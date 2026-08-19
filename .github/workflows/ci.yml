@@ -19,7 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.3', '8.4']
+        # composer.json's framework requirement is php ^8.3, but pestphp/pest ^5.1
+        # (require-dev only) needs php ^8.4, so 8.4 is the floor the test suite can
+        # actually run on today. Add 8.3 back if/when Pest supports it, or if this
+        # matrix should instead track a runtime-only smoke test separate from Pest.
+        php: ['8.4']
 
     services:
       postgres:
@@ -118,6 +122,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, intl, zip, bcmath, gd
+          coverage: none
+
+      - name: Install Composer dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Generate application key
+        run: php artisan key:generate
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
@@ -126,6 +146,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # resources/js/{routes,actions} are generated from the route table by the
+      # Wayfinder Vite plugin (php artisan wayfinder:generate under the hood) and
+      # are gitignored. ESLint's import/order rule and tsc both need them on disk
+      # to resolve `@/routes` and `@/actions` imports correctly, so generate them
+      # before linting/type-checking rather than only at the end via `npm run build`.
+      - name: Generate Wayfinder routes/actions
+        # --with-form must match vite.config.ts's wayfinder({ formVariants: true }),
+        # or the generated actions lack the .form() variant and tsc fails.
+        run: php artisan wayfinder:generate --with-form
 
       - name: Lint (ESLint)
         run: npm run lint:check
