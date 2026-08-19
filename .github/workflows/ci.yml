@@ -49,6 +49,18 @@ jobs:
       - name: Install Composer dependencies
         uses: ramsey/composer-install@v3
 
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '26'
+          cache: npm
+
+      - name: Install NPM dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build
+
       - name: Copy environment file
         run: cp .env.example .env
 
