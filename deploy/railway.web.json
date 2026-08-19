@@ -18,8 +18,7 @@
   "deploy": {
     "startCommand": "docker-php-serversideup-entrypoint /init",
     "preDeployCommand": [
-      "php artisan migrate --force",
-      "php artisan cm:ensure-admin"
+      "php artisan migrate --force && php artisan cm:ensure-admin"
     ],
     "healthcheckPath": "/up",
     "healthcheckTimeout": 120,
