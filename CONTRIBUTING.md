@@ -4,6 +4,9 @@ Thanks for taking a look at this project. It's early: a fresh Laravel + Inertia 
 React scaffold, pre-alpha, nothing is wired up yet. That's actually a good time to
 get involved if you want to help shape the foundations.
 
+Engineering conventions (Action pattern, DTOs, SOLID, DRY) are required for every PR,
+human or AI-assisted — see [`CLAUDE.md`](CLAUDE.md).
+
 ## Local development
 
 There's no `compose.yaml` yet (that lands once the app actually needs Postgres/S3

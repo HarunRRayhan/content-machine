@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\CurrentWorkspace;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(CurrentWorkspace::class);
     }
 
     /**
@@ -24,6 +25,14 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+
+        // App\Listeners\CreatePersonalTeamOnRegistration (on Registered) and
+        // App\Listeners\AcceptPendingTeamInvitationOnLogin (on Login) are
+        // NOT registered here: Laravel's event auto-discovery already wires
+        // them up from their handle() method type-hints. Registering them
+        // again here double-fires every listener in app/Listeners on every
+        // matching event (confirmed via `php artisan event:list` during
+        // manual testing: a single registration created two personal teams).
     }
 
     /**
