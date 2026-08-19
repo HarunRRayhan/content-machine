@@ -87,3 +87,6 @@ first.
 - `routes/dashboard.php` — everything behind `auth`+`verified`+`SetCurrentWorkspace`, prefixed
   `/dashboard`
 - `docs/adr/` — architecture decisions and why
+- `.secrets/<service>.env` — operational/infra credentials (Railway tokens, etc.), gitignored,
+  separate from the app's own `.env`. See `.secrets/README.md`. Never put an infra token in the
+  app's `.env` — a local test run that overwrites `.env` has taken one down before.

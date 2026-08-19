@@ -15,6 +15,12 @@
 .env
 .env.backup
 .env.production
+
+# Operational/infra credentials (Railway tokens, etc.) — see .secrets/README.md.
+# Deliberately separate from the app's own .env: a local test run copying a
+# throwaway env over .env has, in practice, wiped out infra tokens that had
+# nothing to do with the app itself.
+/.secrets/*.env
 .phpactor.json
 .phpunit.result.cache
 Homestead.json
