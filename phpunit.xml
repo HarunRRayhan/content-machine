@@ -23,9 +23,19 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
-        <env name="DB_URL" value=""/>
+        <!--
+            No DB_CONNECTION override here on purpose. This project's tests rely on
+            Postgres-specific behavior (JSONB columns, partial unique indexes, CHECK
+            constraints applied only under the pgsql driver, row-level locking in
+            ReserveContentIdAction via lockForUpdate) that SQLite either ignores or
+            emulates differently. A hardcoded sqlite/:memory: override here previously
+            made every local/CI test run silently ignore whatever DB_CONNECTION .env
+            actually specified; CI's postgres:17 service and migrations were real,
+            but the test run itself was against SQLite the whole time. Tests now use
+            whatever DB_CONNECTION is in .env: point it at a real Postgres locally
+            (see any recent PR's verification steps for the throwaway-container
+            pattern), same as CI's own "Configure database environment" step does.
+        -->
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
