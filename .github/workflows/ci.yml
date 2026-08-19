@@ -168,3 +168,21 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -f deploy/Dockerfile -t cm:ci .
+
+      - name: Smoke test
+        run: |
+          # A bare `php artisan about` needs a real APP_KEY and .env to not
+          # error; give it the throwaway env the assets build stage also uses.
+          docker run --rm cm:ci sh -c "cp .env.example .env && php artisan key:generate --force && php artisan about --only=environment"
+          docker run --rm cm:ci yt-dlp --version
+          docker run --rm cm:ci ffmpeg -version

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "deploy/Dockerfile",
+    "watchPatterns": [
+      "app/**",
+      "routes/**",
+      "resources/**",
+      "config/**",
+      "database/**",
+      "bootstrap/**",
+      "composer.*",
+      "package*.json",
+      "deploy/**"
+    ]
+  },
+  "deploy": {
+    "startCommand": "docker-php-serversideup-entrypoint /init",
+    "preDeployCommand": ["php artisan migrate --force"],
+    "healthcheckPath": "/up",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "overlapSeconds": 30,
+    "drainingSeconds": 30
+  }
+}

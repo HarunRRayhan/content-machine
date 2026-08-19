@@ -1,0 +1,23 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "deploy/Dockerfile",
+    "watchPatterns": [
+      "app/**",
+      "routes/**",
+      "resources/**",
+      "config/**",
+      "database/**",
+      "bootstrap/**",
+      "composer.*",
+      "package*.json",
+      "deploy/**"
+    ]
+  },
+  "deploy": {
+    "startCommand": "docker-php-serversideup-entrypoint supervisord -c /etc/supervisor/conf.d/supervisord.conf",
+    "restartPolicyType": "ALWAYS",
+    "drainingSeconds": 120
+  }
+}

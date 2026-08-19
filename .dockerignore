@@ -1,0 +1,45 @@
+# Installed by the vendor/assets build stages, not needed (and much heavier) in build context
+/node_modules
+/vendor
+
+/.git
+/.github
+
+/tests
+
+# Runtime-generated; the app stage recreates these directories and chowns them,
+# but their contents shouldn't ship in the image
+/storage/logs/*
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+!/storage/logs/.gitignore
+!/storage/framework/cache/.gitignore
+!/storage/framework/sessions/.gitignore
+!/storage/framework/views/.gitignore
+
+# Local env files; .env.example is kept so the assets stage can bootstrap a throwaway .env
+/.env
+/.env.*
+!/.env.example
+
+/public/build
+/public/hot
+/bootstrap/ssr
+
+# Locally generated package/service discovery caches (gitignored, so a real
+# git checkout never has them, but a local `docker build` reads the working
+# tree directly and would otherwise pick up a dev machine's own --dev cache,
+# which lists require-dev-only providers this --no-dev build doesn't install)
+/bootstrap/cache/packages.php
+/bootstrap/cache/services.php
+/resources/js/actions
+/resources/js/routes
+/resources/js/wayfinder
+
+.DS_Store
+/.idea
+/.vscode
+/.fleet
+/.nova
+/.zed
