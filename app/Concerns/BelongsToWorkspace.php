@@ -10,10 +10,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Scopes a model to the current workspace (Workspace::current(), set by the
  * SetCurrentWorkspace middleware for the duration of a request).
  *
- * Nothing in this phase actually uses this trait yet, since no
- * workspace-scoped content model (ideas, posts, videos) exists; it's added
- * now so those later models can `use BelongsToWorkspace` from day one
- * instead of retrofitting tenancy scoping onto already-shipped tables. See
+ * First real consumers: ScratchpadEntry and Idea. A model with a
+ * workspace_id column that needs cross-workspace lookups (e.g. ContentId's
+ * idempotency-key replay, MediaAsset) deliberately doesn't use this trait,
+ * and instead exposes a plain `workspace()` BelongsTo. See
  * tests/Unit/Concerns/BelongsToWorkspaceTest.php for a dummy-model proof
  * that the scope filters correctly.
  *

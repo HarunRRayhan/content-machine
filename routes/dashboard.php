@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Scratchpad\ScratchpadController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
@@ -16,6 +17,10 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
 
         Route::get('team', [TeamController::class, 'index'])->name('team.index');
         Route::post('team/invitations', [TeamController::class, 'storeInvitation'])->name('team.invitations.store');
+
+        Route::get('scratchpad', [ScratchpadController::class, 'index'])->name('scratchpad.index');
+        Route::post('scratchpad', [ScratchpadController::class, 'store'])->name('scratchpad.store');
+        Route::get('scratchpad/{entry}', [ScratchpadController::class, 'show'])->name('scratchpad.show');
 
         Route::redirect('settings', '/dashboard/settings/profile');
 

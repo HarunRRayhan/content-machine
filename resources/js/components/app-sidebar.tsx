@@ -1,5 +1,11 @@
 import { Link } from '@inertiajs/react';
-import { BookOpen, FolderGit2, LayoutGrid, Users } from 'lucide-react';
+import {
+    BookOpen,
+    FolderGit2,
+    LayoutGrid,
+    NotebookPen,
+    Users,
+} from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
@@ -14,6 +20,7 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { home } from '@/routes/dashboard';
+import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
 import type { NavItem } from '@/types';
 
@@ -22,6 +29,11 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: home(),
         icon: LayoutGrid,
+    },
+    {
+        title: 'Scratch Pad',
+        href: scratchpadIndex(),
+        icon: NotebookPen,
     },
     {
         title: 'Team',

@@ -9,12 +9,10 @@ use Illuminate\Support\Facades\Auth;
 
 /**
  * Gives any Eloquent model append-only status/field history, backed by the
- * `status_transitions` and `content_versions` tables. Nothing populates
- * these yet, since no content model (ideas, posts, videos) exists in this
- * phase; the trait exists so those later models can `use RecordsHistory`
- * from day one instead of retrofitting audit logging later. See
- * tests/Unit/Concerns/RecordsHistoryTest.php for proof against a dummy
- * model.
+ * `status_transitions` and `content_versions` tables. First real consumer:
+ * ScratchpadEntry, via CaptureTextNoteAction recording the null -> new
+ * transition on capture. See tests/Unit/Concerns/RecordsHistoryTest.php for
+ * proof against a dummy model.
  */
 trait RecordsHistory
 {
