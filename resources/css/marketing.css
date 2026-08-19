@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+@source '../views/welcome.blade.php';
+
+/*
+ * Marketing-only theme: intentionally NOT the dashboard's shadcn palette
+ * (resources/css/app.css). Public pages get their own industrial
+ * "workshop" identity — a dark charcoal ground, a single safety-orange
+ * accent, and stencil/condensed industrial type — while the authenticated
+ * dashboard stays on neutral shadcn defaults. See CLAUDE.md's route split.
+ */
+@theme {
+    --font-display: 'Big Shoulders Stencil Display', ui-sans-serif, sans-serif;
+    --font-heading: 'Big Shoulders', ui-sans-serif, sans-serif;
+    --font-mono-cm: 'IBM Plex Mono', ui-monospace, monospace;
+
+    --color-cm-bg: #171310;
+    --color-cm-bg-raised: #211d18;
+    --color-cm-fg: #f5f0e8;
+    --color-cm-fg-muted: #a69c8d;
+    --color-cm-accent: #f2600c;
+    --color-cm-accent-dim: #f2600c6b;
+    --color-cm-border: #332c24;
+}
+
+body.cm-marketing {
+    background-color: var(--color-cm-bg);
+    color: var(--color-cm-fg);
+    font-family: var(--font-mono-cm);
+    background-image: radial-gradient(
+        var(--color-cm-border) 1px,
+        transparent 1px
+    );
+    background-size: 28px 28px;
+    background-position: -14px -14px;
+}
+
+.cm-hazard-rule {
+    background-image: repeating-linear-gradient(
+        -45deg,
+        var(--color-cm-accent) 0 10px,
+        transparent 10px 20px
+    );
+    opacity: 0.5;
+}
+
+@keyframes cm-rise {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.cm-rise {
+    animation: cm-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
