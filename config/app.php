@@ -138,4 +138,20 @@ return [
 
     'registration_enabled' => ! (bool) env('DISABLE_REGISTRATION', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Admin User Seeding
+    |--------------------------------------------------------------------------
+    |
+    | `php artisan cm:ensure-admin` creates this user (with a personal team)
+    | if it doesn't already exist — the only way in once DISABLE_REGISTRATION
+    | is set. Safe to leave set permanently: idempotent, no-ops once the
+    | account exists.
+    |
+    */
+
+    'admin_email' => env('ADMIN_EMAIL'),
+
+    'admin_name' => env('ADMIN_NAME', 'Admin'),
+
 ];
