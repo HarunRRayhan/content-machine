@@ -123,4 +123,19 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Self-Registration
+    |--------------------------------------------------------------------------
+    |
+    | Open source deployments are often run by a single operator who wants
+    | to sign in themselves without opening account creation to the public
+    | internet. Defaults to open (false) so a fresh self-hosted install is
+    | usable immediately; set DISABLE_REGISTRATION=true to close it once
+    | you've created your own account.
+    |
+    */
+
+    'registration_enabled' => ! (bool) env('DISABLE_REGISTRATION', false),
+
 ];
