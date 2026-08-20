@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Scratchpad;
 
+use App\Models\Idea;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Workspace;
@@ -120,5 +121,119 @@ class ScratchpadControllerTest extends TestCase
         $entry = ScratchpadEntry::factory()->for($otherWorkspace)->create();
 
         $this->get(route('dashboard.scratchpad.show', $entry))->assertNotFound();
+    }
+
+    public function test_triage_as_post_idea_files_an_idea_and_marks_the_entry_triaged()
+    {
+        [$user, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create(['body' => 'Raw capture.']);
+
+        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'post_idea',
+            'title' => 'A filed idea',
+            'score' => 600,
+            'trend' => 'seasonal',
+            'rationale' => 'Timely.',
+        ]);
+
+        $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
+
+        $this->assertDatabaseHas('scratchpad_entries', [
+            'id' => $entry->id,
+            'status' => 'triaged',
+            'triaged_by_user_id' => $user->id,
+        ]);
+
+        $idea = Idea::sole();
+        $this->assertSame('post', $idea->kind);
+        $this->assertSame('A filed idea', $idea->title);
+        $this->assertSame($entry->id, $idea->scratchpad_entry_id);
+    }
+
+    public function test_triage_as_video_idea_files_a_video_idea()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'video_idea',
+            'title' => 'A filed video idea',
+        ])->assertRedirect(route('dashboard.scratchpad.show', $entry));
+
+        $idea = Idea::sole();
+        $this->assertSame('video', $idea->kind);
+    }
+
+    public function test_triage_requires_a_title_when_filing_an_idea()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'post_idea',
+        ]);
+
+        $response->assertSessionHasErrors(['title']);
+        $this->assertDatabaseCount('ideas', 0);
+    }
+
+    public function test_triage_as_drop_marks_the_entry_dropped_with_a_reason()
+    {
+        [$user, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'drop',
+            'drop_reason' => 'Not useful.',
+        ]);
+
+        $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
+
+        $this->assertDatabaseHas('scratchpad_entries', [
+            'id' => $entry->id,
+            'status' => 'dropped',
+            'drop_reason' => 'Not useful.',
+            'triaged_by_user_id' => $user->id,
+        ]);
+        $this->assertDatabaseCount('ideas', 0);
+    }
+
+    public function test_triage_requires_a_reason_when_dropping()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'drop',
+        ]);
+
+        $response->assertSessionHasErrors(['drop_reason']);
+    }
+
+    public function test_triage_404s_for_an_entry_in_a_different_workspace()
+    {
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        $entry = ScratchpadEntry::factory()->for($otherWorkspace)->create();
+
+        $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'drop',
+            'drop_reason' => 'Nope.',
+        ])->assertNotFound();
+    }
+
+    public function test_an_already_triaged_entry_cannot_be_triaged_again()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->triaged()->create();
+
+        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+            'target' => 'drop',
+            'drop_reason' => 'Too late.',
+        ]);
+
+        $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
+        $response->assertInertiaFlash('toast.type', 'error');
     }
 }

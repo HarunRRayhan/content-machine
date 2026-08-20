@@ -120,7 +120,9 @@ class ScratchpadEntry extends Model
     }
 
     /**
-     * The idea this entry was triaged into, if any. Empty in this phase.
+     * The idea this entry was triaged into, if any (via
+     * TriageScratchpadEntryAction). At most one, since an entry can only be
+     * triaged once.
      *
      * @return HasMany<Idea, $this>
      */

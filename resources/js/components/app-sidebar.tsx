@@ -3,6 +3,7 @@ import {
     BookOpen,
     FolderGit2,
     LayoutGrid,
+    Lightbulb,
     NotebookPen,
     Users,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { home } from '@/routes/dashboard';
+import { index as ideasIndex } from '@/routes/dashboard/ideas';
 import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
 import type { NavItem } from '@/types';
@@ -34,6 +36,11 @@ const mainNavItems: NavItem[] = [
         title: 'Scratch Pad',
         href: scratchpadIndex(),
         icon: NotebookPen,
+    },
+    {
+        title: 'Ideas',
+        href: ideasIndex(),
+        icon: Lightbulb,
     },
     {
         title: 'Team',
