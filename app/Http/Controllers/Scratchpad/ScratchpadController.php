@@ -290,8 +290,10 @@ class ScratchpadController extends Controller
     /**
      * A link entry's original URL and how far ResolveScratchpadLinkAction
      * got resolving it, so the dashboard can render "resolved via: ..." as
-     * honestly as the Telegram bot's own replies do. Null for every other
-     * entry kind.
+     * honestly as the Telegram bot's own replies do. `summarized` flags
+     * whether the entry's body is SummarizeCaptureAction's AI-written
+     * rewrite rather than the raw scraped description. Null for every
+     * other entry kind.
      *
      * @return array<string, mixed>|null
      */
@@ -305,6 +307,7 @@ class ScratchpadController extends Controller
             'url' => $entry->meta['url'] ?? null,
             'resolved_via' => $entry->meta['resolved_via'] ?? null,
             'thumbnail_url' => $entry->meta['thumbnail_url'] ?? null,
+            'summarized' => isset($entry->meta['summarized_at']),
         ];
     }
 

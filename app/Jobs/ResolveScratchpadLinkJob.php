@@ -19,9 +19,18 @@ class ResolveScratchpadLinkJob implements ShouldQueue
         public readonly ScratchpadEntry $entry,
     ) {}
 
+    /**
+     * Summarization only runs after a genuine resolution (never for
+     * 'unresolved', which has no scraped title/description to summarize
+     * in the first place).
+     */
     public function handle(ResolveScratchpadLinkAction $action): void
     {
         $action->handle($this->entry);
+
+        if (($this->entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
+            SummarizeCaptureJob::dispatch($this->entry);
+        }
     }
 
     /**
