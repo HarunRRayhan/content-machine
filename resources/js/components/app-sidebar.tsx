@@ -6,6 +6,7 @@ import {
     LayoutGrid,
     Lightbulb,
     NotebookPen,
+    Send,
     Users,
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
@@ -26,6 +27,7 @@ import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
 import { index as ideasIndex } from '@/routes/dashboard/ideas';
 import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
+import { edit as telegramEdit } from '@/routes/dashboard/telegram';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
@@ -53,6 +55,11 @@ const mainNavItems: NavItem[] = [
         title: 'Team',
         href: teamIndex(),
         icon: Users,
+    },
+    {
+        title: 'Telegram',
+        href: telegramEdit(),
+        icon: Send,
     },
 ];
 

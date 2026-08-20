@@ -7,6 +7,8 @@ use App\Support\AiProviders\HttpAiProviderVerifier;
 use App\Support\CurrentWorkspace;
 use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ProcessLinkResolver;
+use App\Support\Telegram\HttpTelegramClient;
+use App\Support\Telegram\TelegramClientContract;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +25,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(CurrentWorkspace::class);
         $this->app->bind(LinkResolverContract::class, ProcessLinkResolver::class);
         $this->app->bind(AiProviderVerifierContract::class, HttpAiProviderVerifier::class);
+        $this->app->bind(TelegramClientContract::class, HttpTelegramClient::class);
     }
 
     /**
