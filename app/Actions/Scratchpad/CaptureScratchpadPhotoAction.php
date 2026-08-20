@@ -16,12 +16,15 @@ use Illuminate\Support\Facades\DB;
  * ScratchpadEntry, and records the null -> new status transition, same
  * shape as CaptureTextNoteAction. No OCR/AI ever reads the image here;
  * capture is pure capture.
+ *
+ * $capturedBy is nullable for the same reason as CaptureTextNoteAction's:
+ * a Telegram-originated capture has no Laravel User to pass.
  */
 class CaptureScratchpadPhotoAction
 {
     use ResolvesMediaAsset;
 
-    public function handle(Workspace $workspace, User $capturedBy, CaptureScratchpadPhotoData $data): ScratchpadEntry
+    public function handle(Workspace $workspace, ?User $capturedBy, CaptureScratchpadPhotoData $data): ScratchpadEntry
     {
         $mediaAsset = $this->resolveMediaAsset($workspace, $capturedBy, $data->file, 'image');
 
@@ -29,7 +32,7 @@ class CaptureScratchpadPhotoAction
             $entry = ScratchpadEntry::create([
                 'workspace_id' => $workspace->id,
                 'kind' => 'photo',
-                'source' => 'web',
+                'source' => $data->source,
                 'captured_at' => now(),
                 'body' => $data->caption,
                 'status' => 'new',

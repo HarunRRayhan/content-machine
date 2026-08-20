@@ -109,4 +109,26 @@ class CaptureScratchpadPhotoActionTest extends TestCase
             'actor_id' => $user->id,
         ]);
     }
+
+    public function test_a_telegram_capture_has_no_uploading_user_and_records_a_system_actor()
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+
+        $entry = (new CaptureScratchpadPhotoAction)->handle(
+            $workspace,
+            null,
+            CaptureScratchpadPhotoData::fromTelegram(UploadedFile::fake()->image('photo.jpg'), 'From the roof'),
+        );
+
+        $this->assertSame('telegram', $entry->source);
+        $this->assertNull(MediaAsset::sole()->uploaded_by_user_id);
+        $this->assertDatabaseHas('status_transitions', [
+            'subject_type' => $entry->getMorphClass(),
+            'subject_id' => $entry->id,
+            'actor_type' => 'system',
+            'actor_id' => null,
+        ]);
+    }
 }

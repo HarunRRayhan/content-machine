@@ -7,51 +7,20 @@ use App\Data\Telegram\ConnectTelegramBotData;
 use App\Models\TelegramBotConfig;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramApiResult;
-use App\Support\Telegram\TelegramClientContract;
 use App\Support\Telegram\TelegramGetMeResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
+use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
 class ConnectTelegramBotActionTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function fakeClient(TelegramGetMeResult $getMeResult, ?TelegramApiResult $setWebhookResult = null): TelegramClientContract
-    {
-        return new class($getMeResult, $setWebhookResult ?? TelegramApiResult::success()) implements TelegramClientContract
-        {
-            public function __construct(
-                private readonly TelegramGetMeResult $getMeResult,
-                private readonly TelegramApiResult $setWebhookResult,
-            ) {}
-
-            public function getMe(string $botToken): TelegramGetMeResult
-            {
-                return $this->getMeResult;
-            }
-
-            public function setWebhook(string $botToken, string $url, string $secretToken): TelegramApiResult
-            {
-                return $this->setWebhookResult;
-            }
-
-            public function deleteWebhook(string $botToken): TelegramApiResult
-            {
-                return TelegramApiResult::success();
-            }
-
-            public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult
-            {
-                return TelegramApiResult::success();
-            }
-        };
-    }
-
     public function test_a_successful_check_connects_and_generates_a_secret_and_slug()
     {
         $workspace = Workspace::factory()->create();
-        $client = $this->fakeClient(TelegramGetMeResult::success('harun_capture_bot'));
+        $client = (new FakeTelegramClient)->willGetMe(TelegramGetMeResult::success('harun_capture_bot'));
 
         $config = (new ConnectTelegramBotAction($client))->handle($workspace, new ConnectTelegramBotData('123:abc'));
 
@@ -69,7 +38,7 @@ class ConnectTelegramBotActionTest extends TestCase
         $originalSecret = $existing->webhook_secret;
         $originalSlug = $existing->webhook_slug;
 
-        $client = $this->fakeClient(TelegramGetMeResult::success('a_new_username'));
+        $client = (new FakeTelegramClient)->willGetMe(TelegramGetMeResult::success('a_new_username'));
         $config = (new ConnectTelegramBotAction($client))->handle($workspace, new ConnectTelegramBotData('999:new-token'));
 
         $this->assertSame($originalSecret, $config->webhook_secret);
@@ -80,7 +49,7 @@ class ConnectTelegramBotActionTest extends TestCase
     public function test_a_failed_getme_check_throws_and_stores_nothing()
     {
         $workspace = Workspace::factory()->create();
-        $client = $this->fakeClient(TelegramGetMeResult::failure('Telegram rejected this token as invalid.'));
+        $client = (new FakeTelegramClient)->willGetMe(TelegramGetMeResult::failure('Telegram rejected this token as invalid.'));
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Telegram rejected this token as invalid.');
@@ -95,10 +64,9 @@ class ConnectTelegramBotActionTest extends TestCase
     public function test_a_failed_webhook_registration_throws_and_stores_nothing()
     {
         $workspace = Workspace::factory()->create();
-        $client = $this->fakeClient(
-            TelegramGetMeResult::success('harun_capture_bot'),
-            TelegramApiResult::failure('Telegram rejected the webhook registration.'),
-        );
+        $client = (new FakeTelegramClient)
+            ->willGetMe(TelegramGetMeResult::success('harun_capture_bot'))
+            ->willSetWebhook(TelegramApiResult::failure('Telegram rejected the webhook registration.'));
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Telegram rejected the webhook registration.');
