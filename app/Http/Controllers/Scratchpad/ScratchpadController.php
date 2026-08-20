@@ -122,7 +122,13 @@ class ScratchpadController extends Controller
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,
             $mediaAsset->original_filename,
-            ['Content-Type' => $mediaAsset->mime],
+            [
+                'Content-Type' => $mediaAsset->mime,
+                // Defense in depth on top of resolveMime()'s whitelist: even
+                // if Content-Type were ever wrong, this stops a browser from
+                // MIME-sniffing the body into something more dangerous.
+                'X-Content-Type-Options' => 'nosniff',
+            ],
         );
     }
 
