@@ -25,6 +25,7 @@ type EntryLink = {
     url: string | null;
     resolved_via: string | null;
     thumbnail_url: string | null;
+    summarized: boolean;
 };
 
 type EntryTranscription = {
@@ -129,7 +130,12 @@ export default function ScratchpadShow({ entry }: PageProps) {
                 )}
 
                 {entry.body && (
-                    <div className="max-w-2xl rounded-lg border p-4">
+                    <div className="max-w-2xl space-y-1 rounded-lg border p-4">
+                        {entry.link?.summarized && (
+                            <p className="text-xs text-muted-foreground">
+                                ✨ AI summary
+                            </p>
+                        )}
                         <p className="whitespace-pre-wrap">{entry.body}</p>
                     </div>
                 )}

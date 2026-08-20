@@ -4,12 +4,14 @@ namespace Tests\Unit\Jobs;
 
 use App\Actions\Scratchpad\ResolveScratchpadLinkAction;
 use App\Jobs\ResolveScratchpadLinkJob;
+use App\Jobs\SummarizeCaptureJob;
 use App\Models\ScratchpadEntry;
 use App\Models\Workspace;
 use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ResolvedLink;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class ResolveScratchpadLinkJobTest extends TestCase
@@ -18,6 +20,8 @@ class ResolveScratchpadLinkJobTest extends TestCase
 
     public function test_handle_resolves_the_entry_via_the_action()
     {
+        Queue::fake();
+
         $entry = ScratchpadEntry::factory()->create([
             'workspace_id' => Workspace::factory(),
             'kind' => 'link',
@@ -38,6 +42,54 @@ class ResolveScratchpadLinkJobTest extends TestCase
 
         $this->assertSame('Resolved Title', $entry->title);
         $this->assertSame('page metadata (og tags)', $entry->meta['resolved_via']);
+    }
+
+    public function test_a_successful_resolution_dispatches_the_summarizer()
+    {
+        Queue::fake();
+
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => Workspace::factory(),
+            'kind' => 'link',
+            'body' => 'https://example.com/post',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+
+        $resolver = new class implements LinkResolverContract
+        {
+            public function resolve(string $url): ResolvedLink
+            {
+                return new ResolvedLink(kind: 'webpage', resolvedVia: 'page metadata (og tags)', title: 'Resolved Title');
+            }
+        };
+
+        (new ResolveScratchpadLinkJob($entry))->handle(new ResolveScratchpadLinkAction($resolver));
+
+        Queue::assertPushed(SummarizeCaptureJob::class, fn (SummarizeCaptureJob $job) => $job->entry->is($entry));
+    }
+
+    public function test_an_unresolved_link_does_not_dispatch_the_summarizer()
+    {
+        Queue::fake();
+
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => Workspace::factory(),
+            'kind' => 'link',
+            'body' => 'https://example.com/post',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+
+        $resolver = new class implements LinkResolverContract
+        {
+            public function resolve(string $url): ResolvedLink
+            {
+                return ResolvedLink::unresolved('metadata only (yt-dlp unavailable)');
+            }
+        };
+
+        (new ResolveScratchpadLinkJob($entry))->handle(new ResolveScratchpadLinkAction($resolver));
+
+        Queue::assertNotPushed(SummarizeCaptureJob::class);
     }
 
     public function test_failed_marks_the_entry_as_unresolved_without_losing_the_url()
