@@ -7,6 +7,7 @@ use App\Http\Controllers\Scratchpad\ScratchpadController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
+use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Auth\Middleware\RequirePassword;
 use Illuminate\Support\Facades\Route;
@@ -43,6 +44,10 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::delete('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'destroy'])->name('ai-providers.destroy');
         Route::post('ai-providers/{aiProviderCredential}/toggle', [AiProviderCredentialsController::class, 'toggle'])->name('ai-providers.toggle');
         Route::post('ai-providers/{aiProviderCredential}/verify', [AiProviderCredentialsController::class, 'verify'])->name('ai-providers.verify');
+
+        Route::get('telegram', [TelegramBotConfigController::class, 'edit'])->name('telegram.edit');
+        Route::post('telegram', [TelegramBotConfigController::class, 'update'])->name('telegram.update');
+        Route::delete('telegram', [TelegramBotConfigController::class, 'destroy'])->name('telegram.destroy');
 
         Route::redirect('settings', '/dashboard/settings/profile');
 
