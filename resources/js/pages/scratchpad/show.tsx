@@ -3,6 +3,8 @@ import { useState } from 'react';
 import ScratchpadController from '@/actions/App/Http/Controllers/Scratchpad/ScratchpadController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
+import { ScratchpadEntryMedia } from '@/components/scratchpad-entry-media';
+import type { ScratchpadAttachment } from '@/components/scratchpad-entry-media';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,10 +27,12 @@ type EntryDetail = {
     kind: string;
     status: string;
     source: string;
+    language: string | null;
     title: string | null;
     body: string | null;
     captured_at: string;
     drop_reason: string | null;
+    attachments: ScratchpadAttachment[];
     idea: TriagedIdea | null;
 };
 
@@ -60,9 +64,14 @@ export default function ScratchpadShow({ entry }: PageProps) {
 
                 <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">{entry.kind}</Badge>
+                    {entry.language && (
+                        <Badge variant="outline">{entry.language}</Badge>
+                    )}
                     <Badge variant="secondary">{entry.status}</Badge>
                     <Badge variant="outline">via {entry.source}</Badge>
                 </div>
+
+                <ScratchpadEntryMedia attachments={entry.attachments} />
 
                 {entry.body && (
                     <div className="max-w-2xl rounded-lg border p-4">
