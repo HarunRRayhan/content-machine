@@ -1,4 +1,4 @@
-import { Form, Head, Link } from '@inertiajs/react';
+import { Form, Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 import ScratchpadController from '@/actions/App/Http/Controllers/Scratchpad/ScratchpadController';
 import Heading from '@/components/heading';
@@ -52,14 +52,44 @@ type EntryDetail = {
     idea: TriagedIdea | null;
 };
 
+type TriageSuggestion = {
+    target: 'post_idea' | 'video_idea';
+    successful: boolean;
+    title: string | null;
+    score: number | null;
+    trend: string | null;
+    rationale: string | null;
+    error: string | null;
+};
+
 type PageProps = {
     entry: EntryDetail;
+    suggestion?: TriageSuggestion | null;
 };
 
 type TriagePanel = 'post_idea' | 'video_idea' | 'drop' | null;
 
-export default function ScratchpadShow({ entry }: PageProps) {
+export default function ScratchpadShow({ entry, suggestion }: PageProps) {
     const [panel, setPanel] = useState<TriagePanel>(null);
+    const [suggesting, setSuggesting] = useState(false);
+
+    function requestSuggestion(target: 'post_idea' | 'video_idea') {
+        setSuggesting(true);
+        router.post(
+            ScratchpadController.suggestTriage.url(entry.id),
+            { target },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                preserveUrl: true,
+                only: ['suggestion'],
+                onFinish: () => setSuggesting(false),
+            },
+        );
+    }
+
+    const activeSuggestion =
+        suggestion && suggestion.target === panel ? suggestion : null;
 
     return (
         <>
@@ -209,75 +239,125 @@ export default function ScratchpadShow({ entry }: PageProps) {
                                             value={panel}
                                         />
 
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="title">Title</Label>
-                                            <Input
-                                                id="title"
-                                                name="title"
-                                                required
-                                                placeholder="What's the idea called?"
-                                            />
-                                            <InputError
-                                                message={errors.title}
-                                            />
+                                        <div className="flex items-center justify-between">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={suggesting}
+                                                onClick={() =>
+                                                    requestSuggestion(panel)
+                                                }
+                                            >
+                                                {suggesting
+                                                    ? 'Thinking...'
+                                                    : '✨ Suggest with AI'}
+                                            </Button>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-4">
+                                        {activeSuggestion &&
+                                            !activeSuggestion.successful && (
+                                                <p className="text-sm text-destructive">
+                                                    Couldn't get a suggestion
+                                                    {activeSuggestion.error
+                                                        ? `: ${activeSuggestion.error}`
+                                                        : '.'}
+                                                </p>
+                                            )}
+
+                                        <div
+                                            key={JSON.stringify(
+                                                activeSuggestion,
+                                            )}
+                                            className="space-y-4"
+                                        >
                                             <div className="grid gap-2">
-                                                <Label htmlFor="score">
-                                                    Score (0-1000)
+                                                <Label htmlFor="title">
+                                                    Title
                                                 </Label>
                                                 <Input
-                                                    id="score"
-                                                    type="number"
-                                                    name="score"
-                                                    min={0}
-                                                    max={1000}
+                                                    id="title"
+                                                    name="title"
+                                                    required
+                                                    defaultValue={
+                                                        activeSuggestion?.title ??
+                                                        ''
+                                                    }
+                                                    placeholder="What's the idea called?"
                                                 />
                                                 <InputError
-                                                    message={errors.score}
+                                                    message={errors.title}
                                                 />
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="score">
+                                                        Score (0-1000)
+                                                    </Label>
+                                                    <Input
+                                                        id="score"
+                                                        type="number"
+                                                        name="score"
+                                                        min={0}
+                                                        max={1000}
+                                                        defaultValue={
+                                                            activeSuggestion?.score ??
+                                                            undefined
+                                                        }
+                                                    />
+                                                    <InputError
+                                                        message={errors.score}
+                                                    />
+                                                </div>
+
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="trend">
+                                                        Trend
+                                                    </Label>
+                                                    <select
+                                                        id="trend"
+                                                        name="trend"
+                                                        defaultValue={
+                                                            activeSuggestion?.trend ??
+                                                            ''
+                                                        }
+                                                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                                    >
+                                                        <option value="">
+                                                            Unset
+                                                        </option>
+                                                        <option value="evergreen">
+                                                            Evergreen
+                                                        </option>
+                                                        <option value="seasonal">
+                                                            Seasonal
+                                                        </option>
+                                                    </select>
+                                                    <InputError
+                                                        message={errors.trend}
+                                                    />
+                                                </div>
                                             </div>
 
                                             <div className="grid gap-2">
-                                                <Label htmlFor="trend">
-                                                    Trend
+                                                <Label htmlFor="rationale">
+                                                    Rationale
                                                 </Label>
-                                                <select
-                                                    id="trend"
-                                                    name="trend"
-                                                    defaultValue=""
-                                                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                                                >
-                                                    <option value="">
-                                                        Unset
-                                                    </option>
-                                                    <option value="evergreen">
-                                                        Evergreen
-                                                    </option>
-                                                    <option value="seasonal">
-                                                        Seasonal
-                                                    </option>
-                                                </select>
+                                                <Textarea
+                                                    id="rationale"
+                                                    name="rationale"
+                                                    rows={3}
+                                                    defaultValue={
+                                                        activeSuggestion?.rationale ??
+                                                        ''
+                                                    }
+                                                    placeholder="Why does this belong in the pipeline?"
+                                                />
                                                 <InputError
-                                                    message={errors.trend}
+                                                    message={errors.rationale}
                                                 />
                                             </div>
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="rationale">
-                                                Rationale
-                                            </Label>
-                                            <Textarea
-                                                id="rationale"
-                                                name="rationale"
-                                                rows={3}
-                                                placeholder="Why does this belong in the pipeline?"
-                                            />
-                                            <InputError
-                                                message={errors.rationale}
-                                            />
                                         </div>
 
                                         <Button disabled={processing}>

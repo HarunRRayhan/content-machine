@@ -3,12 +3,15 @@
 namespace Tests\Feature\Scratchpad;
 
 use App\Jobs\ResolveScratchpadLinkJob;
+use App\Models\AiProviderCredential;
 use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\AiProviders\AiCompletionClientContract;
+use App\Support\AiProviders\AiCompletionResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -226,6 +229,76 @@ class ScratchpadControllerTest extends TestCase
         $this->post(route('dashboard.scratchpad.triage', $entry), [
             'target' => 'drop',
             'drop_reason' => 'Nope.',
+        ])->assertNotFound();
+    }
+
+    public function test_suggest_triage_renders_a_successful_suggestion()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create(['body' => 'A raw capture.']);
+
+        $this->app->instance(AiCompletionClientContract::class, new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                return AiCompletionResult::success(json_encode([
+                    'title' => 'A suggested title',
+                    'score' => 700,
+                    'trend' => 'evergreen',
+                    'rationale' => 'It is a good fit.',
+                ]));
+            }
+        });
+        AiProviderCredential::factory()->for($workspace)->create();
+
+        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+            'target' => 'post_idea',
+        ])->assertInertia(fn (Assert $page) => $page
+            ->component('scratchpad/show')
+            ->where('suggestion.target', 'post_idea')
+            ->where('suggestion.successful', true)
+            ->where('suggestion.title', 'A suggested title')
+            ->where('suggestion.score', 700)
+            ->where('suggestion.trend', 'evergreen')
+        );
+
+        $this->assertDatabaseHas('scratchpad_entries', ['id' => $entry->id, 'status' => 'new']);
+        $this->assertDatabaseCount('ideas', 0);
+    }
+
+    public function test_suggest_triage_renders_a_failure_honestly()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+            'target' => 'video_idea',
+        ])->assertInertia(fn (Assert $page) => $page
+            ->component('scratchpad/show')
+            ->where('suggestion.successful', false)
+            ->where('suggestion.error', 'No AI-generated suggestion is available right now.')
+        );
+    }
+
+    public function test_suggest_triage_rejects_an_invalid_target()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+            'target' => 'drop',
+        ])->assertSessionHasErrors(['target']);
+    }
+
+    public function test_suggest_triage_404s_for_an_entry_in_a_different_workspace()
+    {
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        $entry = ScratchpadEntry::factory()->for($otherWorkspace)->create();
+
+        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+            'target' => 'post_idea',
         ])->assertNotFound();
     }
 

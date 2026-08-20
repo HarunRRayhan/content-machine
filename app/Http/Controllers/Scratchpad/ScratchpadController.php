@@ -6,6 +6,7 @@ use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Scratchpad\SuggestIdeaFramingAction;
 use App\Actions\Scratchpad\TriageScratchpadEntryAction;
 use App\Data\Scratchpad\CaptureScratchpadLinkData;
 use App\Data\Scratchpad\CaptureScratchpadPhotoData;
@@ -17,6 +18,7 @@ use App\Http\Requests\Scratchpad\StoreScratchpadLinkRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadPhotoRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadTextNoteRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadVoiceRequest;
+use App\Http\Requests\Scratchpad\SuggestIdeaFramingRequest;
 use App\Http\Requests\Scratchpad\TriageScratchpadEntryRequest;
 use App\Models\Attachment;
 use App\Models\MediaAsset;
@@ -202,6 +204,41 @@ class ScratchpadController extends Controller
         ]);
 
         return to_route('dashboard.scratchpad.show', $entry);
+    }
+
+    /**
+     * Ask the AI for a title/score/trend/rationale suggestion for filing
+     * this entry as a post or video idea. Purely advisory: nothing here
+     * persists, the entry and its idea state are unchanged, this only
+     * enriches the current page with a `suggestion` prop for the triage
+     * panel to prefill from.
+     */
+    public function suggestTriage(SuggestIdeaFramingRequest $request, ScratchpadEntry $entry, SuggestIdeaFramingAction $suggestIdeaFramingAction): Response
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($entry->workspace_id !== $workspace->id, 404);
+
+        $entry->load('transcriptions');
+        $target = $request->string('target')->toString();
+        $kind = Str::before($target, '_idea');
+
+        $suggestion = $suggestIdeaFramingAction->handle($entry, $kind);
+
+        $entry->load(['attachments.mediaAsset']);
+
+        return Inertia::render('scratchpad/show', [
+            'entry' => $this->presentDetail($entry),
+            'suggestion' => [
+                'target' => $target,
+                'successful' => $suggestion->successful,
+                'title' => $suggestion->title,
+                'score' => $suggestion->score,
+                'trend' => $suggestion->trend,
+                'rationale' => $suggestion->rationale,
+                'error' => $suggestion->error,
+            ],
+        ]);
     }
 
     private function currentUser(Request $request): User
