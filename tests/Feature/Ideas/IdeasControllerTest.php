@@ -158,6 +158,8 @@ class IdeasControllerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('ideas/show')
                 ->where('idea.status', 'promoted')
+                ->where('idea.promoted_to.id', $post->id)
+                ->where('idea.promoted_to.kind', 'post')
                 ->where('idea.promoted_to.human_id', $post->human_id)
             );
     }

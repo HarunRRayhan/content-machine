@@ -9,8 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { home } from '@/routes/dashboard';
 import { index } from '@/routes/dashboard/ideas';
+import { show as showPost } from '@/routes/dashboard/posts';
+import { show as showVideo } from '@/routes/dashboard/videos';
 
 type PromotedEntity = {
+    id: number;
+    kind: string;
     human_id: string;
     title: string;
     status: string;
@@ -88,10 +92,17 @@ export default function IdeaShow({ idea }: PageProps) {
                         <p className="text-sm text-muted-foreground">
                             Promoted to
                         </p>
-                        <p className="font-medium">
+                        <Link
+                            href={
+                                idea.promoted_to.kind === 'video'
+                                    ? showVideo.url(idea.promoted_to.id)
+                                    : showPost.url(idea.promoted_to.id)
+                            }
+                            className="font-medium hover:underline"
+                        >
                             {idea.promoted_to.human_id}:{' '}
                             {idea.promoted_to.title}
-                        </p>
+                        </Link>
                         <p className="text-sm text-muted-foreground">
                             {idea.promoted_to.status}
                         </p>
