@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Support\AiProviders\AiProviderVerifierContract;
+use App\Support\AiProviders\AiTranscriptionClientContract;
 use App\Support\AiProviders\HttpAiProviderVerifier;
+use App\Support\AiProviders\OpenAiTranscriptionClient;
 use App\Support\CurrentWorkspace;
 use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ProcessLinkResolver;
@@ -25,6 +27,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(CurrentWorkspace::class);
         $this->app->bind(LinkResolverContract::class, ProcessLinkResolver::class);
         $this->app->bind(AiProviderVerifierContract::class, HttpAiProviderVerifier::class);
+        $this->app->bind(AiTranscriptionClientContract::class, OpenAiTranscriptionClient::class);
         $this->app->bind(TelegramClientContract::class, HttpTelegramClient::class);
     }
 

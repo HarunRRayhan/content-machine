@@ -8,8 +8,8 @@ export type ScratchpadAttachment = {
 /**
  * Renders a scratchpad entry's attached media: an <img> for a photo
  * capture, an <audio> player for a voice memo. Empty for a text entry
- * (attachments is simply []). No transcript is rendered for a voice entry,
- * since transcription doesn't exist yet in this phase.
+ * (attachments is simply []). A voice memo's transcript is a separate
+ * concern, rendered by the page itself from `entry.transcription`.
  */
 export function ScratchpadEntryMedia({
     attachments,

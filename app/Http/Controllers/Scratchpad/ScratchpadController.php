@@ -21,6 +21,7 @@ use App\Http\Requests\Scratchpad\TriageScratchpadEntryRequest;
 use App\Models\Attachment;
 use App\Models\MediaAsset;
 use App\Models\ScratchpadEntry;
+use App\Models\Transcription;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
@@ -44,7 +45,7 @@ class ScratchpadController extends Controller
 
         $entries = ScratchpadEntry::query()
             ->where('workspace_id', $workspace->id)
-            ->with('attachments.mediaAsset')
+            ->with(['attachments.mediaAsset', 'transcriptions'])
             ->orderByDesc('captured_at')
             ->paginate(20)
             ->withQueryString()
@@ -93,8 +94,9 @@ class ScratchpadController extends Controller
     }
 
     /**
-     * Capture a new voice memo. No transcription happens here, that's a
-     * separate later phase; the entry simply has no transcript yet.
+     * Capture a new voice memo. Transcription happens afterward in a queued
+     * job (see CaptureScratchpadVoiceAction), so the entry exists
+     * immediately with its transcript still pending.
      */
     public function storeVoice(StoreScratchpadVoiceRequest $request, CaptureScratchpadVoiceAction $captureScratchpadVoiceAction): RedirectResponse
     {
@@ -165,7 +167,7 @@ class ScratchpadController extends Controller
 
         abort_if($entry->workspace_id !== $workspace->id, 404);
 
-        $entry->load('attachments.mediaAsset');
+        $entry->load(['attachments.mediaAsset', 'transcriptions']);
 
         return Inertia::render('scratchpad/show', [
             'entry' => $this->presentDetail($entry),
@@ -225,13 +227,15 @@ class ScratchpadController extends Controller
      */
     private function presentSummary(ScratchpadEntry $entry): array
     {
+        $preview = $entry->body ?? $this->presentTranscription($entry)['text'] ?? null;
+
         return [
             'id' => $entry->id,
             'public_id' => $entry->public_id,
             'kind' => $entry->kind,
             'status' => $entry->status,
             'title' => $entry->title,
-            'preview' => $entry->body === null ? null : Str::limit($entry->body, 140),
+            'preview' => $preview === null ? null : Str::limit($preview, 140),
             'captured_at' => $entry->captured_at->toIso8601String(),
             'language' => $entry->language,
             'attachments' => $this->presentAttachments($entry),
@@ -257,6 +261,7 @@ class ScratchpadController extends Controller
             'drop_reason' => $entry->drop_reason,
             'attachments' => $this->presentAttachments($entry),
             'link' => $this->presentLink($entry),
+            'transcription' => $this->presentTranscription($entry),
             'idea' => $this->presentTriagedIdea($entry),
         ];
     }
@@ -300,6 +305,29 @@ class ScratchpadController extends Controller
             'url' => $entry->meta['url'] ?? null,
             'resolved_via' => $entry->meta['resolved_via'] ?? null,
             'thumbnail_url' => $entry->meta['thumbnail_url'] ?? null,
+        ];
+    }
+
+    /**
+     * A voice entry's transcription, whatever stage it's at: still
+     * pending/processing, done with text, or failed with an honest reason.
+     * Null for every other entry kind, matching presentLink()'s shape.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function presentTranscription(ScratchpadEntry $entry): ?array
+    {
+        $transcription = $entry->transcriptions->first();
+
+        if ($transcription === null) {
+            return null;
+        }
+
+        return [
+            'status' => $transcription->status,
+            'text' => $transcription->text,
+            'language' => $transcription->language,
+            'error_message' => $transcription->error_message,
         ];
     }
 

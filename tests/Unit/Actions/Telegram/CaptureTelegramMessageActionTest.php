@@ -194,6 +194,7 @@ class CaptureTelegramMessageActionTest extends TestCase
     public function test_a_voice_note_is_downloaded_and_captured()
     {
         Storage::fake('scratchpad');
+        Queue::fake();
         $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
         $action = $this->action();
         $this->client->willDownloadFile(TelegramFileDownloadResult::success('not-really-audio-but-thats-fine'));

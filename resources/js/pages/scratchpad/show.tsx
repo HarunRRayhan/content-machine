@@ -27,6 +27,13 @@ type EntryLink = {
     thumbnail_url: string | null;
 };
 
+type EntryTranscription = {
+    status: string;
+    text: string | null;
+    language: string | null;
+    error_message: string | null;
+};
+
 type EntryDetail = {
     id: number;
     public_id: string;
@@ -40,6 +47,7 @@ type EntryDetail = {
     drop_reason: string | null;
     attachments: ScratchpadAttachment[];
     link: EntryLink | null;
+    transcription: EntryTranscription | null;
     idea: TriagedIdea | null;
 };
 
@@ -79,6 +87,30 @@ export default function ScratchpadShow({ entry }: PageProps) {
                 </div>
 
                 <ScratchpadEntryMedia attachments={entry.attachments} />
+
+                {entry.transcription && (
+                    <div className="max-w-2xl space-y-1 rounded-lg border p-4">
+                        {entry.transcription.status === 'done' && (
+                            <p className="whitespace-pre-wrap">
+                                {entry.transcription.text}
+                            </p>
+                        )}
+                        {(entry.transcription.status === 'pending' ||
+                            entry.transcription.status === 'processing') && (
+                            <p className="text-sm text-muted-foreground">
+                                Transcribing...
+                            </p>
+                        )}
+                        {entry.transcription.status === 'failed' && (
+                            <p className="text-sm text-destructive">
+                                Transcription failed
+                                {entry.transcription.error_message
+                                    ? `: ${entry.transcription.error_message}`
+                                    : '.'}
+                            </p>
+                        )}
+                    </div>
+                )}
 
                 {entry.link?.url && (
                     <div className="max-w-2xl space-y-1 rounded-lg border p-4">
