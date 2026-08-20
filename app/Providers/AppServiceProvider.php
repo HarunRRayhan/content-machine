@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Support\CurrentWorkspace;
+use App\Support\LinkResolution\LinkResolverContract;
+use App\Support\LinkResolution\ProcessLinkResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +19,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(CurrentWorkspace::class);
+        $this->app->bind(LinkResolverContract::class, ProcessLinkResolver::class);
     }
 
     /**
