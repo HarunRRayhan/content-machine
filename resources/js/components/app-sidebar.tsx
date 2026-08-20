@@ -2,6 +2,7 @@ import { Link } from '@inertiajs/react';
 import {
     BookOpen,
     FolderGit2,
+    KeyRound,
     LayoutGrid,
     Lightbulb,
     NotebookPen,
@@ -21,6 +22,7 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { home } from '@/routes/dashboard';
+import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
 import { index as ideasIndex } from '@/routes/dashboard/ideas';
 import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
@@ -41,6 +43,11 @@ const mainNavItems: NavItem[] = [
         title: 'Ideas',
         href: ideasIndex(),
         icon: Lightbulb,
+    },
+    {
+        title: 'AI Providers',
+        href: aiProvidersIndex(),
+        icon: KeyRound,
     },
     {
         title: 'Team',

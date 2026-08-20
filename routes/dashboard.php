@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Scratchpad\ScratchpadController;
@@ -32,6 +33,16 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('ideas/{idea}', [IdeasController::class, 'show'])->name('ideas.show');
         Route::patch('ideas/{idea}', [IdeasController::class, 'update'])->name('ideas.update');
         Route::post('ideas/{idea}/drop', [IdeasController::class, 'drop'])->name('ideas.drop');
+
+        Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');
+        Route::post('ai-providers', [AiProviderCredentialsController::class, 'store'])->name('ai-providers.store');
+        // Registered before the {aiProviderCredential} routes below so
+        // "reorder" is never captured as a route-model-binding id.
+        Route::post('ai-providers/reorder', [AiProviderCredentialsController::class, 'reorder'])->name('ai-providers.reorder');
+        Route::patch('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'update'])->name('ai-providers.update');
+        Route::delete('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'destroy'])->name('ai-providers.destroy');
+        Route::post('ai-providers/{aiProviderCredential}/toggle', [AiProviderCredentialsController::class, 'toggle'])->name('ai-providers.toggle');
+        Route::post('ai-providers/{aiProviderCredential}/verify', [AiProviderCredentialsController::class, 'verify'])->name('ai-providers.verify');
 
         Route::redirect('settings', '/dashboard/settings/profile');
 
