@@ -2,8 +2,12 @@ import { Form, Head, Link } from '@inertiajs/react';
 import ScratchpadController from '@/actions/App/Http/Controllers/Scratchpad/ScratchpadController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
+import { ScratchpadEntryMedia } from '@/components/scratchpad-entry-media';
+import type { ScratchpadAttachment } from '@/components/scratchpad-entry-media';
+import { ScratchpadVoiceRecorder } from '@/components/scratchpad-voice-recorder';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { home } from '@/routes/dashboard';
@@ -17,6 +21,8 @@ type EntrySummary = {
     title: string | null;
     preview: string | null;
     captured_at: string;
+    language: string | null;
+    attachments: ScratchpadAttachment[];
 };
 
 type PaginationLink = {
@@ -88,6 +94,52 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                     </Form>
                 </div>
 
+                <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                    <Form
+                        {...ScratchpadController.storePhoto.form()}
+                        resetOnSuccess
+                        className="space-y-4"
+                    >
+                        {({ processing, errors }) => (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="photo">
+                                        Capture a photo
+                                    </Label>
+                                    <Input
+                                        id="photo"
+                                        type="file"
+                                        name="photo"
+                                        accept="image/*"
+                                        required
+                                    />
+                                    <InputError message={errors.photo} />
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label htmlFor="caption">
+                                        Caption (optional)
+                                    </Label>
+                                    <Input
+                                        id="caption"
+                                        name="caption"
+                                        placeholder="What's in the photo?"
+                                    />
+                                    <InputError message={errors.caption} />
+                                </div>
+
+                                <Button disabled={processing}>
+                                    Save photo
+                                </Button>
+                            </>
+                        )}
+                    </Form>
+
+                    <div className="border-t pt-4">
+                        <ScratchpadVoiceRecorder />
+                    </div>
+                </div>
+
                 <div className="space-y-3">
                     {entries.data.length === 0 && (
                         <p className="text-sm text-muted-foreground">
@@ -96,40 +148,57 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                     )}
 
                     {entries.data.map((entry) => (
-                        <Link
+                        <div
                             key={entry.id}
-                            href={show.url(entry.id)}
-                            className="block space-y-1 rounded-lg border p-3 transition-colors hover:bg-accent"
+                            className="space-y-2 rounded-lg border p-3 transition-colors hover:bg-accent"
                         >
-                            <div className="flex items-center justify-between gap-2">
-                                <p className="text-sm text-muted-foreground">
-                                    {new Date(
-                                        entry.captured_at,
-                                    ).toLocaleString()}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                    <Badge variant="outline">
-                                        {entry.kind}
-                                    </Badge>
-                                    <Badge
-                                        variant={
-                                            statusVariant[entry.status] ??
-                                            'outline'
-                                        }
-                                    >
-                                        {entry.status}
-                                    </Badge>
+                            {/* audio's own <audio controls> is interactive
+                                content, so it can't nest inside this <a>
+                                without breaking clicks on its play button;
+                                the link only wraps the non-interactive
+                                summary text below. */}
+                            <Link
+                                href={show.url(entry.id)}
+                                className="block space-y-1"
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-sm text-muted-foreground">
+                                        {new Date(
+                                            entry.captured_at,
+                                        ).toLocaleString()}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline">
+                                            {entry.kind}
+                                        </Badge>
+                                        {entry.language && (
+                                            <Badge variant="outline">
+                                                {entry.language}
+                                            </Badge>
+                                        )}
+                                        <Badge
+                                            variant={
+                                                statusVariant[entry.status] ??
+                                                'outline'
+                                            }
+                                        >
+                                            {entry.status}
+                                        </Badge>
+                                    </div>
                                 </div>
-                            </div>
-                            {entry.title && (
-                                <p className="font-medium">{entry.title}</p>
-                            )}
-                            {entry.preview && (
-                                <p className="text-sm text-muted-foreground">
-                                    {entry.preview}
-                                </p>
-                            )}
-                        </Link>
+                                {entry.title && (
+                                    <p className="font-medium">{entry.title}</p>
+                                )}
+                                {entry.preview && (
+                                    <p className="text-sm text-muted-foreground">
+                                        {entry.preview}
+                                    </p>
+                                )}
+                            </Link>
+                            <ScratchpadEntryMedia
+                                attachments={entry.attachments}
+                            />
+                        </div>
                     ))}
                 </div>
 

@@ -60,6 +60,22 @@ return [
             'report' => false,
         ],
 
+        // Scratchpad photo/voice captures (MediaAsset rows with disk='scratchpad').
+        // Deliberately separate from the 'local'/'public' disks above, which point
+        // elsewhere. No SCRATCHPAD_STORAGE_PATH env var: storage_path('app/uploads')
+        // already resolves to /var/www/html/storage/app/uploads in the production
+        // container (deploy/Dockerfile's runtime stage sets WORKDIR /var/www/html
+        // and COPY . . there, so Laravel's base_path()/storage_path() resolve from
+        // that same root), which is exactly where the persistent Railway volume is
+        // mounted. R2/S3 is a later phase; swapping the driver here is a config
+        // change only as long as callers keep going through Storage::disk('scratchpad').
+        'scratchpad' => [
+            'driver' => 'local',
+            'root' => storage_path('app/uploads'),
+            'visibility' => 'private',
+            'throw' => true,
+        ],
+
     ],
 
     /*

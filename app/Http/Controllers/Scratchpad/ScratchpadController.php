@@ -2,22 +2,32 @@
 
 namespace App\Http\Controllers\Scratchpad;
 
+use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
+use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\TriageScratchpadEntryAction;
+use App\Data\Scratchpad\CaptureScratchpadPhotoData;
+use App\Data\Scratchpad\CaptureScratchpadVoiceData;
 use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Data\Scratchpad\TriageScratchpadEntryData;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Scratchpad\StoreScratchpadPhotoRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadTextNoteRequest;
+use App\Http\Requests\Scratchpad\StoreScratchpadVoiceRequest;
 use App\Http\Requests\Scratchpad\TriageScratchpadEntryRequest;
+use App\Models\Attachment;
+use App\Models\MediaAsset;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ScratchpadController extends Controller
 {
@@ -31,6 +41,7 @@ class ScratchpadController extends Controller
 
         $entries = ScratchpadEntry::query()
             ->where('workspace_id', $workspace->id)
+            ->with('attachments.mediaAsset')
             ->orderByDesc('captured_at')
             ->paginate(20)
             ->withQueryString()
@@ -60,6 +71,62 @@ class ScratchpadController extends Controller
     }
 
     /**
+     * Capture a new photo. No OCR/AI reads the image; capture is pure
+     * capture, same as the text note above.
+     */
+    public function storePhoto(StoreScratchpadPhotoRequest $request, CaptureScratchpadPhotoAction $captureScratchpadPhotoAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+        $user = $this->currentUser($request);
+
+        $captureScratchpadPhotoAction->handle($workspace, $user, CaptureScratchpadPhotoData::fromRequest($request));
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Photo captured.'),
+        ]);
+
+        return to_route('dashboard.scratchpad.index');
+    }
+
+    /**
+     * Capture a new voice memo. No transcription happens here, that's a
+     * separate later phase; the entry simply has no transcript yet.
+     */
+    public function storeVoice(StoreScratchpadVoiceRequest $request, CaptureScratchpadVoiceAction $captureScratchpadVoiceAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+        $user = $this->currentUser($request);
+
+        $captureScratchpadVoiceAction->handle($workspace, $user, CaptureScratchpadVoiceData::fromRequest($request));
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Voice note captured.'),
+        ]);
+
+        return to_route('dashboard.scratchpad.index');
+    }
+
+    /**
+     * Stream back a captured photo/voice file. The `scratchpad` disk is
+     * private, so this is the only way to view one: it 404s for a media
+     * asset outside the current workspace rather than exposing a public URL.
+     */
+    public function media(Request $request, MediaAsset $mediaAsset): StreamedResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+
+        return Storage::disk($mediaAsset->disk)->response(
+            $mediaAsset->path,
+            $mediaAsset->original_filename,
+            ['Content-Type' => $mediaAsset->mime],
+        );
+    }
+
+    /**
      * Show a single entry. 404s if it's not in the current workspace so a
      * request can't view another workspace's capture by guessing an id.
      */
@@ -68,6 +135,8 @@ class ScratchpadController extends Controller
         $workspace = $this->currentWorkspace($request);
 
         abort_if($entry->workspace_id !== $workspace->id, 404);
+
+        $entry->load('attachments.mediaAsset');
 
         return Inertia::render('scratchpad/show', [
             'entry' => $this->presentDetail($entry),
@@ -135,6 +204,8 @@ class ScratchpadController extends Controller
             'title' => $entry->title,
             'preview' => $entry->body === null ? null : Str::limit($entry->body, 140),
             'captured_at' => $entry->captured_at->toIso8601String(),
+            'language' => $entry->language,
+            'attachments' => $this->presentAttachments($entry),
         ];
     }
 
@@ -149,12 +220,35 @@ class ScratchpadController extends Controller
             'kind' => $entry->kind,
             'status' => $entry->status,
             'source' => $entry->source,
+            'language' => $entry->language,
             'title' => $entry->title,
             'body' => $entry->body,
             'captured_at' => $entry->captured_at->toIso8601String(),
             'drop_reason' => $entry->drop_reason,
+            'attachments' => $this->presentAttachments($entry),
             'idea' => $this->presentTriagedIdea($entry),
         ];
+    }
+
+    /**
+     * The entry's attached media (a photo's image, a voice memo's audio),
+     * pointing at the private-disk-backed GET .../scratchpad/media/{id}
+     * route rather than a public URL. Empty for a text entry.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function presentAttachments(ScratchpadEntry $entry): array
+    {
+        return $entry->attachments
+            ->sortBy('position')
+            ->values()
+            ->map(fn (Attachment $attachment) => [
+                'id' => $attachment->id,
+                'role' => $attachment->role,
+                'mime' => $attachment->mediaAsset->mime,
+                'media_url' => route('dashboard.scratchpad.media', $attachment->media_asset_id),
+            ])
+            ->all();
     }
 
     /**
