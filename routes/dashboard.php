@@ -35,6 +35,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('ideas/{idea}', [IdeasController::class, 'show'])->name('ideas.show');
         Route::patch('ideas/{idea}', [IdeasController::class, 'update'])->name('ideas.update');
         Route::post('ideas/{idea}/drop', [IdeasController::class, 'drop'])->name('ideas.drop');
+        Route::post('ideas/{idea}/promote', [IdeasController::class, 'promote'])->name('ideas.promote');
 
         Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');
         Route::post('ai-providers', [AiProviderCredentialsController::class, 'store'])->name('ai-providers.store');

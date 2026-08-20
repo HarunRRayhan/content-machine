@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Ideas;
 
 use App\Actions\Ideas\DropIdeaAction;
+use App\Actions\Ideas\PromoteIdeaAction;
 use App\Actions\Ideas\UpdateIdeaAction;
 use App\Data\Ideas\DropIdeaData;
 use App\Data\Ideas\UpdateIdeaData;
@@ -105,6 +106,32 @@ class IdeasController extends Controller
         return to_route('dashboard.ideas.show', $idea);
     }
 
+    /**
+     * Promote an open idea into a draft post/video shell. No user input:
+     * everything PromoteIdeaAction needs comes from the idea itself.
+     */
+    public function promote(Request $request, Idea $idea, PromoteIdeaAction $promoteIdeaAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($idea->workspace_id !== $workspace->id, 404);
+
+        try {
+            $entity = $promoteIdeaAction->handle($idea);
+        } catch (RuntimeException $e) {
+            Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
+
+            return to_route('dashboard.ideas.show', $idea);
+        }
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Promoted to :humanId.', ['humanId' => $entity->human_id]),
+        ]);
+
+        return to_route('dashboard.ideas.show', $idea);
+    }
+
     private function currentWorkspace(Request $request): Workspace
     {
         $workspace = Workspace::current();
@@ -149,6 +176,29 @@ class IdeasController extends Controller
             'status' => $idea->status,
             'drop_reason' => $idea->drop_reason,
             'created_at' => $idea->created_at?->toIso8601String(),
+            'promoted_to' => $this->presentPromotedEntity($idea),
+        ];
+    }
+
+    /**
+     * The draft post/video this idea was promoted into, presented just
+     * enough to show it happened; there's no post/video detail page yet
+     * to link to. Null for an unpromoted idea.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function presentPromotedEntity(Idea $idea): ?array
+    {
+        $entity = $idea->kind === 'video' ? $idea->video : $idea->post;
+
+        if ($entity === null) {
+            return null;
+        }
+
+        return [
+            'human_id' => $entity->human_id,
+            'title' => $entity->title,
+            'status' => $entity->status,
         ];
     }
 }

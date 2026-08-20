@@ -3,6 +3,7 @@
 namespace Tests\Feature\Ideas;
 
 use App\Models\Idea;
+use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Workspace;
@@ -137,6 +138,50 @@ class IdeasControllerTest extends TestCase
             'status' => 'dropped',
             'drop_reason' => 'No longer relevant.',
         ]);
+    }
+
+    public function test_promote_creates_a_draft_post_and_shows_it_on_the_idea()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $idea = Idea::factory()->for($workspace)->create(['kind' => 'post', 'status' => 'open', 'title' => 'Promote me']);
+
+        $response = $this->post(route('dashboard.ideas.promote', $idea));
+
+        $response->assertRedirect(route('dashboard.ideas.show', $idea));
+        $this->assertDatabaseHas('ideas', ['id' => $idea->id, 'status' => 'promoted']);
+
+        $post = Post::sole();
+        $this->assertSame('Promote me', $post->title);
+        $this->assertSame($idea->id, $post->idea_id);
+
+        $this->get(route('dashboard.ideas.show', $idea))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('ideas/show')
+                ->where('idea.status', 'promoted')
+                ->where('idea.promoted_to.human_id', $post->human_id)
+            );
+    }
+
+    public function test_promote_404s_for_an_idea_in_a_different_workspace()
+    {
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        $idea = Idea::factory()->for($otherWorkspace)->create(['kind' => 'post', 'status' => 'open']);
+
+        $this->post(route('dashboard.ideas.promote', $idea))->assertNotFound();
+    }
+
+    public function test_promote_flashes_an_error_for_an_already_promoted_idea()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $idea = Idea::factory()->for($workspace)->promoted()->create(['kind' => 'post']);
+
+        $response = $this->post(route('dashboard.ideas.promote', $idea));
+
+        $response->assertRedirect(route('dashboard.ideas.show', $idea));
+        $response->assertInertiaFlash('toast.type', 'error');
+        $this->assertDatabaseCount('posts', 0);
     }
 
     public function test_the_full_triage_then_view_the_idea_flow()
