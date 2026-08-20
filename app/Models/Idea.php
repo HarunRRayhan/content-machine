@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * A scored candidate (post/video/feature) waiting to be promoted into the
@@ -120,5 +121,29 @@ class Idea extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /**
+     * The post this idea was promoted into, if it's a kind=post idea and
+     * PromoteIdeaAction has run. Null for a video/feature idea or an
+     * unpromoted one.
+     *
+     * @return HasOne<Post, $this>
+     */
+    public function post(): HasOne
+    {
+        return $this->hasOne(Post::class);
+    }
+
+    /**
+     * The video this idea was promoted into, if it's a kind=video idea and
+     * PromoteIdeaAction has run. Null for a post/feature idea or an
+     * unpromoted one.
+     *
+     * @return HasOne<Video, $this>
+     */
+    public function video(): HasOne
+    {
+        return $this->hasOne(Video::class);
     }
 }

@@ -10,6 +10,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { home } from '@/routes/dashboard';
 import { index } from '@/routes/dashboard/ideas';
 
+type PromotedEntity = {
+    human_id: string;
+    title: string;
+    status: string;
+};
+
 type IdeaDetail = {
     id: number;
     human_id: string;
@@ -23,6 +29,7 @@ type IdeaDetail = {
     status: string;
     drop_reason: string | null;
     created_at: string | null;
+    promoted_to: PromotedEntity | null;
 };
 
 type PageProps = {
@@ -36,6 +43,7 @@ const statusVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
 };
 
 export default function IdeaShow({ idea }: PageProps) {
+    const isOpen = idea.status === 'open';
     const isDropped = idea.status === 'dropped';
 
     return (
@@ -72,6 +80,41 @@ export default function IdeaShow({ idea }: PageProps) {
                         <p className="text-sm text-muted-foreground">
                             {idea.drop_reason}
                         </p>
+                    </div>
+                )}
+
+                {idea.promoted_to && (
+                    <div className="max-w-2xl rounded-lg border p-4">
+                        <p className="text-sm text-muted-foreground">
+                            Promoted to
+                        </p>
+                        <p className="font-medium">
+                            {idea.promoted_to.human_id}:{' '}
+                            {idea.promoted_to.title}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            {idea.promoted_to.status}
+                        </p>
+                    </div>
+                )}
+
+                {isOpen && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <Heading
+                            variant="small"
+                            title="Promote this idea"
+                            description={`Create a draft ${idea.kind} shell from it.`}
+                        />
+
+                        <Form {...IdeasController.promote.form(idea.id)}>
+                            {({ processing }) => (
+                                <Button type="submit" disabled={processing}>
+                                    {idea.kind === 'video'
+                                        ? 'Promote to video'
+                                        : 'Promote to post'}
+                                </Button>
+                            )}
+                        </Form>
                     </div>
                 )}
 
