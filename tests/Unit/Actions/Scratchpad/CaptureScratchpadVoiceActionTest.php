@@ -4,12 +4,15 @@ namespace Tests\Unit\Actions\Scratchpad;
 
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Data\Scratchpad\CaptureScratchpadVoiceData;
+use App\Jobs\TranscribeVoiceNoteJob;
 use App\Models\Attachment;
 use App\Models\MediaAsset;
+use App\Models\Transcription;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -20,6 +23,7 @@ class CaptureScratchpadVoiceActionTest extends TestCase
     public function test_it_stores_the_file_and_creates_a_media_asset_attachment_and_entry()
     {
         Storage::fake('scratchpad');
+        Queue::fake();
 
         $workspace = Workspace::factory()->create();
         $user = User::factory()->create();
@@ -66,9 +70,33 @@ class CaptureScratchpadVoiceActionTest extends TestCase
         $this->assertSame(0, $attachment->position);
     }
 
+    public function test_it_creates_a_pending_transcription_and_dispatches_the_job()
+    {
+        Storage::fake('scratchpad');
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $user = User::factory()->create();
+
+        $entry = (new CaptureScratchpadVoiceAction)->handle(
+            $workspace,
+            $user,
+            new CaptureScratchpadVoiceData(file: UploadedFile::fake()->create('note.weba', 50, 'audio/webm'), language: null),
+        );
+
+        $mediaAsset = MediaAsset::sole();
+        $transcription = Transcription::sole();
+        $this->assertSame($entry->id, $transcription->scratchpad_entry_id);
+        $this->assertSame($mediaAsset->id, $transcription->media_asset_id);
+        $this->assertSame('pending', $transcription->status);
+
+        Queue::assertPushed(TranscribeVoiceNoteJob::class, fn (TranscribeVoiceNoteJob $job) => $job->transcription->is($transcription));
+    }
+
     public function test_a_duplicate_upload_reuses_the_existing_media_asset()
     {
         Storage::fake('scratchpad');
+        Queue::fake();
 
         $workspace = Workspace::factory()->create();
         $user = User::factory()->create();
@@ -99,6 +127,7 @@ class CaptureScratchpadVoiceActionTest extends TestCase
     public function test_it_records_a_null_to_new_status_transition()
     {
         Storage::fake('scratchpad');
+        Queue::fake();
 
         $workspace = Workspace::factory()->create();
         $user = User::factory()->create();
@@ -123,6 +152,7 @@ class CaptureScratchpadVoiceActionTest extends TestCase
     public function test_a_telegram_capture_has_no_uploading_user_and_records_a_system_actor()
     {
         Storage::fake('scratchpad');
+        Queue::fake();
 
         $workspace = Workspace::factory()->create();
         $file = UploadedFile::fake()->create('telegram-voice.ogg', 50, 'audio/ogg');

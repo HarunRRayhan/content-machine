@@ -110,7 +110,10 @@ class ScratchpadEntry extends Model
     }
 
     /**
-     * This entry's transcription, if it's a voice capture. Empty in this phase.
+     * This entry's transcription, if it's a voice capture. At most one row
+     * in practice (CaptureScratchpadVoiceAction creates exactly one), kept
+     * as hasMany rather than hasOne since Transcription's own schema
+     * allows more.
      *
      * @return HasMany<Transcription, $this>
      */
