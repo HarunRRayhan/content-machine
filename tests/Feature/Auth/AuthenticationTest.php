@@ -32,6 +32,15 @@ class AuthenticationTest extends TestCase
         $response->assertRedirect(route('dashboard.home', absolute: false));
     }
 
+    public function test_an_authenticated_user_visiting_login_is_redirected_to_the_dashboard_not_home()
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user)->get(route('login'));
+
+        $response->assertRedirect(route('dashboard.home', absolute: false));
+    }
+
     public function test_users_with_two_factor_enabled_are_redirected_to_two_factor_challenge()
     {
         $this->skipUnlessFortifyHas(Features::twoFactorAuthentication());

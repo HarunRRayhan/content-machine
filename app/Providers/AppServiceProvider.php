@@ -14,6 +14,7 @@ use App\Support\LinkResolution\ProcessLinkResolver;
 use App\Support\Telegram\HttpTelegramClient;
 use App\Support\Telegram\TelegramClientContract;
 use Carbon\CarbonImmutable;
+use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
@@ -48,6 +49,17 @@ class AppServiceProvider extends ServiceProvider
         // again here double-fires every listener in app/Listeners on every
         // matching event (confirmed via `php artisan event:list` during
         // manual testing: a single registration created two personal teams).
+
+        // Laravel's default RedirectIfAuthenticated ("guest" middleware,
+        // guarding /login and /register) looks for a route literally named
+        // "dashboard" and falls back to "home" when it doesn't find one.
+        // This app's dashboard home route is named "dashboard.home" (every
+        // dashboard.php route is prefixed), never bare "dashboard", so an
+        // already-authenticated user hitting /login was silently bounced to
+        // the marketing homepage instead of the dashboard. Confirmed live
+        // 2026-08-20: this is exactly what locked Harun out after his first
+        // successful login.
+        RedirectIfAuthenticated::redirectUsing(fn () => route('dashboard.home'));
     }
 
     /**
