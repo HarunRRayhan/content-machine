@@ -18,16 +18,20 @@ use App\Models\Workspace;
  * Action reaching for global auth state itself. In the web flow the
  * controller always passes the authenticated request user, which is who
  * RecordsHistory's recordStatusTransition() below also attributes the
- * transition to (it resolves the actor from Auth::user() itself).
+ * transition to (it resolves the actor from Auth::user() itself). It's
+ * nullable because a Telegram-originated capture (CaptureTelegramMessageAction)
+ * has no Laravel User to pass; recordStatusTransition() falls back to a
+ * 'system' actor when there's no authenticated user, which is exactly
+ * correct there.
  */
 class CaptureTextNoteAction
 {
-    public function handle(Workspace $workspace, User $capturedBy, CaptureTextNoteData $data): ScratchpadEntry
+    public function handle(Workspace $workspace, ?User $capturedBy, CaptureTextNoteData $data): ScratchpadEntry
     {
         $entry = ScratchpadEntry::create([
             'workspace_id' => $workspace->id,
             'kind' => 'text',
-            'source' => 'web',
+            'source' => $data->source,
             'captured_at' => now(),
             'body' => $data->body,
             'status' => 'new',

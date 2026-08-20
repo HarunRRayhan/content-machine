@@ -14,15 +14,18 @@ use App\Models\Workspace;
  * entry exists and is visible the instant the URL is submitted, same as a
  * voice memo's audio is never blocked on its transcription; a slow or
  * failed resolution never costs the capture itself.
+ *
+ * $capturedBy is nullable for the same reason as CaptureTextNoteAction's:
+ * a Telegram-originated capture has no Laravel User to pass.
  */
 class CaptureScratchpadLinkAction
 {
-    public function handle(Workspace $workspace, User $capturedBy, CaptureScratchpadLinkData $data): ScratchpadEntry
+    public function handle(Workspace $workspace, ?User $capturedBy, CaptureScratchpadLinkData $data): ScratchpadEntry
     {
         $entry = ScratchpadEntry::create([
             'workspace_id' => $workspace->id,
             'kind' => 'link',
-            'source' => 'web',
+            'source' => $data->source,
             'captured_at' => now(),
             'body' => $data->url,
             'status' => 'new',

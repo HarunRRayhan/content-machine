@@ -54,4 +54,60 @@ class HttpTelegramClientTest extends TestCase
         $this->assertFalse($result->successful);
         $this->assertSame('Could not reach Telegram. Check your network and try again.', $result->error);
     }
+
+    public function test_set_webhook_sends_the_url_and_secret_token()
+    {
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true, 'result' => true])]);
+
+        $result = (new HttpTelegramClient)->setWebhook('123:token', 'https://cm.harun.dev/telegram/webhook/abc', 'the-secret');
+
+        $this->assertTrue($result->successful);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/bot123:token/setWebhook')
+            && $request['url'] === 'https://cm.harun.dev/telegram/webhook/abc'
+            && $request['secret_token'] === 'the-secret');
+    }
+
+    public function test_set_webhook_reports_telegrams_rejection()
+    {
+        Http::fake(['*' => Http::response(['ok' => false, 'description' => 'Bad webhook: HTTPS url must be provided'], 400)]);
+
+        $result = (new HttpTelegramClient)->setWebhook('123:token', 'http://insecure', 'secret');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Bad webhook: HTTPS url must be provided', $result->error);
+    }
+
+    public function test_delete_webhook_reports_success()
+    {
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true, 'result' => true])]);
+
+        $result = (new HttpTelegramClient)->deleteWebhook('123:token');
+
+        $this->assertTrue($result->successful);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/bot123:token/deleteWebhook'));
+    }
+
+    public function test_send_message_posts_the_chat_id_and_text()
+    {
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]])]);
+
+        $result = (new HttpTelegramClient)->sendMessage('123:token', 987654, 'Captured.');
+
+        $this->assertTrue($result->successful);
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/bot123:token/sendMessage')
+            && $request['chat_id'] === 987654
+            && $request['text'] === 'Captured.');
+    }
+
+    public function test_a_connection_failure_on_send_message_is_reported_without_leaking_the_exception()
+    {
+        Http::fake(function () {
+            throw new ConnectionException('Connection refused');
+        });
+
+        $result = (new HttpTelegramClient)->sendMessage('123:token', 1, 'hi');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Could not reach Telegram to send the reply.', $result->error);
+    }
 }

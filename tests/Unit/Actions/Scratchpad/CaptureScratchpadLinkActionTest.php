@@ -76,4 +76,25 @@ class CaptureScratchpadLinkActionTest extends TestCase
             'actor_id' => $user->id,
         ]);
     }
+
+    public function test_a_telegram_capture_has_no_capturing_user_and_records_a_system_actor()
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+
+        $entry = (new CaptureScratchpadLinkAction)->handle(
+            $workspace,
+            null,
+            CaptureScratchpadLinkData::fromTelegram('https://example.com/reel/123'),
+        );
+
+        $this->assertSame('telegram', $entry->source);
+        $this->assertDatabaseHas('status_transitions', [
+            'subject_type' => $entry->getMorphClass(),
+            'subject_id' => $entry->id,
+            'actor_type' => 'system',
+            'actor_id' => null,
+        ]);
+    }
 }

@@ -17,5 +17,14 @@ class CaptureScratchpadLinkDataTest extends TestCase
         $data = CaptureScratchpadLinkData::fromRequest($request);
 
         $this->assertSame('https://example.com/reel/123', $data->url);
+        $this->assertSame('web', $data->source);
+    }
+
+    public function test_from_telegram_sets_the_telegram_source()
+    {
+        $data = CaptureScratchpadLinkData::fromTelegram('https://example.com/reel/123');
+
+        $this->assertSame('https://example.com/reel/123', $data->url);
+        $this->assertSame('telegram', $data->source);
     }
 }

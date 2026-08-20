@@ -25,6 +25,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
+        // Telegram itself posts here, it can't carry a CSRF token; the
+        // route verifies the request another way, see
+        // TelegramWebhookController.
+        $middleware->validateCsrfTokens(except: ['telegram/webhook/*']);
+
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,

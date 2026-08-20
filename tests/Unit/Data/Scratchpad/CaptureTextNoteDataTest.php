@@ -17,5 +17,14 @@ class CaptureTextNoteDataTest extends TestCase
         $data = CaptureTextNoteData::fromRequest($request);
 
         $this->assertSame('A captured thought.', $data->body);
+        $this->assertSame('web', $data->source);
+    }
+
+    public function test_from_telegram_sets_the_telegram_source()
+    {
+        $data = CaptureTextNoteData::fromTelegram('A message.');
+
+        $this->assertSame('A message.', $data->body);
+        $this->assertSame('telegram', $data->source);
     }
 }
