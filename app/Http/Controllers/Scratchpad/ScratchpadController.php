@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers\Scratchpad;
 
+use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\TriageScratchpadEntryAction;
+use App\Data\Scratchpad\CaptureScratchpadLinkData;
 use App\Data\Scratchpad\CaptureScratchpadPhotoData;
 use App\Data\Scratchpad\CaptureScratchpadVoiceData;
 use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Data\Scratchpad\TriageScratchpadEntryData;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Scratchpad\StoreScratchpadLinkRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadPhotoRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadTextNoteRequest;
 use App\Http\Requests\Scratchpad\StoreScratchpadVoiceRequest;
@@ -103,6 +106,26 @@ class ScratchpadController extends Controller
         Inertia::flash('toast', [
             'type' => 'success',
             'message' => __('Voice note captured.'),
+        ]);
+
+        return to_route('dashboard.scratchpad.index');
+    }
+
+    /**
+     * Capture a forwarded URL. Resolution (title/description via yt-dlp or
+     * page metadata) happens afterward in a queued job, so the entry exists
+     * immediately even if the URL is slow or never resolves.
+     */
+    public function storeLink(StoreScratchpadLinkRequest $request, CaptureScratchpadLinkAction $captureScratchpadLinkAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+        $user = $this->currentUser($request);
+
+        $captureScratchpadLinkAction->handle($workspace, $user, CaptureScratchpadLinkData::fromRequest($request));
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Link captured.'),
         ]);
 
         return to_route('dashboard.scratchpad.index');
@@ -212,6 +235,7 @@ class ScratchpadController extends Controller
             'captured_at' => $entry->captured_at->toIso8601String(),
             'language' => $entry->language,
             'attachments' => $this->presentAttachments($entry),
+            'link' => $this->presentLink($entry),
         ];
     }
 
@@ -232,6 +256,7 @@ class ScratchpadController extends Controller
             'captured_at' => $entry->captured_at->toIso8601String(),
             'drop_reason' => $entry->drop_reason,
             'attachments' => $this->presentAttachments($entry),
+            'link' => $this->presentLink($entry),
             'idea' => $this->presentTriagedIdea($entry),
         ];
     }
@@ -255,6 +280,27 @@ class ScratchpadController extends Controller
                 'media_url' => route('dashboard.scratchpad.media', $attachment->media_asset_id),
             ])
             ->all();
+    }
+
+    /**
+     * A link entry's original URL and how far ResolveScratchpadLinkAction
+     * got resolving it, so the dashboard can render "resolved via: ..." as
+     * honestly as the Telegram bot's own replies do. Null for every other
+     * entry kind.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function presentLink(ScratchpadEntry $entry): ?array
+    {
+        if ($entry->kind !== 'link') {
+            return null;
+        }
+
+        return [
+            'url' => $entry->meta['url'] ?? null,
+            'resolved_via' => $entry->meta['resolved_via'] ?? null,
+            'thumbnail_url' => $entry->meta['thumbnail_url'] ?? null,
+        ];
     }
 
     /**

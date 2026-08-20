@@ -13,6 +13,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { home } from '@/routes/dashboard';
 import { index, show } from '@/routes/dashboard/scratchpad';
 
+type EntryLink = {
+    url: string | null;
+    resolved_via: string | null;
+    thumbnail_url: string | null;
+};
+
 type EntrySummary = {
     id: number;
     public_id: string;
@@ -23,6 +29,7 @@ type EntrySummary = {
     captured_at: string;
     language: string | null;
     attachments: ScratchpadAttachment[];
+    link: EntryLink | null;
 };
 
 type PaginationLink = {
@@ -89,6 +96,32 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                                 </div>
 
                                 <Button disabled={processing}>Save note</Button>
+                            </>
+                        )}
+                    </Form>
+                </div>
+
+                <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                    <Form
+                        {...ScratchpadController.storeLink.form()}
+                        resetOnSuccess
+                        className="space-y-4"
+                    >
+                        {({ processing, errors }) => (
+                            <>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="url">Capture a link</Label>
+                                    <Input
+                                        id="url"
+                                        type="url"
+                                        name="url"
+                                        required
+                                        placeholder="https://..."
+                                    />
+                                    <InputError message={errors.url} />
+                                </div>
+
+                                <Button disabled={processing}>Save link</Button>
                             </>
                         )}
                     </Form>
@@ -192,6 +225,14 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                                 {entry.preview && (
                                     <p className="text-sm text-muted-foreground">
                                         {entry.preview}
+                                    </p>
+                                )}
+                                {entry.link?.url && (
+                                    <p className="truncate text-sm text-muted-foreground">
+                                        🔗 {entry.link.url}
+                                        {entry.link.resolved_via
+                                            ? ` (${entry.link.resolved_via})`
+                                            : ' (resolving...)'}
                                     </p>
                                 )}
                             </Link>

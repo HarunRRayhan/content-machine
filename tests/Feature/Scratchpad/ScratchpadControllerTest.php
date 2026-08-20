@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Scratchpad;
 
+use App\Jobs\ResolveScratchpadLinkJob;
 use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
@@ -10,6 +11,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -239,6 +241,40 @@ class ScratchpadControllerTest extends TestCase
 
         $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
         $response->assertInertiaFlash('toast.type', 'error');
+    }
+
+    public function test_store_link_creates_a_link_entry_and_queues_resolution()
+    {
+        Queue::fake();
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $response = $this->post(route('dashboard.scratchpad.link'), [
+            'url' => 'https://example.com/a-post',
+        ]);
+
+        $response->assertRedirect(route('dashboard.scratchpad.index'));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame($workspace->id, $entry->workspace_id);
+        $this->assertSame('link', $entry->kind);
+        $this->assertSame('web', $entry->source);
+        $this->assertSame('new', $entry->status);
+        $this->assertSame('https://example.com/a-post', $entry->body);
+        $this->assertSame('https://example.com/a-post', $entry->meta['url']);
+
+        Queue::assertPushed(ResolveScratchpadLinkJob::class, fn (ResolveScratchpadLinkJob $job) => $job->entry->is($entry));
+    }
+
+    public function test_store_link_rejects_a_non_url_value()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $response = $this->post(route('dashboard.scratchpad.link'), [
+            'url' => 'not a url',
+        ]);
+
+        $response->assertSessionHasErrors('url');
+        $this->assertSame(0, ScratchpadEntry::where('workspace_id', $workspace->id)->count());
     }
 
     public function test_store_photo_creates_a_photo_entry_with_a_media_asset_and_attachment()

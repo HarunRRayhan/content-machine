@@ -21,6 +21,12 @@ type TriagedIdea = {
     title: string;
 };
 
+type EntryLink = {
+    url: string | null;
+    resolved_via: string | null;
+    thumbnail_url: string | null;
+};
+
 type EntryDetail = {
     id: number;
     public_id: string;
@@ -33,6 +39,7 @@ type EntryDetail = {
     captured_at: string;
     drop_reason: string | null;
     attachments: ScratchpadAttachment[];
+    link: EntryLink | null;
     idea: TriagedIdea | null;
 };
 
@@ -72,6 +79,22 @@ export default function ScratchpadShow({ entry }: PageProps) {
                 </div>
 
                 <ScratchpadEntryMedia attachments={entry.attachments} />
+
+                {entry.link?.url && (
+                    <div className="max-w-2xl space-y-1 rounded-lg border p-4">
+                        <a
+                            href={entry.link.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="font-medium break-all text-primary hover:underline"
+                        >
+                            {entry.link.url}
+                        </a>
+                        <p className="text-sm text-muted-foreground">
+                            {entry.link.resolved_via ?? 'resolving...'}
+                        </p>
+                    </div>
+                )}
 
                 {entry.body && (
                     <div className="max-w-2xl rounded-lg border p-4">

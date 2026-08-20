@@ -23,6 +23,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::post('scratchpad', [ScratchpadController::class, 'store'])->name('scratchpad.store');
         Route::post('scratchpad/photo', [ScratchpadController::class, 'storePhoto'])->name('scratchpad.photo');
         Route::post('scratchpad/voice', [ScratchpadController::class, 'storeVoice'])->name('scratchpad.voice');
+        Route::post('scratchpad/link', [ScratchpadController::class, 'storeLink'])->name('scratchpad.link');
         Route::get('scratchpad/media/{mediaAsset}', [ScratchpadController::class, 'media'])->name('scratchpad.media');
         Route::get('scratchpad/{entry}', [ScratchpadController::class, 'show'])->name('scratchpad.show');
         Route::post('scratchpad/{entry}/triage', [ScratchpadController::class, 'triage'])->name('scratchpad.triage');
