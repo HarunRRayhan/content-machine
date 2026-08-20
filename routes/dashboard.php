@@ -29,6 +29,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('scratchpad/media/{mediaAsset}', [ScratchpadController::class, 'media'])->name('scratchpad.media');
         Route::get('scratchpad/{entry}', [ScratchpadController::class, 'show'])->name('scratchpad.show');
         Route::post('scratchpad/{entry}/triage', [ScratchpadController::class, 'triage'])->name('scratchpad.triage');
+        Route::post('scratchpad/{entry}/suggest-triage', [ScratchpadController::class, 'suggestTriage'])->name('scratchpad.suggest-triage');
 
         Route::get('ideas', [IdeasController::class, 'index'])->name('ideas.index');
         Route::get('ideas/{idea}', [IdeasController::class, 'show'])->name('ideas.show');
