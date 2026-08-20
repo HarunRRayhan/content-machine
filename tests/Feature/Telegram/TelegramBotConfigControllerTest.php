@@ -71,6 +71,10 @@ class TelegramBotConfigControllerTest extends TestCase
         $this->assertTrue($config->isConnected());
         $this->assertSame('harun_capture_bot', $config->bot_username);
         $this->assertSame('123456:test-token', $config->bot_token);
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/setWebhook')
+            && $request['secret_token'] === $config->webhook_secret
+            && str_contains((string) $request['url'], $config->webhook_slug));
     }
 
     public function test_update_rejects_an_invalid_token_and_stores_nothing()
@@ -89,6 +93,8 @@ class TelegramBotConfigControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+
+        Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
 
         $this->delete(route('dashboard.telegram.destroy'))
             ->assertRedirect(route('dashboard.telegram.edit'));
