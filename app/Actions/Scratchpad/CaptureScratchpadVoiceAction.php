@@ -16,12 +16,15 @@ use Illuminate\Support\Facades\DB;
  * transition, same shape as CaptureTextNoteAction. No transcription runs
  * here, that's a separate later phase; the entry simply has no transcript
  * yet.
+ *
+ * $capturedBy is nullable for the same reason as CaptureTextNoteAction's:
+ * a Telegram-originated capture has no Laravel User to pass.
  */
 class CaptureScratchpadVoiceAction
 {
     use ResolvesMediaAsset;
 
-    public function handle(Workspace $workspace, User $capturedBy, CaptureScratchpadVoiceData $data): ScratchpadEntry
+    public function handle(Workspace $workspace, ?User $capturedBy, CaptureScratchpadVoiceData $data): ScratchpadEntry
     {
         $mediaAsset = $this->resolveMediaAsset($workspace, $capturedBy, $data->file, 'audio');
 
@@ -29,7 +32,7 @@ class CaptureScratchpadVoiceAction
             $entry = ScratchpadEntry::create([
                 'workspace_id' => $workspace->id,
                 'kind' => 'voice',
-                'source' => 'web',
+                'source' => $data->source,
                 'captured_at' => now(),
                 'language' => $data->language,
                 'status' => 'new',

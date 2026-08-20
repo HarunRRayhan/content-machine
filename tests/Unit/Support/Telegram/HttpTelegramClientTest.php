@@ -110,4 +110,67 @@ class HttpTelegramClientTest extends TestCase
         $this->assertFalse($result->successful);
         $this->assertSame('Could not reach Telegram to send the reply.', $result->error);
     }
+
+    public function test_download_file_fetches_metadata_then_content()
+    {
+        Http::fake([
+            'api.telegram.org/bot123:token/getFile*' => Http::response([
+                'ok' => true,
+                'result' => ['file_id' => 'f1', 'file_path' => 'voice/file_0.oga'],
+            ]),
+            'api.telegram.org/file/bot123:token/*' => Http::response('raw-file-bytes-here'),
+        ]);
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertTrue($result->successful);
+        $this->assertSame('raw-file-bytes-here', $result->contents);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.telegram.org/bot123:token/getFile?file_id=f1');
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.telegram.org/file/bot123:token/voice/file_0.oga');
+    }
+
+    public function test_download_file_reports_telegrams_getfile_rejection()
+    {
+        Http::fake(['*' => Http::response(['ok' => false, 'description' => 'file is too big'], 400)]);
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('file is too big', $result->error);
+    }
+
+    public function test_download_file_fails_when_telegram_omits_a_file_path()
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'result' => ['file_id' => 'f1']])]);
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Telegram did not return a path for that file.', $result->error);
+    }
+
+    public function test_download_file_fails_when_the_content_fetch_itself_fails()
+    {
+        Http::fake([
+            'api.telegram.org/bot123:token/getFile*' => Http::response(['ok' => true, 'result' => ['file_path' => 'photos/x.jpg']]),
+            'api.telegram.org/file/*' => Http::response('', 404),
+        ]);
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Telegram rejected the file download.', $result->error);
+    }
+
+    public function test_a_connection_failure_on_download_file_is_reported_without_leaking_the_exception()
+    {
+        Http::fake(function () {
+            throw new ConnectionException('Connection refused');
+        });
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Could not reach Telegram to look up the file.', $result->error);
+    }
 }

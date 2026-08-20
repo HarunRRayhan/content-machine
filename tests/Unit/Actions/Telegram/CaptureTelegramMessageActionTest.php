@@ -3,66 +3,37 @@
 namespace Tests\Unit\Actions\Telegram;
 
 use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
+use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
+use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Models\Attachment;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
-use App\Support\Telegram\TelegramApiResult;
-use App\Support\Telegram\TelegramClientContract;
-use App\Support\Telegram\TelegramGetMeResult;
+use App\Support\Telegram\TelegramFileDownloadResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
 class CaptureTelegramMessageActionTest extends TestCase
 {
     use RefreshDatabase;
 
-    /**
-     * Public, not private: the fake TelegramClientContract built in
-     * action() is an anonymous class, a genuinely different class from
-     * this test even though it's defined inside one of its methods, so it
-     * can only reach this property if visibility allows it.
-     *
-     * @var list<array{0: string, 1: int, 2: string}>
-     */
-    public array $sentMessages = [];
+    private FakeTelegramClient $client;
 
     private function action(): CaptureTelegramMessageAction
     {
-        $this->sentMessages = [];
-
-        $client = new class($this) implements TelegramClientContract
-        {
-            public function __construct(private readonly CaptureTelegramMessageActionTest $test) {}
-
-            public function getMe(string $botToken): TelegramGetMeResult
-            {
-                return TelegramGetMeResult::success('irrelevant');
-            }
-
-            public function setWebhook(string $botToken, string $url, string $secretToken): TelegramApiResult
-            {
-                return TelegramApiResult::success();
-            }
-
-            public function deleteWebhook(string $botToken): TelegramApiResult
-            {
-                return TelegramApiResult::success();
-            }
-
-            public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult
-            {
-                $this->test->sentMessages[] = [$botToken, $chatId, $text];
-
-                return TelegramApiResult::success();
-            }
-        };
+        $this->client = new FakeTelegramClient;
 
         return new CaptureTelegramMessageAction(
             new CaptureTextNoteAction,
             new CaptureScratchpadLinkAction,
-            $client,
+            new CaptureScratchpadPhotoAction,
+            new CaptureScratchpadVoiceAction,
+            $this->client,
         );
     }
 
@@ -89,7 +60,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('A thought worth keeping.', $entry->body);
         $this->assertSame(42, $config->fresh()->linked_telegram_user_id);
-        $this->assertSame([['123:tok', 555, 'Captured.']], $this->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'Captured.']], $this->client->sentMessages);
     }
 
     public function test_a_message_that_is_only_a_url_is_captured_as_a_link()
@@ -103,7 +74,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('link', $entry->kind);
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('https://example.com/article', $entry->meta['url']);
-        $this->assertSame([['123:tok', 555, '🔗 Link captured.']], $this->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🔗 Link captured.']], $this->client->sentMessages);
     }
 
     public function test_a_message_from_a_different_sender_than_the_locked_one_is_rejected()
@@ -117,10 +88,10 @@ class CaptureTelegramMessageActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::count());
         $this->assertSame(42, $config->fresh()->linked_telegram_user_id);
-        $this->assertSame([['123:tok', 555, 'This bot is private.']], $this->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'This bot is private.']], $this->client->sentMessages);
     }
 
-    public function test_a_message_with_no_text_gets_an_honest_not_yet_reply()
+    public function test_a_message_with_none_of_the_supported_content_gets_an_honest_not_yet_reply()
     {
         $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
 
@@ -129,15 +100,15 @@ class CaptureTelegramMessageActionTest extends TestCase
             'message' => [
                 'chat' => ['id' => 555],
                 'from' => ['id' => 42],
-                'photo' => [['file_id' => 'abc']],
+                'document' => ['file_id' => 'abc'],
             ],
         ];
 
         $this->action()->handle($config, $update);
 
         $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertCount(1, $this->sentMessages);
-        $this->assertStringContainsString('coming soon', $this->sentMessages[0][2]);
+        $this->assertCount(1, $this->client->sentMessages);
+        $this->assertStringContainsString('text, links, photos, and voice notes', $this->client->sentMessages[0]['text']);
     }
 
     public function test_an_update_with_no_message_key_is_ignored()
@@ -147,7 +118,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->action()->handle($config, ['update_id' => 1, 'edited_message' => ['text' => 'edited']]);
 
         $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertSame([], $this->sentMessages);
+        $this->assertSame([], $this->client->sentMessages);
     }
 
     public function test_the_same_sender_can_capture_more_than_once()
@@ -159,5 +130,111 @@ class CaptureTelegramMessageActionTest extends TestCase
         $action->handle($config->fresh(), $this->textUpdate(42, 'Second note.'));
 
         $this->assertSame(2, ScratchpadEntry::count());
+    }
+
+    public function test_a_photo_is_downloaded_and_captured_with_its_caption()
+    {
+        Storage::fake('scratchpad');
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+
+        // Held in a variable rather than read inline: Illuminate\Http\
+        // Testing\File cleans up its own temp file once nothing references
+        // it, which can happen before an inline file_get_contents() runs.
+        $fakeImage = UploadedFile::fake()->image('x.jpg', 20, 10);
+        $realJpegBytes = file_get_contents($fakeImage->getRealPath());
+        $action = $this->action();
+        $this->client->willDownloadFile(TelegramFileDownloadResult::success($realJpegBytes));
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 42],
+                'caption' => 'From the roof',
+                // Telegram lists PhotoSize entries smallest to largest; the
+                // action must pick the last one.
+                'photo' => [
+                    ['file_id' => 'small', 'width' => 90, 'height' => 51],
+                    ['file_id' => 'large', 'width' => 800, 'height' => 450],
+                ],
+            ],
+        ];
+
+        $action->handle($config, $update);
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('photo', $entry->kind);
+        $this->assertSame('telegram', $entry->source);
+        $this->assertSame('From the roof', $entry->body);
+        $this->assertSame(1, Attachment::count());
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '📷 Photo captured.']], $this->client->sentMessages);
+    }
+
+    public function test_a_photo_download_failure_replies_honestly_and_captures_nothing()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+        $action = $this->action();
+        $this->client->willDownloadFile(TelegramFileDownloadResult::failure('file is too big'));
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 42],
+                'photo' => [['file_id' => 'x', 'width' => 10, 'height' => 10]],
+            ],
+        ];
+
+        $action->handle($config, $update);
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertStringContainsString('file is too big', $this->client->sentMessages[0]['text']);
+    }
+
+    public function test_a_voice_note_is_downloaded_and_captured()
+    {
+        Storage::fake('scratchpad');
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+        $action = $this->action();
+        $this->client->willDownloadFile(TelegramFileDownloadResult::success('not-really-audio-but-thats-fine'));
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 42],
+                'voice' => ['file_id' => 'v1', 'duration' => 4, 'mime_type' => 'audio/ogg'],
+            ],
+        ];
+
+        $action->handle($config, $update);
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('voice', $entry->kind);
+        $this->assertSame('telegram', $entry->source);
+        $mediaAsset = Attachment::sole()->mediaAsset;
+        $this->assertSame('audio/ogg', $mediaAsset->mime);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🎙️ Voice note captured.']], $this->client->sentMessages);
+    }
+
+    public function test_a_voice_download_failure_replies_honestly_and_captures_nothing()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+        $action = $this->action();
+        $this->client->willDownloadFile(TelegramFileDownloadResult::failure('Telegram could not find that file.'));
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 42],
+                'voice' => ['file_id' => 'v1', 'duration' => 4, 'mime_type' => 'audio/ogg'],
+            ],
+        ];
+
+        $action->handle($config, $update);
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertStringContainsString('Telegram could not find that file.', $this->client->sentMessages[0]['text']);
     }
 }

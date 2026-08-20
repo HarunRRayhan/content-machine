@@ -38,7 +38,7 @@ trait ResolvesMediaAsset
         'audio/x-m4a',
     ];
 
-    private function resolveMediaAsset(Workspace $workspace, User $uploadedBy, UploadedFile $file, string $kind): MediaAsset
+    private function resolveMediaAsset(Workspace $workspace, ?User $uploadedBy, UploadedFile $file, string $kind): MediaAsset
     {
         $checksum = hash_file('sha256', $file->getRealPath());
 
@@ -71,7 +71,7 @@ trait ResolvesMediaAsset
             // ffmpeg/getID3-style dependency this task doesn't add. A later
             // phase can backfill it without a schema change.
             'original_filename' => $file->getClientOriginalName(),
-            'uploaded_by_user_id' => $uploadedBy->id,
+            'uploaded_by_user_id' => $uploadedBy?->id,
         ]);
     }
 

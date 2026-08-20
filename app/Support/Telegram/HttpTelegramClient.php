@@ -81,6 +81,43 @@ final class HttpTelegramClient implements TelegramClientContract
         return $this->toApiResult($response, 'Telegram rejected the message.');
     }
 
+    public function downloadFile(string $botToken, string $fileId): TelegramFileDownloadResult
+    {
+        try {
+            $getFileResponse = Http::timeout(10)->get(self::API_BASE_URL."/bot{$botToken}/getFile", [
+                'file_id' => $fileId,
+            ]);
+        } catch (Throwable) {
+            return TelegramFileDownloadResult::failure('Could not reach Telegram to look up the file.');
+        }
+
+        if (! $getFileResponse->successful() || $getFileResponse->json('ok') !== true) {
+            $description = $getFileResponse->json('description');
+
+            return TelegramFileDownloadResult::failure(
+                is_string($description) && $description !== '' ? $description : 'Telegram could not find that file.'
+            );
+        }
+
+        $filePath = $getFileResponse->json('result.file_path');
+
+        if (! is_string($filePath) || $filePath === '') {
+            return TelegramFileDownloadResult::failure('Telegram did not return a path for that file.');
+        }
+
+        try {
+            $contentResponse = Http::timeout(30)->get(self::API_BASE_URL."/file/bot{$botToken}/{$filePath}");
+        } catch (Throwable) {
+            return TelegramFileDownloadResult::failure('Could not reach Telegram to download the file.');
+        }
+
+        if (! $contentResponse->successful()) {
+            return TelegramFileDownloadResult::failure('Telegram rejected the file download.');
+        }
+
+        return TelegramFileDownloadResult::success($contentResponse->body());
+    }
+
     private function toApiResult(Response $response, string $genericError): TelegramApiResult
     {
         if ($response->successful() && $response->json('ok') === true) {

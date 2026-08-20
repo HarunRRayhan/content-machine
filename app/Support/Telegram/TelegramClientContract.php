@@ -24,4 +24,13 @@ interface TelegramClientContract
     public function deleteWebhook(string $botToken): TelegramApiResult;
 
     public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult;
+
+    /**
+     * Resolves a file_id (from a message's photo/voice/etc.) to its raw
+     * bytes, via Telegram's own two-step getFile-then-download dance — the
+     * caller never sees that mechanic, only the result. Fails honestly
+     * (rather than throwing) when Telegram can't find the file or, per the
+     * Bot API's 20MB cap, refuses to hand it over for being too big.
+     */
+    public function downloadFile(string $botToken, string $fileId): TelegramFileDownloadResult;
 }

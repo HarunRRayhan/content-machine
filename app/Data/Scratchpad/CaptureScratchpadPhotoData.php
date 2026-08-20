@@ -6,13 +6,15 @@ use App\Http\Requests\Scratchpad\StoreScratchpadPhotoRequest;
 use Illuminate\Http\UploadedFile;
 
 /**
- * Typed input for CaptureScratchpadPhotoAction.
+ * Typed input for CaptureScratchpadPhotoAction. $source defaults to 'web',
+ * see CaptureTextNoteData's docblock for why.
  */
 final readonly class CaptureScratchpadPhotoData
 {
     public function __construct(
         public UploadedFile $file,
         public ?string $caption,
+        public string $source = 'web',
     ) {}
 
     public static function fromRequest(StoreScratchpadPhotoRequest $request): self
@@ -23,6 +25,12 @@ final readonly class CaptureScratchpadPhotoData
         return new self(
             file: $file,
             caption: $request->string('caption')->toString() ?: null,
+            source: 'web',
         );
+    }
+
+    public static function fromTelegram(UploadedFile $file, ?string $caption): self
+    {
+        return new self(file: $file, caption: $caption, source: 'telegram');
     }
 }
