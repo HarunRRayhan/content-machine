@@ -20,6 +20,24 @@ use Throwable;
  */
 trait ResolvesMediaAsset
 {
+    /**
+     * The only client-declared Content-Type values ever trusted for
+     * storage/serving, for the reason explained in resolveMime() below. Not
+     * a general-purpose audio mime list — deliberately just what this
+     * app's own recorder (resources/js/components/scratchpad-voice-recorder.tsx)
+     * and the equivalent common browser encoders actually produce.
+     */
+    private const ALLOWED_AUDIO_CLIENT_MIME_TYPES = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg',
+        'audio/mpeg',
+        'audio/wav',
+        'audio/x-wav',
+        'audio/x-m4a',
+    ];
+
     private function resolveMediaAsset(Workspace $workspace, User $uploadedBy, UploadedFile $file, string $kind): MediaAsset
     {
         $checksum = hash_file('sha256', $file->getRealPath());
@@ -44,19 +62,7 @@ trait ResolvesMediaAsset
             'kind' => $kind,
             'disk' => 'scratchpad',
             'path' => $storedPath,
-            // getClientMimeType() (browser-declared), not getMimeType()
-            // (content-sniffed): verified with real ffmpeg-encoded
-            // audio-only fixtures that PHP's finfo/Symfony MimeTypes
-            // content-sniffing cannot tell an audio-only WebM/fragmented-MP4
-            // container from a video one, so a genuine browser voice
-            // recording's real bytes sniff as 'video/webm' or 'video/mp4',
-            // not 'audio/*'. Storing that would break this app's own
-            // `mime.startsWith('audio/')` UI check and mislabel the file.
-            // Content-sniffing is still what StoreScratchpadVoiceRequest's
-            // `mimetypes:` rule validates against (security-relevant, can't
-            // be spoofed by the client); the client-declared type is only
-            // trusted afterward, for display, once that check has passed.
-            'mime' => $file->getClientMimeType(),
+            'mime' => $this->resolveMime($file, $kind),
             'bytes' => $file->getSize(),
             'checksum_sha256' => $checksum,
             'width' => $width,
@@ -67,6 +73,40 @@ trait ResolvesMediaAsset
             'original_filename' => $file->getClientOriginalName(),
             'uploaded_by_user_id' => $uploadedBy->id,
         ]);
+    }
+
+    /**
+     * The Content-Type stored on the MediaAsset and later replayed verbatim
+     * as the HTTP response Content-Type when serving the file back
+     * (ScratchpadController::media()) — so this can never be an arbitrary
+     * client-supplied string, or an attacker could upload a file whose
+     * bytes genuinely pass image/audio content-sniff validation while
+     * separately declaring a spoofed Content-Type (e.g. "text/html") on
+     * the multipart part, which validation never checks. A browser given
+     * that combination back could interpret the stored bytes as HTML/script
+     * (a polyglot-file stored-XSS), same-origin with the dashboard.
+     *
+     * Images: always the server-side, content-sniffed mime
+     * (UploadedFile::getMimeType(), via finfo — not spoofable by the
+     * client). Audio: PHP's content-sniffing genuinely cannot tell a
+     * real audio-only WebM/fragmented-MP4 recording from a video one by
+     * bytes alone (verified with real ffmpeg-encoded fixtures — see
+     * StoreScratchpadVoiceRequest's validation rule docblock), so the
+     * client-declared type is used instead, but ONLY after checking it
+     * against ALLOWED_AUDIO_CLIENT_MIME_TYPES; anything else falls back to
+     * application/octet-stream, which browsers download rather than render.
+     */
+    private function resolveMime(UploadedFile $file, string $kind): string
+    {
+        if ($kind !== 'audio') {
+            return (string) $file->getMimeType();
+        }
+
+        $declared = (string) $file->getClientMimeType();
+
+        return in_array($declared, self::ALLOWED_AUDIO_CLIENT_MIME_TYPES, true)
+            ? $declared
+            : 'application/octet-stream';
     }
 
     private function storeFile(Workspace $workspace, UploadedFile $file): string

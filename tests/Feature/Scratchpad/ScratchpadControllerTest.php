@@ -403,6 +403,43 @@ class ScratchpadControllerTest extends TestCase
         $this->assertSame('audio/mp4', $mediaAsset->mime);
     }
 
+    /**
+     * Proves the fix for a real gap: the client-declared Content-Type on a
+     * multipart upload is not checked by StoreScratchpadVoiceRequest's
+     * mimetypes: rule at all (that rule only content-sniffs the bytes), so
+     * without a whitelist an attacker could upload a file whose bytes
+     * genuinely pass audio validation while declaring an arbitrary
+     * Content-Type (e.g. "text/html") that then gets stored and later
+     * replayed verbatim as the response Content-Type when the file is
+     * served back (ScratchpadController::media()) — a stored-XSS-via-upload
+     * vector for a same-origin polyglot file. The real audio-only WebM
+     * bytes here are identical to the legitimate test above; only the
+     * client-declared type differs.
+     */
+    public function test_store_voice_ignores_a_spoofed_client_content_type()
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $tmpPath = tempnam(sys_get_temp_dir(), 'webm');
+        file_put_contents($tmpPath, base64_decode(
+            'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAEtzEU2bdLpNu4tTq4QVSalmUw=='
+        ));
+        $file = new UploadedFile($tmpPath, 'voice-note.webm', 'text/html', null, true);
+
+        $response = $this->post(route('dashboard.scratchpad.voice'), [
+            'audio' => $file,
+        ]);
+        unlink($tmpPath);
+
+        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertSessionHasNoErrors();
+
+        $mediaAsset = MediaAsset::sole();
+        $this->assertSame('application/octet-stream', $mediaAsset->mime);
+        $this->assertNotSame('text/html', $mediaAsset->mime);
+    }
+
     public function test_media_streams_back_a_workspaces_own_asset()
     {
         Storage::fake('scratchpad');
