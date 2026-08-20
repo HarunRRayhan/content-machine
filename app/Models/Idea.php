@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Concerns\BelongsToWorkspace;
+use App\Concerns\RecordsHistory;
 use Carbon\CarbonImmutable;
 use Database\Factories\IdeaFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -12,9 +13,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A scored candidate (post/video/feature) waiting to be promoted into the
- * real pipeline, or dropped. Schema + model only in this phase: no
- * controller/route/page reads or writes this table yet, that's a separate
- * triage-UI slice.
+ * real pipeline, or dropped. Created by TriageScratchpadEntryAction (or
+ * dropped directly via DropIdeaAction) and edited via UpdateIdeaAction, on
+ * IdeasController's list/detail pages.
  *
  * @property int $id
  * @property int $workspace_id
@@ -41,7 +42,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Idea extends Model
 {
     /** @use HasFactory<IdeaFactory> */
-    use BelongsToWorkspace, HasFactory;
+    use BelongsToWorkspace, HasFactory, RecordsHistory;
 
     /**
      * The attributes that are mass assignable.

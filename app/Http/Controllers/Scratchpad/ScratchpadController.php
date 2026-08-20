@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Scratchpad;
 
 use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Scratchpad\TriageScratchpadEntryAction;
 use App\Data\Scratchpad\CaptureTextNoteData;
+use App\Data\Scratchpad\TriageScratchpadEntryData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Scratchpad\StoreScratchpadTextNoteRequest;
+use App\Http\Requests\Scratchpad\TriageScratchpadEntryRequest;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Workspace;
@@ -14,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
+use RuntimeException;
 
 class ScratchpadController extends Controller
 {
@@ -70,6 +74,36 @@ class ScratchpadController extends Controller
         ]);
     }
 
+    /**
+     * Route a `status === 'new'` entry into a post idea, a video idea, or a
+     * drop. Redirects back to the entry either way, whose `presentDetail`
+     * then reflects the outcome (linked idea, or drop reason).
+     */
+    public function triage(TriageScratchpadEntryRequest $request, ScratchpadEntry $entry, TriageScratchpadEntryAction $triageScratchpadEntryAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($entry->workspace_id !== $workspace->id, 404);
+
+        $user = $this->currentUser($request);
+        $data = TriageScratchpadEntryData::fromRequest($request);
+
+        try {
+            $triageScratchpadEntryAction->handle($entry, $user, $data);
+        } catch (RuntimeException $e) {
+            Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
+
+            return to_route('dashboard.scratchpad.show', $entry);
+        }
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => $data->target === 'drop' ? __('Entry dropped.') : __('Filed as an idea.'),
+        ]);
+
+        return to_route('dashboard.scratchpad.show', $entry);
+    }
+
     private function currentUser(Request $request): User
     {
         $user = $request->user();
@@ -118,6 +152,30 @@ class ScratchpadController extends Controller
             'title' => $entry->title,
             'body' => $entry->body,
             'captured_at' => $entry->captured_at->toIso8601String(),
+            'drop_reason' => $entry->drop_reason,
+            'idea' => $this->presentTriagedIdea($entry),
+        ];
+    }
+
+    /**
+     * The idea this entry was triaged into, presented just enough to link
+     * to it. Null for an untriaged or dropped entry.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function presentTriagedIdea(ScratchpadEntry $entry): ?array
+    {
+        $idea = $entry->ideas()->first();
+
+        if ($idea === null) {
+            return null;
+        }
+
+        return [
+            'id' => $idea->id,
+            'human_id' => $idea->human_id,
+            'kind' => $idea->kind,
+            'title' => $idea->title,
         ];
     }
 }
