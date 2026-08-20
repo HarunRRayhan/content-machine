@@ -181,9 +181,8 @@ class IdeasController extends Controller
     }
 
     /**
-     * The draft post/video this idea was promoted into, presented just
-     * enough to show it happened; there's no post/video detail page yet
-     * to link to. Null for an unpromoted idea.
+     * The draft post/video this idea was promoted into, presented enough
+     * to link to its own show page. Null for an unpromoted idea.
      *
      * @return array<string, mixed>|null
      */
@@ -196,6 +195,8 @@ class IdeasController extends Controller
         }
 
         return [
+            'id' => $entity->id,
+            'kind' => $idea->kind,
             'human_id' => $entity->human_id,
             'title' => $entity->title,
             'status' => $entity->status,

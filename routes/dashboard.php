@@ -3,11 +3,13 @@
 use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Ideas\IdeasController;
+use App\Http\Controllers\Posts\PostsController;
 use App\Http\Controllers\Scratchpad\ScratchpadController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
+use App\Http\Controllers\Videos\VideosController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Auth\Middleware\RequirePassword;
 use Illuminate\Support\Facades\Route;
@@ -36,6 +38,14 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::patch('ideas/{idea}', [IdeasController::class, 'update'])->name('ideas.update');
         Route::post('ideas/{idea}/drop', [IdeasController::class, 'drop'])->name('ideas.drop');
         Route::post('ideas/{idea}/promote', [IdeasController::class, 'promote'])->name('ideas.promote');
+
+        Route::get('posts', [PostsController::class, 'index'])->name('posts.index');
+        Route::get('posts/{post}', [PostsController::class, 'show'])->name('posts.show');
+        Route::patch('posts/{post}', [PostsController::class, 'update'])->name('posts.update');
+
+        Route::get('videos', [VideosController::class, 'index'])->name('videos.index');
+        Route::get('videos/{video}', [VideosController::class, 'show'])->name('videos.show');
+        Route::patch('videos/{video}', [VideosController::class, 'update'])->name('videos.update');
 
         Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');
         Route::post('ai-providers', [AiProviderCredentialsController::class, 'store'])->name('ai-providers.store');

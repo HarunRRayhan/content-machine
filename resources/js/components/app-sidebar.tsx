@@ -1,12 +1,14 @@
 import { Link } from '@inertiajs/react';
 import {
     BookOpen,
+    Clapperboard,
     FolderGit2,
     KeyRound,
     LayoutGrid,
     Lightbulb,
     NotebookPen,
     Send,
+    SquarePen,
     Users,
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
@@ -25,9 +27,11 @@ import {
 import { home } from '@/routes/dashboard';
 import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
 import { index as ideasIndex } from '@/routes/dashboard/ideas';
+import { index as postsIndex } from '@/routes/dashboard/posts';
 import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
 import { edit as telegramEdit } from '@/routes/dashboard/telegram';
+import { index as videosIndex } from '@/routes/dashboard/videos';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
@@ -45,6 +49,16 @@ const mainNavItems: NavItem[] = [
         title: 'Ideas',
         href: ideasIndex(),
         icon: Lightbulb,
+    },
+    {
+        title: 'Posts',
+        href: postsIndex(),
+        icon: SquarePen,
+    },
+    {
+        title: 'Videos',
+        href: videosIndex(),
+        icon: Clapperboard,
     },
     {
         title: 'AI Providers',
