@@ -125,10 +125,111 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
             <Head title="AI Providers" />
 
             <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
-                <Heading
-                    title="AI Providers"
-                    description="API keys for AI features. Tried top to bottom; if one fails, the next is used. No need to know the model name: add the key and its model is detected automatically."
-                />
+                <div className="flex items-start justify-between gap-4">
+                    <Heading
+                        title="AI Providers"
+                        description="API keys for AI features. Tried top to bottom; if one fails, the next is used. No need to know the model name: add the key and its model is detected automatically."
+                    />
+
+                    <Dialog open={addOpen} onOpenChange={setAddOpen}>
+                        <DialogTrigger asChild>
+                            <Button className="shrink-0">Add credential</Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Add an AI provider</DialogTitle>
+                            </DialogHeader>
+                            <Form
+                                {...AiProviderCredentialsController.store.form()}
+                                resetOnSuccess
+                                onSuccess={() => setAddOpen(false)}
+                                className="space-y-4"
+                            >
+                                {({ processing, errors }) => (
+                                    <>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="label">Label</Label>
+                                            <Input
+                                                id="label"
+                                                name="label"
+                                                required
+                                                placeholder="e.g. Anthropic primary"
+                                            />
+                                            <InputError
+                                                message={errors.label}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="provider">
+                                                Provider format
+                                            </Label>
+                                            <select
+                                                id="provider"
+                                                name="provider"
+                                                value={newProvider}
+                                                onChange={(event) =>
+                                                    setNewProvider(
+                                                        event.target.value,
+                                                    )
+                                                }
+                                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                            >
+                                                <option value="anthropic">
+                                                    Anthropic-style
+                                                </option>
+                                                <option value="openai">
+                                                    OpenAI-style
+                                                </option>
+                                            </select>
+                                            <InputError
+                                                message={errors.provider}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="base_url">
+                                                Base URL (optional)
+                                            </Label>
+                                            <Input
+                                                id="base_url"
+                                                name="base_url"
+                                                placeholder={
+                                                    PROVIDER_DEFAULT_BASE_URL[
+                                                        newProvider
+                                                    ]
+                                                }
+                                            />
+                                            <InputError
+                                                message={errors.base_url}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="api_key">
+                                                API key
+                                            </Label>
+                                            <Input
+                                                id="api_key"
+                                                type="password"
+                                                name="api_key"
+                                                required
+                                                autoComplete="off"
+                                            />
+                                            <InputError
+                                                message={errors.api_key}
+                                            />
+                                        </div>
+
+                                        <Button disabled={processing}>
+                                            Add credential
+                                        </Button>
+                                    </>
+                                )}
+                            </Form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
 
                 <div className="space-y-3">
                     {credentials.length === 0 && (
@@ -398,95 +499,6 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                         </div>
                     ))}
                 </div>
-
-                <Dialog open={addOpen} onOpenChange={setAddOpen}>
-                    <DialogTrigger asChild>
-                        <Button className="self-start">Add credential</Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Add an AI provider</DialogTitle>
-                        </DialogHeader>
-                        <Form
-                            {...AiProviderCredentialsController.store.form()}
-                            resetOnSuccess
-                            onSuccess={() => setAddOpen(false)}
-                            className="space-y-4"
-                        >
-                            {({ processing, errors }) => (
-                                <>
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="label">Label</Label>
-                                        <Input
-                                            id="label"
-                                            name="label"
-                                            required
-                                            placeholder="e.g. Anthropic primary"
-                                        />
-                                        <InputError message={errors.label} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="provider">
-                                            Provider format
-                                        </Label>
-                                        <select
-                                            id="provider"
-                                            name="provider"
-                                            value={newProvider}
-                                            onChange={(event) =>
-                                                setNewProvider(
-                                                    event.target.value,
-                                                )
-                                            }
-                                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                                        >
-                                            <option value="anthropic">
-                                                Anthropic-style
-                                            </option>
-                                            <option value="openai">
-                                                OpenAI-style
-                                            </option>
-                                        </select>
-                                        <InputError message={errors.provider} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="base_url">
-                                            Base URL (optional)
-                                        </Label>
-                                        <Input
-                                            id="base_url"
-                                            name="base_url"
-                                            placeholder={
-                                                PROVIDER_DEFAULT_BASE_URL[
-                                                    newProvider
-                                                ]
-                                            }
-                                        />
-                                        <InputError message={errors.base_url} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="api_key">API key</Label>
-                                        <Input
-                                            id="api_key"
-                                            type="password"
-                                            name="api_key"
-                                            required
-                                            autoComplete="off"
-                                        />
-                                        <InputError message={errors.api_key} />
-                                    </div>
-
-                                    <Button disabled={processing}>
-                                        Add credential
-                                    </Button>
-                                </>
-                            )}
-                        </Form>
-                    </DialogContent>
-                </Dialog>
             </div>
         </>
     );
