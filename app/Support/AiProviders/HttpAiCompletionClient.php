@@ -5,6 +5,7 @@ namespace App\Support\AiProviders;
 use App\Models\AiProviderCredential;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -12,6 +13,13 @@ use Throwable;
  * credential is (Anthropic Messages API or OpenAI-compatible Chat
  * Completions), the same provider branching HttpAiProviderVerifier
  * already does for key verification.
+ *
+ * Every failure is logged (credential id/provider/model, never the key)
+ * before returning: AiCompletionResult::$error only ever reaches the
+ * user as a generic fallback message (see GenerateTelegramChatReplyAction,
+ * ResolveTelegramIntentAction), so `railway logs` is the only place the
+ * actual provider error is visible for diagnosing a "why isn't AI chat
+ * replying" report.
  */
 final class HttpAiCompletionClient implements AiCompletionClientContract
 {
@@ -39,16 +47,19 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
             $response = $credential->provider === 'anthropic'
                 ? $this->completeAnthropic($credential, $model, $systemPrompt, $userContent)
                 : $this->completeOpenAi($credential, $model, $systemPrompt, $userContent);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            $this->logFailure($credential, $model, 'connection', $e->getMessage());
+
             return AiCompletionResult::failure('Could not reach the completion provider.');
         }
 
         if (! $response->successful()) {
             $message = $response->json('error.message');
+            $error = is_string($message) && $message !== '' ? $message : "The completion provider returned an unexpected status ({$response->status()}).";
 
-            return AiCompletionResult::failure(
-                is_string($message) && $message !== '' ? $message : "The completion provider returned an unexpected status ({$response->status()})."
-            );
+            $this->logFailure($credential, $model, (string) $response->status(), $error);
+
+            return AiCompletionResult::failure($error);
         }
 
         $text = $credential->provider === 'anthropic'
@@ -56,10 +67,23 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
             : $response->json('choices.0.message.content');
 
         if (! is_string($text) || trim($text) === '') {
+            $this->logFailure($credential, $model, (string) $response->status(), 'no text in a successful response');
+
             return AiCompletionResult::failure('The completion provider returned no text.');
         }
 
         return AiCompletionResult::success(trim($text));
+    }
+
+    private function logFailure(AiProviderCredential $credential, string $model, string $status, string $reason): void
+    {
+        Log::warning('AI completion failed', [
+            'credential_id' => $credential->id,
+            'provider' => $credential->provider,
+            'model' => $model,
+            'status' => $status,
+            'reason' => $reason,
+        ]);
     }
 
     private function completeAnthropic(AiProviderCredential $credential, string $model, string $systemPrompt, string $userContent): Response
