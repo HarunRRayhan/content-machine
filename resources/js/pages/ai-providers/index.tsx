@@ -104,10 +104,8 @@ function ModelChainSection({
 
     return (
         <div className="space-y-3 rounded-lg border p-3">
-            <p className="text-sm text-muted-foreground">{description}</p>
-
-            <div className="flex gap-2">
-                <AddProviderDialog triggerLabel="Add Providers" />
+            <div className="flex items-start justify-between gap-2">
+                <p className="text-sm text-muted-foreground">{description}</p>
                 <AddModelDialog purpose={purpose} credentials={credentials} />
             </div>
 
@@ -295,21 +293,15 @@ function AddModelDialog({
     );
 }
 
-function AddProviderDialog({
-    triggerLabel = 'Add Provider',
-    triggerClassName,
-}: {
-    triggerLabel?: string;
-    triggerClassName?: string;
-}) {
+function AddProviderDialog() {
     const [open, setOpen] = useState(false);
     const [provider, setProvider] = useState('anthropic');
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-                <Button type="button" size="sm" className={triggerClassName}>
-                    {triggerLabel}
+                <Button type="button" size="sm">
+                    Add Provider
                 </Button>
             </DialogTrigger>
             <DialogContent>
@@ -500,7 +492,9 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                     </TabsContent>
 
                     <TabsContent value="providers" className="space-y-3">
-                        <AddProviderDialog />
+                        <div className="flex justify-end">
+                            <AddProviderDialog />
+                        </div>
 
                         {credentials.length === 0 && (
                             <p className="text-sm text-muted-foreground">
