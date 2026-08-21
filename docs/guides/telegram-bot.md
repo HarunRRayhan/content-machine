@@ -72,12 +72,20 @@ a note, it gets a conversational reply.
 
 Everything else is unaffected: a link, a photo, and a voice note still
 always capture, and `/note <text>` still always saves a note even with AI
-chat on. This is deliberately a minimal, tool-free chat: the AI can only
-talk, it has no access to this app's data (your captures, ideas, posts,
-videos) and can't take any action. It's told who it's talking to and which
-workspace, nothing more, and doesn't remember earlier messages between
-replies. Broader capabilities, if any, are a separate, later, explicit
-addition, not something this toggle grants on its own.
+chat on.
+
+Before a plain text message is treated as free chat, it's checked against
+the bot's own read-only commands: something like "show my notes" or "what
+videos do I have" runs `/notes` or `/videos` and replies with exactly what
+that command would have shown, no paraphrasing. This never does anything a
+command couldn't already do by hand. Anything that doesn't clearly match one
+of `/me`, `/videos`, `/posts`, or `/notes` falls through to a normal
+conversational reply: the AI can talk, but still has no access to this
+app's data beyond those specific lookups, can't take any other action, and
+doesn't remember earlier messages between replies. Broader capabilities are
+a separate, later, explicit addition, not something this toggle grants on
+its own.
 
 If AI chat is on but the workspace's provider fails or isn't reachable, the
-message is captured as a note instead of being dropped.
+bot says so, then still captures the message as a note instead of dropping
+it.

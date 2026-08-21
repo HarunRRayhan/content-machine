@@ -16,21 +16,25 @@ use RuntimeException;
 /**
  * Entry point for every Telegram update: resolves whether the sender is
  * linked to a workspace member (TelegramBotLink), routes slash commands,
- * and otherwise hands off to either a chat reply or plain capture
- * (text/link/photo/voice). Commands work the same regardless of AI
- * provider or ai_chat_enabled state.
+ * and otherwise hands off to intent resolution, a chat reply, or plain
+ * capture (text/link/photo/voice). Commands work the same regardless of
+ * AI provider or ai_chat_enabled state.
  *
  * Only a bare, non-URL text message is ever eligible for the AI-chat
- * branch (config->ai_chat_enabled and a working credential), and even
- * then only when GenerateTelegramChatReplyAction actually returns a
- * reply: a link, a photo, a voice note, or an AI failure always falls
- * through to the same capture path this bot always had, and /note
- * always force-captures regardless of ai_chat_enabled. This is the only
- * "capability" the AI has today: it can talk, nothing else. There is no
- * tool-calling machinery in this codebase at all, so that boundary isn't
- * something this router enforces, it's the only shape available; a real
- * tool/permission model is a distinct, later, separately-approved
- * increment, not built here.
+ * branch (config->ai_chat_enabled and a working credential): a link, a
+ * photo, a voice note, or an AI failure always falls through to the same
+ * capture path this bot always had, and /note always force-captures
+ * regardless of ai_chat_enabled. Within that branch, ResolveTelegramIntentAction
+ * gets first look: if the message clearly asks for one of the bot's
+ * existing read-only commands (/me, /videos, /posts, /notes) in plain
+ * language, it runs that command's own lookup (intentReply() below) and
+ * replies with exactly what typing the command would have produced, no
+ * paraphrasing of the data. Only when that finds no intent does
+ * GenerateTelegramChatReplyAction get the message as a normal chat turn.
+ * There is still no general tool-calling/agent loop in this codebase:
+ * intent resolution is one fixed classification into a fixed, small set
+ * of commands the sender could already type by hand, nothing the model
+ * chooses freely.
  */
 class HandleTelegramUpdateAction
 {
@@ -48,13 +52,16 @@ class HandleTelegramUpdateAction
 
     private const CAPTURE_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note, or just type, and I'll capture it to your Scratch Pad.";
 
-    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note and I'll capture it. Otherwise, just talk — I'll chat back. Use /note to capture text instead.";
+    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you. Use /note to capture text instead.";
+
+    private const CHAT_FAILED_TEXT = "Couldn't generate a chat reply right now, so I saved this as a note instead.";
 
     public function __construct(
         private readonly CaptureTelegramMessageAction $captureTelegramMessageAction,
         private readonly CaptureTextNoteAction $captureTextNoteAction,
         private readonly LinkTelegramAccountAction $linkTelegramAccountAction,
         private readonly GenerateTelegramChatReplyAction $generateTelegramChatReplyAction,
+        private readonly ResolveTelegramIntentAction $resolveTelegramIntentAction,
         private readonly TelegramClientContract $client,
     ) {}
 
@@ -96,6 +103,14 @@ class HandleTelegramUpdateAction
         }
 
         if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)) {
+            $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
+
+            if ($intent !== null) {
+                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
+
+                return;
+            }
+
             $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
 
             if ($chatReply !== null) {
@@ -103,6 +118,8 @@ class HandleTelegramUpdateAction
 
                 return;
             }
+
+            $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
         }
 
         $this->captureTelegramMessageAction->handle($config, $update);
@@ -154,12 +171,31 @@ class HandleTelegramUpdateAction
         }
 
         match ($command) {
-            '/me' => $this->reply($config, $chatId, "You're linked as {$link->user->name} ({$link->user->email})."),
-            '/videos' => $this->reply($config, $chatId, $this->recentVideos($config)),
-            '/posts' => $this->reply($config, $chatId, $this->recentPosts($config)),
-            '/notes' => $this->reply($config, $chatId, $this->recentNotes($config)),
+            '/me' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'me')),
+            '/videos' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'videos')),
+            '/posts' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'posts')),
+            '/notes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'notes')),
             '/note' => $this->handleNote($config, $chatId, $args),
             default => $this->reply($config, $chatId, 'Unknown command. Try /help.'),
+        };
+    }
+
+    /**
+     * Runs the exact same lookup the matching slash command runs
+     * (/me, /videos, /posts, /notes), whether it was reached by typing
+     * that command or by ResolveTelegramIntentAction recognizing the
+     * same request in plain language. $intent is always one of
+     * ResolveTelegramIntentAction::KNOWN_INTENTS or the literal command
+     * names above, never model-chosen free text.
+     */
+    private function intentReply(TelegramBotConfig $config, TelegramBotLink $link, string $intent): string
+    {
+        return match ($intent) {
+            'me' => "You're linked as {$link->user->name} ({$link->user->email}).",
+            'videos' => $this->recentVideos($config),
+            'posts' => $this->recentPosts($config),
+            'notes' => $this->recentNotes($config),
+            default => 'Unknown command. Try /help.',
         };
     }
 

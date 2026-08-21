@@ -10,6 +10,7 @@ use App\Actions\Telegram\CaptureTelegramMessageAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
+use App\Actions\Telegram\ResolveTelegramIntentAction;
 use App\Jobs\ProcessTelegramUpdateJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -49,6 +50,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
             new CaptureTextNoteAction,
             new LinkTelegramAccountAction,
             new GenerateTelegramChatReplyAction($completionClient, new AiProviderCredentialResolver),
+            new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
             $client,
         );
     }
