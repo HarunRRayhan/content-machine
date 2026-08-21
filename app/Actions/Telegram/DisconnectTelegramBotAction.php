@@ -11,8 +11,9 @@ use App\Support\Telegram\TelegramClientContract;
  * doesn't change the workspace's webhook URL. Telegram's deleteWebhook is
  * called best-effort: a disconnect always succeeds locally even if
  * Telegram is briefly unreachable, since the user asked to turn this off
- * and shouldn't be blocked by Telegram's own API. linked_telegram_user_id
- * resets to null so a future reconnect can bind a new first sender.
+ * and shouldn't be blocked by Telegram's own API. Existing TelegramBotLink
+ * rows are left untouched: reconnecting the same workspace's bot later
+ * shouldn't force every already-linked member to re-link.
  */
 class DisconnectTelegramBotAction
 {
@@ -29,7 +30,6 @@ class DisconnectTelegramBotAction
         $config->update([
             'bot_token' => null,
             'bot_username' => null,
-            'linked_telegram_user_id' => null,
             'connected_at' => null,
         ]);
     }

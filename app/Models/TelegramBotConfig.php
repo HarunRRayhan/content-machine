@@ -7,6 +7,7 @@ use Carbon\CarbonImmutable;
 use Database\Factories\TelegramBotConfigFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * A workspace's Telegram bot connection: at most one row per workspace
@@ -14,9 +15,9 @@ use Illuminate\Database\Eloquent\Model;
  * it's derived from whether a token is present, see isConnected(); a
  * disconnect (DisconnectTelegramBotAction) nulls the token but keeps
  * webhook_secret/webhook_slug so reconnecting doesn't change the
- * workspace's webhook URL. linked_telegram_user_id is the id of whoever
- * messaged this bot first (see CaptureTelegramMessageAction); it's the
- * access-control boundary until a real account-linking flow exists.
+ * workspace's webhook URL. The bot itself is connected once (by whoever
+ * has access to a token), but each team member who wants it to answer
+ * them links their own Telegram account separately, see TelegramBotLink.
  *
  * @property int $id
  * @property int $workspace_id
@@ -24,7 +25,6 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $webhook_secret
  * @property string|null $webhook_slug
  * @property string|null $bot_username
- * @property int|null $linked_telegram_user_id
  * @property CarbonImmutable|null $connected_at
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
@@ -45,7 +45,6 @@ class TelegramBotConfig extends Model
         'webhook_secret',
         'webhook_slug',
         'bot_username',
-        'linked_telegram_user_id',
         'connected_at',
     ];
 
@@ -66,5 +65,21 @@ class TelegramBotConfig extends Model
     public function isConnected(): bool
     {
         return $this->bot_token !== null;
+    }
+
+    /**
+     * @return HasMany<TelegramBotLink, $this>
+     */
+    public function links(): HasMany
+    {
+        return $this->hasMany(TelegramBotLink::class);
+    }
+
+    /**
+     * @return HasMany<TelegramLinkCode, $this>
+     */
+    public function linkCodes(): HasMany
+    {
+        return $this->hasMany(TelegramLinkCode::class);
     }
 }

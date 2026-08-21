@@ -49,7 +49,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         ];
     }
 
-    public function test_a_first_message_locks_in_the_sender_and_captures_a_text_note()
+    public function test_a_text_message_is_captured_as_a_note()
     {
         $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
 
@@ -59,7 +59,6 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('text', $entry->kind);
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('A thought worth keeping.', $entry->body);
-        $this->assertSame(42, $config->fresh()->linked_telegram_user_id);
         $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'Captured.']], $this->client->sentMessages);
     }
 
@@ -75,20 +74,6 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('https://example.com/article', $entry->meta['url']);
         $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🔗 Link captured.']], $this->client->sentMessages);
-    }
-
-    public function test_a_message_from_a_different_sender_than_the_locked_one_is_rejected()
-    {
-        $config = TelegramBotConfig::factory()->connected()->create([
-            'bot_token' => '123:tok',
-            'linked_telegram_user_id' => 42,
-        ]);
-
-        $this->action()->handle($config, $this->textUpdate(99, 'I am not Harun.'));
-
-        $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertSame(42, $config->fresh()->linked_telegram_user_id);
-        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'This bot is private.']], $this->client->sentMessages);
     }
 
     public function test_a_message_with_none_of_the_supported_content_gets_an_honest_not_yet_reply()
@@ -119,17 +104,6 @@ class CaptureTelegramMessageActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::count());
         $this->assertSame([], $this->client->sentMessages);
-    }
-
-    public function test_the_same_sender_can_capture_more_than_once()
-    {
-        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
-
-        $action = $this->action();
-        $action->handle($config, $this->textUpdate(42, 'First note.'));
-        $action->handle($config->fresh(), $this->textUpdate(42, 'Second note.'));
-
-        $this->assertSame(2, ScratchpadEntry::count());
     }
 
     public function test_a_photo_is_downloaded_and_captured_with_its_caption()
@@ -213,6 +187,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $entry = ScratchpadEntry::sole();
         $this->assertSame('voice', $entry->kind);
         $this->assertSame('telegram', $entry->source);
+        $this->assertSame(555, $entry->meta['telegram_chat_id']);
         $mediaAsset = Attachment::sole()->mediaAsset;
         $this->assertSame('audio/ogg', $mediaAsset->mime);
         $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🎙️ Voice note captured.']], $this->client->sentMessages);

@@ -8,6 +8,7 @@ use App\Data\Telegram\ConnectTelegramBotData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Telegram\StoreTelegramBotConfigRequest;
 use App\Models\TelegramBotConfig;
+use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,11 +27,26 @@ class TelegramBotConfigController extends Controller
     {
         $workspace = $this->currentWorkspace($request);
         $config = $this->config($workspace);
+        $user = $request->user();
+
+        $myLink = $config !== null && $user instanceof User
+            ? $config->links()->where('user_id', $user->id)->first()
+            : null;
 
         return Inertia::render('telegram/edit', [
             'connected' => $config?->isConnected() ?? false,
             'botUsername' => $config?->bot_username,
             'connectedAt' => $config?->connected_at?->toIso8601String(),
+            'myLink' => $myLink !== null ? [
+                'telegramUsername' => $myLink->telegram_username,
+                'linkedAt' => $myLink->linked_at->toIso8601String(),
+            ] : null,
+            'linkedMembers' => $config !== null
+                ? $config->links()->with('user')->get()->map(fn ($link) => [
+                    'name' => $link->user->name,
+                    'telegramUsername' => $link->telegram_username,
+                ])->all()
+                : [],
         ]);
     }
 

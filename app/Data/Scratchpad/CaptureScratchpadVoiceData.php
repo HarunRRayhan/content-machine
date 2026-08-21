@@ -18,6 +18,7 @@ final readonly class CaptureScratchpadVoiceData
         public UploadedFile $file,
         public ?string $language,
         public string $source = 'web',
+        public ?int $telegramChatId = null,
     ) {}
 
     public static function fromRequest(StoreScratchpadVoiceRequest $request): self
@@ -32,8 +33,8 @@ final readonly class CaptureScratchpadVoiceData
         );
     }
 
-    public static function fromTelegram(UploadedFile $file): self
+    public static function fromTelegram(UploadedFile $file, int $telegramChatId): self
     {
-        return new self(file: $file, language: null, source: 'telegram');
+        return new self(file: $file, language: null, source: 'telegram', telegramChatId: $telegramChatId);
     }
 }

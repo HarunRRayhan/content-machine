@@ -9,6 +9,7 @@ use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
+use App\Http\Controllers\Telegram\TelegramBotLinkController;
 use App\Http\Controllers\Videos\VideosController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Auth\Middleware\RequirePassword;
@@ -60,6 +61,8 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('telegram', [TelegramBotConfigController::class, 'edit'])->name('telegram.edit');
         Route::post('telegram', [TelegramBotConfigController::class, 'update'])->name('telegram.update');
         Route::delete('telegram', [TelegramBotConfigController::class, 'destroy'])->name('telegram.destroy');
+        Route::post('telegram/link-code', [TelegramBotLinkController::class, 'store'])->name('telegram.link-code');
+        Route::post('telegram/test', [TelegramBotLinkController::class, 'test'])->name('telegram.test');
 
         Route::redirect('settings', '/dashboard/settings/profile');
 

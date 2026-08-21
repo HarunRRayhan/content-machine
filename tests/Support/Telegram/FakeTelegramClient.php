@@ -29,6 +29,11 @@ final class FakeTelegramClient implements TelegramClientContract
      */
     public array $deleteWebhookCalledWith = [];
 
+    /**
+     * @var list<array{botToken: string, commands: array<int, array{command: string, description: string}>}>
+     */
+    public array $setMyCommandsCalledWith = [];
+
     private TelegramGetMeResult $getMeResult;
 
     private TelegramApiResult $setWebhookResult;
@@ -36,6 +41,8 @@ final class FakeTelegramClient implements TelegramClientContract
     private TelegramApiResult $deleteWebhookResult;
 
     private TelegramApiResult $sendMessageResult;
+
+    private TelegramApiResult $setMyCommandsResult;
 
     private TelegramFileDownloadResult $downloadFileResult;
 
@@ -45,6 +52,7 @@ final class FakeTelegramClient implements TelegramClientContract
         $this->setWebhookResult = TelegramApiResult::success();
         $this->deleteWebhookResult = TelegramApiResult::success();
         $this->sendMessageResult = TelegramApiResult::success();
+        $this->setMyCommandsResult = TelegramApiResult::success();
         $this->downloadFileResult = TelegramFileDownloadResult::failure('FakeTelegramClient::willDownloadFile() was never configured for this test.');
     }
 
@@ -91,6 +99,13 @@ final class FakeTelegramClient implements TelegramClientContract
         $this->sentMessages[] = ['botToken' => $botToken, 'chatId' => $chatId, 'text' => $text];
 
         return $this->sendMessageResult;
+    }
+
+    public function setMyCommands(string $botToken, array $commands): TelegramApiResult
+    {
+        $this->setMyCommandsCalledWith[] = ['botToken' => $botToken, 'commands' => $commands];
+
+        return $this->setMyCommandsResult;
     }
 
     public function downloadFile(string $botToken, string $fileId): TelegramFileDownloadResult

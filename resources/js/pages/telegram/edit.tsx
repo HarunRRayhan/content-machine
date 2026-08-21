@@ -1,5 +1,7 @@
-import { Form, Head } from '@inertiajs/react';
+import { Form, Head, router } from '@inertiajs/react';
+import { useEffect, useState } from 'react';
 import TelegramBotConfigController from '@/actions/App/Http/Controllers/Telegram/TelegramBotConfigController';
+import TelegramBotLinkController from '@/actions/App/Http/Controllers/Telegram/TelegramBotLinkController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';
@@ -9,17 +11,50 @@ import { Label } from '@/components/ui/label';
 import { home } from '@/routes/dashboard';
 import { edit } from '@/routes/dashboard/telegram';
 
+type LinkInfo = {
+    telegramUsername: string | null;
+    linkedAt: string;
+};
+
+type LinkedMember = {
+    name: string;
+    telegramUsername: string | null;
+};
+
+type LinkCode = {
+    code: string;
+    expiresAt: string;
+};
+
 type PageProps = {
     connected: boolean;
     botUsername: string | null;
     connectedAt: string | null;
+    myLink: LinkInfo | null;
+    linkedMembers: LinkedMember[];
 };
 
 export default function TelegramEdit({
     connected,
     botUsername,
     connectedAt,
+    myLink,
+    linkedMembers,
 }: PageProps) {
+    const [linkCode, setLinkCode] = useState<LinkCode | null>(null);
+
+    useEffect(() => {
+        return router.on('flash', (event) => {
+            const flash = (
+                event as CustomEvent<{ flash?: { linkCode?: LinkCode } }>
+            ).detail?.flash;
+
+            if (flash?.linkCode) {
+                setLinkCode(flash.linkCode);
+            }
+        });
+    }, []);
+
     return (
         <>
             <Head title="Telegram" />
@@ -92,6 +127,95 @@ export default function TelegramEdit({
                         </Form>
                     )}
                 </div>
+
+                {connected && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <div>
+                            <h2 className="font-medium">Your account</h2>
+                            <p className="text-sm text-muted-foreground">
+                                The bot only answers linked members. Link your
+                                own Telegram account to use it.
+                            </p>
+                        </div>
+
+                        {myLink ? (
+                            <>
+                                <p className="text-sm">
+                                    Linked
+                                    {myLink.telegramUsername
+                                        ? ` as @${myLink.telegramUsername}`
+                                        : ''}{' '}
+                                    on{' '}
+                                    {new Date(myLink.linkedAt).toLocaleString()}
+                                    .
+                                </p>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() =>
+                                        router.post(
+                                            TelegramBotLinkController.test.url(),
+                                        )
+                                    }
+                                >
+                                    Send test message
+                                </Button>
+                            </>
+                        ) : (
+                            <>
+                                <p className="text-sm text-muted-foreground">
+                                    Not linked yet.
+                                </p>
+                                <Button
+                                    type="button"
+                                    onClick={() =>
+                                        router.post(
+                                            TelegramBotLinkController.store.url(),
+                                        )
+                                    }
+                                >
+                                    Get link code
+                                </Button>
+                            </>
+                        )}
+
+                        {linkCode && (
+                            <div className="space-y-1 rounded-md border bg-muted/50 p-3">
+                                <p className="text-sm">
+                                    Send this to the bot on Telegram:
+                                </p>
+                                <p className="font-mono text-lg font-semibold">
+                                    /link {linkCode.code}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Expires{' '}
+                                    {new Date(
+                                        linkCode.expiresAt,
+                                    ).toLocaleTimeString()}
+                                    .
+                                </p>
+                            </div>
+                        )}
+
+                        {linkedMembers.length > 0 && (
+                            <div className="space-y-1 border-t pt-4">
+                                <h3 className="text-sm font-medium">
+                                    Linked members
+                                </h3>
+                                <ul className="space-y-1 text-sm text-muted-foreground">
+                                    {linkedMembers.map((member) => (
+                                        <li key={member.name}>
+                                            {member.name}
+                                            {member.telegramUsername
+                                                ? ` (@${member.telegramUsername})`
+                                                : ''}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </>
     );
