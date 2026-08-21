@@ -77,10 +77,12 @@ function ModelChainSection({
     description,
     purpose,
     entries,
+    credentials,
 }: {
     description: string;
     purpose: 'default' | 'vision';
     entries: ModelEntry[];
+    credentials: Credential[];
 }) {
     function move(id: number, direction: 'up' | 'down') {
         const ids = entries.map((entry) => entry.id);
@@ -171,28 +173,67 @@ function ModelChainSection({
                     </div>
                 ))}
             </div>
+
+            <AddModelToChainForm purpose={purpose} credentials={credentials} />
         </div>
     );
 }
 
-function AddModelsForm({ credential }: { credential: Credential }) {
-    const discovered = credential.discovered_models ?? [];
+function AddModelToChainForm({
+    purpose,
+    credentials,
+}: {
+    purpose: 'default' | 'vision';
+    credentials: Credential[];
+}) {
+    const eligible = credentials.filter(
+        (credential) => (credential.discovered_models?.length ?? 0) > 0,
+    );
+    const [credentialId, setCredentialId] = useState<number | null>(
+        eligible[0]?.id ?? null,
+    );
 
-    if (discovered.length === 0) {
-        return null;
+    if (eligible.length === 0) {
+        return (
+            <p className="text-sm text-muted-foreground">
+                No discovered models yet. Add a provider (or reload an existing
+                one) on the Providers tab first.
+            </p>
+        );
     }
+
+    const selected =
+        eligible.find((credential) => credential.id === credentialId) ??
+        eligible[0];
 
     return (
         <Form
-            {...AiProviderCredentialModelsController.store.form(credential.id)}
+            key={selected.id}
+            {...AiProviderCredentialModelsController.store.form(selected.id)}
             resetOnSuccess
             className="space-y-2 rounded-md border border-dashed p-3"
         >
             {({ processing, errors }) => (
                 <>
-                    <Label>Add models to the fallback chain</Label>
+                    <input type="hidden" name="purpose" value={purpose} />
+
+                    <Label>Add a model from</Label>
+                    <select
+                        value={selected.id}
+                        onChange={(event) =>
+                            setCredentialId(Number(event.target.value))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                    >
+                        {eligible.map((credential) => (
+                            <option key={credential.id} value={credential.id}>
+                                {credential.label}
+                            </option>
+                        ))}
+                    </select>
+
                     <div className="grid max-h-40 gap-1.5 overflow-y-auto">
-                        {discovered.map((model) => (
+                        {(selected.discovered_models ?? []).map((model) => (
                             <label
                                 key={model.id}
                                 className="flex items-center gap-2 text-sm"
@@ -204,20 +245,9 @@ function AddModelsForm({ credential }: { credential: Credential }) {
                     </div>
                     <InputError message={errors.models} />
 
-                    <div className="flex items-center gap-2">
-                        <select
-                            name="purpose"
-                            defaultValue="default"
-                            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                        >
-                            <option value="default">As default</option>
-                            <option value="vision">As vision</option>
-                        </select>
-                        <Button type="submit" size="sm" disabled={processing}>
-                            Add selected
-                        </Button>
-                    </div>
-                    <InputError message={errors.purpose} />
+                    <Button type="submit" size="sm" disabled={processing}>
+                        Add selected
+                    </Button>
                 </>
             )}
         </Form>
@@ -255,7 +285,7 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                 <div className="flex items-start justify-between gap-4">
                     <Heading
                         title="AI Models"
-                        description="Add API keys as providers on the right, then pick which of their models actually get tried, and in what order, on the left. A default task tries default models first, then vision models as a further fallback; a vision task only ever uses vision models."
+                        description="Add API keys under Providers, then pick which of their models actually get tried, and in what order, under Models. A default task tries default models first, then vision models as a further fallback; a vision task only ever uses vision models."
                     />
 
                     <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -378,6 +408,7 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                                     description="Tried in order for any plain text/chat task. The top entry is the default, everything below it is a backup tried if it fails."
                                     purpose="default"
                                     entries={models.default}
+                                    credentials={credentials}
                                 />
                             </TabsContent>
                             <TabsContent value="vision">
@@ -385,6 +416,7 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                                     description="Tried in order for any task that reads an image, and as a further fallback after default models run out. The top entry is the default, everything below it is a backup."
                                     purpose="vision"
                                     entries={models.vision}
+                                    credentials={credentials}
                                 />
                             </TabsContent>
                         </Tabs>
@@ -553,7 +585,21 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                                     )}
                                 </Form>
 
-                                <AddModelsForm credential={credential} />
+                                {credential.discovered_models &&
+                                    credential.discovered_models.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {credential.discovered_models.map(
+                                                (model) => (
+                                                    <Badge
+                                                        key={model.id}
+                                                        variant="outline"
+                                                    >
+                                                        {model.label}
+                                                    </Badge>
+                                                ),
+                                            )}
+                                        </div>
+                                    )}
 
                                 {editingId === credential.id && (
                                     <Form
