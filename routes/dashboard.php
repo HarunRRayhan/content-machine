@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
-use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Posts\PostsController;
 use App\Http\Controllers\Scratchpad\ScratchpadController;
@@ -19,7 +18,11 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
     ->prefix('dashboard')
     ->name('dashboard.')
     ->group(function () {
-        Route::get('/', [DashboardController::class, 'index'])->name('home');
+        // Scratch Pad is the app's landing page; there is no separate
+        // dashboard-home view. This route stays named "home" (not removed)
+        // because it's still the target every login/register/email-verify
+        // redirect resolves to, and every page's root breadcrumb links here.
+        Route::redirect('/', '/dashboard/scratchpad')->name('home');
 
         Route::get('team', [TeamController::class, 'index'])->name('team.index');
         Route::post('team/invitations', [TeamController::class, 'storeInvitation'])->name('team.invitations.store');

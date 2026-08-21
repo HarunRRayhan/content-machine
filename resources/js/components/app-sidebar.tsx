@@ -4,8 +4,6 @@ import {
     Clapperboard,
     FolderGit2,
     KeyRound,
-    LayoutGrid,
-    Lightbulb,
     NotebookPen,
     Send,
     SquarePen,
@@ -26,7 +24,6 @@ import {
 } from '@/components/ui/sidebar';
 import { home } from '@/routes/dashboard';
 import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
-import { index as ideasIndex } from '@/routes/dashboard/ideas';
 import { index as postsIndex } from '@/routes/dashboard/posts';
 import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
@@ -36,19 +33,9 @@ import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
     {
-        title: 'Dashboard',
-        href: home(),
-        icon: LayoutGrid,
-    },
-    {
         title: 'Scratch Pad',
         href: scratchpadIndex(),
         icon: NotebookPen,
-    },
-    {
-        title: 'Ideas',
-        href: ideasIndex(),
-        icon: Lightbulb,
     },
     {
         title: 'Posts',
