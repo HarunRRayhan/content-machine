@@ -19,7 +19,6 @@ class StoreAiProviderCredentialRequest extends FormRequest
             'label' => ['required', 'string', 'max:255'],
             'provider' => ['required', Rule::in(['anthropic', 'openai'])],
             'base_url' => ['nullable', 'url', 'max:500'],
-            'model' => ['required', 'string', 'max:255'],
             'api_key' => ['required', 'string', 'max:500'],
         ];
     }

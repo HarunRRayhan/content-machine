@@ -10,12 +10,18 @@ import { Label } from '@/components/ui/label';
 import { home } from '@/routes/dashboard';
 import { index, reorder } from '@/routes/dashboard/ai-providers';
 
+type DiscoveredModel = {
+    id: string;
+    label: string;
+};
+
 type Credential = {
     id: number;
     label: string;
     provider: string;
     base_url: string | null;
-    model: string;
+    model: string | null;
+    discovered_models: DiscoveredModel[] | null;
     priority: number;
     enabled: boolean;
     verified_at: string | null;
@@ -27,6 +33,56 @@ type PageProps = {
 
 function providerLabel(provider: string): string {
     return provider === 'anthropic' ? 'Anthropic-style' : 'OpenAI-style';
+}
+
+function ModelPicker({ credential }: { credential: Credential }) {
+    const discovered = credential.discovered_models ?? [];
+    const hasDiscovered = discovered.length > 0;
+
+    return (
+        <Form
+            {...AiProviderCredentialsController.setModel.form(credential.id)}
+            className="flex flex-wrap items-end gap-2 rounded-md border border-dashed p-3"
+        >
+            {({ processing, errors }) => (
+                <>
+                    <div className="grid gap-2">
+                        <Label htmlFor={`set-model-${credential.id}`}>
+                            {hasDiscovered
+                                ? 'Choose a model'
+                                : "Couldn't detect models automatically. Enter one"}
+                        </Label>
+                        {hasDiscovered ? (
+                            <select
+                                id={`set-model-${credential.id}`}
+                                name="model"
+                                required
+                                className="flex h-9 w-64 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                            >
+                                {discovered.map((model) => (
+                                    <option key={model.id} value={model.id}>
+                                        {model.label}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <Input
+                                id={`set-model-${credential.id}`}
+                                name="model"
+                                required
+                                placeholder="e.g. claude-sonnet-4-5"
+                                className="w-64"
+                            />
+                        )}
+                        <InputError message={errors.model} />
+                    </div>
+                    <Button type="submit" size="sm" disabled={processing}>
+                        Set model
+                    </Button>
+                </>
+            )}
+        </Form>
+    );
 }
 
 export default function AiProvidersIndex({ credentials }: PageProps) {
@@ -57,7 +113,7 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
             <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
                 <Heading
                     title="AI Providers"
-                    description="API keys for AI features. Tried top to bottom; if one fails, the next is used."
+                    description="API keys for AI features. Tried top to bottom; if one fails, the next is used. No need to know the model name: add the key and its model is detected automatically."
                 />
 
                 <div className="max-w-2xl space-y-4 rounded-lg border p-4">
@@ -79,37 +135,24 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                     <InputError message={errors.label} />
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="provider">
-                                            Provider format
-                                        </Label>
-                                        <select
-                                            id="provider"
-                                            name="provider"
-                                            defaultValue="anthropic"
-                                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                                        >
-                                            <option value="anthropic">
-                                                Anthropic-style
-                                            </option>
-                                            <option value="openai">
-                                                OpenAI-style
-                                            </option>
-                                        </select>
-                                        <InputError message={errors.provider} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="model">Model</Label>
-                                        <Input
-                                            id="model"
-                                            name="model"
-                                            required
-                                            placeholder="e.g. claude-sonnet-4-5"
-                                        />
-                                        <InputError message={errors.model} />
-                                    </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="provider">
+                                        Provider format
+                                    </Label>
+                                    <select
+                                        id="provider"
+                                        name="provider"
+                                        defaultValue="anthropic"
+                                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                    >
+                                        <option value="anthropic">
+                                            Anthropic-style
+                                        </option>
+                                        <option value="openai">
+                                            OpenAI-style
+                                        </option>
+                                    </select>
+                                    <InputError message={errors.provider} />
                                 </div>
 
                                 <div className="grid gap-2">
@@ -197,8 +240,10 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                                 )}
                                         </p>
                                         <p className="text-sm text-muted-foreground">
-                                            {providerLabel(credential.provider)}{' '}
-                                            &middot; {credential.model}
+                                            {providerLabel(credential.provider)}
+                                            {' · '}
+                                            {credential.model ??
+                                                'Model not set'}
                                             {credential.base_url &&
                                                 ` · ${credential.base_url}`}
                                         </p>
@@ -230,6 +275,10 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                     </Badge>
                                 </div>
                             </div>
+
+                            {credential.model === null && (
+                                <ModelPicker credential={credential} />
+                            )}
 
                             <div className="flex flex-wrap gap-2">
                                 <Form
@@ -342,9 +391,8 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                                     id={`model-${credential.id}`}
                                                     name="model"
                                                     defaultValue={
-                                                        credential.model
+                                                        credential.model ?? ''
                                                     }
-                                                    required
                                                 />
                                                 <InputError
                                                     message={errors.model}

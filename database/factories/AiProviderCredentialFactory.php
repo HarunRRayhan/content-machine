@@ -35,6 +35,11 @@ class AiProviderCredentialFactory extends Factory
         return $this->state(fn () => ['enabled' => false]);
     }
 
+    public function withoutModel(): static
+    {
+        return $this->state(fn () => ['model' => null]);
+    }
+
     public function openai(): static
     {
         return $this->state(fn () => [

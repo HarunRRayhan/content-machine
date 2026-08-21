@@ -60,6 +60,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::delete('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'destroy'])->name('ai-providers.destroy');
         Route::post('ai-providers/{aiProviderCredential}/toggle', [AiProviderCredentialsController::class, 'toggle'])->name('ai-providers.toggle');
         Route::post('ai-providers/{aiProviderCredential}/verify', [AiProviderCredentialsController::class, 'verify'])->name('ai-providers.verify');
+        Route::post('ai-providers/{aiProviderCredential}/model', [AiProviderCredentialsController::class, 'setModel'])->name('ai-providers.set-model');
 
         Route::get('telegram', [TelegramBotConfigController::class, 'edit'])->name('telegram.edit');
         Route::post('telegram', [TelegramBotConfigController::class, 'update'])->name('telegram.update');

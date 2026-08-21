@@ -32,10 +32,46 @@ final class HttpAiProviderVerifier implements AiProviderVerifierContract
         }
 
         if ($response->successful()) {
-            return AiProviderVerificationResult::success();
+            return AiProviderVerificationResult::success($this->parseModels($credential->provider, $response));
         }
 
         return AiProviderVerificationResult::failure($this->describeFailure($response));
+    }
+
+    /**
+     * @return array<int, array{id: string, label: string}>
+     */
+    private function parseModels(string $provider, Response $response): array
+    {
+        $data = $response->json('data');
+
+        if (! is_array($data)) {
+            return [];
+        }
+
+        $models = [];
+
+        foreach ($data as $item) {
+            if (! is_array($item) || ! is_string($item['id'] ?? null)) {
+                continue;
+            }
+
+            $label = $provider === 'anthropic' && is_string($item['display_name'] ?? null)
+                ? $item['display_name']
+                : $item['id'];
+
+            $models[] = ['id' => $item['id'], 'label' => $label, 'created' => is_int($item['created'] ?? null) ? $item['created'] : null];
+        }
+
+        // Anthropic already lists most-recently-released first; OpenAI's
+        // list has no guaranteed order, so sort it by creation time,
+        // newest first, to put likely-relevant models near the top of a
+        // list that can otherwise run to dozens of entries.
+        if ($provider !== 'anthropic') {
+            usort($models, fn (array $a, array $b) => ($b['created'] ?? 0) <=> ($a['created'] ?? 0));
+        }
+
+        return array_map(fn (array $model) => ['id' => $model['id'], 'label' => $model['label']], $models);
     }
 
     private function verifyAnthropic(AiProviderCredential $credential): Response

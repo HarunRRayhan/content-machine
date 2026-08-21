@@ -25,10 +25,20 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
 
     public function complete(AiProviderCredential $credential, string $systemPrompt, string $userContent): AiCompletionResult
     {
+        // Guaranteed non-null: AiProviderCredentialResolver::chain() only
+        // ever hands out credentials with a model already set. Narrowed
+        // here, once, so completeAnthropic()/completeOpenAi() below get a
+        // definite string rather than each re-checking $credential->model.
+        if ($credential->model === null) {
+            return AiCompletionResult::failure('This credential has no model set yet.');
+        }
+
+        $model = $credential->model;
+
         try {
             $response = $credential->provider === 'anthropic'
-                ? $this->completeAnthropic($credential, $systemPrompt, $userContent)
-                : $this->completeOpenAi($credential, $systemPrompt, $userContent);
+                ? $this->completeAnthropic($credential, $model, $systemPrompt, $userContent)
+                : $this->completeOpenAi($credential, $model, $systemPrompt, $userContent);
         } catch (Throwable) {
             return AiCompletionResult::failure('Could not reach the completion provider.');
         }
@@ -52,7 +62,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
         return AiCompletionResult::success(trim($text));
     }
 
-    private function completeAnthropic(AiProviderCredential $credential, string $systemPrompt, string $userContent): Response
+    private function completeAnthropic(AiProviderCredential $credential, string $model, string $systemPrompt, string $userContent): Response
     {
         $baseUrl = rtrim($credential->base_url ?? self::ANTHROPIC_DEFAULT_BASE_URL, '/');
 
@@ -60,7 +70,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
             'x-api-key' => $credential->api_key,
             'anthropic-version' => self::ANTHROPIC_VERSION,
         ])->timeout(30)->post("{$baseUrl}/v1/messages", [
-            'model' => $credential->model,
+            'model' => $model,
             'max_tokens' => self::MAX_TOKENS,
             'system' => $systemPrompt,
             'messages' => [
@@ -69,14 +79,14 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
         ]);
     }
 
-    private function completeOpenAi(AiProviderCredential $credential, string $systemPrompt, string $userContent): Response
+    private function completeOpenAi(AiProviderCredential $credential, string $model, string $systemPrompt, string $userContent): Response
     {
         $baseUrl = rtrim($credential->base_url ?? self::OPENAI_DEFAULT_BASE_URL, '/');
 
         return Http::withToken($credential->api_key)
             ->timeout(30)
             ->post("{$baseUrl}/v1/chat/completions", [
-                'model' => $credential->model,
+                'model' => $model,
                 'max_tokens' => self::MAX_TOKENS,
                 'messages' => [
                     ['role' => 'system', 'content' => $systemPrompt],

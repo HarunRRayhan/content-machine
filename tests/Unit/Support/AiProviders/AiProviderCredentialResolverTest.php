@@ -34,6 +34,17 @@ class AiProviderCredentialResolverTest extends TestCase
         $this->assertSame([$enabled->id], $chain->pluck('id')->all());
     }
 
+    public function test_chain_excludes_credentials_with_no_model_set_yet()
+    {
+        $workspace = Workspace::factory()->create();
+        AiProviderCredential::factory()->for($workspace)->withoutModel()->create(['priority' => 0]);
+        $withModel = AiProviderCredential::factory()->for($workspace)->create(['priority' => 1]);
+
+        $chain = (new AiProviderCredentialResolver)->chain($workspace);
+
+        $this->assertSame([$withModel->id], $chain->pluck('id')->all());
+    }
+
     public function test_chain_excludes_another_workspaces_credentials()
     {
         $workspace = Workspace::factory()->create();
