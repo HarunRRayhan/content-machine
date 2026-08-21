@@ -17,7 +17,7 @@ class ToggleTelegramAiChatActionTest extends TestCase
     public function test_it_flips_ai_chat_enabled_each_call_when_a_provider_is_configured()
     {
         $config = TelegramBotConfig::factory()->connected()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
         $action = new ToggleTelegramAiChatAction(new AiProviderCredentialResolver);
         $this->assertFalse($config->ai_chat_enabled);
 

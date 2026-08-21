@@ -48,7 +48,7 @@ const mainNavItems: NavItem[] = [
         icon: Clapperboard,
     },
     {
-        title: 'AI Providers',
+        title: 'AI Models',
         href: aiProvidersIndex(),
         icon: KeyRound,
     },

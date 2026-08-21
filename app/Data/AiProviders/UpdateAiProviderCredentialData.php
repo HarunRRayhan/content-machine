@@ -15,7 +15,6 @@ final readonly class UpdateAiProviderCredentialData
     public function __construct(
         public string $label,
         public ?string $baseUrl,
-        public ?string $model,
         public ?string $apiKey,
     ) {}
 
@@ -24,7 +23,6 @@ final readonly class UpdateAiProviderCredentialData
         return new self(
             label: $request->string('label')->toString(),
             baseUrl: $request->filled('base_url') ? $request->string('base_url')->toString() : null,
-            model: $request->filled('model') ? $request->string('model')->toString() : null,
             apiKey: $request->filled('api_key') ? $request->string('api_key')->toString() : null,
         );
     }

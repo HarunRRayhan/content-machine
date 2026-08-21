@@ -51,8 +51,8 @@ class ResolveTelegramIntentAction
 
     public function handle(Workspace $workspace, string $message): ?string
     {
-        foreach ($this->resolver->chain($workspace) as $credential) {
-            $result = $this->client->complete($credential, self::SYSTEM_PROMPT, $message);
+        foreach ($this->resolver->textChain($workspace) as $entry) {
+            $result = $this->client->complete($entry, self::SYSTEM_PROMPT, $message);
 
             if (! $result->successful || $result->text === null) {
                 continue;

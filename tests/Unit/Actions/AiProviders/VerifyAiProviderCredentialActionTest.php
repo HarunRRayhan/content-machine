@@ -31,10 +31,9 @@ class VerifyAiProviderCredentialActionTest extends TestCase
         $this->assertNotNull($credential->fresh()->verified_at);
     }
 
-    public function test_a_successful_verification_refreshes_discovered_models_even_when_a_model_is_already_set()
+    public function test_a_successful_verification_refreshes_discovered_models_even_when_models_are_already_added()
     {
-        $credential = AiProviderCredential::factory()->create([
-            'model' => 'gpt-4o',
+        $credential = AiProviderCredential::factory()->withModel('gpt-4o')->create([
             'discovered_models' => null,
         ]);
 
@@ -55,7 +54,7 @@ class VerifyAiProviderCredentialActionTest extends TestCase
             ['id' => 'gpt-5.4', 'label' => 'gpt-5.4'],
             ['id' => 'gpt-4o', 'label' => 'gpt-4o'],
         ], $credential->fresh()->discovered_models);
-        $this->assertSame('gpt-4o', $credential->fresh()->model);
+        $this->assertSame('gpt-4o', $credential->models()->sole()->model);
     }
 
     public function test_a_failed_verification_leaves_verified_at_null_and_returns_the_error()

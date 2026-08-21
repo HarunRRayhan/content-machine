@@ -60,7 +60,7 @@ class AiProviderCredentialsControllerTest extends TestCase
         $response->assertDontSee('sk-ant-', false);
     }
 
-    public function test_store_creates_a_credential_at_the_end_of_the_chain_with_no_model_yet()
+    public function test_store_creates_a_credential_at_the_end_of_the_chain_with_discovered_models()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         AiProviderCredential::factory()->for($workspace)->create(['priority' => 0]);
@@ -85,7 +85,7 @@ class AiProviderCredentialsControllerTest extends TestCase
         $this->assertSame(1, $stored->priority);
         $this->assertTrue($stored->enabled);
         $this->assertSame('sk-test-123', $stored->api_key);
-        $this->assertNull($stored->model);
+        $this->assertTrue($stored->models()->doesntExist());
         $this->assertSame([['id' => 'gpt-4o', 'label' => 'gpt-4o']], $stored->discovered_models);
         $this->assertNotNull($stored->verified_at);
     }
@@ -103,32 +103,6 @@ class AiProviderCredentialsControllerTest extends TestCase
         $this->assertSame(0, AiProviderCredential::where('workspace_id', $workspace->id)->count());
     }
 
-    public function test_set_model_resolves_a_credential_out_of_the_needs_a_model_state()
-    {
-        [, $workspace] = $this->actingAsWorkspaceMember();
-        $credential = AiProviderCredential::factory()->for($workspace)->create([
-            'model' => null,
-            'discovered_models' => [['id' => 'gpt-4o', 'label' => 'gpt-4o']],
-        ]);
-
-        $this->post(route('dashboard.ai-providers.set-model', $credential), ['model' => 'gpt-4o'])
-            ->assertRedirect(route('dashboard.ai-providers.index'));
-
-        $credential->refresh();
-        $this->assertSame('gpt-4o', $credential->model);
-        $this->assertNull($credential->discovered_models);
-    }
-
-    public function test_set_model_404s_for_another_workspaces_credential()
-    {
-        $this->actingAsWorkspaceMember();
-        $other = Workspace::factory()->create();
-        $credential = AiProviderCredential::factory()->for($other)->create(['model' => null]);
-
-        $this->post(route('dashboard.ai-providers.set-model', $credential), ['model' => 'gpt-4o'])
-            ->assertNotFound();
-    }
-
     public function test_update_changes_fields_without_requiring_a_new_key()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
@@ -140,7 +114,6 @@ class AiProviderCredentialsControllerTest extends TestCase
 
         $response = $this->patch(route('dashboard.ai-providers.update', $credential), [
             'label' => 'New label',
-            'model' => $credential->model,
             'base_url' => null,
         ]);
 
@@ -162,7 +135,6 @@ class AiProviderCredentialsControllerTest extends TestCase
 
         $this->patch(route('dashboard.ai-providers.update', $credential), [
             'label' => $credential->label,
-            'model' => $credential->model,
             'api_key' => 'sk-rotated',
         ]);
 
@@ -179,7 +151,6 @@ class AiProviderCredentialsControllerTest extends TestCase
 
         $this->patch(route('dashboard.ai-providers.update', $credential), [
             'label' => 'Hijacked',
-            'model' => 'x',
         ])->assertNotFound();
     }
 

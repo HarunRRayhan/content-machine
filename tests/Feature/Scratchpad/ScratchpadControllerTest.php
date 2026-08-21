@@ -239,7 +239,7 @@ class ScratchpadControllerTest extends TestCase
 
         $this->app->instance(AiCompletionClientContract::class, new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success(json_encode([
                     'title' => 'A suggested title',
@@ -249,7 +249,7 @@ class ScratchpadControllerTest extends TestCase
                 ]));
             }
         });
-        AiProviderCredential::factory()->for($workspace)->create();
+        AiProviderCredential::factory()->withModel()->for($workspace)->create();
 
         $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
             'target' => 'post_idea',

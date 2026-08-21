@@ -50,8 +50,8 @@ class GenerateTelegramChatReplyAction
     {
         $systemPrompt = sprintf(self::SYSTEM_PROMPT_TEMPLATE, $user->name, $workspace->name);
 
-        foreach ($this->resolver->chain($workspace) as $credential) {
-            $result = $this->client->complete($credential, $systemPrompt, $message);
+        foreach ($this->resolver->textChain($workspace) as $entry) {
+            $result = $this->client->complete($entry, $systemPrompt, $message);
 
             if ($result->successful) {
                 return $result->text;

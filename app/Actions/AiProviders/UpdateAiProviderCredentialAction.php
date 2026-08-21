@@ -12,7 +12,6 @@ class UpdateAiProviderCredentialAction
         $credential->forceFill([
             'label' => $data->label,
             'base_url' => $data->baseUrl,
-            'model' => $data->model,
         ]);
 
         if ($data->apiKey !== null) {

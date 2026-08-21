@@ -12,24 +12,21 @@ class UpdateAiProviderCredentialActionTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_updates_label_model_and_base_url()
+    public function test_it_updates_label_and_base_url()
     {
         $credential = AiProviderCredential::factory()->create([
             'label' => 'Old',
-            'model' => 'old-model',
             'base_url' => null,
         ]);
 
         (new UpdateAiProviderCredentialAction)->handle($credential, new UpdateAiProviderCredentialData(
             label: 'New',
             baseUrl: 'https://example.com',
-            model: 'new-model',
             apiKey: null,
         ));
 
         $credential->refresh();
         $this->assertSame('New', $credential->label);
-        $this->assertSame('new-model', $credential->model);
         $this->assertSame('https://example.com', $credential->base_url);
     }
 
@@ -40,7 +37,6 @@ class UpdateAiProviderCredentialActionTest extends TestCase
         (new UpdateAiProviderCredentialAction)->handle($credential, new UpdateAiProviderCredentialData(
             label: $credential->label,
             baseUrl: $credential->base_url,
-            model: $credential->model,
             apiKey: null,
         ));
 
@@ -57,7 +53,6 @@ class UpdateAiProviderCredentialActionTest extends TestCase
         (new UpdateAiProviderCredentialAction)->handle($credential, new UpdateAiProviderCredentialData(
             label: $credential->label,
             baseUrl: $credential->base_url,
-            model: $credential->model,
             apiKey: 'sk-rotated',
         ));
 

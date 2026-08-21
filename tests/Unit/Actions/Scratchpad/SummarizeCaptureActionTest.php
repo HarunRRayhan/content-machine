@@ -27,11 +27,11 @@ class SummarizeCaptureActionTest extends TestCase
             'body' => 'The raw scraped og:description.',
             'meta' => ['url' => 'https://example.com/post', 'resolved_kind' => 'webpage'],
         ]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success('A punchy AI summary.');
             }
@@ -54,13 +54,13 @@ class SummarizeCaptureActionTest extends TestCase
             'body' => 'The raw description.',
             'meta' => ['url' => 'https://example.com/post'],
         ]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
             public ?string $capturedUserContent = null;
 
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 $this->capturedUserContent = $userContent;
 
@@ -86,7 +86,7 @@ class SummarizeCaptureActionTest extends TestCase
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 throw new RuntimeException('should never be called');
             }
@@ -106,11 +106,11 @@ class SummarizeCaptureActionTest extends TestCase
             'title' => null,
             'body' => null,
         ]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 throw new RuntimeException('should never be called');
             }
@@ -130,18 +130,18 @@ class SummarizeCaptureActionTest extends TestCase
             'body' => 'Description.',
             'meta' => [],
         ]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
 
         $client = new class implements AiCompletionClientContract
         {
             public array $attemptedKeys = [];
 
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
-                $this->attemptedKeys[] = $credential->api_key;
+                $this->attemptedKeys[] = $entry->credential->api_key;
 
-                return $credential->api_key === 'sk-first'
+                return $entry->credential->api_key === 'sk-first'
                     ? AiCompletionResult::failure('first provider is down')
                     : AiCompletionResult::success('from the second provider');
             }
@@ -161,11 +161,11 @@ class SummarizeCaptureActionTest extends TestCase
             'title' => 'Title',
             'body' => 'The raw scraped description.',
         ]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::failure('provider is down');
             }

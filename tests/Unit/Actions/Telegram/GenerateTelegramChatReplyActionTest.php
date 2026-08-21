@@ -20,11 +20,11 @@ class GenerateTelegramChatReplyActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create(['name' => 'Acme']);
         $user = User::factory()->create(['name' => 'Ada Lovelace']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success('Sure, happy to brainstorm.');
             }
@@ -40,13 +40,13 @@ class GenerateTelegramChatReplyActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create(['name' => 'Acme Workspace']);
         $user = User::factory()->create(['name' => 'Ada Lovelace']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
             public ?string $capturedPrompt = null;
 
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 $this->capturedPrompt = $systemPrompt;
 
@@ -69,7 +69,7 @@ class GenerateTelegramChatReplyActionTest extends TestCase
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 throw new \RuntimeException('should never be called');
             }
@@ -85,12 +85,12 @@ class GenerateTelegramChatReplyActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $user = User::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 0]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 1]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 0]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 1]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::failure('provider down');
             }
@@ -106,14 +106,14 @@ class GenerateTelegramChatReplyActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $user = User::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
-                return $credential->api_key === 'sk-first'
+                return $entry->credential->api_key === 'sk-first'
                     ? AiCompletionResult::failure('first provider is down')
                     : AiCompletionResult::success('from the second provider');
             }

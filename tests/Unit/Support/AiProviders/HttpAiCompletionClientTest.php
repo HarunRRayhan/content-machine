@@ -3,6 +3,7 @@
 namespace Tests\Unit\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
+use App\Models\AiProviderCredentialModel;
 use App\Support\AiProviders\HttpAiCompletionClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -10,20 +11,31 @@ use Tests\TestCase;
 
 class HttpAiCompletionClientTest extends TestCase
 {
+    /**
+     * @param  array<string, mixed>  $credentialAttrs
+     */
+    private function entry(array $credentialAttrs = [], string $model = 'claude-sonnet-4-5'): AiProviderCredentialModel
+    {
+        $credential = AiProviderCredential::factory()->make($credentialAttrs);
+        $entry = AiProviderCredentialModel::factory()->make(['model' => $model]);
+        $entry->setRelation('credential', $credential);
+
+        return $entry;
+    }
+
     public function test_anthropic_success_hits_the_default_base_url_with_the_right_shape()
     {
         Http::fake(['api.anthropic.com/*' => Http::response([
             'content' => [['type' => 'text', 'text' => 'A short summary.']],
         ], 200)]);
 
-        $credential = AiProviderCredential::factory()->make([
+        $entry = $this->entry([
             'provider' => 'anthropic',
             'base_url' => null,
             'api_key' => 'sk-ant-test',
-            'model' => 'claude-sonnet-4-5',
-        ]);
+        ], 'claude-sonnet-4-5');
 
-        $result = (new HttpAiCompletionClient)->complete($credential, 'system prompt', 'user content');
+        $result = (new HttpAiCompletionClient)->complete($entry, 'system prompt', 'user content');
 
         $this->assertTrue($result->successful);
         $this->assertSame('A short summary.', $result->text);
@@ -41,9 +53,9 @@ class HttpAiCompletionClientTest extends TestCase
             'choices' => [['message' => ['content' => 'A short summary.']]],
         ], 200)]);
 
-        $credential = AiProviderCredential::factory()->openai()->make(['api_key' => 'sk-openai-test', 'model' => 'gpt-4o']);
+        $entry = $this->entry(['provider' => 'openai', 'api_key' => 'sk-openai-test'], 'gpt-4o');
 
-        $result = (new HttpAiCompletionClient)->complete($credential, 'system prompt', 'user content');
+        $result = (new HttpAiCompletionClient)->complete($entry, 'system prompt', 'user content');
 
         $this->assertTrue($result->successful);
         $this->assertSame('A short summary.', $result->text);
@@ -59,12 +71,12 @@ class HttpAiCompletionClientTest extends TestCase
     {
         Http::fake(['*' => Http::response(['content' => [['text' => 'ok']]], 200)]);
 
-        $credential = AiProviderCredential::factory()->make([
+        $entry = $this->entry([
             'provider' => 'anthropic',
             'base_url' => 'https://proxy.example.com/anthropic',
         ]);
 
-        (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
+        (new HttpAiCompletionClient)->complete($entry, 'sys', 'user');
 
         Http::assertSent(fn ($request) => $request->url() === 'https://proxy.example.com/anthropic/v1/messages');
     }
@@ -73,9 +85,9 @@ class HttpAiCompletionClientTest extends TestCase
     {
         Http::fake(['*' => Http::response(['error' => ['message' => 'rate limited']], 429)]);
 
-        $credential = AiProviderCredential::factory()->make(['provider' => 'anthropic']);
+        $entry = $this->entry(['provider' => 'anthropic']);
 
-        $result = (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
+        $result = (new HttpAiCompletionClient)->complete($entry, 'sys', 'user');
 
         $this->assertFalse($result->successful);
         $this->assertSame('rate limited', $result->error);
@@ -85,9 +97,9 @@ class HttpAiCompletionClientTest extends TestCase
     {
         Http::fake(['*' => Http::response([], 500)]);
 
-        $credential = AiProviderCredential::factory()->openai()->make();
+        $entry = $this->entry(['provider' => 'openai']);
 
-        $result = (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
+        $result = (new HttpAiCompletionClient)->complete($entry, 'sys', 'user');
 
         $this->assertFalse($result->successful);
         $this->assertSame('The completion provider returned an unexpected status (500).', $result->error);
@@ -97,25 +109,12 @@ class HttpAiCompletionClientTest extends TestCase
     {
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => '   ']]]], 200)]);
 
-        $credential = AiProviderCredential::factory()->openai()->make();
+        $entry = $this->entry(['provider' => 'openai']);
 
-        $result = (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
+        $result = (new HttpAiCompletionClient)->complete($entry, 'sys', 'user');
 
         $this->assertFalse($result->successful);
         $this->assertSame('The completion provider returned no text.', $result->error);
-    }
-
-    public function test_a_credential_with_no_model_set_fails_honestly_without_calling_the_provider()
-    {
-        Http::fake();
-
-        $credential = AiProviderCredential::factory()->make(['provider' => 'anthropic', 'model' => null]);
-
-        $result = (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
-
-        $this->assertFalse($result->successful);
-        $this->assertSame('This credential has no model set yet.', $result->error);
-        Http::assertNothingSent();
     }
 
     public function test_a_connection_failure_is_reported_without_leaking_the_exception()
@@ -124,9 +123,9 @@ class HttpAiCompletionClientTest extends TestCase
             throw new ConnectionException('Connection refused');
         });
 
-        $credential = AiProviderCredential::factory()->make(['provider' => 'anthropic']);
+        $entry = $this->entry(['provider' => 'anthropic']);
 
-        $result = (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
+        $result = (new HttpAiCompletionClient)->complete($entry, 'sys', 'user');
 
         $this->assertFalse($result->successful);
         $this->assertSame('Could not reach the completion provider.', $result->error);

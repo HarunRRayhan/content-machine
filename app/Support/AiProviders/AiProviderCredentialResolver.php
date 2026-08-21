@@ -3,39 +3,67 @@
 namespace App\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
+use App\Models\AiProviderCredentialModel;
 use App\Models\Workspace;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
- * Resolves a workspace's AI fallback chain: enabled credentials with a
- * model actually set, in priority order (lowest first), so a caller can
- * try the first one and fall through the rest on a provider error. A
- * credential still waiting on model auto-discovery/manual entry
- * (model === null) is excluded, not merely deprioritized: every consumer
- * of this chain builds a real request around `model`, so handing one out
- * would just be a guaranteed failure dressed up as a candidate. Nothing
- * here makes the actual API call, that's for whichever future agent
- * (TriageAgent, CaptureSummarizer) consumes the chain, each provider
- * needs a different request shape and this resolver only owns ordering.
+ * Resolves a workspace's AI fallback chain(s). Two independent chains
+ * exist, both scoped to enabled credentials only, in each model's own
+ * `priority` order (lowest first, see the ai_provider_credential_models
+ * migration): `default` for plain text/chat, `vision` for models that can
+ * read images. A default/text task should call textChain(), which tries
+ * `default` models first and falls back to `vision` ones (a vision-capable
+ * model can still do plain text); a vision task should call
+ * chain($workspace, 'vision') directly, since the reverse doesn't hold, a
+ * default/vision-less model can't do that job at all.
+ *
+ * credentialChain() is the separate, older concern: some consumers
+ * (transcription) need a specific credential/API key, never a chosen
+ * model, so they resolve credentials directly rather than through either
+ * purpose chain.
  */
 class AiProviderCredentialResolver
 {
     /**
-     * @return Collection<int, AiProviderCredential>
+     * @return Collection<int, AiProviderCredentialModel>
      */
-    public function chain(Workspace $workspace): Collection
+    public function chain(Workspace $workspace, string $purpose = 'default'): Collection
     {
-        return AiProviderCredential::query()
-            ->where('workspace_id', $workspace->id)
-            ->where('enabled', true)
-            ->whereNotNull('model')
+        return AiProviderCredentialModel::query()
+            ->where('purpose', $purpose)
+            ->whereHas('credential', fn ($query) => $query
+                ->where('workspace_id', $workspace->id)
+                ->where('enabled', true))
+            ->with('credential')
             ->orderBy('priority')
             ->orderBy('id')
             ->get();
     }
 
-    public function default(Workspace $workspace): ?AiProviderCredential
+    /**
+     * @return Collection<int, AiProviderCredentialModel>
+     */
+    public function textChain(Workspace $workspace): Collection
     {
-        return $this->chain($workspace)->first();
+        return $this->chain($workspace, 'default')->concat($this->chain($workspace, 'vision'));
+    }
+
+    public function default(Workspace $workspace): ?AiProviderCredentialModel
+    {
+        return $this->textChain($workspace)->first();
+    }
+
+    /**
+     * @return Collection<int, AiProviderCredential>
+     */
+    public function credentialChain(Workspace $workspace): Collection
+    {
+        return AiProviderCredential::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('enabled', true)
+            ->orderBy('priority')
+            ->orderBy('id')
+            ->get();
     }
 }

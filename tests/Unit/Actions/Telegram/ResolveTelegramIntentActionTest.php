@@ -19,11 +19,11 @@ class ResolveTelegramIntentActionTest extends TestCase
     public function test_a_recognized_intent_is_returned()
     {
         $workspace = Workspace::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success('notes');
             }
@@ -38,11 +38,11 @@ class ResolveTelegramIntentActionTest extends TestCase
     public function test_the_model_saying_none_returns_null()
     {
         $workspace = Workspace::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success('none');
             }
@@ -57,11 +57,11 @@ class ResolveTelegramIntentActionTest extends TestCase
     public function test_an_unrecognized_word_from_the_model_is_treated_as_no_intent()
     {
         $workspace = Workspace::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success('Sure, happy to help!');
             }
@@ -76,11 +76,11 @@ class ResolveTelegramIntentActionTest extends TestCase
     public function test_matching_is_case_insensitive_and_trims_whitespace()
     {
         $workspace = Workspace::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::success(" Videos \n");
             }
@@ -98,7 +98,7 @@ class ResolveTelegramIntentActionTest extends TestCase
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 throw new RuntimeException('should never be called');
             }
@@ -113,12 +113,12 @@ class ResolveTelegramIntentActionTest extends TestCase
     public function test_every_credential_failing_returns_null()
     {
         $workspace = Workspace::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 0]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 1]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 0]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 1]);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return AiCompletionResult::failure('provider down');
             }
@@ -133,14 +133,14 @@ class ResolveTelegramIntentActionTest extends TestCase
     public function test_the_fallback_chain_tries_the_next_credential_after_a_failure()
     {
         $workspace = Workspace::factory()->create();
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
-                return $credential->api_key === 'sk-first'
+                return $entry->credential->api_key === 'sk-first'
                     ? AiCompletionResult::failure('first provider is down')
                     : AiCompletionResult::success('posts');
             }
