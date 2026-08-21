@@ -1,4 +1,6 @@
 import { Form, Head, Link } from '@inertiajs/react';
+import { Image, Link2, Mic, NotebookPen, Plus } from 'lucide-react';
+import { useState } from 'react';
 import ScratchpadController from '@/actions/App/Http/Controllers/Scratchpad/ScratchpadController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
@@ -54,6 +56,19 @@ const statusVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
     dropped: 'outline',
 };
 
+type CaptureMode = 'closed' | 'picking' | 'text' | 'link' | 'photo' | 'voice';
+
+const CAPTURE_TYPES: {
+    mode: Exclude<CaptureMode, 'closed' | 'picking'>;
+    label: string;
+    icon: typeof NotebookPen;
+}[] = [
+    { mode: 'text', label: 'Text note', icon: NotebookPen },
+    { mode: 'link', label: 'Link', icon: Link2 },
+    { mode: 'photo', label: 'Photo', icon: Image },
+    { mode: 'voice', label: 'Voice', icon: Mic },
+];
+
 /**
  * Laravel's paginator labels ("&laquo; Previous", "Next &raquo;") come as
  * HTML-entity-encoded strings meant for a Blade `{!! !!}` echo. Rendering
@@ -65,6 +80,8 @@ function paginationLabel(label: string): string {
 }
 
 export default function ScratchpadIndex({ entries }: PageProps) {
+    const [mode, setMode] = useState<CaptureMode>('closed');
+
     return (
         <>
             <Head title="Scratch Pad" />
@@ -75,103 +92,192 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                     description="Capture an idea the instant it occurs to you. Sort it out later."
                 />
 
-                <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                    <Form
-                        {...ScratchpadController.store.form()}
-                        resetOnSuccess
-                        className="space-y-4"
+                {mode === 'closed' && (
+                    <Button
+                        type="button"
+                        className="w-fit"
+                        onClick={() => setMode('picking')}
                     >
-                        {({ processing, errors }) => (
-                            <>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="body">New note</Label>
-                                    <Textarea
-                                        id="body"
-                                        name="body"
-                                        required
-                                        placeholder="What's on your mind?"
-                                        rows={3}
-                                    />
-                                    <InputError message={errors.body} />
-                                </div>
+                        <Plus /> New capture
+                    </Button>
+                )}
 
-                                <Button disabled={processing}>Save note</Button>
-                            </>
-                        )}
-                    </Form>
-                </div>
-
-                <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                    <Form
-                        {...ScratchpadController.storeLink.form()}
-                        resetOnSuccess
-                        className="space-y-4"
-                    >
-                        {({ processing, errors }) => (
-                            <>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="url">Capture a link</Label>
-                                    <Input
-                                        id="url"
-                                        type="url"
-                                        name="url"
-                                        required
-                                        placeholder="https://..."
-                                    />
-                                    <InputError message={errors.url} />
-                                </div>
-
-                                <Button disabled={processing}>Save link</Button>
-                            </>
-                        )}
-                    </Form>
-                </div>
-
-                <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                    <Form
-                        {...ScratchpadController.storePhoto.form()}
-                        resetOnSuccess
-                        className="space-y-4"
-                    >
-                        {({ processing, errors }) => (
-                            <>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="photo">
-                                        Capture a photo
-                                    </Label>
-                                    <Input
-                                        id="photo"
-                                        type="file"
-                                        name="photo"
-                                        accept="image/*"
-                                        required
-                                    />
-                                    <InputError message={errors.photo} />
-                                </div>
-
-                                <div className="grid gap-2">
-                                    <Label htmlFor="caption">
-                                        Caption (optional)
-                                    </Label>
-                                    <Input
-                                        id="caption"
-                                        name="caption"
-                                        placeholder="What's in the photo?"
-                                    />
-                                    <InputError message={errors.caption} />
-                                </div>
-
-                                <Button disabled={processing}>
-                                    Save photo
+                {mode === 'picking' && (
+                    <div className="flex max-w-2xl flex-wrap items-center gap-2 rounded-lg border p-4">
+                        {CAPTURE_TYPES.map(
+                            ({ mode: type, label, icon: Icon }) => (
+                                <Button
+                                    key={type}
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setMode(type)}
+                                >
+                                    <Icon /> {label}
                                 </Button>
-                            </>
+                            ),
                         )}
-                    </Form>
-
-                    <div className="border-t pt-4">
-                        <ScratchpadVoiceRecorder />
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            className="ml-auto"
+                            onClick={() => setMode('closed')}
+                        >
+                            Cancel
+                        </Button>
                     </div>
-                </div>
+                )}
+
+                {mode === 'text' && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <button
+                            type="button"
+                            onClick={() => setMode('picking')}
+                            className="text-sm text-muted-foreground hover:underline"
+                        >
+                            &larr; Choose a different type
+                        </button>
+
+                        <Form
+                            {...ScratchpadController.store.form()}
+                            resetOnSuccess
+                            onSuccess={() => setMode('closed')}
+                            className="space-y-4"
+                        >
+                            {({ processing, errors }) => (
+                                <>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="body">New note</Label>
+                                        <Textarea
+                                            id="body"
+                                            name="body"
+                                            required
+                                            autoFocus
+                                            placeholder="What's on your mind?"
+                                            rows={3}
+                                        />
+                                        <InputError message={errors.body} />
+                                    </div>
+
+                                    <Button disabled={processing}>
+                                        Save note
+                                    </Button>
+                                </>
+                            )}
+                        </Form>
+                    </div>
+                )}
+
+                {mode === 'link' && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <button
+                            type="button"
+                            onClick={() => setMode('picking')}
+                            className="text-sm text-muted-foreground hover:underline"
+                        >
+                            &larr; Choose a different type
+                        </button>
+
+                        <Form
+                            {...ScratchpadController.storeLink.form()}
+                            resetOnSuccess
+                            onSuccess={() => setMode('closed')}
+                            className="space-y-4"
+                        >
+                            {({ processing, errors }) => (
+                                <>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="url">
+                                            Capture a link
+                                        </Label>
+                                        <Input
+                                            id="url"
+                                            type="url"
+                                            name="url"
+                                            required
+                                            autoFocus
+                                            placeholder="https://..."
+                                        />
+                                        <InputError message={errors.url} />
+                                    </div>
+
+                                    <Button disabled={processing}>
+                                        Save link
+                                    </Button>
+                                </>
+                            )}
+                        </Form>
+                    </div>
+                )}
+
+                {mode === 'photo' && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <button
+                            type="button"
+                            onClick={() => setMode('picking')}
+                            className="text-sm text-muted-foreground hover:underline"
+                        >
+                            &larr; Choose a different type
+                        </button>
+
+                        <Form
+                            {...ScratchpadController.storePhoto.form()}
+                            resetOnSuccess
+                            onSuccess={() => setMode('closed')}
+                            className="space-y-4"
+                        >
+                            {({ processing, errors }) => (
+                                <>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="photo">
+                                            Capture a photo
+                                        </Label>
+                                        <Input
+                                            id="photo"
+                                            type="file"
+                                            name="photo"
+                                            accept="image/*"
+                                            required
+                                            autoFocus
+                                        />
+                                        <InputError message={errors.photo} />
+                                    </div>
+
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="caption">
+                                            Caption (optional)
+                                        </Label>
+                                        <Input
+                                            id="caption"
+                                            name="caption"
+                                            placeholder="What's in the photo?"
+                                        />
+                                        <InputError message={errors.caption} />
+                                    </div>
+
+                                    <Button disabled={processing}>
+                                        Save photo
+                                    </Button>
+                                </>
+                            )}
+                        </Form>
+                    </div>
+                )}
+
+                {mode === 'voice' && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <button
+                            type="button"
+                            onClick={() => setMode('picking')}
+                            className="text-sm text-muted-foreground hover:underline"
+                        >
+                            &larr; Choose a different type
+                        </button>
+
+                        <ScratchpadVoiceRecorder
+                            onSaved={() => setMode('closed')}
+                        />
+                    </div>
+                )}
 
                 <div className="space-y-3">
                     {entries.data.length === 0 && (

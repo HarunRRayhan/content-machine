@@ -25,6 +25,11 @@ function extensionFor(mimeType: string): string {
     return mimeType.startsWith('audio/mp4') ? 'm4a' : 'webm';
 }
 
+type Props = {
+    /** Called after a recording finishes uploading successfully. */
+    onSaved?: () => void;
+};
+
 /**
  * Record/stop toggle for a voice memo, no waveform, no time limit UI. On
  * stop, assembles the recorded chunks into a Blob and submits it the same
@@ -32,7 +37,7 @@ function extensionFor(mimeType: string): string {
  * dashboard.scratchpad.voice), relying on Inertia's default
  * post-redirect-GET to refresh the entry list.
  */
-export function ScratchpadVoiceRecorder() {
+export function ScratchpadVoiceRecorder({ onSaved }: Props) {
     const [recording, setRecording] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -102,6 +107,7 @@ export function ScratchpadVoiceRecorder() {
             { audio: file },
             {
                 forceFormData: true,
+                onSuccess: () => onSaved?.(),
                 onError: () => setError('Could not save the recording.'),
                 onFinish: () => setUploading(false),
             },
