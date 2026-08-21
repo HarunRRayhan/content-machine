@@ -106,6 +106,11 @@ function ModelChainSection({
         <div className="space-y-3 rounded-lg border p-3">
             <p className="text-sm text-muted-foreground">{description}</p>
 
+            <div className="flex gap-2">
+                <AddProviderDialog triggerLabel="Add Providers" />
+                <AddModelDialog purpose={purpose} credentials={credentials} />
+            </div>
+
             {entries.length === 0 && (
                 <p className="text-sm text-muted-foreground">
                     No models added yet.
@@ -173,19 +178,18 @@ function ModelChainSection({
                     </div>
                 ))}
             </div>
-
-            <AddModelToChainForm purpose={purpose} credentials={credentials} />
         </div>
     );
 }
 
-function AddModelToChainForm({
+function AddModelDialog({
     purpose,
     credentials,
 }: {
     purpose: 'default' | 'vision';
     credentials: Credential[];
 }) {
+    const [open, setOpen] = useState(false);
     const eligible = credentials.filter(
         (credential) => (credential.discovered_models?.length ?? 0) > 0,
     );
@@ -193,71 +197,233 @@ function AddModelToChainForm({
         eligible[0]?.id ?? null,
     );
 
-    if (eligible.length === 0) {
-        return (
-            <p className="text-sm text-muted-foreground">
-                No discovered models yet. Add a provider (or reload an existing
-                one) on the Providers tab first.
-            </p>
-        );
-    }
-
     const selected =
         eligible.find((credential) => credential.id === credentialId) ??
         eligible[0];
 
     return (
-        <Form
-            key={selected.id}
-            {...AiProviderCredentialModelsController.store.form(selected.id)}
-            resetOnSuccess
-            className="space-y-2 rounded-md border border-dashed p-3"
-        >
-            {({ processing, errors }) => (
-                <>
-                    <input type="hidden" name="purpose" value={purpose} />
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+                <Button type="button" size="sm" variant="outline">
+                    Add Model
+                </Button>
+            </DialogTrigger>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Add a model</DialogTitle>
+                </DialogHeader>
 
-                    <Label>Add a model from</Label>
-                    <select
-                        value={selected.id}
-                        onChange={(event) =>
-                            setCredentialId(Number(event.target.value))
-                        }
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                {eligible.length === 0 || selected === undefined ? (
+                    <p className="text-sm text-muted-foreground">
+                        No discovered models yet. Add a provider (or reload an
+                        existing one) first.
+                    </p>
+                ) : (
+                    <Form
+                        key={selected.id}
+                        {...AiProviderCredentialModelsController.store.form(
+                            selected.id,
+                        )}
+                        resetOnSuccess
+                        onSuccess={() => setOpen(false)}
+                        className="space-y-4"
                     >
-                        {eligible.map((credential) => (
-                            <option key={credential.id} value={credential.id}>
-                                {credential.label}
-                            </option>
-                        ))}
-                    </select>
+                        {({ processing, errors }) => (
+                            <>
+                                <input
+                                    type="hidden"
+                                    name="purpose"
+                                    value={purpose}
+                                />
 
-                    <div className="grid max-h-40 gap-1.5 overflow-y-auto">
-                        {(selected.discovered_models ?? []).map((model) => (
-                            <label
-                                key={model.id}
-                                className="flex items-center gap-2 text-sm"
-                            >
-                                <Checkbox name="models[]" value={model.id} />
-                                {model.label}
-                            </label>
-                        ))}
-                    </div>
-                    <InputError message={errors.models} />
+                                <div className="grid gap-2">
+                                    <Label>Provider</Label>
+                                    <select
+                                        value={selected.id}
+                                        onChange={(event) =>
+                                            setCredentialId(
+                                                Number(event.target.value),
+                                            )
+                                        }
+                                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                    >
+                                        {eligible.map((credential) => (
+                                            <option
+                                                key={credential.id}
+                                                value={credential.id}
+                                            >
+                                                {credential.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
 
-                    <Button type="submit" size="sm" disabled={processing}>
-                        Add selected
-                    </Button>
-                </>
+                                <div className="grid gap-2">
+                                    <Label>Models</Label>
+                                    <div className="grid max-h-40 gap-1.5 overflow-y-auto">
+                                        {(selected.discovered_models ?? []).map(
+                                            (model) => (
+                                                <label
+                                                    key={model.id}
+                                                    className="flex items-center gap-2 text-sm"
+                                                >
+                                                    <Checkbox
+                                                        name="models[]"
+                                                        value={model.id}
+                                                    />
+                                                    {model.label}
+                                                </label>
+                                            ),
+                                        )}
+                                    </div>
+                                    <InputError message={errors.models} />
+                                </div>
+
+                                <Button
+                                    type="submit"
+                                    size="sm"
+                                    disabled={processing}
+                                >
+                                    Add selected
+                                </Button>
+                            </>
+                        )}
+                    </Form>
+                )}
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function AddProviderDialog({
+    triggerLabel = 'Add Provider',
+    triggerClassName,
+}: {
+    triggerLabel?: string;
+    triggerClassName?: string;
+}) {
+    const [open, setOpen] = useState(false);
+    const [provider, setProvider] = useState('anthropic');
+
+    return (
+        <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+                <Button type="button" size="sm" className={triggerClassName}>
+                    {triggerLabel}
+                </Button>
+            </DialogTrigger>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Add an AI provider</DialogTitle>
+                </DialogHeader>
+                <Form
+                    {...AiProviderCredentialsController.store.form()}
+                    resetOnSuccess
+                    onSuccess={() => setOpen(false)}
+                    className="space-y-4"
+                >
+                    {({ processing, errors }) => (
+                        <>
+                            <div className="grid gap-2">
+                                <Label htmlFor="label">Label</Label>
+                                <Input
+                                    id="label"
+                                    name="label"
+                                    required
+                                    placeholder="e.g. Anthropic primary"
+                                />
+                                <InputError message={errors.label} />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="provider">
+                                    Provider format
+                                </Label>
+                                <select
+                                    id="provider"
+                                    name="provider"
+                                    value={provider}
+                                    onChange={(event) =>
+                                        setProvider(event.target.value)
+                                    }
+                                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                >
+                                    <option value="anthropic">
+                                        Anthropic-style
+                                    </option>
+                                    <option value="openai">OpenAI-style</option>
+                                </select>
+                                <InputError message={errors.provider} />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="base_url">
+                                    Base URL (optional)
+                                </Label>
+                                <Input
+                                    id="base_url"
+                                    name="base_url"
+                                    placeholder={
+                                        PROVIDER_DEFAULT_BASE_URL[provider]
+                                    }
+                                />
+                                <InputError message={errors.base_url} />
+                            </div>
+
+                            <div className="grid gap-2">
+                                <Label htmlFor="api_key">API key</Label>
+                                <Input
+                                    id="api_key"
+                                    type="password"
+                                    name="api_key"
+                                    required
+                                    autoComplete="off"
+                                />
+                                <InputError message={errors.api_key} />
+                            </div>
+
+                            <Button disabled={processing}>Add provider</Button>
+                        </>
+                    )}
+                </Form>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function ProviderModelsToggle({ models }: { models: DiscoveredModel[] }) {
+    const [show, setShow] = useState(false);
+
+    if (models.length === 0) {
+        return null;
+    }
+
+    return (
+        <div className="space-y-2">
+            <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setShow((value) => !value)}
+            >
+                {show ? 'Hide Models' : 'Show Models'}
+            </Button>
+
+            {show && (
+                <div className="flex flex-wrap gap-1.5">
+                    {models.map((model) => (
+                        <Badge key={model.id} variant="outline">
+                            {model.label}
+                        </Badge>
+                    ))}
+                </div>
             )}
-        </Form>
+        </div>
     );
 }
 
 export default function AiProvidersIndex({ credentials, models }: PageProps) {
     const [editingId, setEditingId] = useState<number | null>(null);
-    const [newProvider, setNewProvider] = useState('anthropic');
-    const [addOpen, setAddOpen] = useState(false);
 
     function move(id: number, direction: 'up' | 'down') {
         const ids = credentials.map((credential) => credential.id);
@@ -282,111 +448,10 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
             <Head title="AI Models" />
 
             <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-4">
-                    <Heading
-                        title="AI Models"
-                        description="Add API keys under Providers, then pick which of their models actually get tried, and in what order, under Models. A default task tries default models first, then vision models as a further fallback; a vision task only ever uses vision models."
-                    />
-
-                    <Dialog open={addOpen} onOpenChange={setAddOpen}>
-                        <DialogTrigger asChild>
-                            <Button className="shrink-0">Add provider</Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Add an AI provider</DialogTitle>
-                            </DialogHeader>
-                            <Form
-                                {...AiProviderCredentialsController.store.form()}
-                                resetOnSuccess
-                                onSuccess={() => setAddOpen(false)}
-                                className="space-y-4"
-                            >
-                                {({ processing, errors }) => (
-                                    <>
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="label">Label</Label>
-                                            <Input
-                                                id="label"
-                                                name="label"
-                                                required
-                                                placeholder="e.g. Anthropic primary"
-                                            />
-                                            <InputError
-                                                message={errors.label}
-                                            />
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="provider">
-                                                Provider format
-                                            </Label>
-                                            <select
-                                                id="provider"
-                                                name="provider"
-                                                value={newProvider}
-                                                onChange={(event) =>
-                                                    setNewProvider(
-                                                        event.target.value,
-                                                    )
-                                                }
-                                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                                            >
-                                                <option value="anthropic">
-                                                    Anthropic-style
-                                                </option>
-                                                <option value="openai">
-                                                    OpenAI-style
-                                                </option>
-                                            </select>
-                                            <InputError
-                                                message={errors.provider}
-                                            />
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="base_url">
-                                                Base URL (optional)
-                                            </Label>
-                                            <Input
-                                                id="base_url"
-                                                name="base_url"
-                                                placeholder={
-                                                    PROVIDER_DEFAULT_BASE_URL[
-                                                        newProvider
-                                                    ]
-                                                }
-                                            />
-                                            <InputError
-                                                message={errors.base_url}
-                                            />
-                                        </div>
-
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="api_key">
-                                                API key
-                                            </Label>
-                                            <Input
-                                                id="api_key"
-                                                type="password"
-                                                name="api_key"
-                                                required
-                                                autoComplete="off"
-                                            />
-                                            <InputError
-                                                message={errors.api_key}
-                                            />
-                                        </div>
-
-                                        <Button disabled={processing}>
-                                            Add provider
-                                        </Button>
-                                    </>
-                                )}
-                            </Form>
-                        </DialogContent>
-                    </Dialog>
-                </div>
+                <Heading
+                    title="AI Models"
+                    description="Add API keys under Providers, then pick which of their models actually get tried, and in what order, under Models. A default task tries default models first, then vision models as a further fallback; a vision task only ever uses vision models."
+                />
 
                 <Tabs defaultValue="models">
                     <div className="flex justify-center">
@@ -435,6 +500,8 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                     </TabsContent>
 
                     <TabsContent value="providers" className="space-y-3">
+                        <AddProviderDialog />
+
                         {credentials.length === 0 && (
                             <p className="text-sm text-muted-foreground">
                                 No AI providers configured yet.
@@ -597,21 +664,9 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                                     )}
                                 </Form>
 
-                                {credential.discovered_models &&
-                                    credential.discovered_models.length > 0 && (
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {credential.discovered_models.map(
-                                                (model) => (
-                                                    <Badge
-                                                        key={model.id}
-                                                        variant="outline"
-                                                    >
-                                                        {model.label}
-                                                    </Badge>
-                                                ),
-                                            )}
-                                        </div>
-                                    )}
+                                <ProviderModelsToggle
+                                    models={credential.discovered_models ?? []}
+                                />
 
                                 {editingId === credential.id && (
                                     <Form
