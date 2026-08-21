@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { home } from '@/routes/dashboard';
 import { index, reorder } from '@/routes/dashboard/ai-providers';
 
@@ -73,12 +74,10 @@ const PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
 };
 
 function ModelChainSection({
-    title,
     description,
     purpose,
     entries,
 }: {
-    title: string;
     description: string;
     purpose: 'default' | 'vision';
     entries: ModelEntry[];
@@ -103,10 +102,7 @@ function ModelChainSection({
 
     return (
         <div className="space-y-3 rounded-lg border p-3">
-            <div>
-                <h3 className="font-medium">{title}</h3>
-                <p className="text-sm text-muted-foreground">{description}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">{description}</p>
 
             {entries.length === 0 && (
                 <p className="text-sm text-muted-foreground">
@@ -362,23 +358,39 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                     </Dialog>
                 </div>
 
-                <div className="grid gap-6 lg:grid-cols-2">
-                    <div className="space-y-6">
-                        <ModelChainSection
-                            title="Default models"
-                            description="Tried in order for any plain text/chat task."
-                            purpose="default"
-                            entries={models.default}
-                        />
-                        <ModelChainSection
-                            title="Vision models"
-                            description="Tried in order for any task that reads an image. Also used as a fallback after default models run out."
-                            purpose="vision"
-                            entries={models.vision}
-                        />
-                    </div>
+                <Tabs defaultValue="models">
+                    <TabsList>
+                        <TabsTrigger value="models">Models</TabsTrigger>
+                        <TabsTrigger value="providers">Providers</TabsTrigger>
+                    </TabsList>
 
-                    <div className="space-y-3">
+                    <TabsContent value="models">
+                        <Tabs defaultValue="default">
+                            <TabsList>
+                                <TabsTrigger value="default">
+                                    Default
+                                </TabsTrigger>
+                                <TabsTrigger value="vision">Vision</TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent value="default">
+                                <ModelChainSection
+                                    description="Tried in order for any plain text/chat task. The top entry is the default, everything below it is a backup tried if it fails."
+                                    purpose="default"
+                                    entries={models.default}
+                                />
+                            </TabsContent>
+                            <TabsContent value="vision">
+                                <ModelChainSection
+                                    description="Tried in order for any task that reads an image, and as a further fallback after default models run out. The top entry is the default, everything below it is a backup."
+                                    purpose="vision"
+                                    entries={models.vision}
+                                />
+                            </TabsContent>
+                        </Tabs>
+                    </TabsContent>
+
+                    <TabsContent value="providers" className="space-y-3">
                         {credentials.length === 0 && (
                             <p className="text-sm text-muted-foreground">
                                 No AI providers configured yet.
@@ -630,8 +642,8 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                                 )}
                             </div>
                         ))}
-                    </div>
-                </div>
+                    </TabsContent>
+                </Tabs>
             </div>
         </>
     );
