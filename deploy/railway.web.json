@@ -7,6 +7,7 @@
       "app/**",
       "routes/**",
       "resources/**",
+      "public/**",
       "config/**",
       "database/**",
       "bootstrap/**",
