@@ -114,16 +114,18 @@ class TranscribeVoiceNoteAction
             return;
         }
 
-        $config = TelegramBotConfig::query()->where('workspace_id', $entry->workspace_id)->first();
+        $chatId = $entry->meta['telegram_chat_id'] ?? null;
 
-        if ($config === null || ! $config->isConnected() || $config->linked_telegram_user_id === null) {
+        if (! is_int($chatId)) {
             return;
         }
 
-        // Telegram's own semantics for a private 1:1 chat with a bot: the
-        // chat_id and the sender's user_id are the same number, so the
-        // stored linked_telegram_user_id doubles as the chat to reply into
-        // without this job needing the original webhook payload at all.
-        $this->telegramClient->sendMessage((string) $config->bot_token, $config->linked_telegram_user_id, "📝 Transcript: {$text}");
+        $config = TelegramBotConfig::query()->where('workspace_id', $entry->workspace_id)->first();
+
+        if ($config === null || ! $config->isConnected()) {
+            return;
+        }
+
+        $this->telegramClient->sendMessage((string) $config->bot_token, $chatId, "📝 Transcript: {$text}");
     }
 }

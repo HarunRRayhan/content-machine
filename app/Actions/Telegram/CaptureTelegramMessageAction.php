@@ -24,11 +24,12 @@ use Illuminate\Http\UploadedFile;
  * CaptureScratchpadPhotoAction/CaptureScratchpadVoiceAction never need to
  * know the bytes didn't arrive as an HTTP multipart upload.
  *
- * Access control: whoever messages the bot first is bound as the only
- * sender that gets captured (TelegramBotConfig::linked_telegram_user_id),
- * see the migration's docblock for why. Every message gets a real reply,
- * never silence: capture success, an unsupported-content notice, or the
- * "this bot is private" rejection.
+ * Access control (is this sender linked to a workspace member?) and
+ * command routing (/start, /link, /note, ...) both happen one layer up,
+ * in HandleTelegramUpdateAction; by the time this Action runs, the sender
+ * is already known-linked and the message is already known not to be a
+ * command. Every message gets a real reply, never silence: capture
+ * success or an unsupported-content notice.
  *
  * Text, links, photos, and voice notes are handled. A message with none
  * of those (document, video, sticker, forwarded audio file, ...) gets an
@@ -60,14 +61,6 @@ class CaptureTelegramMessageAction
         $fromUserId = $message['from']['id'] ?? null;
 
         if (! is_int($chatId) || ! is_int($fromUserId)) {
-            return;
-        }
-
-        if ($config->linked_telegram_user_id === null) {
-            $config->update(['linked_telegram_user_id' => $fromUserId]);
-        } elseif ($config->linked_telegram_user_id !== $fromUserId) {
-            $this->reply($config, $chatId, 'This bot is private.');
-
             return;
         }
 
@@ -186,7 +179,7 @@ class CaptureTelegramMessageAction
         $file = $this->toUploadedFile((string) $download->contents, 'telegram-voice.'.$this->extensionForMime($mimeType), $mimeType);
 
         try {
-            $this->captureScratchpadVoiceAction->handle($workspace, null, CaptureScratchpadVoiceData::fromTelegram($file));
+            $this->captureScratchpadVoiceAction->handle($workspace, null, CaptureScratchpadVoiceData::fromTelegram($file, $chatId));
         } finally {
             @unlink($file->getRealPath());
         }

@@ -29,6 +29,8 @@ class ConnectTelegramBotActionTest extends TestCase
         $this->assertNotNull($config->webhook_secret);
         $this->assertNotNull($config->webhook_slug);
         $this->assertNotNull($config->connected_at);
+        $this->assertCount(1, $client->setMyCommandsCalledWith);
+        $this->assertSame('123:abc', $client->setMyCommandsCalledWith[0]['botToken']);
     }
 
     public function test_reconnecting_keeps_the_same_webhook_secret_and_slug()

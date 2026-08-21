@@ -18,12 +18,28 @@ use RuntimeException;
  * is never saved half-connected either. webhook_secret/webhook_slug are
  * generated once, on the workspace's first successful connect, and kept
  * stable across later disconnect/reconnect cycles so the registered
- * webhook URL doesn't change every time the token is rotated.
+ * webhook URL doesn't change every time the token is rotated. The command
+ * menu (setMyCommands) is registered last and best-effort: unlike the
+ * webhook, a failure here doesn't block the connection, it only means
+ * Telegram's own "/" UI won't suggest commands yet.
  *
  * @throws RuntimeException if Telegram rejects the token or the webhook registration
  */
 class ConnectTelegramBotAction
 {
+    /**
+     * @var array<int, array{command: string, description: string}>
+     */
+    private const COMMANDS = [
+        ['command' => 'start', 'description' => 'Get started'],
+        ['command' => 'help', 'description' => 'See what I can do'],
+        ['command' => 'me', 'description' => 'Which account you\'re linked as'],
+        ['command' => 'link', 'description' => 'Link your account with a code'],
+        ['command' => 'videos', 'description' => 'Your most recent videos'],
+        ['command' => 'posts', 'description' => 'Your most recent posts'],
+        ['command' => 'note', 'description' => 'Save a Scratch Pad note'],
+    ];
+
     public function __construct(
         private readonly TelegramClientContract $client,
     ) {}
@@ -57,6 +73,8 @@ class ConnectTelegramBotAction
         ]);
 
         $config->save();
+
+        $this->client->setMyCommands($data->botToken, self::COMMANDS);
 
         return $config;
     }

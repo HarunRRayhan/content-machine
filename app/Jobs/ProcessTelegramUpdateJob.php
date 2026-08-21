@@ -2,7 +2,7 @@
 
 namespace App\Jobs;
 
-use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Models\TelegramBotConfig;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -22,7 +22,7 @@ class ProcessTelegramUpdateJob implements ShouldQueue
         public readonly array $update,
     ) {}
 
-    public function handle(CaptureTelegramMessageAction $action): void
+    public function handle(HandleTelegramUpdateAction $action): void
     {
         $config = TelegramBotConfig::find($this->telegramBotConfigId);
 

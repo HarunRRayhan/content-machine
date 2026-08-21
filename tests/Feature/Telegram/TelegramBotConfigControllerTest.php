@@ -3,6 +3,7 @@
 namespace Tests\Feature\Telegram;
 
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramBotLink;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -52,6 +53,27 @@ class TelegramBotConfigControllerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->where('connected', true)
                 ->where('botUsername', 'harun_capture_bot')
+            );
+    }
+
+    public function test_the_current_users_own_link_status_is_shown()
+    {
+        [$user, $workspace] = $this->actingAsWorkspaceMember();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+
+        $this->get(route('dashboard.telegram.edit'))
+            ->assertInertia(fn (Assert $page) => $page->where('myLink', null));
+
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_username' => 'harun',
+        ]);
+
+        $this->get(route('dashboard.telegram.edit'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('myLink.telegramUsername', 'harun')
+                ->where('linkedMembers.0.name', $user->name)
             );
     }
 

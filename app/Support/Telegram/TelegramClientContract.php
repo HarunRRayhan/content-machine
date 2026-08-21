@@ -26,6 +26,16 @@ interface TelegramClientContract
     public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult;
 
     /**
+     * Registers the bot's command menu, the "/" list Telegram shows in its
+     * own client UI. Best-effort: called once on connect, a failure here
+     * doesn't block the connection (the commands still work as plain
+     * messages, they're just not suggested by Telegram's UI).
+     *
+     * @param  array<int, array{command: string, description: string}>  $commands
+     */
+    public function setMyCommands(string $botToken, array $commands): TelegramApiResult;
+
+    /**
      * Resolves a file_id (from a message's photo/voice/etc.) to its raw
      * bytes, via Telegram's own two-step getFile-then-download dance — the
      * caller never sees that mechanic, only the result. Fails honestly

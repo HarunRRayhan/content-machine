@@ -105,7 +105,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         $this->assertSame('en', $entry->refresh()->language);
     }
 
-    public function test_a_telegram_sourced_entry_gets_a_reply_when_the_bot_is_connected_and_linked()
+    public function test_a_telegram_sourced_entry_gets_a_reply_when_the_bot_is_connected_and_the_entry_has_a_stored_chat_id()
     {
         Storage::fake('scratchpad');
         Storage::disk('scratchpad')->put('audio/note.ogg', 'raw-bytes');
@@ -119,6 +119,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         $entry = ScratchpadEntry::factory()->create([
             'workspace_id' => $workspace->id,
             'source' => 'telegram',
+            'meta' => ['telegram_chat_id' => 987654321],
         ]);
         $transcription = Transcription::factory()->create([
             'scratchpad_entry_id' => $entry->id,
@@ -127,7 +128,6 @@ class TranscribeVoiceNoteActionTest extends TestCase
         AiProviderCredential::factory()->openai()->create(['workspace_id' => $workspace->id]);
         $config = TelegramBotConfig::factory()->connected()->create([
             'workspace_id' => $workspace->id,
-            'linked_telegram_user_id' => 987654321,
         ]);
 
         $client = new class implements AiTranscriptionClientContract
@@ -161,6 +161,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         $entry = ScratchpadEntry::factory()->create([
             'workspace_id' => $workspace->id,
             'source' => 'web',
+            'meta' => ['telegram_chat_id' => 987654321],
         ]);
         $transcription = Transcription::factory()->create([
             'scratchpad_entry_id' => $entry->id,
@@ -169,8 +170,44 @@ class TranscribeVoiceNoteActionTest extends TestCase
         AiProviderCredential::factory()->openai()->create(['workspace_id' => $workspace->id]);
         TelegramBotConfig::factory()->connected()->create([
             'workspace_id' => $workspace->id,
-            'linked_telegram_user_id' => 987654321,
         ]);
+
+        $client = new class implements AiTranscriptionClientContract
+        {
+            public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
+            {
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+            }
+        };
+        $telegram = new FakeTelegramClient;
+
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, $telegram))->handle($transcription);
+
+        $this->assertSame([], $telegram->sentMessages);
+    }
+
+    public function test_no_reply_is_sent_for_a_telegram_sourced_entry_with_no_stored_chat_id()
+    {
+        Storage::fake('scratchpad');
+        Storage::disk('scratchpad')->put('audio/note.ogg', 'raw-bytes');
+
+        $workspace = Workspace::factory()->create();
+        $mediaAsset = MediaAsset::factory()->create([
+            'workspace_id' => $workspace->id,
+            'disk' => 'scratchpad',
+            'path' => 'audio/note.ogg',
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'source' => 'telegram',
+            'meta' => [],
+        ]);
+        $transcription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $entry->id,
+            'media_asset_id' => $mediaAsset->id,
+        ]);
+        AiProviderCredential::factory()->openai()->create(['workspace_id' => $workspace->id]);
+        TelegramBotConfig::factory()->connected()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiTranscriptionClientContract
         {

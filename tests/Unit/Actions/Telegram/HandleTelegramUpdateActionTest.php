@@ -1,0 +1,221 @@
+<?php
+
+namespace Tests\Unit\Actions\Telegram;
+
+use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
+use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
+use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
+use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\HandleTelegramUpdateAction;
+use App\Actions\Telegram\LinkTelegramAccountAction;
+use App\Models\Post;
+use App\Models\ScratchpadEntry;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramBotLink;
+use App\Models\TelegramLinkCode;
+use App\Models\User;
+use App\Models\Video;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\Telegram\FakeTelegramClient;
+use Tests\TestCase;
+
+class HandleTelegramUpdateActionTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private FakeTelegramClient $client;
+
+    private function action(): HandleTelegramUpdateAction
+    {
+        $this->client = new FakeTelegramClient;
+
+        return new HandleTelegramUpdateAction(
+            new CaptureTelegramMessageAction(
+                new CaptureTextNoteAction,
+                new CaptureScratchpadLinkAction,
+                new CaptureScratchpadPhotoAction,
+                new CaptureScratchpadVoiceAction,
+                $this->client,
+            ),
+            new CaptureTextNoteAction,
+            new LinkTelegramAccountAction,
+            $this->client,
+        );
+    }
+
+    private function update(int $fromId, string $text, int $chatId = 555): array
+    {
+        return [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => $chatId],
+                'from' => ['id' => $fromId, 'username' => 'sender'],
+                'text' => $text,
+            ],
+        ];
+    }
+
+    private function lastReply(): string
+    {
+        return $this->client->sentMessages[count($this->client->sentMessages) - 1]['text'];
+    }
+
+    public function test_an_unlinked_sender_sending_plain_text_is_asked_to_link_and_nothing_is_captured()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+
+        $this->action()->handle($config, $this->update(1, 'a stray thought'));
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertStringContainsString('/link', $this->lastReply());
+    }
+
+    public function test_an_unlinked_sender_can_still_use_start_and_help()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+
+        $this->action()->handle($config, $this->update(1, '/start'));
+        $this->assertStringContainsString('/link', $this->lastReply());
+
+        $this->action()->handle($config, $this->update(1, '/help'));
+        $this->assertStringContainsString('/videos', $this->lastReply());
+    }
+
+    public function test_link_with_no_code_prompts_for_one()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+
+        $this->action()->handle($config, $this->update(1, '/link'));
+
+        $this->assertStringContainsString('/link followed by the code', $this->lastReply());
+        $this->assertSame(0, TelegramBotLink::count());
+    }
+
+    public function test_link_with_an_unrecognized_code_fails_honestly()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+
+        $this->action()->handle($config, $this->update(1, '/link NOPE1234'));
+
+        $this->assertStringContainsString("don't recognize", $this->lastReply());
+        $this->assertSame(0, TelegramBotLink::count());
+    }
+
+    public function test_link_with_a_valid_code_links_the_account()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create(['name' => 'Ada Lovelace']);
+        $linkCode = TelegramLinkCode::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'code' => 'ABC12345',
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/link '.$linkCode->code));
+
+        $link = TelegramBotLink::sole();
+        $this->assertSame($user->id, $link->user_id);
+        $this->assertSame(1, $link->telegram_user_id);
+        $this->assertSame('sender', $link->telegram_username);
+        $this->assertStringContainsString('Ada Lovelace', $this->lastReply());
+    }
+
+    public function test_a_linked_sender_can_ask_who_they_are()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create(['name' => 'Grace Hopper', 'email' => 'grace@example.com']);
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/me'));
+
+        $this->assertStringContainsString('Grace Hopper', $this->lastReply());
+        $this->assertStringContainsString('grace@example.com', $this->lastReply());
+    }
+
+    public function test_videos_command_lists_recent_videos_for_the_workspace()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        Video::factory()->create(['workspace_id' => $config->workspace_id, 'human_id' => 'V-9', 'title' => 'A great video']);
+
+        $this->action()->handle($config, $this->update(1, '/videos'));
+
+        $this->assertStringContainsString('V-9', $this->lastReply());
+        $this->assertStringContainsString('A great video', $this->lastReply());
+    }
+
+    public function test_videos_command_with_none_yet_says_so()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/videos'));
+
+        $this->assertSame('No videos yet.', $this->lastReply());
+    }
+
+    public function test_posts_command_lists_recent_posts_for_the_workspace()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        Post::factory()->create(['workspace_id' => $config->workspace_id, 'human_id' => 'P-4', 'title' => 'A great post']);
+
+        $this->action()->handle($config, $this->update(1, '/posts'));
+
+        $this->assertStringContainsString('P-4', $this->lastReply());
+        $this->assertStringContainsString('A great post', $this->lastReply());
+    }
+
+    public function test_note_command_with_no_text_prompts_for_it()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/note'));
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertStringContainsString('/note followed by', $this->lastReply());
+    }
+
+    public function test_note_command_captures_a_text_note()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/note remember to renew the domain'));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('remember to renew the domain', $entry->body);
+        $this->assertSame('Captured.', $this->lastReply());
+    }
+
+    public function test_an_unknown_command_from_a_linked_sender_gets_a_clear_reply()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/frobnicate'));
+
+        $this->assertStringContainsString('Unknown command', $this->lastReply());
+    }
+
+    public function test_a_linked_sender_sending_plain_text_is_captured_as_normal()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, 'a captured thought'));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('a captured thought', $entry->body);
+        $this->assertSame('Captured.', $this->lastReply());
+    }
+}

@@ -41,6 +41,7 @@ class CaptureScratchpadVoiceAction
                 'captured_at' => now(),
                 'language' => $data->language,
                 'status' => 'new',
+                'meta' => $data->telegramChatId !== null ? ['telegram_chat_id' => $data->telegramChatId] : [],
             ]);
 
             $entry->attachments()->create([

@@ -12,9 +12,9 @@ class DisconnectTelegramBotActionTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_clears_the_token_username_and_sender_lock_but_keeps_the_webhook_identity()
+    public function test_it_clears_the_token_and_username_but_keeps_the_webhook_identity()
     {
-        $config = TelegramBotConfig::factory()->connected()->create(['linked_telegram_user_id' => 555]);
+        $config = TelegramBotConfig::factory()->connected()->create();
         $secret = $config->webhook_secret;
         $slug = $config->webhook_slug;
 
@@ -24,7 +24,6 @@ class DisconnectTelegramBotActionTest extends TestCase
         $this->assertFalse($fresh->isConnected());
         $this->assertNull($fresh->bot_username);
         $this->assertNull($fresh->connected_at);
-        $this->assertNull($fresh->linked_telegram_user_id);
         $this->assertSame($secret, $fresh->webhook_secret);
         $this->assertSame($slug, $fresh->webhook_slug);
     }

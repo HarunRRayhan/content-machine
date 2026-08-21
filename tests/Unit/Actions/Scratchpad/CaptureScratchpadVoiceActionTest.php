@@ -160,10 +160,11 @@ class CaptureScratchpadVoiceActionTest extends TestCase
         $entry = (new CaptureScratchpadVoiceAction)->handle(
             $workspace,
             null,
-            CaptureScratchpadVoiceData::fromTelegram($file),
+            CaptureScratchpadVoiceData::fromTelegram($file, 555),
         );
 
         $this->assertSame('telegram', $entry->source);
+        $this->assertSame(555, $entry->meta['telegram_chat_id']);
         $this->assertNull(MediaAsset::sole()->uploaded_by_user_id);
         $this->assertDatabaseHas('status_transitions', [
             'subject_type' => $entry->getMorphClass(),

@@ -81,6 +81,19 @@ final class HttpTelegramClient implements TelegramClientContract
         return $this->toApiResult($response, 'Telegram rejected the message.');
     }
 
+    public function setMyCommands(string $botToken, array $commands): TelegramApiResult
+    {
+        try {
+            $response = Http::asForm()->timeout(10)->post(self::API_BASE_URL."/bot{$botToken}/setMyCommands", [
+                'commands' => json_encode($commands),
+            ]);
+        } catch (Throwable) {
+            return TelegramApiResult::failure('Could not reach Telegram to register bot commands.');
+        }
+
+        return $this->toApiResult($response, 'Telegram rejected the command list.');
+    }
+
     public function downloadFile(string $botToken, string $fileId): TelegramFileDownloadResult
     {
         try {

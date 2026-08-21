@@ -7,9 +7,13 @@ use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\HandleTelegramUpdateAction;
+use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Jobs\ProcessTelegramUpdateJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramBotLink;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
@@ -18,20 +22,29 @@ class ProcessTelegramUpdateJobTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function action(): CaptureTelegramMessageAction
+    private function action(): HandleTelegramUpdateAction
     {
-        return new CaptureTelegramMessageAction(
+        $client = new FakeTelegramClient;
+
+        return new HandleTelegramUpdateAction(
+            new CaptureTelegramMessageAction(
+                new CaptureTextNoteAction,
+                new CaptureScratchpadLinkAction,
+                new CaptureScratchpadPhotoAction,
+                new CaptureScratchpadVoiceAction,
+                $client,
+            ),
             new CaptureTextNoteAction,
-            new CaptureScratchpadLinkAction,
-            new CaptureScratchpadPhotoAction,
-            new CaptureScratchpadVoiceAction,
-            new FakeTelegramClient,
+            new LinkTelegramAccountAction,
+            $client,
         );
     }
 
-    public function test_it_delegates_to_the_capture_action_for_a_connected_config()
+    public function test_it_delegates_to_the_capture_action_for_a_linked_sender()
     {
         $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
 
         $update = [
             'update_id' => 1,
