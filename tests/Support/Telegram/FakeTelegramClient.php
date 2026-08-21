@@ -34,6 +34,16 @@ final class FakeTelegramClient implements TelegramClientContract
      */
     public array $setMyCommandsCalledWith = [];
 
+    /**
+     * @var list<array{botToken: string, chatId: int, action: string}>
+     */
+    public array $chatActionsSent = [];
+
+    /**
+     * @var list<array{botToken: string, chatId: int, messageId: int, emoji: string}>
+     */
+    public array $reactionsSet = [];
+
     private TelegramGetMeResult $getMeResult;
 
     private TelegramApiResult $setWebhookResult;
@@ -111,5 +121,19 @@ final class FakeTelegramClient implements TelegramClientContract
     public function downloadFile(string $botToken, string $fileId): TelegramFileDownloadResult
     {
         return $this->downloadFileResult;
+    }
+
+    public function sendChatAction(string $botToken, int $chatId, string $action): TelegramApiResult
+    {
+        $this->chatActionsSent[] = ['botToken' => $botToken, 'chatId' => $chatId, 'action' => $action];
+
+        return TelegramApiResult::success();
+    }
+
+    public function setMessageReaction(string $botToken, int $chatId, int $messageId, string $emoji): TelegramApiResult
+    {
+        $this->reactionsSet[] = ['botToken' => $botToken, 'chatId' => $chatId, 'messageId' => $messageId, 'emoji' => $emoji];
+
+        return TelegramApiResult::success();
     }
 }

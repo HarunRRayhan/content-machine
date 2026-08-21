@@ -131,6 +131,35 @@ final class HttpTelegramClient implements TelegramClientContract
         return TelegramFileDownloadResult::success($contentResponse->body());
     }
 
+    public function sendChatAction(string $botToken, int $chatId, string $action): TelegramApiResult
+    {
+        try {
+            $response = Http::asForm()->timeout(10)->post(self::API_BASE_URL."/bot{$botToken}/sendChatAction", [
+                'chat_id' => $chatId,
+                'action' => $action,
+            ]);
+        } catch (Throwable) {
+            return TelegramApiResult::failure('Could not reach Telegram to send the chat action.');
+        }
+
+        return $this->toApiResult($response, 'Telegram rejected the chat action.');
+    }
+
+    public function setMessageReaction(string $botToken, int $chatId, int $messageId, string $emoji): TelegramApiResult
+    {
+        try {
+            $response = Http::asForm()->timeout(10)->post(self::API_BASE_URL."/bot{$botToken}/setMessageReaction", [
+                'chat_id' => $chatId,
+                'message_id' => $messageId,
+                'reaction' => json_encode([['type' => 'emoji', 'emoji' => $emoji]]),
+            ]);
+        } catch (Throwable) {
+            return TelegramApiResult::failure('Could not reach Telegram to set the reaction.');
+        }
+
+        return $this->toApiResult($response, 'Telegram rejected the reaction.');
+    }
+
     private function toApiResult(Response $response, string $genericError): TelegramApiResult
     {
         if ($response->successful() && $response->json('ok') === true) {

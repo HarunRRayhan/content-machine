@@ -75,6 +75,16 @@ class SyncTelegramBotCommandsActionTest extends TestCase
             {
                 return TelegramFileDownloadResult::failure('not used in this test');
             }
+
+            public function sendChatAction(string $botToken, int $chatId, string $action): TelegramApiResult
+            {
+                return TelegramApiResult::success();
+            }
+
+            public function setMessageReaction(string $botToken, int $chatId, int $messageId, string $emoji): TelegramApiResult
+            {
+                return TelegramApiResult::success();
+            }
         };
 
         TelegramBotConfig::factory()->connected()->create(['bot_token' => 'bad:token']);

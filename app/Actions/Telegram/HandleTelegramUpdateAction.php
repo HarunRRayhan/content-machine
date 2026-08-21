@@ -35,6 +35,12 @@ use RuntimeException;
  * intent resolution is one fixed classification into a fixed, small set
  * of commands the sender could already type by hand, nothing the model
  * chooses freely.
+ *
+ * Every message gets acknowledge()'d the instant it arrives, a heart
+ * reaction on the message plus Telegram's typing indicator, before any of
+ * the above runs: a fixed-response command replies fast enough that this
+ * barely shows, but an AI-chat reply can take several seconds, and
+ * without it the sender has zero feedback that anything is happening.
  */
 class HandleTelegramUpdateAction
 {
@@ -55,6 +61,8 @@ class HandleTelegramUpdateAction
     private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you. Use /note to capture text instead.";
 
     private const CHAT_FAILED_TEXT = "Couldn't generate a chat reply right now, so I saved this as a note instead.";
+
+    private const LOVE_REACTION = '❤';
 
     public function __construct(
         private readonly CaptureTelegramMessageAction $captureTelegramMessageAction,
@@ -85,6 +93,9 @@ class HandleTelegramUpdateAction
             return;
         }
 
+        $messageId = $message['message_id'] ?? null;
+        $this->acknowledge($config, $chatId, is_int($messageId) ? $messageId : null);
+
         $text = $message['text'] ?? null;
         $text = is_string($text) ? trim($text) : null;
 
@@ -103,6 +114,7 @@ class HandleTelegramUpdateAction
         }
 
         if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)) {
+            $this->keepTyping($config, $chatId);
             $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
 
             if ($intent !== null) {
@@ -111,6 +123,7 @@ class HandleTelegramUpdateAction
                 return;
             }
 
+            $this->keepTyping($config, $chatId);
             $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
 
             if ($chatReply !== null) {
@@ -123,6 +136,39 @@ class HandleTelegramUpdateAction
         }
 
         $this->captureTelegramMessageAction->handle($config, $update);
+    }
+
+    /**
+     * Fires the moment a message arrives, well before any reply text
+     * exists: a heart reaction on the message itself (skipped if Telegram
+     * didn't give a message_id) plus the typing indicator, both
+     * best-effort and never allowed to block or fail message processing.
+     */
+    private function acknowledge(TelegramBotConfig $config, int $chatId, ?int $messageId): void
+    {
+        if ($config->bot_token === null) {
+            return;
+        }
+
+        if ($messageId !== null) {
+            $this->client->setMessageReaction($config->bot_token, $chatId, $messageId, self::LOVE_REACTION);
+        }
+
+        $this->keepTyping($config, $chatId);
+    }
+
+    /**
+     * Telegram's typing indicator clears itself after a few seconds, so a
+     * reply that takes longer (an AI completion call, especially one that
+     * falls back across multiple credentials) needs this resent before
+     * each blocking step to stay visible until reply() actually sends
+     * something, which is what makes it stop.
+     */
+    private function keepTyping(TelegramBotConfig $config, int $chatId): void
+    {
+        if ($config->bot_token !== null) {
+            $this->client->sendChatAction($config->bot_token, $chatId, 'typing');
+        }
     }
 
     /**
