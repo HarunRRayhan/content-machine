@@ -35,6 +35,11 @@ function providerLabel(provider: string): string {
     return provider === 'anthropic' ? 'Anthropic-style' : 'OpenAI-style';
 }
 
+const PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
+    anthropic: 'https://api.anthropic.com',
+    openai: 'https://api.openai.com',
+};
+
 function ModelPicker({ credential }: { credential: Credential }) {
     const discovered = credential.discovered_models ?? [];
     const hasDiscovered = discovered.length > 0;
@@ -87,6 +92,7 @@ function ModelPicker({ credential }: { credential: Credential }) {
 
 export default function AiProvidersIndex({ credentials }: PageProps) {
     const [editingId, setEditingId] = useState<number | null>(null);
+    const [newProvider, setNewProvider] = useState('anthropic');
 
     function move(id: number, direction: 'up' | 'down') {
         const ids = credentials.map((credential) => credential.id);
@@ -142,7 +148,10 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                     <select
                                         id="provider"
                                         name="provider"
-                                        defaultValue="anthropic"
+                                        value={newProvider}
+                                        onChange={(event) =>
+                                            setNewProvider(event.target.value)
+                                        }
                                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
                                     >
                                         <option value="anthropic">
@@ -162,7 +171,11 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                     <Input
                                         id="base_url"
                                         name="base_url"
-                                        placeholder="Leave blank for the provider's default"
+                                        placeholder={
+                                            PROVIDER_DEFAULT_BASE_URL[
+                                                newProvider
+                                            ]
+                                        }
                                     />
                                     <InputError message={errors.base_url} />
                                 </div>
@@ -411,6 +424,11 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                                     defaultValue={
                                                         credential.base_url ??
                                                         ''
+                                                    }
+                                                    placeholder={
+                                                        PROVIDER_DEFAULT_BASE_URL[
+                                                            credential.provider
+                                                        ]
                                                     }
                                                 />
                                                 <InputError
