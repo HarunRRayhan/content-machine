@@ -20,6 +20,7 @@ final class TelegramBotCommands
         ['command' => 'link', 'description' => 'Link your account with a code'],
         ['command' => 'videos', 'description' => 'Your most recent videos'],
         ['command' => 'posts', 'description' => 'Your most recent posts'],
+        ['command' => 'notes', 'description' => 'Your most recent Scratch Pad captures'],
         ['command' => 'note', 'description' => 'Save a Scratch Pad note'],
     ];
 }
