@@ -19,7 +19,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
 
     private const ANTHROPIC_VERSION = '2023-06-01';
 
-    private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com';
+    private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
     private const MAX_TOKENS = 300;
 
@@ -81,11 +81,13 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
 
     private function completeOpenAi(AiProviderCredential $credential, string $model, string $systemPrompt, string $userContent): Response
     {
+        // See HttpAiProviderVerifier::verifyOpenAi() for why this is a bare
+        // "/chat/completions": the base URL already carries the version.
         $baseUrl = rtrim($credential->base_url ?? self::OPENAI_DEFAULT_BASE_URL, '/');
 
         return Http::withToken($credential->api_key)
             ->timeout(30)
-            ->post("{$baseUrl}/v1/chat/completions", [
+            ->post("{$baseUrl}/chat/completions", [
                 'model' => $model,
                 'max_tokens' => self::MAX_TOKENS,
                 'messages' => [

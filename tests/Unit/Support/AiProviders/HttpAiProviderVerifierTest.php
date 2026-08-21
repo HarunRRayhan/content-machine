@@ -55,6 +55,17 @@ class HttpAiProviderVerifierTest extends TestCase
             && $request->hasHeader('Authorization', 'Bearer sk-openai-test'));
     }
 
+    public function test_openai_style_custom_base_url_already_carrying_v1_hits_a_bare_models_path()
+    {
+        Http::fake(['openrouter.ai/*' => Http::response(['data' => []], 200)]);
+
+        $credential = AiProviderCredential::factory()->openai()->make(['base_url' => 'https://openrouter.ai/api/v1']);
+
+        (new HttpAiProviderVerifier)->verify($credential);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://openrouter.ai/api/v1/models');
+    }
+
     public function test_anthropic_models_are_parsed_with_display_name_as_the_label_most_recent_first()
     {
         Http::fake(['api.anthropic.com/*' => Http::response([

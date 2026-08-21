@@ -14,19 +14,21 @@ use Throwable;
  */
 final class OpenAiTranscriptionClient implements AiTranscriptionClientContract
 {
-    private const DEFAULT_BASE_URL = 'https://api.openai.com';
+    private const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
     private const MODEL = 'whisper-1';
 
     public function transcribe(AiProviderCredential $credential, string $audioContents, string $filename, string $mimeType): AiTranscriptionResult
     {
+        // See HttpAiProviderVerifier::verifyOpenAi() for why this is a bare
+        // "/audio/transcriptions": the base URL already carries the version.
         $baseUrl = rtrim($credential->base_url ?? self::DEFAULT_BASE_URL, '/');
 
         try {
             $response = Http::withToken($credential->api_key)
                 ->timeout(60)
                 ->attach('file', $audioContents, $filename, ['Content-Type' => $mimeType])
-                ->post("{$baseUrl}/v1/audio/transcriptions", [
+                ->post("{$baseUrl}/audio/transcriptions", [
                     'model' => self::MODEL,
                     'response_format' => 'verbose_json',
                 ]);
