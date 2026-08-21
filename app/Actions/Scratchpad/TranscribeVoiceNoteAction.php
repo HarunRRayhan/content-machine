@@ -40,7 +40,7 @@ class TranscribeVoiceNoteAction
         $mediaAsset = $transcription->mediaAsset;
         $workspace = $mediaAsset->workspace;
 
-        $credentials = $this->resolver->chain($workspace)->where('provider', 'openai');
+        $credentials = $this->resolver->credentialChain($workspace)->where('provider', 'openai');
 
         if ($credentials->isEmpty()) {
             $transcription->update([

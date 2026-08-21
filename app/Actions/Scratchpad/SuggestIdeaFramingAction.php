@@ -36,10 +36,10 @@ class SuggestIdeaFramingAction
     public function handle(ScratchpadEntry $entry, string $kind): IdeaSuggestion
     {
         $userContent = $this->buildUserContent($entry, $kind);
-        $credentials = $this->resolver->chain($entry->workspace);
+        $chain = $this->resolver->textChain($entry->workspace);
 
-        foreach ($credentials as $credential) {
-            $result = $this->client->complete($credential, self::SYSTEM_PROMPT, $userContent);
+        foreach ($chain as $modelEntry) {
+            $result = $this->client->complete($modelEntry, self::SYSTEM_PROMPT, $userContent);
 
             if (! $result->successful) {
                 continue;

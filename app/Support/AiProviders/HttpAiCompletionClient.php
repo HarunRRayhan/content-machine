@@ -3,6 +3,7 @@
 namespace App\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
+use App\Models\AiProviderCredentialModel;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -10,9 +11,9 @@ use Throwable;
 
 /**
  * Runs a single chat completion against whichever provider shape the
- * credential is (Anthropic Messages API or OpenAI-compatible Chat
+ * entry's credential is (Anthropic Messages API or OpenAI-compatible Chat
  * Completions), the same provider branching HttpAiProviderVerifier
- * already does for key verification.
+ * already does for key verification, using that entry's specific model.
  *
  * Every failure is logged (credential id/provider/model, never the key)
  * before returning: AiCompletionResult::$error only ever reaches the
@@ -31,17 +32,10 @@ final class HttpAiCompletionClient implements AiCompletionClientContract
 
     private const MAX_TOKENS = 300;
 
-    public function complete(AiProviderCredential $credential, string $systemPrompt, string $userContent): AiCompletionResult
+    public function complete(AiProviderCredentialModel $entry, string $systemPrompt, string $userContent): AiCompletionResult
     {
-        // Guaranteed non-null: AiProviderCredentialResolver::chain() only
-        // ever hands out credentials with a model already set. Narrowed
-        // here, once, so completeAnthropic()/completeOpenAi() below get a
-        // definite string rather than each re-checking $credential->model.
-        if ($credential->model === null) {
-            return AiCompletionResult::failure('This credential has no model set yet.');
-        }
-
-        $model = $credential->model;
+        $credential = $entry->credential;
+        $model = $entry->model;
 
         try {
             $response = $credential->provider === 'anthropic'

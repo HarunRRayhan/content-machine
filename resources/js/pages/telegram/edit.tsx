@@ -245,7 +245,7 @@ export default function TelegramEdit({
                         {!hasAiProvider && (
                             <p className="text-sm text-muted-foreground">
                                 No AI provider is configured yet. Add one under
-                                AI Providers before turning this on.
+                                AI Models before turning this on.
                             </p>
                         )}
 

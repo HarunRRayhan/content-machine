@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AiProviders\AiProviderCredentialModelsController;
 use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Posts\PostsController;
@@ -60,7 +61,10 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::delete('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'destroy'])->name('ai-providers.destroy');
         Route::post('ai-providers/{aiProviderCredential}/toggle', [AiProviderCredentialsController::class, 'toggle'])->name('ai-providers.toggle');
         Route::post('ai-providers/{aiProviderCredential}/verify', [AiProviderCredentialsController::class, 'verify'])->name('ai-providers.verify');
-        Route::post('ai-providers/{aiProviderCredential}/model', [AiProviderCredentialsController::class, 'setModel'])->name('ai-providers.set-model');
+
+        Route::post('ai-provider-models/reorder', [AiProviderCredentialModelsController::class, 'reorder'])->name('ai-provider-models.reorder');
+        Route::post('ai-providers/{aiProviderCredential}/models', [AiProviderCredentialModelsController::class, 'store'])->name('ai-provider-models.store');
+        Route::delete('ai-provider-models/{aiProviderCredentialModel}', [AiProviderCredentialModelsController::class, 'destroy'])->name('ai-provider-models.destroy');
 
         Route::get('telegram', [TelegramBotConfigController::class, 'edit'])->name('telegram.edit');
         Route::post('telegram', [TelegramBotConfigController::class, 'update'])->name('telegram.update');

@@ -23,7 +23,7 @@ class SuggestIdeaFramingActionTest extends TestCase
         {
             public function __construct(private readonly AiCompletionResult $result) {}
 
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 return $this->result;
             }
@@ -34,7 +34,7 @@ class SuggestIdeaFramingActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id, 'title' => 'Title', 'body' => 'Body']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = $this->fakeClient(AiCompletionResult::success(json_encode([
             'title' => 'A great post idea',
@@ -56,7 +56,7 @@ class SuggestIdeaFramingActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = $this->fakeClient(AiCompletionResult::success('```json'.PHP_EOL.'{"title":"x","score":1,"trend":"evergreen","rationale":"y"}'.PHP_EOL.'```'));
 
@@ -69,7 +69,7 @@ class SuggestIdeaFramingActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = $this->fakeClient(AiCompletionResult::success(json_encode([
             'title' => 'x', 'score' => 1500, 'trend' => 'evergreen', 'rationale' => 'y',
@@ -84,7 +84,7 @@ class SuggestIdeaFramingActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = $this->fakeClient(AiCompletionResult::success(json_encode([
             'title' => 'x', 'score' => 1, 'trend' => 'trending', 'rationale' => 'y',
@@ -102,7 +102,7 @@ class SuggestIdeaFramingActionTest extends TestCase
 
         $client = new class implements AiCompletionClientContract
         {
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 throw new \RuntimeException('should never be called');
             }
@@ -118,18 +118,18 @@ class SuggestIdeaFramingActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id]);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 0, 'api_key' => 'sk-first']);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id, 'priority' => 1, 'api_key' => 'sk-second']);
 
         $client = new class implements AiCompletionClientContract
         {
             public array $attemptedKeys = [];
 
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
-                $this->attemptedKeys[] = $credential->api_key;
+                $this->attemptedKeys[] = $entry->credential->api_key;
 
-                return $credential->api_key === 'sk-first'
+                return $entry->credential->api_key === 'sk-first'
                     ? AiCompletionResult::success('not json at all')
                     : AiCompletionResult::success(json_encode([
                         'title' => 'from second', 'score' => 10, 'trend' => 'seasonal', 'rationale' => 'r',
@@ -149,13 +149,13 @@ class SuggestIdeaFramingActionTest extends TestCase
         $workspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id, 'kind' => 'voice', 'title' => null, 'body' => null]);
         $entry->transcriptions()->create(['media_asset_id' => MediaAsset::factory()->create(['workspace_id' => $workspace->id])->id, 'status' => 'done', 'text' => 'A spoken transcript.']);
-        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
         $client = new class implements AiCompletionClientContract
         {
             public ?string $capturedUserContent = null;
 
-            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
             {
                 $this->capturedUserContent = $userContent;
 

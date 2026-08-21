@@ -45,7 +45,7 @@ class CreateAiProviderCredentialActionTest extends TestCase
         $this->assertSame(0, $credential->priority);
         $this->assertTrue($credential->enabled);
         $this->assertSame('sk-ant-123', $credential->api_key);
-        $this->assertNull($credential->model);
+        $this->assertTrue($credential->models()->doesntExist());
     }
 
     public function test_it_appends_after_the_existing_highest_priority()
@@ -101,7 +101,7 @@ class CreateAiProviderCredentialActionTest extends TestCase
             apiKey: 'sk-ant-123',
         ));
 
-        $this->assertNull($credential->model);
+        $this->assertTrue($credential->models()->doesntExist());
         $this->assertSame($models, $credential->discovered_models);
         $this->assertNotNull($credential->verified_at);
     }
@@ -140,7 +140,7 @@ class CreateAiProviderCredentialActionTest extends TestCase
             apiKey: 'sk-ant-123',
         ));
 
-        $this->assertNull($credential->model);
+        $this->assertTrue($credential->models()->doesntExist());
         $this->assertNull($credential->discovered_models);
         $this->assertNull($credential->verified_at);
         $this->assertSame('sk-ant-123', $credential->api_key);

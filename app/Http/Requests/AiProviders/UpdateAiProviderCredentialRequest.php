@@ -24,7 +24,6 @@ class UpdateAiProviderCredentialRequest extends FormRequest
         return [
             'label' => ['required', 'string', 'max:255'],
             'base_url' => ['nullable', 'url', 'max:500'],
-            'model' => ['nullable', 'string', 'max:255'],
             'api_key' => ['nullable', 'string', 'max:500'],
         ];
     }

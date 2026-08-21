@@ -5,7 +5,6 @@ namespace App\Http\Controllers\AiProviders;
 use App\Actions\AiProviders\CreateAiProviderCredentialAction;
 use App\Actions\AiProviders\DeleteAiProviderCredentialAction;
 use App\Actions\AiProviders\ReorderAiProviderCredentialsAction;
-use App\Actions\AiProviders\SetAiProviderCredentialModelAction;
 use App\Actions\AiProviders\ToggleAiProviderCredentialAction;
 use App\Actions\AiProviders\UpdateAiProviderCredentialAction;
 use App\Actions\AiProviders\VerifyAiProviderCredentialAction;
@@ -14,10 +13,10 @@ use App\Data\AiProviders\ReorderAiProviderCredentialsData;
 use App\Data\AiProviders\UpdateAiProviderCredentialData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AiProviders\ReorderAiProviderCredentialsRequest;
-use App\Http\Requests\AiProviders\SetAiProviderCredentialModelRequest;
 use App\Http\Requests\AiProviders\StoreAiProviderCredentialRequest;
 use App\Http\Requests\AiProviders\UpdateAiProviderCredentialRequest;
 use App\Models\AiProviderCredential;
+use App\Models\AiProviderCredentialModel;
 use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,9 +27,12 @@ use RuntimeException;
 class AiProviderCredentialsController extends Controller
 {
     /**
-     * List the current workspace's AI credentials in fallback order
-     * (priority ascending), the same order AiProviderCredentialResolver
-     * will use once an agent consumes it.
+     * Renders both panels of the AI Models page: providers (this
+     * workspace's API keys, priority ascending) on the right, and the two
+     * model fallback chains (default, vision; each priority ascending,
+     * the order AiProviderCredentialResolver actually consumes) on the
+     * left. See AiProviderCredentialModelsController for the actions that
+     * change the left side.
      */
     public function index(Request $request): Response
     {
@@ -43,8 +45,19 @@ class AiProviderCredentialsController extends Controller
             ->get()
             ->map(fn (AiProviderCredential $credential) => $this->presentCredential($credential));
 
+        $models = AiProviderCredentialModel::query()
+            ->whereHas('credential', fn ($query) => $query->where('workspace_id', $workspace->id))
+            ->with('credential')
+            ->orderBy('priority')
+            ->orderBy('id')
+            ->get();
+
         return Inertia::render('ai-providers/index', [
             'credentials' => $credentials,
+            'models' => [
+                'default' => $models->where('purpose', 'default')->values()->map($this->presentModelEntry(...)),
+                'vision' => $models->where('purpose', 'vision')->values()->map($this->presentModelEntry(...)),
+            ],
         ]);
     }
 
@@ -54,7 +67,7 @@ class AiProviderCredentialsController extends Controller
 
         $createAiProviderCredentialAction->handle($workspace, CreateAiProviderCredentialData::fromRequest($request));
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => __('Credential added.')]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Provider added.')]);
 
         return to_route('dashboard.ai-providers.index');
     }
@@ -67,20 +80,7 @@ class AiProviderCredentialsController extends Controller
 
         $updateAiProviderCredentialAction->handle($aiProviderCredential, UpdateAiProviderCredentialData::fromRequest($request));
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => __('Credential updated.')]);
-
-        return to_route('dashboard.ai-providers.index');
-    }
-
-    public function setModel(SetAiProviderCredentialModelRequest $request, AiProviderCredential $aiProviderCredential, SetAiProviderCredentialModelAction $setAiProviderCredentialModelAction): RedirectResponse
-    {
-        $workspace = $this->currentWorkspace($request);
-
-        abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
-
-        $setAiProviderCredentialModelAction->handle($aiProviderCredential, $request->string('model')->toString());
-
-        Inertia::flash('toast', ['type' => 'success', 'message' => __('Model set.')]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Provider updated.')]);
 
         return to_route('dashboard.ai-providers.index');
     }
@@ -93,7 +93,7 @@ class AiProviderCredentialsController extends Controller
 
         $deleteAiProviderCredentialAction->handle($aiProviderCredential);
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => __('Credential removed.')]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Provider removed.')]);
 
         return to_route('dashboard.ai-providers.index');
     }
@@ -162,11 +162,28 @@ class AiProviderCredentialsController extends Controller
             'label' => $credential->label,
             'provider' => $credential->provider,
             'base_url' => $credential->base_url,
-            'model' => $credential->model,
             'discovered_models' => $credential->discovered_models,
             'priority' => $credential->priority,
             'enabled' => $credential->enabled,
             'verified_at' => $credential->verified_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentModelEntry(AiProviderCredentialModel $entry): array
+    {
+        return [
+            'id' => $entry->id,
+            'model' => $entry->model,
+            'purpose' => $entry->purpose,
+            'priority' => $entry->priority,
+            'credential' => [
+                'id' => $entry->credential->id,
+                'label' => $entry->credential->label,
+                'provider' => $entry->credential->provider,
+            ],
         ];
     }
 }

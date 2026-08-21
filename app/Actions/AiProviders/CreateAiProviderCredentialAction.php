@@ -8,21 +8,20 @@ use App\Models\Workspace;
 use App\Support\AiProviders\AiProviderVerifierContract;
 
 /**
- * Adds a new credential to a workspace's AI fallback chain, at the end of
- * it: the new key never jumps ahead of an existing default. Reordering to
- * make it the default is a separate, explicit action
- * (ReorderAiProviderCredentialsAction).
+ * Adds a new provider to a workspace, at the end of the providers list: a
+ * new key never jumps ahead of an existing one. Reordering that list is a
+ * separate, explicit action (ReorderAiProviderCredentialsAction).
  *
- * No model is asked for upfront: the credential saves immediately with
- * model = null, then this same call checks the provider's list-models
- * endpoint (the same call VerifyAiProviderCredentialAction makes) and
- * stores whatever it found as discovered_models, for the dashboard to
- * offer as a picker. If the check fails or the provider lists nothing,
- * the credential is still saved (label/provider/base_url/api_key are
- * real regardless); the dashboard falls back to asking for a model by
- * hand. AiProviderCredentialResolver excludes a model === null credential
- * from the fallback chain, so an unresolved one is inert, never a
- * guaranteed-to-fail candidate.
+ * No model is asked for upfront: the credential saves immediately, then
+ * this same call checks the provider's list-models endpoint (the same
+ * call VerifyAiProviderCredentialAction makes) and stores whatever it
+ * found as discovered_models, for the dashboard to offer models to add
+ * to the fallback chain (AddAiProviderCredentialModelsAction). If the
+ * check fails or the provider lists nothing, the credential is still
+ * saved (label/provider/base_url/api_key are real regardless); a
+ * credential with no models added yet simply contributes nothing to
+ * AiProviderCredentialResolver's chain, never a guaranteed-to-fail
+ * candidate.
  */
 class CreateAiProviderCredentialAction
 {
@@ -41,7 +40,6 @@ class CreateAiProviderCredentialAction
             'label' => $data->label,
             'provider' => $data->provider,
             'base_url' => $data->baseUrl,
-            'model' => null,
             'api_key' => $data->apiKey,
             'priority' => $nextPriority,
             'enabled' => true,

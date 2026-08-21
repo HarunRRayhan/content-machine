@@ -268,7 +268,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
 
         $completionClient = new class implements AiCompletionClientContract
         {
@@ -310,7 +310,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
 
         $completionClient = new class implements AiCompletionClientContract
         {
@@ -332,7 +332,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
         ScratchpadEntry::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'text', 'body' => 'remember to renew the domain', 'status' => 'new']);
 
         $completionClient = new class implements AiCompletionClientContract
@@ -358,7 +358,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
 
         $completionClient = new class implements AiCompletionClientContract
         {
@@ -383,7 +383,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
 
         $completionClient = new class implements AiCompletionClientContract
         {
@@ -440,7 +440,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
 
         $completionClient = new class implements AiCompletionClientContract
         {
