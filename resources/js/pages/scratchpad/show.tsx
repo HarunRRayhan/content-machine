@@ -108,13 +108,38 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
                     description={new Date(entry.captured_at).toLocaleString()}
                 />
 
-                <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{entry.kind}</Badge>
-                    {entry.language && (
-                        <Badge variant="outline">{entry.language}</Badge>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-2">
+                        <Badge variant="outline">{entry.kind}</Badge>
+                        {entry.language && (
+                            <Badge variant="outline">{entry.language}</Badge>
+                        )}
+                        <Badge variant="secondary">{entry.status}</Badge>
+                        <Badge variant="outline">via {entry.source}</Badge>
+                    </div>
+
+                    {entry.status !== 'triaged' && (
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                                if (
+                                    confirm(
+                                        "Delete this entry? This can't be undone.",
+                                    )
+                                ) {
+                                    router.delete(
+                                        ScratchpadController.destroy.url(
+                                            entry.id,
+                                        ),
+                                    );
+                                }
+                            }}
+                        >
+                            Delete
+                        </Button>
                     )}
-                    <Badge variant="secondary">{entry.status}</Badge>
-                    <Badge variant="outline">via {entry.source}</Badge>
                 </div>
 
                 <ScratchpadEntryMedia attachments={entry.attachments} />

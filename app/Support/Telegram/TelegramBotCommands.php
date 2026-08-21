@@ -22,5 +22,6 @@ final class TelegramBotCommands
         ['command' => 'posts', 'description' => 'Your most recent posts'],
         ['command' => 'notes', 'description' => 'Your most recent Scratch Pad captures'],
         ['command' => 'note', 'description' => 'Save a Scratch Pad note'],
+        ['command' => 'clearnotes', 'description' => 'Delete your recent untriaged Scratch Pad notes'],
     ];
 }

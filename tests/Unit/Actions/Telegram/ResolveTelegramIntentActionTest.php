@@ -35,6 +35,25 @@ class ResolveTelegramIntentActionTest extends TestCase
         $this->assertSame('notes', $intent);
     }
 
+    public function test_a_delete_request_resolves_to_clear_notes()
+    {
+        $workspace = Workspace::factory()->create();
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+
+        $client = new class implements AiCompletionClientContract
+        {
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
+            {
+                return AiCompletionResult::success('clear_notes');
+            }
+        };
+
+        $intent = (new ResolveTelegramIntentAction($client, new AiProviderCredentialResolver))
+            ->handle($workspace, 'delete all of these');
+
+        $this->assertSame('clear_notes', $intent);
+    }
+
     public function test_the_model_saying_none_returns_null()
     {
         $workspace = Workspace::factory()->create();

@@ -6,6 +6,7 @@ use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Scratchpad\SuggestIdeaFramingAction;
 use App\Actions\Scratchpad\TriageScratchpadEntryAction;
 use App\Data\Scratchpad\CaptureScratchpadLinkData;
@@ -239,6 +240,34 @@ class ScratchpadController extends Controller
                 'error' => $suggestion->error,
             ],
         ]);
+    }
+
+    /**
+     * Hard-delete an entry. 404s if it's not in the current workspace, same
+     * boundary as every other single-entry action here; refuses (via a
+     * flashed error, back to the entry) if it's already been triaged into
+     * an idea, since DeleteScratchpadEntryAction won't sever that link.
+     */
+    public function destroy(Request $request, ScratchpadEntry $entry, DeleteScratchpadEntryAction $deleteScratchpadEntryAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($entry->workspace_id !== $workspace->id, 404);
+
+        try {
+            $deleteScratchpadEntryAction->handle($entry);
+        } catch (RuntimeException $e) {
+            Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
+
+            return to_route('dashboard.scratchpad.show', $entry);
+        }
+
+        Inertia::flash('toast', [
+            'type' => 'success',
+            'message' => __('Note deleted.'),
+        ]);
+
+        return to_route('dashboard.scratchpad.index');
     }
 
     private function currentUser(Request $request): User

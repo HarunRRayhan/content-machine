@@ -6,6 +6,8 @@ use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
+use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
@@ -51,6 +53,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
             new LinkTelegramAccountAction,
             new GenerateTelegramChatReplyAction($completionClient, new AiProviderCredentialResolver),
             new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
+            new DeleteRecentScratchpadEntriesAction(new DeleteScratchpadEntryAction),
             $client,
         );
     }
