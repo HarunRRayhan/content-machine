@@ -44,6 +44,7 @@ can actually reach you.
 | `/link CODE` | Links your Telegram account using a code from the dashboard. |
 | `/videos` | Your workspace's most recent videos. |
 | `/posts` | Your workspace's most recent posts. |
+| `/notes` | Your workspace's most recent Scratch Pad captures (text, links, photos, voice). |
 | `/note <text>` | Saves a Scratch Pad text note. |
 
 Commands work the same for every linked member, with or without an AI

@@ -186,6 +186,31 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertStringContainsString('A great post', $this->lastReply());
     }
 
+    public function test_notes_command_lists_recent_scratchpad_captures_for_the_workspace()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        ScratchpadEntry::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'text', 'body' => 'remember to renew the domain', 'status' => 'new']);
+
+        $this->action()->handle($config, $this->update(1, '/notes'));
+
+        $this->assertStringContainsString('text', $this->lastReply());
+        $this->assertStringContainsString('remember to renew the domain', $this->lastReply());
+        $this->assertStringContainsString('new', $this->lastReply());
+    }
+
+    public function test_notes_command_with_none_yet_says_so()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/notes'));
+
+        $this->assertSame('No Scratch Pad captures yet.', $this->lastReply());
+    }
+
     public function test_note_command_with_no_text_prompts_for_it()
     {
         $config = TelegramBotConfig::factory()->connected()->create();

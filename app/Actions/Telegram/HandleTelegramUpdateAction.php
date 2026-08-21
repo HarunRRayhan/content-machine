@@ -5,10 +5,12 @@ namespace App\Actions\Telegram;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Models\Post;
+use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\Video;
 use App\Support\Telegram\TelegramClientContract;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -21,7 +23,7 @@ use RuntimeException;
  * Only a bare, non-URL text message is ever eligible for the AI-chat
  * branch (config->ai_chat_enabled and a working credential), and even
  * then only when GenerateTelegramChatReplyAction actually returns a
- * reply — a link, a photo, a voice note, or an AI failure always falls
+ * reply: a link, a photo, a voice note, or an AI failure always falls
  * through to the same capture path this bot always had, and /note
  * always force-captures regardless of ai_chat_enabled. This is the only
  * "capability" the AI has today: it can talk, nothing else. There is no
@@ -35,12 +37,13 @@ class HandleTelegramUpdateAction
     private const HELP_TEXT = <<<'TEXT'
         Here's what I can do:
 
-        /me — which account you're linked as
-        /link CODE — link your Content Machine account
-        /videos — your workspace's most recent videos
-        /posts — your workspace's most recent posts
-        /note <text> — save a Scratch Pad note
-        /help — show this list
+        /me: which account you're linked as
+        /link CODE: link your Content Machine account
+        /videos: your workspace's most recent videos
+        /posts: your workspace's most recent posts
+        /notes: your workspace's most recent Scratch Pad captures
+        /note <text>: save a Scratch Pad note
+        /help: show this list
         TEXT;
 
     private const CAPTURE_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note, or just type, and I'll capture it to your Scratch Pad.";
@@ -154,6 +157,7 @@ class HandleTelegramUpdateAction
             '/me' => $this->reply($config, $chatId, "You're linked as {$link->user->name} ({$link->user->email})."),
             '/videos' => $this->reply($config, $chatId, $this->recentVideos($config)),
             '/posts' => $this->reply($config, $chatId, $this->recentPosts($config)),
+            '/notes' => $this->reply($config, $chatId, $this->recentNotes($config)),
             '/note' => $this->handleNote($config, $chatId, $args),
             default => $this->reply($config, $chatId, 'Unknown command. Try /help.'),
         };
@@ -235,6 +239,22 @@ class HandleTelegramUpdateAction
         }
 
         return $posts->map(fn (Post $post) => "{$post->human_id} · {$post->title} · {$post->status}")->implode("\n");
+    }
+
+    private function recentNotes(TelegramBotConfig $config): string
+    {
+        $entries = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->orderByDesc('captured_at')->limit(10)->get();
+
+        if ($entries->isEmpty()) {
+            return 'No Scratch Pad captures yet.';
+        }
+
+        return $entries->map(function (ScratchpadEntry $entry) {
+            $preview = $entry->title ?? $entry->body;
+            $preview = $preview === null ? '(no preview)' : Str::limit($preview, 60);
+
+            return "{$entry->kind}: {$preview} ({$entry->status})";
+        })->implode("\n");
     }
 
     private function helpText(TelegramBotConfig $config): string
