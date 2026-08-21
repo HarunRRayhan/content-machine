@@ -25,6 +25,7 @@ class TelegramBotConfigFactory extends Factory
             'webhook_secret' => null,
             'webhook_slug' => null,
             'bot_username' => null,
+            'ai_chat_enabled' => false,
             'connected_at' => null,
         ];
     }
@@ -38,5 +39,10 @@ class TelegramBotConfigFactory extends Factory
             'bot_username' => fake()->userName().'_bot',
             'connected_at' => now(),
         ]);
+    }
+
+    public function aiChatEnabled(): static
+    {
+        return $this->state(fn () => ['ai_chat_enabled' => true]);
     }
 }

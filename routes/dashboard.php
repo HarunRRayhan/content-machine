@@ -61,6 +61,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('telegram', [TelegramBotConfigController::class, 'edit'])->name('telegram.edit');
         Route::post('telegram', [TelegramBotConfigController::class, 'update'])->name('telegram.update');
         Route::delete('telegram', [TelegramBotConfigController::class, 'destroy'])->name('telegram.destroy');
+        Route::post('telegram/ai-chat/toggle', [TelegramBotConfigController::class, 'toggleAiChat'])->name('telegram.ai-chat.toggle');
         Route::post('telegram/link-code', [TelegramBotLinkController::class, 'store'])->name('telegram.link-code');
         Route::post('telegram/test', [TelegramBotLinkController::class, 'test'])->name('telegram.test');
 

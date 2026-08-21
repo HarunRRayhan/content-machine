@@ -57,7 +57,26 @@ Anything that isn't a command is captured straight to the Scratch Pad:
 - A photo (with an optional caption) is captured as a photo.
 - A voice note is captured, then transcribed in the background — the
   transcript arrives as a follow-up message once it's ready.
-- Any other text is captured as a note.
+- Any other text is captured as a note (unless **AI chat** is on, see below).
 
 Every message gets a real reply: capture confirmation, or an honest error
 if something couldn't be captured.
+
+## AI chat
+
+Off by default. When a workspace has an AI provider configured (see
+**AI Providers**), the **Telegram** page has an **AI chat** toggle. Turning
+it on changes what a plain text message does: instead of being captured as
+a note, it gets a conversational reply.
+
+Everything else is unaffected — a link, a photo, and a voice note still
+always capture, and `/note <text>` still always saves a note even with AI
+chat on. This is deliberately a minimal, tool-free chat: the AI can only
+talk, it has no access to this app's data (your captures, ideas, posts,
+videos) and can't take any action. It's told who it's talking to and which
+workspace, nothing more, and doesn't remember earlier messages between
+replies. Broader capabilities, if any, are a separate, later, explicit
+addition — not something this toggle grants on its own.
+
+If AI chat is on but the workspace's provider fails or isn't reachable, the
+message is captured as a note instead of being dropped.

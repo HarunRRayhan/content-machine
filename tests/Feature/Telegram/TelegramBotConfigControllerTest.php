@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Telegram;
 
+use App\Models\AiProviderCredential;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\User;
@@ -75,6 +76,45 @@ class TelegramBotConfigControllerTest extends TestCase
                 ->where('myLink.telegramUsername', 'harun')
                 ->where('linkedMembers.0.name', $user->name)
             );
+    }
+
+    public function test_ai_chat_state_and_provider_availability_are_shown()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        TelegramBotConfig::factory()->for($workspace)->connected()->create();
+
+        $this->get(route('dashboard.telegram.edit'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('aiChatEnabled', false)
+                ->where('hasAiProvider', false)
+            );
+
+        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
+
+        $this->get(route('dashboard.telegram.edit'))
+            ->assertInertia(fn (Assert $page) => $page->where('hasAiProvider', true));
+    }
+
+    public function test_toggle_ai_chat_flips_the_flag()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+
+        $this->post(route('dashboard.telegram.ai-chat.toggle'))
+            ->assertRedirect(route('dashboard.telegram.edit'));
+
+        $this->assertTrue($config->fresh()->ai_chat_enabled);
+
+        $this->post(route('dashboard.telegram.ai-chat.toggle'));
+
+        $this->assertFalse($config->fresh()->ai_chat_enabled);
+    }
+
+    public function test_toggle_ai_chat_404s_when_the_bot_is_not_connected()
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->post(route('dashboard.telegram.ai-chat.toggle'))->assertNotFound();
     }
 
     public function test_update_connects_with_a_valid_token()

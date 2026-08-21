@@ -7,6 +7,7 @@ use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Jobs\ProcessTelegramUpdateJob;
@@ -14,7 +15,11 @@ use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\User;
+use App\Support\AiProviders\AiCompletionClientContract;
+use App\Support\AiProviders\AiCompletionResult;
+use App\Support\AiProviders\AiProviderCredentialResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
@@ -25,6 +30,13 @@ class ProcessTelegramUpdateJobTest extends TestCase
     private function action(): HandleTelegramUpdateAction
     {
         $client = new FakeTelegramClient;
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                throw new RuntimeException('AI chat is disabled in this test and should never be called.');
+            }
+        };
 
         return new HandleTelegramUpdateAction(
             new CaptureTelegramMessageAction(
@@ -36,6 +48,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
             ),
             new CaptureTextNoteAction,
             new LinkTelegramAccountAction,
+            new GenerateTelegramChatReplyAction($completionClient, new AiProviderCredentialResolver),
             $client,
         );
     }
