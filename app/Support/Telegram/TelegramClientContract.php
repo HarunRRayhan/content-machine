@@ -43,4 +43,22 @@ interface TelegramClientContract
      * Bot API's 20MB cap, refuses to hand it over for being too big.
      */
     public function downloadFile(string $botToken, string $fileId): TelegramFileDownloadResult;
+
+    /**
+     * Shows Telegram's own "..." typing indicator in the chat. It clears
+     * itself after a few seconds or as soon as a message actually arrives
+     * from this bot, whichever comes first, so a caller expecting a slow
+     * reply (an AI completion call) resends this before each blocking step
+     * rather than relying on a single call to cover the whole wait.
+     * Best-effort: a failure here never blocks the real reply.
+     */
+    public function sendChatAction(string $botToken, int $chatId, string $action): TelegramApiResult;
+
+    /**
+     * Sets (replacing any existing one) a single emoji reaction on
+     * $messageId, the fastest visible acknowledgement Telegram offers that
+     * a message actually arrived, well before any reply text exists.
+     * Best-effort: a failure here never blocks the real reply.
+     */
+    public function setMessageReaction(string $botToken, int $chatId, int $messageId, string $emoji): TelegramApiResult;
 }

@@ -67,6 +67,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         return [
             'update_id' => 1,
             'message' => [
+                'message_id' => 42,
                 'chat' => ['id' => $chatId],
                 'from' => ['id' => $fromId, 'username' => 'sender'],
                 'text' => $text,
@@ -396,6 +397,65 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $entry = ScratchpadEntry::sole();
         $this->assertSame('remember to renew the domain', $entry->body);
+    }
+
+    public function test_every_message_gets_an_instant_reaction_and_typing_indicator()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, 'a captured thought'));
+
+        $this->assertCount(1, $this->client->reactionsSet);
+        $this->assertSame(42, $this->client->reactionsSet[0]['messageId']);
+        $this->assertSame(555, $this->client->reactionsSet[0]['chatId']);
+        $this->assertSame('❤', $this->client->reactionsSet[0]['emoji']);
+
+        $this->assertNotEmpty($this->client->chatActionsSent);
+        $this->assertSame('typing', $this->client->chatActionsSent[0]['action']);
+    }
+
+    public function test_a_message_with_no_message_id_skips_the_reaction_but_still_types()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 1, 'username' => 'sender'],
+                'text' => 'hey',
+            ],
+        ];
+
+        $this->action()->handle($config, $update);
+
+        $this->assertSame([], $this->client->reactionsSet);
+        $this->assertNotEmpty($this->client->chatActionsSent);
+    }
+
+    public function test_the_typing_indicator_is_resent_before_each_ai_call()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                return AiCompletionResult::success('none');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, 'got any ideas?'));
+
+        // Once on arrival, once before intent resolution, once before the
+        // chat completion call itself: three separate blocking steps in
+        // this flow, each needs its own resend.
+        $this->assertCount(3, $this->client->chatActionsSent);
     }
 
     public function test_help_text_mentions_chat_when_ai_chat_is_enabled()
