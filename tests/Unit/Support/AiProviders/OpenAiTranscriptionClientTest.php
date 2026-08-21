@@ -34,7 +34,7 @@ class OpenAiTranscriptionClientTest extends TestCase
     {
         Http::fake(['*' => Http::response(['text' => 'hello'], 200)]);
 
-        $credential = AiProviderCredential::factory()->openai()->make(['base_url' => 'https://proxy.example.com/openai']);
+        $credential = AiProviderCredential::factory()->openai()->make(['base_url' => 'https://proxy.example.com/openai/v1']);
 
         (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
 

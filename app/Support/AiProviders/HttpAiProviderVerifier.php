@@ -19,7 +19,7 @@ final class HttpAiProviderVerifier implements AiProviderVerifierContract
 
     private const ANTHROPIC_VERSION = '2023-06-01';
 
-    private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com';
+    private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
     public function verify(AiProviderCredential $credential): AiProviderVerificationResult
     {
@@ -86,11 +86,15 @@ final class HttpAiProviderVerifier implements AiProviderVerifierContract
 
     private function verifyOpenAi(AiProviderCredential $credential): Response
     {
+        // OpenAI-compatible base URLs conventionally already include the
+        // version segment (https://api.openai.com/v1, .../openai/v1 for
+        // Groq, https://openrouter.ai/api/v1, ...), so the models endpoint
+        // is a bare "/models" rather than another "/v1/models".
         $baseUrl = rtrim($credential->base_url ?? self::OPENAI_DEFAULT_BASE_URL, '/');
 
         return Http::withToken($credential->api_key)
             ->timeout(10)
-            ->get("{$baseUrl}/v1/models");
+            ->get("{$baseUrl}/models");
     }
 
     private function describeFailure(Response $response): string
