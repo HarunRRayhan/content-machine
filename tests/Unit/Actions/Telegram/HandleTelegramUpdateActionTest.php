@@ -7,8 +7,10 @@ use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
+use App\Models\AiProviderCredential;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -16,7 +18,12 @@ use App\Models\TelegramBotLink;
 use App\Models\TelegramLinkCode;
 use App\Models\User;
 use App\Models\Video;
+use App\Support\AiProviders\AiCompletionClientContract;
+use App\Support\AiProviders\AiCompletionResult;
+use App\Support\AiProviders\AiProviderCredentialResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
@@ -26,9 +33,17 @@ class HandleTelegramUpdateActionTest extends TestCase
 
     private FakeTelegramClient $client;
 
-    private function action(): HandleTelegramUpdateAction
+    private function action(?AiCompletionClientContract $completionClient = null): HandleTelegramUpdateAction
     {
         $this->client = new FakeTelegramClient;
+
+        $completionClient ??= new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                throw new RuntimeException('AI chat is disabled in this test and should never be called.');
+            }
+        };
 
         return new HandleTelegramUpdateAction(
             new CaptureTelegramMessageAction(
@@ -40,6 +55,7 @@ class HandleTelegramUpdateActionTest extends TestCase
             ),
             new CaptureTextNoteAction,
             new LinkTelegramAccountAction,
+            new GenerateTelegramChatReplyAction($completionClient, new AiProviderCredentialResolver),
             $this->client,
         );
     }
@@ -217,5 +233,101 @@ class HandleTelegramUpdateActionTest extends TestCase
         $entry = ScratchpadEntry::sole();
         $this->assertSame('a captured thought', $entry->body);
         $this->assertSame('Captured.', $this->lastReply());
+    }
+
+    public function test_plain_text_with_ai_chat_enabled_gets_a_chat_reply_instead_of_being_captured()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                return AiCompletionResult::success('Sure, brainstorm away.');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, 'got any ideas?'));
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertSame('Sure, brainstorm away.', $this->lastReply());
+    }
+
+    public function test_ai_chat_enabled_but_no_provider_falls_back_to_capture()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                throw new RuntimeException('should never be called with no provider configured');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, 'got any ideas?'));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('got any ideas?', $entry->body);
+        $this->assertSame('Captured.', $this->lastReply());
+    }
+
+    public function test_a_url_with_ai_chat_enabled_still_captures_as_a_link_without_calling_ai()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                throw new RuntimeException('a URL should never be routed to AI chat');
+            }
+        };
+
+        Queue::fake();
+        $this->action($completionClient)->handle($config, $this->update(1, 'https://example.com/article'));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('link', $entry->kind);
+    }
+
+    public function test_note_command_still_captures_even_with_ai_chat_enabled()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                throw new RuntimeException('/note should never be routed to AI chat');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, '/note remember to renew the domain'));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('remember to renew the domain', $entry->body);
+    }
+
+    public function test_help_text_mentions_chat_when_ai_chat_is_enabled()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/help'));
+
+        $this->assertStringContainsString("I'll chat back", $this->lastReply());
     }
 }

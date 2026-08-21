@@ -14,11 +14,21 @@ use RuntimeException;
 /**
  * Entry point for every Telegram update: resolves whether the sender is
  * linked to a workspace member (TelegramBotLink), routes slash commands,
- * and otherwise hands plain capture (text/link/photo/voice) off to
- * CaptureTelegramMessageAction. Commands work the same whether or not the
- * workspace has an AI provider configured; the AI-chat layer that
- * replaces the default-capture branch when enabled is a separate, later
- * addition, not part of this router's job.
+ * and otherwise hands off to either a chat reply or plain capture
+ * (text/link/photo/voice). Commands work the same regardless of AI
+ * provider or ai_chat_enabled state.
+ *
+ * Only a bare, non-URL text message is ever eligible for the AI-chat
+ * branch (config->ai_chat_enabled and a working credential), and even
+ * then only when GenerateTelegramChatReplyAction actually returns a
+ * reply — a link, a photo, a voice note, or an AI failure always falls
+ * through to the same capture path this bot always had, and /note
+ * always force-captures regardless of ai_chat_enabled. This is the only
+ * "capability" the AI has today: it can talk, nothing else. There is no
+ * tool-calling machinery in this codebase at all, so that boundary isn't
+ * something this router enforces, it's the only shape available; a real
+ * tool/permission model is a distinct, later, separately-approved
+ * increment, not built here.
  */
 class HandleTelegramUpdateAction
 {
@@ -31,14 +41,17 @@ class HandleTelegramUpdateAction
         /posts — your workspace's most recent posts
         /note <text> — save a Scratch Pad note
         /help — show this list
-
-        Forward me a link, a photo, or a voice note, or just type, and I'll capture it to your Scratch Pad.
         TEXT;
+
+    private const CAPTURE_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note, or just type, and I'll capture it to your Scratch Pad.";
+
+    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, or a voice note and I'll capture it. Otherwise, just talk — I'll chat back. Use /note to capture text instead.";
 
     public function __construct(
         private readonly CaptureTelegramMessageAction $captureTelegramMessageAction,
         private readonly CaptureTextNoteAction $captureTextNoteAction,
         private readonly LinkTelegramAccountAction $linkTelegramAccountAction,
+        private readonly GenerateTelegramChatReplyAction $generateTelegramChatReplyAction,
         private readonly TelegramClientContract $client,
     ) {}
 
@@ -79,7 +92,29 @@ class HandleTelegramUpdateAction
             return;
         }
 
+        if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)) {
+            $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
+
+            if ($chatReply !== null) {
+                $this->reply($config, $chatId, $chatReply);
+
+                return;
+            }
+        }
+
         $this->captureTelegramMessageAction->handle($config, $update);
+    }
+
+    /**
+     * @param  array<string, mixed>  $message
+     */
+    private function isChatEligible(array $message, string $text): bool
+    {
+        if ($text === '' || isset($message['photo']) || isset($message['voice'])) {
+            return false;
+        }
+
+        return filter_var($text, FILTER_VALIDATE_URL) === false;
     }
 
     private function handleCommand(TelegramBotConfig $config, int $chatId, int $fromUserId, ?string $fromUsername, string $text): void
@@ -89,7 +124,7 @@ class HandleTelegramUpdateAction
         if ($command === '/start') {
             $link = $this->findLink($config, $fromUserId);
             $this->reply($config, $chatId, $link !== null
-                ? "Welcome back, {$link->user->name}."."\n\n".self::HELP_TEXT
+                ? "Welcome back, {$link->user->name}.\n\n".$this->helpText($config)
                 : "Welcome. This bot isn't linked to your account yet.\n\n{$this->notLinkedMessage()}");
 
             return;
@@ -102,7 +137,7 @@ class HandleTelegramUpdateAction
         }
 
         if ($command === '/help') {
-            $this->reply($config, $chatId, self::HELP_TEXT);
+            $this->reply($config, $chatId, $this->helpText($config));
 
             return;
         }
@@ -200,6 +235,11 @@ class HandleTelegramUpdateAction
         }
 
         return $posts->map(fn (Post $post) => "{$post->human_id} · {$post->title} · {$post->status}")->implode("\n");
+    }
+
+    private function helpText(TelegramBotConfig $config): string
+    {
+        return self::HELP_TEXT."\n\n".($config->ai_chat_enabled ? self::CHAT_DEFAULT_TEXT : self::CAPTURE_DEFAULT_TEXT);
     }
 
     private function notLinkedMessage(): string

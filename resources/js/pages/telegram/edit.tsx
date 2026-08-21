@@ -30,6 +30,8 @@ type PageProps = {
     connected: boolean;
     botUsername: string | null;
     connectedAt: string | null;
+    aiChatEnabled: boolean;
+    hasAiProvider: boolean;
     myLink: LinkInfo | null;
     linkedMembers: LinkedMember[];
 };
@@ -38,6 +40,8 @@ export default function TelegramEdit({
     connected,
     botUsername,
     connectedAt,
+    aiChatEnabled,
+    hasAiProvider,
     myLink,
     linkedMembers,
 }: PageProps) {
@@ -214,6 +218,50 @@ export default function TelegramEdit({
                                 </ul>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {connected && (
+                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                        <div className="flex items-center justify-between gap-4">
+                            <div>
+                                <h2 className="font-medium">AI chat</h2>
+                                <p className="text-sm text-muted-foreground">
+                                    When on, a plain message gets a
+                                    conversational reply instead of being
+                                    captured as a note. Links, photos, voice
+                                    notes, and /note always still capture. The
+                                    AI has no access to this app's data or any
+                                    tools, it can only talk.
+                                </p>
+                            </div>
+                            <Badge
+                                variant={aiChatEnabled ? 'default' : 'outline'}
+                            >
+                                {aiChatEnabled ? 'On' : 'Off'}
+                            </Badge>
+                        </div>
+
+                        {!hasAiProvider && (
+                            <p className="text-sm text-muted-foreground">
+                                No AI provider is configured yet. Add one under
+                                AI Providers before turning this on.
+                            </p>
+                        )}
+
+                        <Form
+                            {...TelegramBotConfigController.toggleAiChat.form()}
+                        >
+                            {({ processing }) => (
+                                <Button
+                                    type="submit"
+                                    variant="outline"
+                                    disabled={processing}
+                                >
+                                    {aiChatEnabled ? 'Turn off' : 'Turn on'}
+                                </Button>
+                            )}
+                        </Form>
                     </div>
                 )}
             </div>
