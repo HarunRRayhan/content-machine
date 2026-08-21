@@ -95,10 +95,11 @@ class TelegramBotConfigControllerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page->where('hasAiProvider', true));
     }
 
-    public function test_toggle_ai_chat_flips_the_flag()
+    public function test_toggle_ai_chat_flips_the_flag_when_a_provider_is_configured()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        AiProviderCredential::factory()->create(['workspace_id' => $workspace->id]);
 
         $this->post(route('dashboard.telegram.ai-chat.toggle'))
             ->assertRedirect(route('dashboard.telegram.edit'));
@@ -106,6 +107,17 @@ class TelegramBotConfigControllerTest extends TestCase
         $this->assertTrue($config->fresh()->ai_chat_enabled);
 
         $this->post(route('dashboard.telegram.ai-chat.toggle'));
+
+        $this->assertFalse($config->fresh()->ai_chat_enabled);
+    }
+
+    public function test_toggle_ai_chat_is_rejected_without_a_configured_provider()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+
+        $this->post(route('dashboard.telegram.ai-chat.toggle'))
+            ->assertRedirect(route('dashboard.telegram.edit'));
 
         $this->assertFalse($config->fresh()->ai_chat_enabled);
     }

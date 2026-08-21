@@ -5,6 +5,7 @@ namespace App\Actions\Telegram;
 use App\Data\Telegram\ConnectTelegramBotData;
 use App\Models\TelegramBotConfig;
 use App\Models\Workspace;
+use App\Support\Telegram\TelegramBotCommands;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -27,19 +28,6 @@ use RuntimeException;
  */
 class ConnectTelegramBotAction
 {
-    /**
-     * @var array<int, array{command: string, description: string}>
-     */
-    private const COMMANDS = [
-        ['command' => 'start', 'description' => 'Get started'],
-        ['command' => 'help', 'description' => 'See what I can do'],
-        ['command' => 'me', 'description' => 'Which account you\'re linked as'],
-        ['command' => 'link', 'description' => 'Link your account with a code'],
-        ['command' => 'videos', 'description' => 'Your most recent videos'],
-        ['command' => 'posts', 'description' => 'Your most recent posts'],
-        ['command' => 'note', 'description' => 'Save a Scratch Pad note'],
-    ];
-
     public function __construct(
         private readonly TelegramClientContract $client,
     ) {}
@@ -74,7 +62,7 @@ class ConnectTelegramBotAction
 
         $config->save();
 
-        $this->client->setMyCommands($data->botToken, self::COMMANDS);
+        $this->client->setMyCommands($data->botToken, TelegramBotCommands::LIST);
 
         return $config;
     }

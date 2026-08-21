@@ -78,7 +78,13 @@ class TelegramBotConfigController extends Controller
 
         abort_if($config === null || ! $config->isConnected(), 404, 'The Telegram bot is not connected.');
 
-        $toggleTelegramAiChatAction->handle($config);
+        try {
+            $toggleTelegramAiChatAction->handle($config);
+        } catch (RuntimeException $e) {
+            Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
+
+            return to_route('dashboard.telegram.edit');
+        }
 
         return to_route('dashboard.telegram.edit');
     }
