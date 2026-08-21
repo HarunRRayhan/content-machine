@@ -389,18 +389,30 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                 </div>
 
                 <Tabs defaultValue="models">
-                    <TabsList>
-                        <TabsTrigger value="models">Models</TabsTrigger>
-                        <TabsTrigger value="providers">Providers</TabsTrigger>
-                    </TabsList>
+                    <div className="flex justify-center">
+                        <TabsList>
+                            <TabsTrigger value="models">Models</TabsTrigger>
+                            <TabsTrigger value="providers">
+                                Providers
+                            </TabsTrigger>
+                        </TabsList>
+                    </div>
 
                     <TabsContent value="models">
                         <Tabs defaultValue="default">
-                            <TabsList>
-                                <TabsTrigger value="default">
+                            <TabsList className="h-auto w-fit justify-start rounded-none border-b bg-transparent p-0">
+                                <TabsTrigger
+                                    value="default"
+                                    className="rounded-none border-b-2 border-transparent px-3 pb-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                                >
                                     Default
                                 </TabsTrigger>
-                                <TabsTrigger value="vision">Vision</TabsTrigger>
+                                <TabsTrigger
+                                    value="vision"
+                                    className="rounded-none border-b-2 border-transparent px-3 pb-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                                >
+                                    Vision
+                                </TabsTrigger>
                             </TabsList>
 
                             <TabsContent value="default">
