@@ -20,7 +20,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $label
  * @property string $provider
  * @property string|null $base_url
- * @property string $model
+ * @property string|null $model
+ * @property array<int, array{id: string, label: string}>|null $discovered_models
  * @property string $api_key
  * @property int $priority
  * @property bool $enabled
@@ -44,6 +45,7 @@ class AiProviderCredential extends Model
         'provider',
         'base_url',
         'model',
+        'discovered_models',
         'api_key',
         'priority',
         'enabled',
@@ -59,6 +61,7 @@ class AiProviderCredential extends Model
     {
         return [
             'api_key' => 'encrypted',
+            'discovered_models' => 'array',
             'enabled' => 'boolean',
             'verified_at' => 'datetime',
         ];

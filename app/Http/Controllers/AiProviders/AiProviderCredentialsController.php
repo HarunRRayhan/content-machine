@@ -5,6 +5,7 @@ namespace App\Http\Controllers\AiProviders;
 use App\Actions\AiProviders\CreateAiProviderCredentialAction;
 use App\Actions\AiProviders\DeleteAiProviderCredentialAction;
 use App\Actions\AiProviders\ReorderAiProviderCredentialsAction;
+use App\Actions\AiProviders\SetAiProviderCredentialModelAction;
 use App\Actions\AiProviders\ToggleAiProviderCredentialAction;
 use App\Actions\AiProviders\UpdateAiProviderCredentialAction;
 use App\Actions\AiProviders\VerifyAiProviderCredentialAction;
@@ -13,6 +14,7 @@ use App\Data\AiProviders\ReorderAiProviderCredentialsData;
 use App\Data\AiProviders\UpdateAiProviderCredentialData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AiProviders\ReorderAiProviderCredentialsRequest;
+use App\Http\Requests\AiProviders\SetAiProviderCredentialModelRequest;
 use App\Http\Requests\AiProviders\StoreAiProviderCredentialRequest;
 use App\Http\Requests\AiProviders\UpdateAiProviderCredentialRequest;
 use App\Models\AiProviderCredential;
@@ -66,6 +68,19 @@ class AiProviderCredentialsController extends Controller
         $updateAiProviderCredentialAction->handle($aiProviderCredential, UpdateAiProviderCredentialData::fromRequest($request));
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Credential updated.')]);
+
+        return to_route('dashboard.ai-providers.index');
+    }
+
+    public function setModel(SetAiProviderCredentialModelRequest $request, AiProviderCredential $aiProviderCredential, SetAiProviderCredentialModelAction $setAiProviderCredentialModelAction): RedirectResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
+
+        $setAiProviderCredentialModelAction->handle($aiProviderCredential, $request->string('model')->toString());
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Model set.')]);
 
         return to_route('dashboard.ai-providers.index');
     }
@@ -148,6 +163,7 @@ class AiProviderCredentialsController extends Controller
             'provider' => $credential->provider,
             'base_url' => $credential->base_url,
             'model' => $credential->model,
+            'discovered_models' => $credential->discovered_models,
             'priority' => $credential->priority,
             'enabled' => $credential->enabled,
             'verified_at' => $credential->verified_at?->toIso8601String(),

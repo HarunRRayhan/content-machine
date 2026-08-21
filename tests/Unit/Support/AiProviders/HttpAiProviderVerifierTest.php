@@ -55,6 +55,57 @@ class HttpAiProviderVerifierTest extends TestCase
             && $request->hasHeader('Authorization', 'Bearer sk-openai-test'));
     }
 
+    public function test_anthropic_models_are_parsed_with_display_name_as_the_label_most_recent_first()
+    {
+        Http::fake(['api.anthropic.com/*' => Http::response([
+            'data' => [
+                ['id' => 'claude-opus-5', 'display_name' => 'Claude Opus 5', 'type' => 'model'],
+                ['id' => 'claude-sonnet-4-5', 'display_name' => 'Claude Sonnet 4.5', 'type' => 'model'],
+            ],
+        ], 200)]);
+
+        $credential = AiProviderCredential::factory()->make(['provider' => 'anthropic']);
+
+        $result = (new HttpAiProviderVerifier)->verify($credential);
+
+        $this->assertSame([
+            ['id' => 'claude-opus-5', 'label' => 'Claude Opus 5'],
+            ['id' => 'claude-sonnet-4-5', 'label' => 'Claude Sonnet 4.5'],
+        ], $result->models);
+    }
+
+    public function test_openai_models_are_parsed_with_id_as_the_label_sorted_newest_first()
+    {
+        Http::fake(['api.openai.com/*' => Http::response([
+            'object' => 'list',
+            'data' => [
+                ['id' => 'gpt-4o', 'object' => 'model', 'created' => 1000],
+                ['id' => 'gpt-5.4', 'object' => 'model', 'created' => 2000],
+            ],
+        ], 200)]);
+
+        $credential = AiProviderCredential::factory()->openai()->make();
+
+        $result = (new HttpAiProviderVerifier)->verify($credential);
+
+        $this->assertSame([
+            ['id' => 'gpt-5.4', 'label' => 'gpt-5.4'],
+            ['id' => 'gpt-4o', 'label' => 'gpt-4o'],
+        ], $result->models);
+    }
+
+    public function test_no_data_field_results_in_an_empty_model_list_not_a_failure()
+    {
+        Http::fake(['api.anthropic.com/*' => Http::response([], 200)]);
+
+        $credential = AiProviderCredential::factory()->make(['provider' => 'anthropic']);
+
+        $result = (new HttpAiProviderVerifier)->verify($credential);
+
+        $this->assertTrue($result->successful);
+        $this->assertSame([], $result->models);
+    }
+
     public function test_a_401_is_reported_as_an_invalid_key()
     {
         Http::fake(['*' => Http::response(['error' => ['message' => 'nope']], 401)]);

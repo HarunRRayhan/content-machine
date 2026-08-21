@@ -6,6 +6,8 @@ use App\Actions\AiProviders\CreateAiProviderCredentialAction;
 use App\Data\AiProviders\CreateAiProviderCredentialData;
 use App\Models\AiProviderCredential;
 use App\Models\Workspace;
+use App\Support\AiProviders\AiProviderVerificationResult;
+use App\Support\AiProviders\AiProviderVerifierContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -13,21 +15,37 @@ class CreateAiProviderCredentialActionTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function action(AiProviderVerifierContract $verifier): CreateAiProviderCredentialAction
+    {
+        return new CreateAiProviderCredentialAction($verifier);
+    }
+
+    private function alwaysFailingVerifier(): AiProviderVerifierContract
+    {
+        return new class implements AiProviderVerifierContract
+        {
+            public function verify(AiProviderCredential $credential): AiProviderVerificationResult
+            {
+                return AiProviderVerificationResult::failure('unreachable in this test');
+            }
+        };
+    }
+
     public function test_it_creates_a_credential_with_priority_zero_when_the_chain_is_empty()
     {
         $workspace = Workspace::factory()->create();
 
-        $credential = (new CreateAiProviderCredentialAction)->handle($workspace, new CreateAiProviderCredentialData(
+        $credential = $this->action($this->alwaysFailingVerifier())->handle($workspace, new CreateAiProviderCredentialData(
             label: 'Primary',
             provider: 'anthropic',
             baseUrl: null,
-            model: 'claude-sonnet-4-5',
             apiKey: 'sk-ant-123',
         ));
 
         $this->assertSame(0, $credential->priority);
         $this->assertTrue($credential->enabled);
         $this->assertSame('sk-ant-123', $credential->api_key);
+        $this->assertNull($credential->model);
     }
 
     public function test_it_appends_after_the_existing_highest_priority()
@@ -35,11 +53,10 @@ class CreateAiProviderCredentialActionTest extends TestCase
         $workspace = Workspace::factory()->create();
         AiProviderCredential::factory()->for($workspace)->create(['priority' => 5]);
 
-        $credential = (new CreateAiProviderCredentialAction)->handle($workspace, new CreateAiProviderCredentialData(
+        $credential = $this->action($this->alwaysFailingVerifier())->handle($workspace, new CreateAiProviderCredentialData(
             label: 'Fallback',
             provider: 'openai',
             baseUrl: 'https://openrouter.ai/api',
-            model: 'gpt-4o',
             apiKey: 'sk-456',
         ));
 
@@ -52,14 +69,80 @@ class CreateAiProviderCredentialActionTest extends TestCase
         $other = Workspace::factory()->create();
         AiProviderCredential::factory()->for($other)->create(['priority' => 99]);
 
-        $credential = (new CreateAiProviderCredentialAction)->handle($workspace, new CreateAiProviderCredentialData(
+        $credential = $this->action($this->alwaysFailingVerifier())->handle($workspace, new CreateAiProviderCredentialData(
             label: 'Primary',
             provider: 'anthropic',
             baseUrl: null,
-            model: 'claude-sonnet-4-5',
             apiKey: 'sk-ant-123',
         ));
 
         $this->assertSame(0, $credential->priority);
+    }
+
+    public function test_a_successful_check_stores_discovered_models_and_marks_verified()
+    {
+        $workspace = Workspace::factory()->create();
+        $models = [['id' => 'claude-sonnet-4-5', 'label' => 'Claude Sonnet 4.5']];
+
+        $verifier = new class($models) implements AiProviderVerifierContract
+        {
+            public function __construct(private readonly array $models) {}
+
+            public function verify(AiProviderCredential $credential): AiProviderVerificationResult
+            {
+                return AiProviderVerificationResult::success($this->models);
+            }
+        };
+
+        $credential = $this->action($verifier)->handle($workspace, new CreateAiProviderCredentialData(
+            label: 'Primary',
+            provider: 'anthropic',
+            baseUrl: null,
+            apiKey: 'sk-ant-123',
+        ));
+
+        $this->assertNull($credential->model);
+        $this->assertSame($models, $credential->discovered_models);
+        $this->assertNotNull($credential->verified_at);
+    }
+
+    public function test_a_successful_check_with_no_models_listed_still_marks_verified()
+    {
+        $workspace = Workspace::factory()->create();
+
+        $verifier = new class implements AiProviderVerifierContract
+        {
+            public function verify(AiProviderCredential $credential): AiProviderVerificationResult
+            {
+                return AiProviderVerificationResult::success([]);
+            }
+        };
+
+        $credential = $this->action($verifier)->handle($workspace, new CreateAiProviderCredentialData(
+            label: 'Primary',
+            provider: 'anthropic',
+            baseUrl: null,
+            apiKey: 'sk-ant-123',
+        ));
+
+        $this->assertSame([], $credential->discovered_models);
+        $this->assertNotNull($credential->verified_at);
+    }
+
+    public function test_a_failed_check_still_saves_the_credential_unverified_and_undiscovered()
+    {
+        $workspace = Workspace::factory()->create();
+
+        $credential = $this->action($this->alwaysFailingVerifier())->handle($workspace, new CreateAiProviderCredentialData(
+            label: 'Primary',
+            provider: 'anthropic',
+            baseUrl: null,
+            apiKey: 'sk-ant-123',
+        ));
+
+        $this->assertNull($credential->model);
+        $this->assertNull($credential->discovered_models);
+        $this->assertNull($credential->verified_at);
+        $this->assertSame('sk-ant-123', $credential->api_key);
     }
 }

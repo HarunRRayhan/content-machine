@@ -60,33 +60,34 @@ class AiProviderCredentialsControllerTest extends TestCase
         $response->assertDontSee('sk-ant-', false);
     }
 
-    public function test_store_creates_a_credential_at_the_end_of_the_chain()
+    public function test_store_creates_a_credential_at_the_end_of_the_chain_with_no_model_yet()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         AiProviderCredential::factory()->for($workspace)->create(['priority' => 0]);
+
+        Http::fake(['openrouter.ai/*' => Http::response(['data' => [
+            ['id' => 'gpt-4o', 'object' => 'model', 'created' => 1715367049],
+        ]], 200)]);
 
         $response = $this->post(route('dashboard.ai-providers.store'), [
             'label' => 'Fallback',
             'provider' => 'openai',
             'base_url' => 'https://openrouter.ai/api',
-            'model' => 'gpt-4o',
             'api_key' => 'sk-test-123',
         ]);
 
         $response->assertRedirect(route('dashboard.ai-providers.index'));
 
-        $this->assertDatabaseHas('ai_provider_credentials', [
-            'workspace_id' => $workspace->id,
-            'label' => 'Fallback',
-            'provider' => 'openai',
-            'base_url' => 'https://openrouter.ai/api',
-            'model' => 'gpt-4o',
-            'priority' => 1,
-            'enabled' => true,
-        ]);
-
         $stored = AiProviderCredential::where('label', 'Fallback')->sole();
+        $this->assertSame($workspace->id, $stored->workspace_id);
+        $this->assertSame('openai', $stored->provider);
+        $this->assertSame('https://openrouter.ai/api', $stored->base_url);
+        $this->assertSame(1, $stored->priority);
+        $this->assertTrue($stored->enabled);
         $this->assertSame('sk-test-123', $stored->api_key);
+        $this->assertNull($stored->model);
+        $this->assertSame([['id' => 'gpt-4o', 'label' => 'gpt-4o']], $stored->discovered_models);
+        $this->assertNotNull($stored->verified_at);
     }
 
     public function test_store_rejects_an_unknown_provider()
@@ -96,11 +97,36 @@ class AiProviderCredentialsControllerTest extends TestCase
         $this->post(route('dashboard.ai-providers.store'), [
             'label' => 'Bad',
             'provider' => 'made-up',
-            'model' => 'x',
             'api_key' => 'x',
         ])->assertSessionHasErrors('provider');
 
         $this->assertSame(0, AiProviderCredential::where('workspace_id', $workspace->id)->count());
+    }
+
+    public function test_set_model_resolves_a_credential_out_of_the_needs_a_model_state()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $credential = AiProviderCredential::factory()->for($workspace)->create([
+            'model' => null,
+            'discovered_models' => [['id' => 'gpt-4o', 'label' => 'gpt-4o']],
+        ]);
+
+        $this->post(route('dashboard.ai-providers.set-model', $credential), ['model' => 'gpt-4o'])
+            ->assertRedirect(route('dashboard.ai-providers.index'));
+
+        $credential->refresh();
+        $this->assertSame('gpt-4o', $credential->model);
+        $this->assertNull($credential->discovered_models);
+    }
+
+    public function test_set_model_404s_for_another_workspaces_credential()
+    {
+        $this->actingAsWorkspaceMember();
+        $other = Workspace::factory()->create();
+        $credential = AiProviderCredential::factory()->for($other)->create(['model' => null]);
+
+        $this->post(route('dashboard.ai-providers.set-model', $credential), ['model' => 'gpt-4o'])
+            ->assertNotFound();
     }
 
     public function test_update_changes_fields_without_requiring_a_new_key()

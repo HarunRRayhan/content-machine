@@ -105,6 +105,19 @@ class HttpAiCompletionClientTest extends TestCase
         $this->assertSame('The completion provider returned no text.', $result->error);
     }
 
+    public function test_a_credential_with_no_model_set_fails_honestly_without_calling_the_provider()
+    {
+        Http::fake();
+
+        $credential = AiProviderCredential::factory()->make(['provider' => 'anthropic', 'model' => null]);
+
+        $result = (new HttpAiCompletionClient)->complete($credential, 'sys', 'user');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('This credential has no model set yet.', $result->error);
+        Http::assertNothingSent();
+    }
+
     public function test_a_connection_failure_is_reported_without_leaking_the_exception()
     {
         Http::fake(function () {
