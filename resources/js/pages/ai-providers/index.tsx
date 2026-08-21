@@ -1,4 +1,5 @@
 import { Form, Head, router } from '@inertiajs/react';
+import { MoreVertical, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import AiProviderCredentialsController from '@/actions/App/Http/Controllers/AiProviders/AiProviderCredentialsController';
 import Heading from '@/components/heading';
@@ -12,6 +13,13 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { home } from '@/routes/dashboard';
@@ -125,10 +133,111 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
             <Head title="AI Providers" />
 
             <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
-                <Heading
-                    title="AI Providers"
-                    description="API keys for AI features. Tried top to bottom; if one fails, the next is used. No need to know the model name: add the key and its model is detected automatically."
-                />
+                <div className="flex items-start justify-between gap-4">
+                    <Heading
+                        title="AI Providers"
+                        description="API keys for AI features. Tried top to bottom; if one fails, the next is used. No need to know the model name: add the key and its model is detected automatically."
+                    />
+
+                    <Dialog open={addOpen} onOpenChange={setAddOpen}>
+                        <DialogTrigger asChild>
+                            <Button className="shrink-0">Add credential</Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Add an AI provider</DialogTitle>
+                            </DialogHeader>
+                            <Form
+                                {...AiProviderCredentialsController.store.form()}
+                                resetOnSuccess
+                                onSuccess={() => setAddOpen(false)}
+                                className="space-y-4"
+                            >
+                                {({ processing, errors }) => (
+                                    <>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="label">Label</Label>
+                                            <Input
+                                                id="label"
+                                                name="label"
+                                                required
+                                                placeholder="e.g. Anthropic primary"
+                                            />
+                                            <InputError
+                                                message={errors.label}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="provider">
+                                                Provider format
+                                            </Label>
+                                            <select
+                                                id="provider"
+                                                name="provider"
+                                                value={newProvider}
+                                                onChange={(event) =>
+                                                    setNewProvider(
+                                                        event.target.value,
+                                                    )
+                                                }
+                                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                            >
+                                                <option value="anthropic">
+                                                    Anthropic-style
+                                                </option>
+                                                <option value="openai">
+                                                    OpenAI-style
+                                                </option>
+                                            </select>
+                                            <InputError
+                                                message={errors.provider}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="base_url">
+                                                Base URL (optional)
+                                            </Label>
+                                            <Input
+                                                id="base_url"
+                                                name="base_url"
+                                                placeholder={
+                                                    PROVIDER_DEFAULT_BASE_URL[
+                                                        newProvider
+                                                    ]
+                                                }
+                                            />
+                                            <InputError
+                                                message={errors.base_url}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="api_key">
+                                                API key
+                                            </Label>
+                                            <Input
+                                                id="api_key"
+                                                type="password"
+                                                name="api_key"
+                                                required
+                                                autoComplete="off"
+                                            />
+                                            <InputError
+                                                message={errors.api_key}
+                                            />
+                                        </div>
+
+                                        <Button disabled={processing}>
+                                            Add credential
+                                        </Button>
+                                    </>
+                                )}
+                            </Form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
 
                 <div className="space-y-3">
                     {credentials.length === 0 && (
@@ -143,54 +252,23 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                             className="space-y-3 rounded-lg border p-3"
                         >
                             <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-3">
-                                    <div className="flex flex-col">
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                move(credential.id, 'up')
-                                            }
-                                            disabled={position === 0}
-                                            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
-                                            aria-label="Move up"
-                                        >
-                                            ▲
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                move(credential.id, 'down')
-                                            }
-                                            disabled={
-                                                position ===
-                                                credentials.length - 1
-                                            }
-                                            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
-                                            aria-label="Move down"
-                                        >
-                                            ▼
-                                        </button>
-                                    </div>
-
-                                    <div>
-                                        <p className="flex items-center gap-2 font-medium">
-                                            {credential.label}
-                                            {position === 0 &&
-                                                credential.enabled && (
-                                                    <Badge variant="default">
-                                                        Default
-                                                    </Badge>
-                                                )}
-                                        </p>
-                                        <p className="text-sm text-muted-foreground">
-                                            {providerLabel(credential.provider)}
-                                            {' · '}
-                                            {credential.model ??
-                                                'Model not set'}
-                                            {credential.base_url &&
-                                                ` · ${credential.base_url}`}
-                                        </p>
-                                    </div>
+                                <div>
+                                    <p className="flex items-center gap-2 font-medium">
+                                        {credential.label}
+                                        {position === 0 &&
+                                            credential.enabled && (
+                                                <Badge variant="default">
+                                                    Default
+                                                </Badge>
+                                            )}
+                                    </p>
+                                    <p className="text-sm text-muted-foreground">
+                                        {providerLabel(credential.provider)}
+                                        {' · '}
+                                        {credential.model ?? 'Model not set'}
+                                        {credential.base_url &&
+                                            ` · ${credential.base_url}`}
+                                    </p>
                                 </div>
 
                                 <div className="flex items-center gap-2">
@@ -216,14 +294,99 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                             ? 'Verified'
                                             : 'Unverified'}
                                     </Badge>
+
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="size-8"
+                                                aria-label="More actions"
+                                            >
+                                                <MoreVertical className="size-4" />
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                            <DropdownMenuItem
+                                                disabled={position === 0}
+                                                onSelect={() =>
+                                                    move(credential.id, 'up')
+                                                }
+                                            >
+                                                Move up
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                                disabled={
+                                                    position ===
+                                                    credentials.length - 1
+                                                }
+                                                onSelect={() =>
+                                                    move(credential.id, 'down')
+                                                }
+                                            >
+                                                Move down
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                                onSelect={() =>
+                                                    router.post(
+                                                        AiProviderCredentialsController.toggle.url(
+                                                            credential.id,
+                                                        ),
+                                                        {},
+                                                        {
+                                                            preserveScroll: true,
+                                                        },
+                                                    )
+                                                }
+                                            >
+                                                {credential.enabled
+                                                    ? 'Disable'
+                                                    : 'Enable'}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                                onSelect={() =>
+                                                    setEditingId(
+                                                        editingId ===
+                                                            credential.id
+                                                            ? null
+                                                            : credential.id,
+                                                    )
+                                                }
+                                            >
+                                                {editingId === credential.id
+                                                    ? 'Cancel edit'
+                                                    : 'Edit'}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                                variant="destructive"
+                                                onSelect={() =>
+                                                    router.delete(
+                                                        AiProviderCredentialsController.destroy.url(
+                                                            credential.id,
+                                                        ),
+                                                        {
+                                                            preserveScroll: true,
+                                                        },
+                                                    )
+                                                }
+                                            >
+                                                Delete
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 </div>
                             </div>
 
-                            {credential.model === null && (
-                                <ModelPicker credential={credential} />
-                            )}
-
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex items-center justify-between gap-2 rounded-md border border-dashed p-2 text-sm">
+                                <span>
+                                    <span className="text-muted-foreground">
+                                        Model:
+                                    </span>{' '}
+                                    {credential.model ?? 'Not set'}
+                                </span>
                                 <Form
                                     {...AiProviderCredentialsController.verify.form(
                                         credential.id,
@@ -236,64 +399,18 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                                             variant="outline"
                                             disabled={processing}
                                         >
-                                            Verify
-                                        </Button>
-                                    )}
-                                </Form>
-
-                                <Form
-                                    {...AiProviderCredentialsController.toggle.form(
-                                        credential.id,
-                                    )}
-                                >
-                                    {({ processing }) => (
-                                        <Button
-                                            type="submit"
-                                            size="sm"
-                                            variant="outline"
-                                            disabled={processing}
-                                        >
-                                            {credential.enabled
-                                                ? 'Disable'
-                                                : 'Enable'}
-                                        </Button>
-                                    )}
-                                </Form>
-
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                        setEditingId(
-                                            editingId === credential.id
-                                                ? null
-                                                : credential.id,
-                                        )
-                                    }
-                                >
-                                    {editingId === credential.id
-                                        ? 'Cancel'
-                                        : 'Edit'}
-                                </Button>
-
-                                <Form
-                                    {...AiProviderCredentialsController.destroy.form(
-                                        credential.id,
-                                    )}
-                                >
-                                    {({ processing }) => (
-                                        <Button
-                                            type="submit"
-                                            size="sm"
-                                            variant="destructive"
-                                            disabled={processing}
-                                        >
-                                            Delete
+                                            <RefreshCw className="size-3.5" />
+                                            Reload models
                                         </Button>
                                     )}
                                 </Form>
                             </div>
+
+                            {(credential.model === null ||
+                                (credential.discovered_models?.length ?? 0) >
+                                    0) && (
+                                <ModelPicker credential={credential} />
+                            )}
 
                             {editingId === credential.id && (
                                 <Form
@@ -398,95 +515,6 @@ export default function AiProvidersIndex({ credentials }: PageProps) {
                         </div>
                     ))}
                 </div>
-
-                <Dialog open={addOpen} onOpenChange={setAddOpen}>
-                    <DialogTrigger asChild>
-                        <Button className="self-start">Add credential</Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Add an AI provider</DialogTitle>
-                        </DialogHeader>
-                        <Form
-                            {...AiProviderCredentialsController.store.form()}
-                            resetOnSuccess
-                            onSuccess={() => setAddOpen(false)}
-                            className="space-y-4"
-                        >
-                            {({ processing, errors }) => (
-                                <>
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="label">Label</Label>
-                                        <Input
-                                            id="label"
-                                            name="label"
-                                            required
-                                            placeholder="e.g. Anthropic primary"
-                                        />
-                                        <InputError message={errors.label} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="provider">
-                                            Provider format
-                                        </Label>
-                                        <select
-                                            id="provider"
-                                            name="provider"
-                                            value={newProvider}
-                                            onChange={(event) =>
-                                                setNewProvider(
-                                                    event.target.value,
-                                                )
-                                            }
-                                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                                        >
-                                            <option value="anthropic">
-                                                Anthropic-style
-                                            </option>
-                                            <option value="openai">
-                                                OpenAI-style
-                                            </option>
-                                        </select>
-                                        <InputError message={errors.provider} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="base_url">
-                                            Base URL (optional)
-                                        </Label>
-                                        <Input
-                                            id="base_url"
-                                            name="base_url"
-                                            placeholder={
-                                                PROVIDER_DEFAULT_BASE_URL[
-                                                    newProvider
-                                                ]
-                                            }
-                                        />
-                                        <InputError message={errors.base_url} />
-                                    </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="api_key">API key</Label>
-                                        <Input
-                                            id="api_key"
-                                            type="password"
-                                            name="api_key"
-                                            required
-                                            autoComplete="off"
-                                        />
-                                        <InputError message={errors.api_key} />
-                                    </div>
-
-                                    <Button disabled={processing}>
-                                        Add credential
-                                    </Button>
-                                </>
-                            )}
-                        </Form>
-                    </DialogContent>
-                </Dialog>
             </div>
         </>
     );
