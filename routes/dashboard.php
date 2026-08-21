@@ -35,6 +35,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::post('scratchpad/link', [ScratchpadController::class, 'storeLink'])->name('scratchpad.link');
         Route::get('scratchpad/media/{mediaAsset}', [ScratchpadController::class, 'media'])->name('scratchpad.media');
         Route::get('scratchpad/{entry}', [ScratchpadController::class, 'show'])->name('scratchpad.show');
+        Route::delete('scratchpad/{entry}', [ScratchpadController::class, 'destroy'])->name('scratchpad.destroy');
         Route::post('scratchpad/{entry}/triage', [ScratchpadController::class, 'triage'])->name('scratchpad.triage');
         Route::post('scratchpad/{entry}/suggest-triage', [ScratchpadController::class, 'suggestTriage'])->name('scratchpad.suggest-triage');
 

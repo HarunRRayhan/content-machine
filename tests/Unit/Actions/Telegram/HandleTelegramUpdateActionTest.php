@@ -6,6 +6,8 @@ use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureScratchpadPhotoAction;
 use App\Actions\Scratchpad\CaptureScratchpadVoiceAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
+use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
@@ -58,6 +60,7 @@ class HandleTelegramUpdateActionTest extends TestCase
             new LinkTelegramAccountAction,
             new GenerateTelegramChatReplyAction($completionClient, new AiProviderCredentialResolver),
             new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
+            new DeleteRecentScratchpadEntriesAction(new DeleteScratchpadEntryAction),
             $this->client,
         );
     }
@@ -212,6 +215,57 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->action()->handle($config, $this->update(1, '/notes'));
 
         $this->assertSame('No Scratch Pad captures yet.', $this->lastReply());
+    }
+
+    public function test_clearnotes_command_deletes_recent_untriaged_notes()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        ScratchpadEntry::factory()->for($config->workspace)->count(2)->create();
+        ScratchpadEntry::factory()->for($config->workspace)->triaged()->create();
+
+        $this->action()->handle($config, $this->update(1, '/clearnotes'));
+
+        $this->assertSame('Deleted 2 notes.', $this->lastReply());
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
+    public function test_clearnotes_command_with_nothing_to_delete_says_so()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+
+        $this->action()->handle($config, $this->update(1, '/clearnotes'));
+
+        $this->assertSame('No notes to delete.', $this->lastReply());
+    }
+
+    public function test_plain_text_asking_to_delete_notes_runs_clearnotes_via_intent_resolution()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                if (str_contains($systemPrompt, 'Classify the user')) {
+                    return AiCompletionResult::success('clear_notes');
+                }
+
+                throw new RuntimeException('a recognized intent should never fall through to a normal chat reply');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, 'delete all of these'));
+
+        $this->assertSame('Deleted 1 note.', $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
     }
 
     public function test_note_command_with_no_text_prompts_for_it()

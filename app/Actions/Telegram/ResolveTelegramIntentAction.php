@@ -8,23 +8,23 @@ use App\Support\AiProviders\AiProviderCredentialResolver;
 
 /**
  * Recognizes when a free-form chat message is actually asking for one of
- * the bot's existing read-only commands (/me, /videos, /posts, /notes)
+ * the bot's existing commands (/me, /videos, /posts, /notes, /clearnotes)
  * and, if so, returns which one. This never invents a new capability: it
  * only ever routes to a command the sender could already type by hand
- * (HandleTelegramUpdateAction::intentReply() runs the exact same lookups
- * as the slash commands). A message that isn't clearly one of these
- * returns null, and the caller falls through to a normal conversational
- * reply via GenerateTelegramChatReplyAction. This is one classification
- * call ahead of the chat call, not tool-calling: no multi-turn loop, no
- * model-chosen arguments, just a fixed single-word intent from a fixed
- * set.
+ * (HandleTelegramUpdateAction::intentReply() runs the exact same lookups,
+ * or the exact same delete, as the matching slash command). A message that
+ * isn't clearly one of these returns null, and the caller falls through to
+ * a normal conversational reply via GenerateTelegramChatReplyAction. This
+ * is one classification call ahead of the chat call, not tool-calling: no
+ * multi-turn loop, no model-chosen arguments, just a fixed single-word
+ * intent from a fixed set.
  */
 class ResolveTelegramIntentAction
 {
     /**
      * @var list<string>
      */
-    private const KNOWN_INTENTS = ['me', 'videos', 'posts', 'notes'];
+    private const KNOWN_INTENTS = ['me', 'videos', 'posts', 'notes', 'clear_notes'];
 
     private const SYSTEM_PROMPT = <<<'PROMPT'
         Classify the user's message as one of these exact intents, only if
@@ -36,6 +36,8 @@ class ResolveTelegramIntentAction
         posts: asking to see, list, or check their recent posts.
         notes: asking to see, list, or check their recent Scratch Pad
         captures or notes.
+        clear_notes: asking to delete, clear, or remove their recent
+        Scratch Pad notes/captures (not a specific post, video, or idea).
 
         If the message doesn't clearly ask for one of these, reply with
         exactly: none

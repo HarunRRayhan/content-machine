@@ -3,6 +3,7 @@
 namespace App\Actions\Telegram;
 
 use App\Actions\Scratchpad\CaptureTextNoteAction;
+use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
 use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
@@ -26,15 +27,17 @@ use RuntimeException;
  * capture path this bot always had, and /note always force-captures
  * regardless of ai_chat_enabled. Within that branch, ResolveTelegramIntentAction
  * gets first look: if the message clearly asks for one of the bot's
- * existing read-only commands (/me, /videos, /posts, /notes) in plain
- * language, it runs that command's own lookup (intentReply() below) and
- * replies with exactly what typing the command would have produced, no
- * paraphrasing of the data. Only when that finds no intent does
- * GenerateTelegramChatReplyAction get the message as a normal chat turn.
- * There is still no general tool-calling/agent loop in this codebase:
- * intent resolution is one fixed classification into a fixed, small set
- * of commands the sender could already type by hand, nothing the model
- * chooses freely.
+ * existing commands (/me, /videos, /posts, /notes, /clearnotes) in plain
+ * language, it runs that command's own handling (intentReply() below) and
+ * replies with exactly what typing the command would have produced.
+ * Every one of those is a lookup except /clearnotes, which deletes; either
+ * way it's the exact same effect typing the command would have had, no
+ * paraphrasing, no model-chosen action. Only when that finds no intent
+ * does GenerateTelegramChatReplyAction get the message as a normal chat
+ * turn. There is still no general tool-calling/agent loop in this
+ * codebase: intent resolution is one fixed classification into a fixed,
+ * small set of commands the sender could already type by hand, nothing
+ * the model chooses freely.
  *
  * Every message gets acknowledge()'d the instant it arrives, a heart
  * reaction on the message plus Telegram's typing indicator, before any of
@@ -53,6 +56,7 @@ class HandleTelegramUpdateAction
         /posts: your workspace's most recent posts
         /notes: your workspace's most recent Scratch Pad captures
         /note <text>: save a Scratch Pad note
+        /clearnotes: delete your workspace's most recent untriaged Scratch Pad notes
         /help: show this list
         TEXT;
 
@@ -70,6 +74,7 @@ class HandleTelegramUpdateAction
         private readonly LinkTelegramAccountAction $linkTelegramAccountAction,
         private readonly GenerateTelegramChatReplyAction $generateTelegramChatReplyAction,
         private readonly ResolveTelegramIntentAction $resolveTelegramIntentAction,
+        private readonly DeleteRecentScratchpadEntriesAction $deleteRecentScratchpadEntriesAction,
         private readonly TelegramClientContract $client,
     ) {}
 
@@ -222,17 +227,20 @@ class HandleTelegramUpdateAction
             '/posts' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'posts')),
             '/notes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'notes')),
             '/note' => $this->handleNote($config, $chatId, $args),
+            '/clearnotes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'clear_notes')),
             default => $this->reply($config, $chatId, 'Unknown command. Try /help.'),
         };
     }
 
     /**
-     * Runs the exact same lookup the matching slash command runs
-     * (/me, /videos, /posts, /notes), whether it was reached by typing
-     * that command or by ResolveTelegramIntentAction recognizing the
-     * same request in plain language. $intent is always one of
+     * Runs the exact same handling the matching slash command runs
+     * (/me, /videos, /posts, /notes, /clearnotes), whether it was reached
+     * by typing that command or by ResolveTelegramIntentAction recognizing
+     * the same request in plain language. $intent is always one of
      * ResolveTelegramIntentAction::KNOWN_INTENTS or the literal command
-     * names above, never model-chosen free text.
+     * names above, never model-chosen free text. Every branch but
+     * clear_notes is a pure lookup; clear_notes deletes, same as typing
+     * /clearnotes would.
      */
     private function intentReply(TelegramBotConfig $config, TelegramBotLink $link, string $intent): string
     {
@@ -241,6 +249,7 @@ class HandleTelegramUpdateAction
             'videos' => $this->recentVideos($config),
             'posts' => $this->recentPosts($config),
             'notes' => $this->recentNotes($config),
+            'clear_notes' => $this->clearNotes($config),
             default => 'Unknown command. Try /help.',
         };
     }
@@ -337,6 +346,24 @@ class HandleTelegramUpdateAction
 
             return "{$entry->kind}: {$preview} ({$entry->status})";
         })->implode("\n");
+    }
+
+    /**
+     * Deletes the same set /notes just listed (the workspace's most recent
+     * untriaged captures) via DeleteRecentScratchpadEntriesAction. Being
+     * linked (TelegramBotLink, already checked before this runs) is the
+     * only permission gate this bot has for any command; there's no
+     * per-note ownership to check beyond that.
+     */
+    private function clearNotes(TelegramBotConfig $config): string
+    {
+        $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
+
+        return match (true) {
+            $deleted === 0 => 'No notes to delete.',
+            $deleted === 1 => 'Deleted 1 note.',
+            default => "Deleted {$deleted} notes.",
+        };
     }
 
     private function helpText(TelegramBotConfig $config): string

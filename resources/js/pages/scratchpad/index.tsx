@@ -1,5 +1,5 @@
-import { Form, Head, Link } from '@inertiajs/react';
-import { Image, Link2, Mic, NotebookPen, Plus } from 'lucide-react';
+import { Form, Head, Link, router } from '@inertiajs/react';
+import { Image, Link2, Mic, NotebookPen, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import ScratchpadController from '@/actions/App/Http/Controllers/Scratchpad/ScratchpadController';
 import Heading from '@/components/heading';
@@ -345,6 +345,32 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                             <ScratchpadEntryMedia
                                 attachments={entry.attachments}
                             />
+                            {entry.status !== 'triaged' && (
+                                <div className="flex justify-end">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="text-muted-foreground hover:text-destructive"
+                                        onClick={() => {
+                                            if (
+                                                confirm(
+                                                    "Delete this entry? This can't be undone.",
+                                                )
+                                            ) {
+                                                router.delete(
+                                                    ScratchpadController.destroy.url(
+                                                        entry.id,
+                                                    ),
+                                                    { preserveScroll: true },
+                                                );
+                                            }
+                                        }}
+                                    >
+                                        <Trash2 /> Delete
+                                    </Button>
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
