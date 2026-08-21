@@ -10,6 +10,7 @@ use App\Actions\Telegram\CaptureTelegramMessageAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
+use App\Actions\Telegram\ResolveTelegramIntentAction;
 use App\Models\AiProviderCredential;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
@@ -56,6 +57,7 @@ class HandleTelegramUpdateActionTest extends TestCase
             new CaptureTextNoteAction,
             new LinkTelegramAccountAction,
             new GenerateTelegramChatReplyAction($completionClient, new AiProviderCredentialResolver),
+            new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
             $this->client,
         );
     }
@@ -322,6 +324,57 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $entry = ScratchpadEntry::sole();
         $this->assertSame('link', $entry->kind);
+    }
+
+    public function test_plain_text_asking_for_notes_runs_the_notes_command_via_intent_resolution()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+        ScratchpadEntry::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'text', 'body' => 'remember to renew the domain', 'status' => 'new']);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                if (str_contains($systemPrompt, 'Classify the user')) {
+                    return AiCompletionResult::success('notes');
+                }
+
+                throw new RuntimeException('a recognized intent should never fall through to a normal chat reply');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, 'show me my scratchpad'));
+
+        $this->assertSame(0, ScratchpadEntry::query()->where('body', 'show me my scratchpad')->count());
+        $this->assertStringContainsString('remember to renew the domain', $this->lastReply());
+    }
+
+    public function test_when_every_provider_fails_the_reply_says_so_before_capturing_anyway()
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->create(['workspace_id' => $config->workspace_id]);
+
+        $completionClient = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                return AiCompletionResult::failure('provider is down');
+            }
+        };
+
+        $this->action($completionClient)->handle($config, $this->update(1, 'got any ideas?'));
+
+        $messages = array_column($this->client->sentMessages, 'text');
+        $this->assertContains("Couldn't generate a chat reply right now, so I saved this as a note instead.", $messages);
+        $this->assertSame('Captured.', end($messages));
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('got any ideas?', $entry->body);
     }
 
     public function test_note_command_still_captures_even_with_ai_chat_enabled()
