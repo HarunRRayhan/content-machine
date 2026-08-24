@@ -4,6 +4,7 @@ import {
     Clapperboard,
     FolderGit2,
     KeyRound,
+    KeySquare,
     NotebookPen,
     Send,
     SquarePen,
@@ -27,6 +28,7 @@ import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
 import { index as postsIndex } from '@/routes/dashboard/posts';
 import { index as scratchpadIndex } from '@/routes/dashboard/scratchpad';
 import { index as teamIndex } from '@/routes/dashboard/team';
+import { index as apiTokensIndex } from '@/routes/dashboard/team/api-tokens';
 import { edit as telegramEdit } from '@/routes/dashboard/telegram';
 import { index as videosIndex } from '@/routes/dashboard/videos';
 import type { NavItem } from '@/types';
@@ -56,6 +58,11 @@ const mainNavItems: NavItem[] = [
         title: 'Team',
         href: teamIndex(),
         icon: Users,
+    },
+    {
+        title: 'API access',
+        href: apiTokensIndex(),
+        icon: KeySquare,
     },
     {
         title: 'Telegram',

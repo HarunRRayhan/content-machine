@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AiProviders\AiProviderCredentialModelsController;
 use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
+use App\Http\Controllers\ApiTokens\WorkspaceApiTokensController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Posts\PostsController;
 use App\Http\Controllers\Scratchpad\ScratchpadController;
@@ -27,8 +28,12 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
 
         Route::get('team', [TeamController::class, 'index'])->name('team.index');
         Route::post('team/invitations', [TeamController::class, 'storeInvitation'])->name('team.invitations.store');
-        Route::post('team/api-tokens', [TeamController::class, 'storeApiToken'])->name('team.api-tokens.store');
-        Route::delete('team/api-tokens/{apiToken}', [TeamController::class, 'revokeApiToken'])->name('team.api-tokens.revoke');
+
+        // API access lives under Team in the sidebar and the URL; tokens are
+        // always scoped to the session's current workspace.
+        Route::get('team/api-tokens', [WorkspaceApiTokensController::class, 'index'])->name('team.api-tokens.index');
+        Route::post('team/api-tokens', [WorkspaceApiTokensController::class, 'store'])->name('team.api-tokens.store');
+        Route::delete('team/api-tokens/{apiToken}', [WorkspaceApiTokensController::class, 'revoke'])->name('team.api-tokens.revoke');
 
         Route::get('scratchpad', [ScratchpadController::class, 'index'])->name('scratchpad.index');
         Route::post('scratchpad', [ScratchpadController::class, 'store'])->name('scratchpad.store');

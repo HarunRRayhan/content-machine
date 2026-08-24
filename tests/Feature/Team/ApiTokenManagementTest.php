@@ -24,7 +24,12 @@ class ApiTokenManagementTest extends TestCase
         return [$user, $workspace];
     }
 
-    public function test_the_team_page_lists_live_tokens_for_the_workspace()
+    public function test_guests_cannot_view_the_api_access_page()
+    {
+        $this->get(route('dashboard.team.api-tokens.index'))->assertRedirect(route('login'));
+    }
+
+    public function test_the_api_access_page_lists_live_tokens_for_the_workspace()
     {
         [$user, $workspace] = $this->actingAsWorkspaceMember();
 
@@ -34,10 +39,11 @@ class ApiTokenManagementTest extends TestCase
         ]);
         WorkspaceApiToken::factory()->create(['name' => 'someone else workspace']);
 
-        $this->get(route('dashboard.team.index'))
+        $this->get(route('dashboard.team.api-tokens.index'))
             ->assertOk()
             ->assertInertia(
                 fn ($page) => $page
+                    ->component('dashboard/api-tokens')
                     ->where('api_tokens.0.name', 'personal-content')
                     ->missing('api_tokens.1'),
             );
@@ -52,7 +58,7 @@ class ApiTokenManagementTest extends TestCase
             'abilities' => ['scratchpad:read', 'scratchpad:write'],
         ]);
 
-        $response->assertRedirect(route('dashboard.team.index'));
+        $response->assertRedirect(route('dashboard.team.api-tokens.index'));
 
         $token = WorkspaceApiToken::query()->sole();
 
@@ -90,7 +96,7 @@ class ApiTokenManagementTest extends TestCase
         $token->forceFill(['workspace_id' => $workspace->id])->save();
 
         $this->delete(route('dashboard.team.api-tokens.revoke', ['apiToken' => $token->id]))
-            ->assertRedirect(route('dashboard.team.index'));
+            ->assertRedirect(route('dashboard.team.api-tokens.index'));
 
         $this->assertNotNull($token->fresh()->revoked_at);
 
