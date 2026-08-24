@@ -27,4 +27,9 @@ final readonly class CaptureScratchpadLinkData
     {
         return new self(url: $url, source: 'telegram');
     }
+
+    public static function fromApi(string $url): self
+    {
+        return new self(url: $url, source: 'api');
+    }
 }

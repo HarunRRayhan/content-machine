@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AuthenticateWorkspaceToken;
 use App\Http\Middleware\EnsureRegistrationIsEnabled;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -15,10 +16,14 @@ return Application::configure(basePath: dirname(__DIR__))
             __DIR__.'/../routes/web.php',
             __DIR__.'/../routes/dashboard.php',
         ],
+        api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->alias([
+            'auth.workspace-token' => AuthenticateWorkspaceToken::class,
+        ]);
         // Trust Railway's TLS-terminating load balancer so signed URLs and
         // Storage::temporaryUrl() generate https:// links instead of http://.
         $middleware->trustProxies(at: '*');

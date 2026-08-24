@@ -16,9 +16,13 @@ files.
 
 ## Status
 
-Pre-alpha. This is a fresh scaffold, not a working product. No Telegram bot,
-no publishing, no scheduling, none of it built yet. See [`docs/`](docs/) for
-the architecture and roadmap as they take shape.
+Pre-alpha, building in public. Live today: multi-user teams/workspaces,
+Scratch Pad capture (text, photo, voice, link) from the dashboard and a
+Telegram bot, AI triage suggestions and transcription via Whisper,
+workspace-scoped AI model fallback chains, idea triage/promotion into
+draft shells, and a token-authenticated JSON API (`/api/v1`) over the
+scratchpad and ideas — see [`docs/guides/api.md`](docs/guides/api.md).
+Publishing/scheduling is not built yet.
 
 ## Getting started
 

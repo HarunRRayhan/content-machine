@@ -27,6 +27,8 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
 
         Route::get('team', [TeamController::class, 'index'])->name('team.index');
         Route::post('team/invitations', [TeamController::class, 'storeInvitation'])->name('team.invitations.store');
+        Route::post('team/api-tokens', [TeamController::class, 'storeApiToken'])->name('team.api-tokens.store');
+        Route::delete('team/api-tokens/{apiToken}', [TeamController::class, 'revokeApiToken'])->name('team.api-tokens.revoke');
 
         Route::get('scratchpad', [ScratchpadController::class, 'index'])->name('scratchpad.index');
         Route::post('scratchpad', [ScratchpadController::class, 'store'])->name('scratchpad.store');

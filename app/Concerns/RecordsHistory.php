@@ -4,6 +4,7 @@ namespace App\Concerns;
 
 use App\Models\ContentVersion;
 use App\Models\StatusTransition;
+use App\Support\CurrentApiToken;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Facades\Auth;
 
@@ -63,14 +64,22 @@ trait RecordsHistory
     /**
      * Resolve who is performing the action being recorded.
      *
-     * Defaults to the authenticated user, falling back to 'system'. There's
-     * no API/token-driven actor in this phase, so the 'token' case is left
-     * for a later phase to add by overriding this method.
+     * Order matters: a request that arrived with a workspace API token is
+     * attributed to that token ('token', token_name), even though the
+     * middleware also sets Auth::user() to the token's creator — the token
+     * is the more precise answer to "what touched this", and it's why
+     * status_transitions carries a token_name column at all. Next comes
+     * the authenticated dashboard user, falling back to 'system' for
+     * callers with neither (Telegram-originated capture).
      *
      * @return array{0: string, 1: int|null, 2: string|null} [actor_type, actor_id, token_name]
      */
     protected function resolveActor(): array
     {
+        if ($token = app(CurrentApiToken::class)->get()) {
+            return ['token', null, $token->name];
+        }
+
         if ($user = Auth::user()) {
             return ['user', $user->id, null];
         }
