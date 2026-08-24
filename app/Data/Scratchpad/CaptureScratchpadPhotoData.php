@@ -33,4 +33,9 @@ final readonly class CaptureScratchpadPhotoData
     {
         return new self(file: $file, caption: $caption, source: 'telegram');
     }
+
+    public static function fromApi(UploadedFile $file, ?string $caption): self
+    {
+        return new self(file: $file, caption: $caption, source: 'api');
+    }
 }

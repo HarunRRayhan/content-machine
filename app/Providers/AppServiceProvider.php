@@ -8,6 +8,7 @@ use App\Support\AiProviders\AiTranscriptionClientContract;
 use App\Support\AiProviders\HttpAiCompletionClient;
 use App\Support\AiProviders\HttpAiProviderVerifier;
 use App\Support\AiProviders\OpenAiTranscriptionClient;
+use App\Support\CurrentApiToken;
 use App\Support\CurrentWorkspace;
 use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ProcessLinkResolver;
@@ -28,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(CurrentWorkspace::class);
+        $this->app->singleton(CurrentApiToken::class);
         $this->app->bind(LinkResolverContract::class, ProcessLinkResolver::class);
         $this->app->bind(AiProviderVerifierContract::class, HttpAiProviderVerifier::class);
         $this->app->bind(AiTranscriptionClientContract::class, OpenAiTranscriptionClient::class);

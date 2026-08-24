@@ -37,4 +37,9 @@ final readonly class CaptureScratchpadVoiceData
     {
         return new self(file: $file, language: null, source: 'telegram', telegramChatId: $telegramChatId);
     }
+
+    public static function fromApi(UploadedFile $file, ?string $language): self
+    {
+        return new self(file: $file, language: $language, source: 'api');
+    }
 }

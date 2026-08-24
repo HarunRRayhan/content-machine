@@ -8,7 +8,7 @@ use App\Http\Requests\Scratchpad\StoreScratchpadTextNoteRequest;
  * Typed input for CaptureTextNoteAction. $source defaults to 'web' so
  * every existing construction (the dashboard's own StoreScratchpadTextNoteRequest
  * flow, and every test written before Telegram capture existed) keeps
- * working unchanged; fromTelegram() is the only other caller today.
+ * working unchanged; fromTelegram() and fromApi() are the other callers.
  */
 final readonly class CaptureTextNoteData
 {
@@ -28,5 +28,10 @@ final readonly class CaptureTextNoteData
     public static function fromTelegram(string $body): self
     {
         return new self(body: $body, source: 'telegram');
+    }
+
+    public static function fromApi(string $body): self
+    {
+        return new self(body: $body, source: 'api');
     }
 }
