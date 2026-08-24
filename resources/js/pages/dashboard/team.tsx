@@ -1,5 +1,7 @@
 import { Form, Head, router } from '@inertiajs/react';
-import TeamController, { revokeApiToken } from '@/actions/App/Http/Controllers/TeamController';
+import TeamController, {
+    revokeApiToken,
+} from '@/actions/App/Http/Controllers/TeamController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';
@@ -46,7 +48,12 @@ const API_TOKEN_ABILITIES = [
     'ideas:write',
 ];
 
-export default function Team({ team, members, invitations, api_tokens }: PageProps) {
+export default function Team({
+    team,
+    members,
+    invitations,
+    api_tokens,
+}: PageProps) {
     return (
         <>
             <Head title="Team" />
@@ -174,10 +181,15 @@ export default function Team({ team, members, invitations, api_tokens }: PagePro
                                     className="flex items-center justify-between gap-4 rounded-lg border p-3"
                                 >
                                     <div className="min-w-0">
-                                        <p className="font-medium">{token.name}</p>
+                                        <p className="font-medium">
+                                            {token.name}
+                                        </p>
                                         <p className="mt-1 flex flex-wrap gap-1">
                                             {token.abilities.map((ability) => (
-                                                <Badge key={ability} variant="outline">
+                                                <Badge
+                                                    key={ability}
+                                                    variant="outline"
+                                                >
                                                     {ability}
                                                 </Badge>
                                             ))}
@@ -193,7 +205,9 @@ export default function Team({ team, members, invitations, api_tokens }: PagePro
                                         size="sm"
                                         onClick={() =>
                                             router.delete(
-                                                revokeApiToken.url({ apiToken: token.id }),
+                                                revokeApiToken.url({
+                                                    apiToken: token.id,
+                                                }),
                                                 { preserveScroll: true },
                                             )
                                         }
@@ -213,7 +227,9 @@ export default function Team({ team, members, invitations, api_tokens }: PagePro
                         {({ processing, errors }) => (
                             <>
                                 <div className="grid gap-2">
-                                    <Label htmlFor="token-name">Token name</Label>
+                                    <Label htmlFor="token-name">
+                                        Token name
+                                    </Label>
                                     <Input
                                         id="token-name"
                                         name="name"
@@ -247,7 +263,9 @@ export default function Team({ team, members, invitations, api_tokens }: PagePro
                                 </fieldset>
                                 <InputError message={errors.abilities} />
 
-                                <Button disabled={processing}>Create token</Button>
+                                <Button disabled={processing}>
+                                    Create token
+                                </Button>
                             </>
                         )}
                     </Form>
