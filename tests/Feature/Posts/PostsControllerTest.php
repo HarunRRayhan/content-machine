@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Posts;
 
+use App\Models\Idea;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
@@ -42,8 +43,95 @@ class PostsControllerTest extends TestCase
         $this->get(route('dashboard.posts.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/index')
-                ->has('posts.data', 1)
-                ->where('posts.data.0.id', $mine->id)
+                ->has('items.data', 1)
+                ->where('items.data.0.type', 'post')
+                ->where('items.data.0.id', $mine->id)
+                ->where('filters.status', 'draft')
+            );
+    }
+
+    public function test_index_defaults_to_draft_tab_when_status_is_missing(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Post::factory()->for($workspace)->create(['title' => 'Draft one', 'status' => 'draft']);
+        Post::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
+
+        $this->get(route('dashboard.posts.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.title', 'Draft one')
+                ->where('filters.status', 'draft')
+            );
+    }
+
+    public function test_index_ideation_tab_lists_open_post_ideas(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $idea = Idea::factory()->for($workspace)->create([
+            'kind' => 'post',
+            'status' => 'open',
+            'title' => 'Post idea',
+            'score' => 720,
+            'trend' => 'evergreen',
+        ]);
+
+        Idea::factory()->for($workspace)->promoted()->create(['kind' => 'post', 'title' => 'Promoted']);
+        Idea::factory()->for($workspace)->create(['kind' => 'video', 'status' => 'open', 'title' => 'Video idea']);
+
+        $otherWorkspace = Workspace::factory()->create();
+        Idea::factory()->for($otherWorkspace)->create(['kind' => 'post', 'status' => 'open']);
+
+        $this->get(route('dashboard.posts.index', ['status' => 'ideation']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.type', 'idea')
+                ->where('items.data.0.id', $idea->id)
+                ->where('items.data.0.title', 'Post idea')
+                ->where('items.data.0.score', 720)
+                ->where('items.data.0.trend', 'evergreen')
+                ->where('filters.status', 'ideation')
+            );
+    }
+
+    public function test_index_exposes_counts_for_all_status_tabs(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Post::factory()->for($workspace)->count(2)->create(['status' => 'draft']);
+        Post::factory()->for($workspace)->create(['status' => 'ready']);
+        Post::factory()->for($workspace)->create(['status' => 'scheduled']);
+        Idea::factory()->for($workspace)->count(3)->create(['kind' => 'post', 'status' => 'open']);
+
+        $this->get(route('dashboard.posts.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('counts.ideation', 3)
+                ->where('counts.draft', 2)
+                ->where('counts.ready', 1)
+                ->where('counts.scheduled', 1)
+                ->where('counts.posted', 0)
+                ->where('counts.archived', 0)
+                ->where('counts.dropped', 0)
+            );
+    }
+
+    public function test_index_filters_posts_by_status_tab(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Post::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
+        Post::factory()->for($workspace)->create(['title' => 'Draft one', 'status' => 'draft']);
+
+        $this->get(route('dashboard.posts.index', ['status' => 'ready']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.type', 'post')
+                ->where('items.data.0.title', 'Ready one')
+                ->where('filters.status', 'ready')
             );
     }
 
