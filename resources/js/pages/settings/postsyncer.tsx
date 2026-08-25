@@ -6,7 +6,6 @@ import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { edit as editPostsyncer } from '@/routes/dashboard/postsyncer';
@@ -268,10 +267,12 @@ export default function PostsyncerSettings({
                             </div>
 
                             <label className="flex items-center gap-2 text-sm">
-                                <Checkbox
+                                <input
+                                    type="checkbox"
                                     name="publish_enabled"
                                     value="1"
                                     defaultChecked={publishEnabled}
+                                    className="size-4 rounded border-input"
                                 />
                                 Enable publishing from Content Machine
                             </label>
