@@ -93,7 +93,7 @@ class VideoPublishPlanner
         return [
             new PublishGroup(
                 language: $language,
-                workspaceId: $workspaceId ?? '',
+                workspaceId: $workspaceId,
                 platforms: $platforms,
                 mediaUrls: $mediaUrls,
                 captions: $included,
@@ -117,10 +117,6 @@ class VideoPublishPlanner
         if ($this->isFlatCaptionMap($captions)) {
             $out = [];
             foreach ($captions as $platform => $value) {
-                if (! is_string($platform)) {
-                    continue;
-                }
-
                 $text = $this->captionText(is_array($value) ? $value : ['caption' => $value]);
                 if ($text !== '') {
                     $out[strtolower($platform)] = $text;
@@ -178,7 +174,7 @@ class VideoPublishPlanner
     }
 
     /**
-     * @param  array{platforms?: list<string>}  $options
+     * @param  array<string, mixed>  $options
      * @return list<string>
      */
     private function selectedPlatforms(array $options): array

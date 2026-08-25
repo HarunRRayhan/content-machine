@@ -86,7 +86,7 @@ class PostsyncerSettingsController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $existing = is_array($langConfig['platforms']) ? $langConfig['platforms'] : [];
+        $existing = $langConfig['platforms'];
         $suggested = $this->mergeAccountsByPlatform($existing, $accounts);
 
         return response()->json([
@@ -121,7 +121,7 @@ class PostsyncerSettingsController extends Controller
     private function presentLanguage(PostsyncerConfig $config, string $language): array
     {
         $lang = $config->language($language);
-        $platforms = is_array($lang['platforms']) ? $lang['platforms'] : [];
+        $platforms = $lang['platforms'];
 
         $presented = [];
         foreach (UpdatePostsyncerSettingsRequest::PLATFORMS as $platform) {
@@ -140,7 +140,7 @@ class PostsyncerSettingsController extends Controller
 
     /**
      * @param  array<string, mixed>  $existing
-     * @param  list<array<string, mixed>>  $accounts
+     * @param  array<int, array<string, mixed>>  $accounts
      * @return array<string, array{account_id: int|string|null, handle: string}>
      */
     private function mergeAccountsByPlatform(array $existing, array $accounts): array
@@ -156,10 +156,6 @@ class PostsyncerSettingsController extends Controller
         }
 
         foreach ($accounts as $account) {
-            if (! is_array($account)) {
-                continue;
-            }
-
             $platform = strtolower((string) ($account['platform'] ?? ''));
 
             if ($platform === '' || ! array_key_exists($platform, $suggested)) {

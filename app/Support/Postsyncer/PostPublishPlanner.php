@@ -92,7 +92,7 @@ class PostPublishPlanner
 
             $groups = array_merge(
                 $groups,
-                $this->splitLanguageGroups($language, $workspaceId ?? '', $included, $defaultMediaUrls, $when),
+                $this->splitLanguageGroups($language, $workspaceId, $included, $defaultMediaUrls, $when),
             );
         }
 
@@ -100,7 +100,7 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array<string, array{caption: string, first_comment: string, images: list<string>|null, thread: list<string>}>  $platformCaptions
+     * @param  array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>  $platformCaptions
      * @param  list<string>  $defaultMediaUrls
      * @return list<PublishGroup>
      */
@@ -138,7 +138,7 @@ class PostPublishPlanner
         $buckets = [];
         foreach ($remaining as $platform => $data) {
             $mediaUrls = $this->resolveMediaUrls($data, $defaultMediaUrls);
-            $key = implode("\0", $mediaUrls).'|'.($data['first_comment'] ?? '');
+            $key = implode("\0", $mediaUrls).'|'.$data['first_comment'];
             $buckets[$key]['mediaUrls'] = $mediaUrls;
             $buckets[$key]['platforms'][$platform] = $data['caption'];
         }
@@ -176,7 +176,7 @@ class PostPublishPlanner
     }
 
     /**
-     * @return array<string, array<string, array{caption: string, first_comment: string, images: list<string>|null, thread: list<string>}>>
+     * @return array<string, array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>>
      */
     private function captionsByLanguage(Post $post): array
     {
@@ -190,9 +190,6 @@ class PostPublishPlanner
             $language = $this->resolveLanguage($post);
             $out = [];
             foreach ($captions as $platform => $value) {
-                if (! is_string($platform)) {
-                    continue;
-                }
                 $normalized = $this->normalizePlatformFields(is_array($value) ? $value : ['caption' => $value]);
                 if ($normalized['caption'] !== '') {
                     $out[strtolower($platform)] = $normalized;
@@ -224,13 +221,8 @@ class PostPublishPlanner
     private function normalizePlatformFields(array $fields, bool $fromNormalizedCaptions = false): array
     {
         $caption = trim((string) ($fields['caption'] ?? ''));
-        if ($caption === '' && is_string($fields['caption'] ?? null)) {
-            $caption = '';
-        } elseif ($caption === '' && ! is_array($fields['caption'] ?? null) && isset($fields['caption'])) {
-            $caption = trim((string) $fields['caption']);
-        }
 
-        if ($caption === '' && is_string($fields) === false && ! isset($fields['caption']) && count($fields) === 1) {
+        if ($caption === '' && ! array_key_exists('caption', $fields) && count($fields) === 1) {
             $caption = trim((string) reset($fields));
         }
 
@@ -289,7 +281,7 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array{platforms?: list<string>}  $options
+     * @param  array<string, mixed>  $options
      * @return list<string>
      */
     private function selectedPlatforms(Post $post, array $options): array

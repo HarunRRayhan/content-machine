@@ -72,7 +72,7 @@ class PublishPostAction
     private function buildPostBody(PostsyncerConfig $config, PublishGroup $group, array $mediaIds): array
     {
         $langConfig = $config->language($group->language);
-        $platformAccounts = is_array($langConfig['platforms'] ?? null) ? $langConfig['platforms'] : [];
+        $platformAccounts = $langConfig['platforms'];
 
         $threadTweets = $group->threadTweets;
         $isThread = is_array($threadTweets) && $threadTweets !== [];
@@ -171,7 +171,8 @@ class PublishPostAction
             return $group->captions['facebook'];
         }
 
-        $caption = reset($group->captions);
+        $captions = $group->captions;
+        $caption = reset($captions);
 
         return is_string($caption) ? $caption : '';
     }

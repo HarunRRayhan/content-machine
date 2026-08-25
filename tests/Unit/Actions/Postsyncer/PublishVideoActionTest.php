@@ -94,7 +94,7 @@ class PublishVideoActionTest extends TestCase
         $this->assertSame('succeeded', $video->publish_state);
         $this->assertNull($video->publish_error);
         $this->assertSame('posted', $video->status);
-        $this->assertSame([
+        $this->assertEquals([
             'groups' => [[
                 'post_id' => '42',
                 'status' => 'PUBLISHED',

@@ -181,6 +181,7 @@ export default function PostsyncerSettings({
 
             if (!response.ok) {
                 window.alert(payload.message ?? 'Could not refresh accounts.');
+
                 return;
             }
 

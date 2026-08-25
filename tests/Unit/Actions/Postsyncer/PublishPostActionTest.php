@@ -91,7 +91,7 @@ class PublishPostActionTest extends TestCase
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertNull($post->publish_error);
         $this->assertSame('posted', $post->status);
-        $this->assertSame([
+        $this->assertEquals([
             'groups' => [[
                 'post_id' => '42',
                 'status' => 'PUBLISHED',

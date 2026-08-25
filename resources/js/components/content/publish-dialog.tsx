@@ -70,6 +70,7 @@ export default function PublishDialog({
 
     function handleOpenChange(nextOpen: boolean) {
         setOpen(nextOpen);
+
         if (!nextOpen) {
             setConfirmAskChecked(false);
         }

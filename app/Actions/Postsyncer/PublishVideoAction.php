@@ -72,7 +72,7 @@ class PublishVideoAction
     private function buildPostBody(PostsyncerConfig $config, PublishGroup $group, array $mediaIds): array
     {
         $langConfig = $config->language($group->language);
-        $platformAccounts = is_array($langConfig['platforms'] ?? null) ? $langConfig['platforms'] : [];
+        $platformAccounts = $langConfig['platforms'];
 
         $videoMediaId = $mediaIds[0] ?? null;
         $coverMediaId = $mediaIds[1] ?? null;
@@ -173,7 +173,8 @@ class PublishVideoAction
             return $group->captions['facebook'];
         }
 
-        $caption = reset($group->captions);
+        $captions = $group->captions;
+        $caption = reset($captions);
 
         return is_string($caption) ? $caption : '';
     }

@@ -57,7 +57,7 @@ class MediaUrlResolver
                 continue;
             }
 
-            if (is_string($url) && $url !== '') {
+            if ($url !== '') {
                 $urls[] = $url;
             }
         }

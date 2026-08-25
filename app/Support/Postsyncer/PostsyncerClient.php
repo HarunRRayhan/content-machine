@@ -19,7 +19,7 @@ class PostsyncerClient
         $response = $this->request('get', '/accounts');
         $data = $this->decodeResponse($response);
 
-        $accounts = is_array($data['data'] ?? null) ? $data['data'] : $data;
+        $accounts = $data['data'] ?? $data;
 
         if (! is_array($accounts)) {
             return [];
