@@ -12,8 +12,6 @@ use Illuminate\Validation\ValidationException;
 /**
  * Creates a video row. Pass human_id+number for an idempotent import from
  * personal-content (BV-53); omit them to reserve the next V-N id.
- *
- * @param  array<string, mixed>  $attributes
  */
 class CreateVideoAction
 {
@@ -21,6 +19,9 @@ class CreateVideoAction
         private readonly ReserveContentIdAction $reserveContentIdAction,
     ) {}
 
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
     public function handle(Workspace $workspace, array $attributes): Video
     {
         return DB::transaction(function () use ($workspace, $attributes) {

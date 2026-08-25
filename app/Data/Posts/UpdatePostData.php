@@ -5,12 +5,12 @@ namespace App\Data\Posts;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
 
-/**
- * @param  array<string, mixed>|null  $captions
- * @param  array<string, mixed>|null  $platforms
- */
 final readonly class UpdatePostData
 {
+    /**
+     * @param  array<string, mixed>|null  $captions
+     * @param  array<string, mixed>|null  $platforms
+     */
     public function __construct(
         public string $title,
         public ?string $body = null,

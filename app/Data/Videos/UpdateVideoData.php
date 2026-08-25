@@ -8,12 +8,13 @@ use App\Models\Video;
 /**
  * Editable surface for a video. Dashboard updates only title/body
  * (`replaceExtended=false`); API PATCH replaces the extended columns too.
- *
- * @param  array<string, mixed>|null  $captions
- * @param  array<string, mixed>|null  $deckManifest
  */
 final readonly class UpdateVideoData
 {
+    /**
+     * @param  array<string, mixed>|null  $captions
+     * @param  array<string, mixed>|null  $deckManifest
+     */
     public function __construct(
         public string $title,
         public ?string $body = null,

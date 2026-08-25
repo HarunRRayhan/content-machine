@@ -9,15 +9,15 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-/**
- * @param  array<string, mixed>  $attributes
- */
 class CreatePostAction
 {
     public function __construct(
         private readonly ReserveContentIdAction $reserveContentIdAction,
     ) {}
 
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
     public function handle(Workspace $workspace, array $attributes): Post
     {
         return DB::transaction(function () use ($workspace, $attributes) {
