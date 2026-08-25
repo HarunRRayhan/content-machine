@@ -138,4 +138,22 @@ class SeedPostsyncerSettingsCommandTest extends TestCase
             ->expectsOutputToContain('File not found:')
             ->assertExitCode(1);
     }
+
+    public function test_it_fails_when_json_is_invalid(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $workspacesPath = $this->tempDir.'/workspaces.json';
+        $postTypesPath = $this->tempDir.'/post_types.json';
+        file_put_contents($workspacesPath, '{not json');
+        file_put_contents($postTypesPath, '{"platforms": {}, "overrides": {}}');
+
+        $this->artisan('postsyncer:seed', [
+            'workspace_id' => $workspace->id,
+            '--workspaces' => $workspacesPath,
+            '--post-types' => $postTypesPath,
+            '--api-key' => 'key',
+        ])
+            ->expectsOutputToContain('Invalid JSON:')
+            ->assertExitCode(1);
+    }
 }
