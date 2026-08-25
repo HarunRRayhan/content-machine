@@ -11,6 +11,7 @@ use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -190,6 +191,7 @@ class VideosController extends Controller
             'number' => $video->number,
             'title' => $video->title,
             'status' => $video->status,
+            'publish_state' => $video->publish_state,
             'language' => $video->language,
             'has_script' => filled($video->script_markdown),
             'has_captions' => ! empty($video->captions),
@@ -227,6 +229,8 @@ class VideosController extends Controller
             'publish_error' => $video->publish_error,
             'postsyncer' => $video->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
+            'needs_confirm_ask' => $postsyncerConfig !== null
+                && app(VideoPublishPlanner::class)->needsConfirmAsk($video, $postsyncerConfig),
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),

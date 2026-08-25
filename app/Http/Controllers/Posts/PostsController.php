@@ -10,6 +10,7 @@ use App\Models\Idea;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -191,6 +192,7 @@ class PostsController extends Controller
             'number' => $post->number,
             'title' => $post->title,
             'status' => $post->status,
+            'publish_state' => $post->publish_state,
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
             'has_captions' => ! empty($post->captions),
@@ -265,6 +267,8 @@ class PostsController extends Controller
             'publish_error' => $post->publish_error,
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
+            'needs_confirm_ask' => $postsyncerConfig !== null
+                && app(PostPublishPlanner::class)->needsConfirmAsk($post, $postsyncerConfig),
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),

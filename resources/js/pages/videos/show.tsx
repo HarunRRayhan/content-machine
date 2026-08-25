@@ -34,6 +34,7 @@ type VideoDetail = {
     publish_error: string | null;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
+    needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
@@ -219,6 +220,7 @@ export default function VideoShow({ video }: PageProps) {
                                 publishError={video.publish_error}
                                 publishUrl={`/dashboard/videos/${video.id}/publish`}
                                 entityLabel="video"
+                                needsConfirmAsk={video.needs_confirm_ask}
                             />
                         </div>
                     </TabsContent>

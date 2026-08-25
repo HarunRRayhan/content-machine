@@ -16,6 +16,32 @@ class VideoPublishPlanner
     ) {}
 
     /**
+     * Whether any selected platform in the publish set is `ask` for reels.
+     *
+     * @param  array{platforms?: list<string>}  $options
+     */
+    public function needsConfirmAsk(Video $video, PostsyncerConfig $config, array $options = []): bool
+    {
+        $language = $this->resolveLanguage($video);
+        $selected = $this->selectedPlatforms($options);
+        $platformCaptions = $this->captionsForLanguage($video, $language);
+
+        foreach ($selected as $platform) {
+            if (! array_key_exists($platform, $platformCaptions)) {
+                continue;
+            }
+
+            $state = $this->platformState($config, $platform, 'reel', $language);
+
+            if ($state === 'ask') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
      * @return list<PublishGroup>
      */

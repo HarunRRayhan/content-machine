@@ -17,6 +17,36 @@ class PostPublishPlanner
     ) {}
 
     /**
+     * Whether any selected platform in the publish set is `ask` for its resolved post type.
+     *
+     * @param  array{platforms?: list<string>}  $options
+     */
+    public function needsConfirmAsk(Post $post, PostsyncerConfig $config, array $options = []): bool
+    {
+        $selected = $this->selectedPlatforms($post, $options);
+        $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
+        $byLanguage = $this->captionsByLanguage($post);
+
+        foreach ($byLanguage as $language => $platformCaptions) {
+            foreach ($selected as $platform) {
+                if (! array_key_exists($platform, $platformCaptions)) {
+                    continue;
+                }
+
+                $mediaUrls = $this->resolveMediaUrls($platformCaptions[$platform], $defaultMediaUrls);
+                $postType = $mediaUrls !== [] ? 'photo' : 'text';
+                $state = $this->platformState($config, $platform, $postType, $language);
+
+                if ($state === 'ask') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
      * @return list<PublishGroup>
      */

@@ -24,6 +24,7 @@ type PostRow = {
     number: number;
     title: string;
     status: string;
+    publish_state: string;
     language: string | null;
     platforms: string[];
     has_captions: boolean;
@@ -287,9 +288,18 @@ export default function PostsIndex({ items, filters, counts, tabs }: PageProps) 
                                                 </div>
                                             </td>
                                             <td className="py-2 pr-4">
-                                                <Badge variant="secondary">
-                                                    {row.status}
-                                                </Badge>
+                                                <div className="flex flex-wrap items-center gap-1">
+                                                    <Badge variant="secondary">
+                                                        {row.status}
+                                                    </Badge>
+                                                    {['queued', 'running'].includes(
+                                                        row.publish_state,
+                                                    ) && (
+                                                        <Badge variant="outline">
+                                                            {row.publish_state}
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="py-2">
                                                 <Link

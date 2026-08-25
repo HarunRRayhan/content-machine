@@ -24,6 +24,7 @@ type VideoRow = {
     number: number;
     title: string;
     status: string;
+    publish_state: string;
     language: string | null;
     has_script: boolean;
     has_captions: boolean;
@@ -295,10 +296,19 @@ export default function VideosIndex({ items, filters, counts, tabs }: PageProps)
                                                 </div>
                                             </td>
                                             <td className="py-2 pr-4">
-                                                <Badge variant="secondary">
-                                                    {TAB_LABELS[row.status] ??
-                                                        row.status}
-                                                </Badge>
+                                                <div className="flex flex-wrap items-center gap-1">
+                                                    <Badge variant="secondary">
+                                                        {TAB_LABELS[row.status] ??
+                                                            row.status}
+                                                    </Badge>
+                                                    {['queued', 'running'].includes(
+                                                        row.publish_state,
+                                                    ) && (
+                                                        <Badge variant="outline">
+                                                            {row.publish_state}
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="py-2">
                                                 <Link

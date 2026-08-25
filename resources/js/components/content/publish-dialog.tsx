@@ -2,6 +2,7 @@ import { Form } from '@inertiajs/react';
 import { useState } from 'react';
 import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Dialog,
     DialogContent,
@@ -20,6 +21,7 @@ type PublishDialogProps = {
     publishError?: string | null;
     publishUrl: string;
     entityLabel: string;
+    needsConfirmAsk?: boolean;
 };
 
 export function PublishStatusBanner({
@@ -53,15 +55,27 @@ export default function PublishDialog({
     publishError,
     publishUrl,
     entityLabel,
+    needsConfirmAsk = false,
 }: PublishDialogProps) {
     const [open, setOpen] = useState(false);
     const [mode, setMode] = useState<'now' | 'schedule'>('now');
+    const [confirmAskChecked, setConfirmAskChecked] = useState(false);
     const publishBusy = ['queued', 'running'].includes(publishState);
 
     function openDialog(nextMode: 'now' | 'schedule') {
         setMode(nextMode);
+        setConfirmAskChecked(false);
         setOpen(true);
     }
+
+    function handleOpenChange(nextOpen: boolean) {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+            setConfirmAskChecked(false);
+        }
+    }
+
+    const submitDisabled = needsConfirmAsk && !confirmAskChecked;
 
     return (
         <div className="space-y-3">
@@ -98,7 +112,7 @@ export default function PublishDialog({
                 </Button>
             </div>
 
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog open={open} onOpenChange={handleOpenChange}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>
@@ -136,6 +150,37 @@ export default function PublishDialog({
                                     </div>
                                 ) : null}
 
+                                {needsConfirmAsk ? (
+                                    <div className="flex items-start gap-3 rounded-lg border bg-muted/20 p-3">
+                                        <Checkbox
+                                            id="confirm_ask"
+                                            name="confirm_ask"
+                                            value="1"
+                                            checked={confirmAskChecked}
+                                            onCheckedChange={(checked) =>
+                                                setConfirmAskChecked(
+                                                    checked === true,
+                                                )
+                                            }
+                                        />
+                                        <div className="grid gap-1">
+                                            <Label
+                                                htmlFor="confirm_ask"
+                                                className="leading-snug"
+                                            >
+                                                I confirm ask-gated platforms
+                                            </Label>
+                                            <p className="text-sm text-muted-foreground">
+                                                Some selected platforms (e.g.
+                                                English Twitter, Threads, or
+                                                Bluesky photo posts) need
+                                                explicit approval before
+                                                publishing.
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : null}
+
                                 <InputError message={errors.publish} />
 
                                 <DialogFooter>
@@ -146,7 +191,11 @@ export default function PublishDialog({
                                     >
                                         Cancel
                                     </Button>
-                                    <Button disabled={processing}>
+                                    <Button
+                                        disabled={
+                                            processing || submitDisabled
+                                        }
+                                    >
                                         {mode === 'now'
                                             ? 'Publish now'
                                             : 'Schedule publish'}

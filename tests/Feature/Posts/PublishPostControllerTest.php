@@ -30,7 +30,7 @@ class PublishPostControllerTest extends TestCase
         return [$user, $workspace];
     }
 
-    private function configurePostsyncer(Workspace $workspace): void
+    private function configurePostsyncer(Workspace $workspace, ?array $postTypes = null): void
     {
         PostsyncerConfig::write($workspace, [
             'publish_enabled' => true,
@@ -38,6 +38,16 @@ class PublishPostControllerTest extends TestCase
             'languages' => [
                 'bangla' => ['workspace_id' => '15211', 'platforms' => []],
                 'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => $postTypes ?? [
+                'platforms' => [
+                    'threads' => ['text' => 'on', 'photo' => 'ask'],
+                ],
+                'overrides' => [
+                    'english' => [
+                        'threads' => ['photo' => 'ask'],
+                    ],
+                ],
             ],
         ]);
     }
@@ -74,6 +84,36 @@ class PublishPostControllerTest extends TestCase
         Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
             return $job->post->is($post)
                 && $job->options['when'] === '2026-08-26T10:00:00+06:00'
+                && $job->options['confirm_ask'] === true;
+        });
+    }
+
+    public function test_publish_with_confirm_ask_accepts_ask_gated_platforms(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['threads'],
+            'captions' => ['threads' => 'English threads caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+            'publish_state' => 'idle',
+        ]);
+
+        $response = $this->post(route('dashboard.posts.publish', $post), [
+            'confirm_ask' => true,
+        ]);
+
+        $response->assertRedirect(route('dashboard.posts.show', $post));
+
+        $this->assertSame('queued', $post->fresh()->publish_state);
+
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
+            return $job->post->is($post)
+                && ($job->options['when'] ?? null) === null
                 && $job->options['confirm_ask'] === true;
         });
     }

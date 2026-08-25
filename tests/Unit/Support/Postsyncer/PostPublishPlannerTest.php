@@ -178,6 +178,41 @@ class PostPublishPlannerTest extends TestCase
         $this->planner->plan($post, $config, ['confirm_ask' => false]);
     }
 
+    public function test_needs_confirm_ask_when_ask_platform_in_publish_set(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['threads'],
+            'captions' => ['threads' => 'Thread text'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+        ]);
+
+        $this->assertTrue($this->planner->needsConfirmAsk($post, $config));
+    }
+
+    public function test_needs_confirm_ask_false_when_no_ask_platforms(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook', 'instagram'],
+            'captions' => [
+                'main' => [
+                    'facebook' => ['caption' => 'FB caption'],
+                    'instagram' => ['caption' => 'IG caption'],
+                ],
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        $this->assertFalse($this->planner->needsConfirmAsk($post, $config));
+    }
+
     public function test_includes_ask_platform_when_confirm_ask_true(): void
     {
         $workspace = Workspace::factory()->create();
