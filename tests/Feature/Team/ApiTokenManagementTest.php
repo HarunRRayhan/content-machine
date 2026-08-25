@@ -60,6 +60,10 @@ class ApiTokenManagementTest extends TestCase
 
         $response->assertRedirect(route('dashboard.team.api-tokens.index'));
 
+        // The plaintext reaches the page as a flash prop (rendered in a
+        // read-only input), never inside the toast.
+        $response->assertSessionHas('new_api_token', fn ($plaintext) => str_starts_with($plaintext, 'cm_'));
+
         $token = WorkspaceApiToken::query()->sole();
 
         $this->assertSame('Script Studio', $token->name);
