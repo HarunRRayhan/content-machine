@@ -22,7 +22,10 @@ type Props = {
 };
 
 async function copyText(text: string) {
-    if (!text) return;
+    if (!text) {
+        return;
+    }
+
     try {
         await navigator.clipboard.writeText(text);
     } catch {

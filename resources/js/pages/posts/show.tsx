@@ -1,8 +1,7 @@
 import { Form, Head, Link } from '@inertiajs/react';
 import { useState } from 'react';
-import CaptionsPanel, {
-    type CaptionGroup,
-} from '@/components/content/captions-panel';
+import CaptionsPanel from '@/components/content/captions-panel';
+import type { CaptionGroup } from '@/components/content/captions-panel';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';

@@ -42,7 +42,6 @@ class IdeasApiController extends Controller
         return IdeaResource::collection($ideas);
     }
 
-
     public function store(Request $request, CreateIdeaAction $action): JsonResponse
     {
         $workspace = $this->currentWorkspace();
