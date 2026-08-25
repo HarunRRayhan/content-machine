@@ -6,6 +6,7 @@ use App\Http\Controllers\ApiTokens\WorkspaceApiTokensController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Posts\PostsController;
 use App\Http\Controllers\Scratchpad\ScratchpadController;
+use App\Http\Controllers\Settings\PostsyncerSettingsController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
@@ -98,4 +99,8 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
             ->name('user-password.update');
 
         Route::inertia('settings/appearance', 'settings/appearance')->name('appearance.edit');
+
+        Route::get('settings/postsyncer', [PostsyncerSettingsController::class, 'edit'])->name('postsyncer.edit');
+        Route::put('settings/postsyncer', [PostsyncerSettingsController::class, 'update'])->name('postsyncer.update');
+        Route::post('settings/postsyncer/refresh-accounts', [PostsyncerSettingsController::class, 'refreshAccounts'])->name('postsyncer.refresh-accounts');
     });
