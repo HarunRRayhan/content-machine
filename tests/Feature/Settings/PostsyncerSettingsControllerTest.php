@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class PostsyncerSettingsControllerTest extends TestCase
@@ -50,5 +51,60 @@ class PostsyncerSettingsControllerTest extends TestCase
             ->assertRedirect(route('dashboard.postsyncer.edit'));
 
         $this->assertTrue(PostsyncerConfig::fromWorkspace($workspace->fresh())->publishEnabled());
+    }
+
+    public function test_edit_omits_workspaces_until_api_key_is_configured(): void
+    {
+        $this->actingAsWorkspaceOwner();
+
+        $this->get(route('dashboard.postsyncer.edit'))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('settings/postsyncer')
+                ->where('apiKeyConfigured', false)
+                ->where('availableWorkspaces', [])
+                ->where('workspacesLoadError', null));
+    }
+
+    public function test_edit_auto_loads_workspaces_when_api_key_is_configured(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'api_base' => 'https://postsyncer.com/api/v1',
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
+                'data' => [
+                    [
+                        'id' => 1,
+                        'workspace_id' => 15211,
+                        'workspace_name' => 'Bangla',
+                        'platform' => 'facebook',
+                        'username' => 'harun',
+                    ],
+                    [
+                        'id' => 2,
+                        'workspace_id' => 853,
+                        'workspace_name' => 'English',
+                        'platform' => 'twitter',
+                        'username' => 'harun',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $this->get(route('dashboard.postsyncer.edit'))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('settings/postsyncer')
+                ->where('apiKeyConfigured', true)
+                ->where('availableWorkspaces', [
+                    ['id' => '15211', 'label' => 'Bangla'],
+                    ['id' => '853', 'label' => 'English'],
+                ])
+                ->where('workspacesLoadError', null));
     }
 }
