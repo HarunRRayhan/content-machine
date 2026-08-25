@@ -17,7 +17,7 @@
     ]
   },
   "deploy": {
-    "startCommand": "docker-php-serversideup-entrypoint supervisord -c /etc/supervisor/conf.d/supervisord.conf",
+    "startCommand": "chown -R www-data:www-data /var/www/html/storage/app/uploads && docker-php-serversideup-entrypoint supervisord -c /etc/supervisor/conf.d/supervisord.conf",
     "restartPolicyType": "ALWAYS",
     "drainingSeconds": 120
   }
