@@ -74,6 +74,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:ideas:read')
         ->name('ideas.index');
 
+    Route::post('ideas', [IdeasApiController::class, 'store'])
+        ->middleware('auth.workspace-token:ideas:write')
+        ->name('ideas.store');
+
     Route::patch('ideas/{human_id}', [IdeasApiController::class, 'update'])
         ->middleware('auth.workspace-token:ideas:write')
         ->name('ideas.update');
