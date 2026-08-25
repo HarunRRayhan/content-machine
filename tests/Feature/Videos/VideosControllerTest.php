@@ -61,6 +61,67 @@ class VideosControllerTest extends TestCase
             );
     }
 
+    public function test_index_filters_by_status_and_exposes_content_flags()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Video::factory()->for($workspace)->create([
+            'title' => 'Ready one',
+            'status' => 'ready',
+            'script_markdown' => '# Hook',
+            'captions' => [
+                'main' => [
+                    'tiktok' => ['title' => 'T', 'caption' => 'C', 'first_comment' => ''],
+                ],
+            ],
+        ]);
+        Video::factory()->for($workspace)->create([
+            'title' => 'Draft one',
+            'status' => 'draft',
+        ]);
+
+        $this->get(route('dashboard.videos.index', ['status' => 'ready']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/index')
+                ->has('videos.data', 1)
+                ->where('videos.data.0.title', 'Ready one')
+                ->where('videos.data.0.has_script', true)
+                ->where('videos.data.0.has_captions', true)
+                ->where('filters.status', 'ready')
+            );
+    }
+
+    public function test_show_includes_normalized_script_and_captions()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create([
+            'title' => 'Rich video',
+            'script_markdown' => "## Hook\n\nSay this.",
+            'captions' => [
+                'Part 1' => [
+                    'tiktok' => [
+                        'title' => 'Hook title',
+                        'caption' => 'Hook body',
+                        'first_comment' => 'more',
+                        'images' => [],
+                        'thread' => [],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->get(route('dashboard.videos.show', $video))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.script_markdown', "## Hook\n\nSay this.")
+                ->where('video.captions.0.part', 'Part 1')
+                ->where('video.captions.0.platforms.0.name', 'tiktok')
+                ->where('video.captions.0.platforms.0.title', 'Hook title')
+                ->where('video.has_deck', false)
+            );
+    }
+
     public function test_show_404s_for_a_video_in_a_different_workspace()
     {
         $this->actingAsWorkspaceMember();

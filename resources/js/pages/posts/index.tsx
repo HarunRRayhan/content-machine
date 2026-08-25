@@ -1,15 +1,21 @@
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import Heading from '@/components/heading';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { home } from '@/routes/dashboard';
 import { index, show } from '@/routes/dashboard/posts';
 
 type PostSummary = {
     id: number;
     human_id: string;
+    number: number;
     title: string;
     status: string;
+    language: string | null;
+    platforms: string[];
+    has_captions: boolean;
+    has_body: boolean;
     created_at: string | null;
 };
 
@@ -25,21 +31,43 @@ type PaginatedPosts = {
     total: number;
 };
 
-type PageProps = {
-    posts: PaginatedPosts;
+type Filters = {
+    status: string | null;
+    language: string | null;
+    q: string | null;
 };
 
-/**
- * Laravel's paginator labels ("&laquo; Previous", "Next &raquo;") come as
- * HTML-entity-encoded strings meant for a Blade `{!! !!}` echo. Rendering
- * them safely here just means decoding the two entities it actually uses,
- * rather than reaching for dangerouslySetInnerHTML.
- */
+type PageProps = {
+    posts: PaginatedPosts;
+    filters: Filters;
+    statuses: string[];
+};
+
 function paginationLabel(label: string): string {
     return label.replace('&laquo;', '«').replace('&raquo;', '»');
 }
 
-export default function PostsIndex({ posts }: PageProps) {
+export default function PostsIndex({ posts, filters, statuses }: PageProps) {
+    function applyFilter(next: Partial<Filters>) {
+        router.get(
+            index.url({
+                query: {
+                    status:
+                        next.status !== undefined
+                            ? next.status
+                            : filters.status,
+                    language:
+                        next.language !== undefined
+                            ? next.language
+                            : filters.language,
+                    q: next.q !== undefined ? next.q : filters.q,
+                },
+            }),
+            {},
+            { preserveState: true, preserveScroll: true },
+        );
+    }
+
     return (
         <>
             <Head title="Posts" />
@@ -47,13 +75,60 @@ export default function PostsIndex({ posts }: PageProps) {
             <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
                 <Heading
                     title="Posts"
-                    description="Draft posts promoted from ideas."
+                    description="Bodies, per-platform captions, and images from the content pipeline."
                 />
+
+                <div className="flex flex-wrap items-center gap-3">
+                    <Input
+                        className="max-w-xs"
+                        placeholder="Search title or id"
+                        defaultValue={filters.q ?? ''}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                applyFilter({
+                                    q:
+                                        (
+                                            event.target as HTMLInputElement
+                                        ).value.trim() || null,
+                                });
+                            }
+                        }}
+                    />
+                    <select
+                        value={filters.status ?? ''}
+                        onChange={(event) =>
+                            applyFilter({
+                                status: event.target.value || null,
+                            })
+                        }
+                        className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                    >
+                        <option value="">All statuses</option>
+                        {statuses.map((status) => (
+                            <option key={status} value={status}>
+                                {status}
+                            </option>
+                        ))}
+                    </select>
+                    <select
+                        value={filters.language ?? ''}
+                        onChange={(event) =>
+                            applyFilter({
+                                language: event.target.value || null,
+                            })
+                        }
+                        className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                    >
+                        <option value="">All languages</option>
+                        <option value="bn">Bangla</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
 
                 <div className="space-y-3">
                     {posts.data.length === 0 && (
                         <p className="text-sm text-muted-foreground">
-                            No posts yet. Promote an idea to create one.
+                            No posts match these filters.
                         </p>
                     )}
 
@@ -61,11 +136,24 @@ export default function PostsIndex({ posts }: PageProps) {
                         <Link
                             key={post.id}
                             href={show.url(post.id)}
-                            className="block space-y-1 rounded-lg border p-3 transition-colors hover:bg-accent"
+                            className="block space-y-2 rounded-lg border p-3 transition-colors hover:bg-accent"
                         >
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant="outline">{post.human_id}</Badge>
                                 <Badge variant="secondary">{post.status}</Badge>
+                                {post.language && (
+                                    <Badge variant="outline">
+                                        {post.language}
+                                    </Badge>
+                                )}
+                                {post.has_captions && (
+                                    <Badge variant="outline">captions</Badge>
+                                )}
+                                {post.platforms.slice(0, 3).map((platform) => (
+                                    <Badge key={platform} variant="outline">
+                                        {platform}
+                                    </Badge>
+                                ))}
                             </div>
                             <p className="font-medium">{post.title}</p>
                         </Link>
