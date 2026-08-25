@@ -17,7 +17,7 @@
     ]
   },
   "deploy": {
-    "startCommand": "docker-php-serversideup-entrypoint /init",
+    "startCommand": "chown -R www-data:www-data /var/www/html/storage/app/uploads && docker-php-serversideup-entrypoint /init",
     "preDeployCommand": ["php artisan cm:deploy"],
     "healthcheckPath": "/up",
     "healthcheckTimeout": 120,
