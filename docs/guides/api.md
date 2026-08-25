@@ -29,6 +29,10 @@ request reads as `401`). Abilities:
 | `scratchpad:write` | capture text/link/photo/voice, edit, delete, triage |
 | `ideas:read` | list/show ideas |
 | `ideas:write` | edit an idea's title/score/trend/rationale/body |
+| `videos:read` | list/show videos |
+| `videos:write` | create/update videos (incl. import with explicit human_id) |
+| `posts:read` | list/show posts |
+| `posts:write` | create/update posts |
 
 Missing ability → `403`. Bad or revoked token → `401`.
 
