@@ -256,8 +256,7 @@ export default function PostShow({ post }: PageProps) {
                             <div className="space-y-2">
                                 <p className="text-sm text-muted-foreground">
                                     Image files are referenced in captions but
-                                    not uploaded to Content Machine storage
-                                    yet:
+                                    not uploaded to Content Machine storage yet:
                                 </p>
                                 <ul className="list-inside list-disc text-sm">
                                     {post.caption_image_names.map((name) => (
@@ -274,7 +273,7 @@ export default function PostShow({ post }: PageProps) {
 
                     <TabsContent value="body">
                         {post.body ? (
-                            <pre className="max-w-4xl whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
+                            <pre className="max-w-4xl rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed whitespace-pre-wrap">
                                 {post.body}
                             </pre>
                         ) : (

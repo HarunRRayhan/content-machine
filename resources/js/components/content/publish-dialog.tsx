@@ -92,7 +92,9 @@ export default function PublishDialog({
             )}
 
             {disabledReason && (
-                <p className="text-sm text-muted-foreground">{disabledReason}</p>
+                <p className="text-sm text-muted-foreground">
+                    {disabledReason}
+                </p>
             )}
 
             <div className="flex flex-wrap gap-2">
@@ -193,9 +195,7 @@ export default function PublishDialog({
                                         Cancel
                                     </Button>
                                     <Button
-                                        disabled={
-                                            processing || submitDisabled
-                                        }
+                                        disabled={processing || submitDisabled}
                                     >
                                         {mode === 'now'
                                             ? 'Publish now'

@@ -94,13 +94,18 @@ function LanguageSection({
                     <thead>
                         <tr className="border-b text-left">
                             <th className="py-2 pr-4 font-medium">Platform</th>
-                            <th className="py-2 pr-4 font-medium">Account id</th>
+                            <th className="py-2 pr-4 font-medium">
+                                Account id
+                            </th>
                             <th className="py-2 font-medium">Handle</th>
                         </tr>
                     </thead>
                     <tbody>
                         {platforms.map((platform) => (
-                            <tr key={platform} className="border-b last:border-0">
+                            <tr
+                                key={platform}
+                                className="border-b last:border-0"
+                            >
                                 <td className="py-2 pr-4">
                                     {platformLabel(platform)}
                                 </td>
@@ -246,7 +251,9 @@ export default function PostsyncerSettings({
 
                             <div className="grid gap-4 sm:grid-cols-2">
                                 <div className="grid gap-2">
-                                    <Label htmlFor="api_base">API base URL</Label>
+                                    <Label htmlFor="api_base">
+                                        API base URL
+                                    </Label>
                                     <Input
                                         id="api_base"
                                         name="api_base"
@@ -330,46 +337,53 @@ export default function PostsyncerSettings({
                                                     className="border-b last:border-0"
                                                 >
                                                     <td className="py-2 pr-4">
-                                                        {platformLabel(platform)}
+                                                        {platformLabel(
+                                                            platform,
+                                                        )}
                                                     </td>
-                                                    {postTypeNames.map((type) => (
-                                                        <td
-                                                            key={type}
-                                                            className="py-2 pr-4"
-                                                        >
-                                                            <select
-                                                                name={`post_types[platforms][${platform}][${type}]`}
-                                                                defaultValue={
-                                                                    postTypes
-                                                                        .platforms?.[
-                                                                        platform
-                                                                    ]?.[type] ??
-                                                                    ''
-                                                                }
-                                                                className="border-input bg-transparent h-9 w-full min-w-24 rounded-md border px-2 text-sm"
+                                                    {postTypeNames.map(
+                                                        (type) => (
+                                                            <td
+                                                                key={type}
+                                                                className="py-2 pr-4"
                                                             >
-                                                                <option value="">
-                                                                    —
-                                                                </option>
-                                                                {postTypeStates.map(
-                                                                    (state) => (
-                                                                        <option
-                                                                            key={
-                                                                                state
-                                                                            }
-                                                                            value={
-                                                                                state
-                                                                            }
-                                                                        >
-                                                                            {
-                                                                                state
-                                                                            }
-                                                                        </option>
-                                                                    ),
-                                                                )}
-                                                            </select>
-                                                        </td>
-                                                    ))}
+                                                                <select
+                                                                    name={`post_types[platforms][${platform}][${type}]`}
+                                                                    defaultValue={
+                                                                        postTypes
+                                                                            .platforms?.[
+                                                                            platform
+                                                                        ]?.[
+                                                                            type
+                                                                        ] ?? ''
+                                                                    }
+                                                                    className="h-9 w-full min-w-24 rounded-md border border-input bg-transparent px-2 text-sm"
+                                                                >
+                                                                    <option value="">
+                                                                        —
+                                                                    </option>
+                                                                    {postTypeStates.map(
+                                                                        (
+                                                                            state,
+                                                                        ) => (
+                                                                            <option
+                                                                                key={
+                                                                                    state
+                                                                                }
+                                                                                value={
+                                                                                    state
+                                                                                }
+                                                                            >
+                                                                                {
+                                                                                    state
+                                                                                }
+                                                                            </option>
+                                                                        ),
+                                                                    )}
+                                                                </select>
+                                                            </td>
+                                                        ),
+                                                    )}
                                                 </tr>
                                             ))}
                                         </tbody>

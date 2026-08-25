@@ -89,7 +89,12 @@ function tabQuery(filters: Filters, status: string): Record<string, string> {
     return query;
 }
 
-export default function VideosIndex({ items, filters, counts, tabs }: PageProps) {
+export default function VideosIndex({
+    items,
+    filters,
+    counts,
+    tabs,
+}: PageProps) {
     const isIdeation = filters.status === 'ideation';
 
     function applyFilter(next: Partial<Filters>) {
@@ -138,7 +143,9 @@ export default function VideosIndex({ items, filters, counts, tabs }: PageProps)
                                 key={tab}
                                 role="tab"
                                 aria-selected={active}
-                                href={index.url({ query: tabQuery(filters, tab) })}
+                                href={index.url({
+                                    query: tabQuery(filters, tab),
+                                })}
                                 preserveScroll
                                 className={cn(
                                     'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
@@ -201,8 +208,12 @@ export default function VideosIndex({ items, filters, counts, tabs }: PageProps)
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b text-left text-muted-foreground">
-                                    <th className="py-2 pr-4 font-medium">ID</th>
-                                    <th className="py-2 pr-4 font-medium">Title</th>
+                                    <th className="py-2 pr-4 font-medium">
+                                        ID
+                                    </th>
+                                    <th className="py-2 pr-4 font-medium">
+                                        Title
+                                    </th>
                                     <th className="py-2 pr-4 font-medium">
                                         {isIdeation ? 'Score' : 'Content'}
                                     </th>
@@ -246,7 +257,9 @@ export default function VideosIndex({ items, filters, counts, tabs }: PageProps)
                                                 </td>
                                                 <td className="py-2">
                                                     <Link
-                                                        href={showIdea.url(row.id)}
+                                                        href={showIdea.url(
+                                                            row.id,
+                                                        )}
                                                         className="text-primary underline-offset-4 hover:underline"
                                                     >
                                                         Open
@@ -298,10 +311,14 @@ export default function VideosIndex({ items, filters, counts, tabs }: PageProps)
                                             <td className="py-2 pr-4">
                                                 <div className="flex flex-wrap items-center gap-1">
                                                     <Badge variant="secondary">
-                                                        {TAB_LABELS[row.status] ??
-                                                            row.status}
+                                                        {TAB_LABELS[
+                                                            row.status
+                                                        ] ?? row.status}
                                                     </Badge>
-                                                    {['queued', 'running'].includes(
+                                                    {[
+                                                        'queued',
+                                                        'running',
+                                                    ].includes(
                                                         row.publish_state,
                                                     ) && (
                                                         <Badge variant="outline">

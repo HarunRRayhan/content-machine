@@ -81,10 +81,7 @@ export default function VideoShow({ video }: PageProps) {
                     <p className="text-sm text-muted-foreground">
                         Video #{video.number}
                     </p>
-                    <Heading
-                        title={video.title}
-                        description={video.human_id}
-                    />
+                    <Heading title={video.title} description={video.human_id} />
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -227,7 +224,7 @@ export default function VideoShow({ video }: PageProps) {
 
                     <TabsContent value="script">
                         {hasScript ? (
-                            <pre className="max-w-4xl whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
+                            <pre className="max-w-4xl rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed whitespace-pre-wrap">
                                 {video.script_markdown}
                             </pre>
                         ) : (
@@ -250,7 +247,9 @@ export default function VideoShow({ video }: PageProps) {
                                     dedicated view.
                                 </p>
                                 <Button asChild>
-                                    <a href={`/dashboard/videos/${video.id}/presentation`}>
+                                    <a
+                                        href={`/dashboard/videos/${video.id}/presentation`}
+                                    >
                                         Open fullscreen presentation
                                     </a>
                                 </Button>
