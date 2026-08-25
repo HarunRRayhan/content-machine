@@ -25,11 +25,18 @@ type PostTypesConfig = {
     overrides?: Record<string, Record<string, Record<string, string>>>;
 };
 
+type AvailableWorkspace = {
+    id: string;
+    label: string;
+};
+
 type PageProps = {
     apiKeyConfigured: boolean;
     apiBase: string;
     uploadBase: string;
     publishEnabled: boolean;
+    availableWorkspaces: AvailableWorkspace[];
+    workspacesLoadError: string | null;
     languages: {
         bangla: LanguageConfig;
         english: LanguageConfig;
@@ -49,6 +56,7 @@ function LanguageSection({
     label,
     config,
     platforms,
+    availableWorkspaces,
     onRefresh,
     refreshing,
 }: {
@@ -56,6 +64,7 @@ function LanguageSection({
     label: string;
     config: LanguageConfig;
     platforms: string[];
+    availableWorkspaces: AvailableWorkspace[];
     onRefresh: (language: 'bangla' | 'english') => void;
     refreshing: boolean;
 }) {
@@ -79,14 +88,31 @@ function LanguageSection({
 
             <div className="grid gap-2">
                 <Label htmlFor={`${language}-workspace-id`}>
-                    PostSyncer workspace id
+                    PostSyncer workspace
                 </Label>
-                <Input
+                <select
                     id={`${language}-workspace-id`}
                     name={`languages[${language}][workspace_id]`}
                     defaultValue={config.workspace_id ?? ''}
-                    placeholder="e.g. 15211"
-                />
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                    <option value="">Select a workspace</option>
+                    {availableWorkspaces.map((workspace) => (
+                        <option key={workspace.id} value={workspace.id}>
+                            {workspace.label === workspace.id
+                                ? workspace.id
+                                : `${workspace.label} (${workspace.id})`}
+                        </option>
+                    ))}
+                    {config.workspace_id &&
+                        !availableWorkspaces.some(
+                            (workspace) => workspace.id === config.workspace_id,
+                        ) && (
+                            <option value={config.workspace_id}>
+                                {config.workspace_id} (saved)
+                            </option>
+                        )}
+                </select>
             </div>
 
             <div className="overflow-x-auto">
@@ -143,6 +169,8 @@ export default function PostsyncerSettings({
     apiBase,
     uploadBase,
     publishEnabled,
+    availableWorkspaces,
+    workspacesLoadError,
     languages,
     postTypes,
     platforms,
@@ -286,25 +314,53 @@ export default function PostsyncerSettings({
                             </label>
                             <InputError message={errors.publish_enabled} />
 
-                            <LanguageSection
-                                key={`bangla-${JSON.stringify(banglaPlatforms)}`}
-                                language="bangla"
-                                label="Bangla"
-                                config={languagesForForm.bangla}
-                                platforms={platforms}
-                                onRefresh={refreshAccounts}
-                                refreshing={refreshingLanguage === 'bangla'}
-                            />
+                            {!apiKeyConfigured && (
+                                <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                                    Save an API key first. PostSyncer workspaces
+                                    load automatically after the key is saved.
+                                </p>
+                            )}
 
-                            <LanguageSection
-                                key={`english-${JSON.stringify(englishPlatforms)}`}
-                                language="english"
-                                label="English"
-                                config={languagesForForm.english}
-                                platforms={platforms}
-                                onRefresh={refreshAccounts}
-                                refreshing={refreshingLanguage === 'english'}
-                            />
+                            {apiKeyConfigured && workspacesLoadError && (
+                                <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                                    Could not load workspaces:{' '}
+                                    {workspacesLoadError}
+                                </p>
+                            )}
+
+                            {apiKeyConfigured && (
+                                <>
+                                    <LanguageSection
+                                        key={`bangla-${JSON.stringify(banglaPlatforms)}`}
+                                        language="bangla"
+                                        label="Bangla"
+                                        config={languagesForForm.bangla}
+                                        platforms={platforms}
+                                        availableWorkspaces={
+                                            availableWorkspaces
+                                        }
+                                        onRefresh={refreshAccounts}
+                                        refreshing={
+                                            refreshingLanguage === 'bangla'
+                                        }
+                                    />
+
+                                    <LanguageSection
+                                        key={`english-${JSON.stringify(englishPlatforms)}`}
+                                        language="english"
+                                        label="English"
+                                        config={languagesForForm.english}
+                                        platforms={platforms}
+                                        availableWorkspaces={
+                                            availableWorkspaces
+                                        }
+                                        onRefresh={refreshAccounts}
+                                        refreshing={
+                                            refreshingLanguage === 'english'
+                                        }
+                                    />
+                                </>
+                            )}
 
                             <div className="space-y-4 rounded-lg border p-4">
                                 <Heading

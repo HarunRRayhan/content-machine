@@ -25,12 +25,24 @@ class PostsyncerSettingsController extends Controller
         $this->authorizeWorkspaceAdmin($request, $workspace);
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
+        $availableWorkspaces = [];
+        $workspacesLoadError = null;
+
+        if ($config->isConfigured()) {
+            try {
+                $availableWorkspaces = (new PostsyncerClient($config))->listWorkspaces();
+            } catch (PostsyncerException $e) {
+                $workspacesLoadError = $e->getMessage();
+            }
+        }
 
         return Inertia::render('settings/postsyncer', [
             'apiKeyConfigured' => $config->isConfigured(),
             'apiBase' => $config->apiBase(),
             'uploadBase' => $config->uploadBase(),
             'publishEnabled' => $config->publishEnabled(),
+            'availableWorkspaces' => $availableWorkspaces,
+            'workspacesLoadError' => $workspacesLoadError,
             'languages' => [
                 'bangla' => $this->presentLanguage($config, 'bangla'),
                 'english' => $this->presentLanguage($config, 'english'),
