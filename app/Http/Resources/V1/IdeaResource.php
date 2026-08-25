@@ -32,6 +32,8 @@ class IdeaResource extends JsonResource
             'trend' => $this->trend,
             'rationale' => $this->rationale,
             'body' => $this->body,
+            'editorial_type' => $this->editorial_type,
+            'details' => $this->details ?? [],
             'status' => $this->status,
             'drop_reason' => $this->drop_reason,
             'created_at' => $this->created_at?->toIso8601String(),
