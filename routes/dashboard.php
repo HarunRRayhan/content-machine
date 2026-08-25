@@ -5,12 +5,15 @@ use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\ApiTokens\WorkspaceApiTokensController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Posts\PostsController;
+use App\Http\Controllers\Posts\PublishPostController;
 use App\Http\Controllers\Scratchpad\ScratchpadController;
+use App\Http\Controllers\Settings\PostsyncerSettingsController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Controllers\Telegram\TelegramBotLinkController;
+use App\Http\Controllers\Videos\PublishVideoController;
 use App\Http\Controllers\Videos\VideoPresentationController;
 use App\Http\Controllers\Videos\VideosController;
 use App\Http\Middleware\SetCurrentWorkspace;
@@ -56,11 +59,13 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('posts', [PostsController::class, 'index'])->name('posts.index');
         Route::get('posts/{post}', [PostsController::class, 'show'])->name('posts.show');
         Route::patch('posts/{post}', [PostsController::class, 'update'])->name('posts.update');
+        Route::post('posts/{post}/publish', PublishPostController::class)->name('posts.publish');
 
         Route::get('videos', [VideosController::class, 'index'])->name('videos.index');
         Route::get('videos/{video}', [VideosController::class, 'show'])->name('videos.show');
         Route::get('videos/{video}/presentation', [VideoPresentationController::class, 'show'])->name('videos.presentation');
         Route::patch('videos/{video}', [VideosController::class, 'update'])->name('videos.update');
+        Route::post('videos/{video}/publish', PublishVideoController::class)->name('videos.publish');
 
         Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');
         Route::post('ai-providers', [AiProviderCredentialsController::class, 'store'])->name('ai-providers.store');
@@ -98,4 +103,8 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
             ->name('user-password.update');
 
         Route::inertia('settings/appearance', 'settings/appearance')->name('appearance.edit');
+
+        Route::get('settings/postsyncer', [PostsyncerSettingsController::class, 'edit'])->name('postsyncer.edit');
+        Route::put('settings/postsyncer', [PostsyncerSettingsController::class, 'update'])->name('postsyncer.update');
+        Route::post('settings/postsyncer/refresh-accounts', [PostsyncerSettingsController::class, 'refreshAccounts'])->name('postsyncer.refresh-accounts');
     });

@@ -17,6 +17,7 @@ class UpdatePostRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:255'],
             'body' => ['nullable', 'string', 'max:20000'],
+            'image_drive_urls' => ['nullable', 'string', 'max:10000'],
         ];
     }
 }

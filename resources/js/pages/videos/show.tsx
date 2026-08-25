@@ -2,6 +2,7 @@ import { Form, Head, Link } from '@inertiajs/react';
 import { useState } from 'react';
 import CaptionsPanel from '@/components/content/captions-panel';
 import type { CaptionGroup } from '@/components/content/captions-panel';
+import PublishDialog from '@/components/content/publish-dialog';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';
@@ -24,9 +25,16 @@ type VideoDetail = {
     captions: CaptionGroup[];
     deck_manifest: Record<string, unknown> | null;
     has_deck: boolean;
+    video_drive_url: string | null;
+    cover_drive_url: string | null;
     language: string | null;
     slug: string | null;
     status: string;
+    publish_state: string;
+    publish_error: string | null;
+    postsyncer: Record<string, unknown> | null;
+    postsyncer_ready: boolean;
+    needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
@@ -48,6 +56,15 @@ export default function VideoShow({ video }: PageProps) {
           : 'overview';
     const [tab, setTab] = useState(defaultTab);
 
+    const publishDisabled =
+        !video.postsyncer_ready ||
+        ['queued', 'running'].includes(video.publish_state);
+    const publishDisabledReason = !video.postsyncer_ready
+        ? 'Configure PostSyncer in Settings before scheduling or publishing.'
+        : ['queued', 'running'].includes(video.publish_state)
+          ? 'A publish job is already queued or running.'
+          : null;
+
     return (
         <>
             <Head title={video.title} />
@@ -64,15 +81,15 @@ export default function VideoShow({ video }: PageProps) {
                     <p className="text-sm text-muted-foreground">
                         Video #{video.number}
                     </p>
-                    <Heading
-                        title={video.title}
-                        description={video.human_id}
-                    />
+                    <Heading title={video.title} description={video.human_id} />
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">{video.human_id}</Badge>
                     <Badge variant="secondary">{video.status}</Badge>
+                    {video.publish_state !== 'idle' && (
+                        <Badge variant="outline">{video.publish_state}</Badge>
+                    )}
                     {video.language && (
                         <Badge variant="outline">{video.language}</Badge>
                     )}
@@ -144,6 +161,40 @@ export default function VideoShow({ video }: PageProps) {
                                             <InputError message={errors.body} />
                                         </div>
 
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="video_drive_url">
+                                                Video Drive URL
+                                            </Label>
+                                            <Input
+                                                id="video_drive_url"
+                                                name="video_drive_url"
+                                                type="url"
+                                                defaultValue={
+                                                    video.video_drive_url ?? ''
+                                                }
+                                            />
+                                            <InputError
+                                                message={errors.video_drive_url}
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="cover_drive_url">
+                                                Cover Drive URL
+                                            </Label>
+                                            <Input
+                                                id="cover_drive_url"
+                                                name="cover_drive_url"
+                                                type="url"
+                                                defaultValue={
+                                                    video.cover_drive_url ?? ''
+                                                }
+                                            />
+                                            <InputError
+                                                message={errors.cover_drive_url}
+                                            />
+                                        </div>
+
                                         <Button disabled={processing}>
                                             Save changes
                                         </Button>
@@ -151,11 +202,29 @@ export default function VideoShow({ video }: PageProps) {
                                 )}
                             </Form>
                         </div>
+
+                        <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                            <Heading
+                                variant="small"
+                                title="Publish"
+                                description="Schedule or publish this video through PostSyncer."
+                            />
+
+                            <PublishDialog
+                                disabled={publishDisabled}
+                                disabledReason={publishDisabledReason}
+                                publishState={video.publish_state}
+                                publishError={video.publish_error}
+                                publishUrl={`/dashboard/videos/${video.id}/publish`}
+                                entityLabel="video"
+                                needsConfirmAsk={video.needs_confirm_ask}
+                            />
+                        </div>
                     </TabsContent>
 
                     <TabsContent value="script">
                         {hasScript ? (
-                            <pre className="max-w-4xl whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed">
+                            <pre className="max-w-4xl rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed whitespace-pre-wrap">
                                 {video.script_markdown}
                             </pre>
                         ) : (
@@ -178,7 +247,9 @@ export default function VideoShow({ video }: PageProps) {
                                     dedicated view.
                                 </p>
                                 <Button asChild>
-                                    <a href={`/dashboard/videos/${video.id}/presentation`}>
+                                    <a
+                                        href={`/dashboard/videos/${video.id}/presentation`}
+                                    >
                                         Open fullscreen presentation
                                     </a>
                                 </Button>

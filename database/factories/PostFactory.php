@@ -25,6 +25,7 @@ class PostFactory extends Factory
             'number' => $number,
             'human_id' => "P-{$number}",
             'title' => fake()->sentence(),
+            'publish_state' => 'idle',
             'status' => 'draft',
         ];
     }

@@ -29,6 +29,11 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $script_markdown
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $deck_manifest
+ * @property string|null $video_drive_url
+ * @property string|null $cover_drive_url
+ * @property array<string, mixed>|null $postsyncer
+ * @property string $publish_state
+ * @property string|null $publish_error
  * @property string $status
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
@@ -50,6 +55,14 @@ class Video extends Model
         'dropped',
     ];
 
+    public const PUBLISH_STATES = [
+        'idle',
+        'queued',
+        'running',
+        'succeeded',
+        'failed',
+    ];
+
     /**
      * @var list<string>
      */
@@ -65,6 +78,11 @@ class Video extends Model
         'script_markdown',
         'captions',
         'deck_manifest',
+        'video_drive_url',
+        'cover_drive_url',
+        'postsyncer',
+        'publish_state',
+        'publish_error',
         'status',
         'created_by_user_id',
     ];
@@ -77,6 +95,7 @@ class Video extends Model
         return [
             'captions' => 'array',
             'deck_manifest' => 'array',
+            'postsyncer' => 'array',
         ];
     }
 

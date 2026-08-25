@@ -20,10 +20,10 @@ final class NormalizeCaptions
 
         // Already Studio-shaped: [{ part, platforms: [...] }]
         if (array_is_list($captions) && isset($captions[0]) && is_array($captions[0]) && array_key_exists('platforms', $captions[0])) {
-            return array_values(array_map(
+            return array_map(
                 fn (mixed $group): array => self::normalizeGroup(is_array($group) ? $group : []),
                 $captions,
-            ));
+            );
         }
 
         // Import shape: { "main"|"Part 1": { "tiktok": { title, caption, ... }, ... } }
