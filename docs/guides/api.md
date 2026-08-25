@@ -56,6 +56,14 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/ideas?kind=post&status=open` | read | cursor-paginated |
 | GET | `/api/v1/ideas/{human_id}` | read | |
 | PATCH | `/api/v1/ideas/{human_id}` | write | `title` required, plus `score`/`trend`/`rationale`/`body` |
+| GET | `/api/v1/videos` | videos:read | filters: `status`, `language` |
+| GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` |
+| POST | `/api/v1/videos` | videos:write | create; pass `human_id`+`number` for idempotent import |
+| PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, … |
+| GET | `/api/v1/posts` | posts:read | filters: `status`, `language` |
+| GET | `/api/v1/posts/{human_id}` | posts:read | |
+| POST | `/api/v1/posts` | posts:write | create / idempotent import |
+| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, … |
 
 Captures made through the API are recorded with `source: api`, and every
 status transition / field change they cause is attributed to the token by
@@ -77,7 +85,9 @@ curl -s -X PATCH https://cm.harun.dev/api/v1/scratchpad/01J8... \
 
 ## Not here yet
 
-- Post/video draft endpoints, promotion over the API, publishing and
-  scheduling (the private pipeline remains the distributor until that ships)
+- Deck/image multipart upload endpoints (manifest fields land via PATCH today;
+  binary packages are next)
+- Promotion of an idea → video/post over the API (dashboard promote stays)
+- Publishing and scheduling
 - Rate limiting beyond the default per-minute throttle
 - An MCP transport inside Laravel (clients wrap these routes instead)
