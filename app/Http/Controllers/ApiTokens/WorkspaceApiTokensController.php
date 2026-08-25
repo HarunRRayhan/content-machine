@@ -67,11 +67,17 @@ class WorkspaceApiTokensController extends Controller
             CreateWorkspaceApiTokenData::fromRequest($request),
         );
 
+        // The plaintext goes to the page as a one-request flash prop, where
+        // it stays visible in a read-only input until the user clicks
+        // "I've saved it" or navigates away. A toast was tried first: it
+        // vanished in seconds, taking the only copy of the credential with
+        // it.
+        $request->session()->flash('new_api_token', $plaintext);
+
         Inertia::flash('toast', [
             'type' => 'success',
-            'message' => __('API token :name created. Copy it now, it is shown only once: :token', [
+            'message' => __('API token :name created. Copy it below before leaving the page.', [
                 'name' => $token->name,
-                'token' => $plaintext,
             ]),
         ]);
 

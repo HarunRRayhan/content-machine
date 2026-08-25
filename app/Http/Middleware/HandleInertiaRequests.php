@@ -42,6 +42,12 @@ class HandleInertiaRequests extends Middleware
                 'user' => $request->user(),
             ],
             'registrationEnabled' => config('app.registration_enabled'),
+            // One-request flash from WorkspaceApiTokensController@store: the
+            // freshly minted token's only appearance. Consumed by the API
+            // access page into client state, so it survives partial reloads
+            // until dismissed there — but a full navigation loses it, which
+            // is the point of showing-it-once.
+            'newApiToken' => fn () => $request->session()->get('new_api_token'),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }

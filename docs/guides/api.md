@@ -8,10 +8,11 @@ entries, work on them, push updates back, triage them into ideas.
 ## Authentication
 
 1. Log in at [cm.harun.dev](https://cm.harun.dev) and open **Team**.
-2. Under **API tokens**, name the client, tick its abilities, **Create
-   token**.
-3. Copy the plaintext from the toast. It is shown exactly once; only a
-   SHA-256 hash is stored, so losing it means minting a new one.
+2. Open **API access**, name the client, tick its abilities, and click
+   **Create token**.
+3. Copy the plaintext from the panel that appears (it stays visible until
+   you click "I've saved it" or leave the page). It is shown exactly once;
+   only a SHA-256 hash is stored, so losing it means minting a new one.
 4. Send it on every call:
 
 ```
@@ -72,7 +73,7 @@ curl -s -X PATCH https://cm.harun.dev/api/v1/scratchpad/01J8... \
 
 ## Not here yet
 
-- Post/video draft endpoints, promotion over the API, publishing/scheduling
-  (the private pipeline remains the distributor until that ships)
+- Post/video draft endpoints, promotion over the API, publishing and
+  scheduling (the private pipeline remains the distributor until that ships)
 - Rate limiting beyond the default per-minute throttle
 - An MCP transport inside Laravel (clients wrap these routes instead)
