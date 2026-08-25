@@ -6,6 +6,7 @@ use App\Actions\Videos\UpdateVideoAction;
 use App\Data\Videos\UpdateVideoData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Videos\UpdateVideoRequest;
+use App\Models\Idea;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
@@ -18,42 +19,81 @@ use Inertia\Response;
 class VideosController extends Controller
 {
     /**
-     * List the current workspace's videos, newest first. Filterable by
-     * status, language, and a free-text query over title / human id.
+     * Studio-like status tabs on the videos index. Ideation lists open
+     * video ideas; every other tab filters videos by pipeline status.
+     *
+     * @var list<string>
+     */
+    public const TAB_STATUSES = [
+        'ideation',
+        'draft',
+        'pending',
+        'ready',
+        'recorded',
+        'scheduled',
+        'posted',
+        'archived',
+        'dropped',
+    ];
+
+    /**
+     * List the current workspace's videos (or video ideas on the Ideation
+     * tab), newest first. Filterable by status tab, language, and a
+     * free-text query over title / human id.
      */
     public function index(Request $request): Response
     {
         $workspace = $this->currentWorkspace($request);
 
-        $status = $request->string('status')->toString() ?: null;
+        $status = $request->string('status')->toString() ?: 'pending';
         $language = $request->string('language')->toString() ?: null;
         $query = $request->string('q')->toString() ?: null;
 
-        $videos = Video::query()
-            ->where('workspace_id', $workspace->id)
-            ->when($status, fn ($builder) => $builder->where('status', $status))
-            ->when($language, fn ($builder) => $builder->where('language', $language))
-            ->when($query, function ($builder) use ($query) {
-                $like = '%'.$query.'%';
-                $builder->where(function ($inner) use ($like) {
-                    $inner->where('title', 'ilike', $like)
-                        ->orWhere('human_id', 'ilike', $like)
-                        ->orWhere('slug', 'ilike', $like);
-                });
-            })
-            ->latest()
-            ->paginate(20)
-            ->withQueryString()
-            ->through(fn (Video $video) => $this->presentSummary($video));
+        if ($status === 'ideation') {
+            $items = Idea::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('kind', 'video')
+                ->where('status', 'open')
+                ->when($query, function ($builder) use ($query) {
+                    $like = '%'.$query.'%';
+                    $builder->where(function ($inner) use ($like) {
+                        $inner->where('title', 'ilike', $like)
+                            ->orWhere('human_id', 'ilike', $like)
+                            ->orWhere('slug', 'ilike', $like);
+                    });
+                })
+                ->latest()
+                ->paginate(20)
+                ->withQueryString()
+                ->through(fn (Idea $idea) => $this->presentIdeaSummary($idea));
+        } else {
+            $items = Video::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('status', $status)
+                ->when($language, fn ($builder) => $builder->where('language', $language))
+                ->when($query, function ($builder) use ($query) {
+                    $like = '%'.$query.'%';
+                    $builder->where(function ($inner) use ($like) {
+                        $inner->where('title', 'ilike', $like)
+                            ->orWhere('human_id', 'ilike', $like)
+                            ->orWhere('slug', 'ilike', $like);
+                    });
+                })
+                ->latest()
+                ->paginate(20)
+                ->withQueryString()
+                ->through(fn (Video $video) => $this->presentSummary($video));
+        }
 
         return Inertia::render('videos/index', [
-            'videos' => $videos,
+            'items' => $items,
             'filters' => [
                 'status' => $status,
                 'language' => $language,
                 'q' => $query,
             ],
-            'statuses' => Video::STATUSES,
+            'counts' => $this->statusCounts($workspace),
+            'tabs' => self::TAB_STATUSES,
         ]);
     }
 
@@ -98,11 +138,53 @@ class VideosController extends Controller
     }
 
     /**
+     * @return array<string, int>
+     */
+    private function statusCounts(Workspace $workspace): array
+    {
+        $videoCounts = Video::query()
+            ->where('workspace_id', $workspace->id)
+            ->selectRaw('status, count(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status');
+
+        $counts = [
+            'ideation' => Idea::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('kind', 'video')
+                ->where('status', 'open')
+                ->count(),
+        ];
+
+        foreach (Video::STATUSES as $videoStatus) {
+            $counts[$videoStatus] = (int) ($videoCounts[$videoStatus] ?? 0);
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentIdeaSummary(Idea $idea): array
+    {
+        return [
+            'type' => 'idea',
+            'id' => $idea->id,
+            'human_id' => $idea->human_id,
+            'title' => $idea->title,
+            'score' => $idea->score,
+            'trend' => $idea->trend,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function presentSummary(Video $video): array
     {
         return [
+            'type' => 'video',
             'id' => $video->id,
             'human_id' => $video->human_id,
             'number' => $video->number,
