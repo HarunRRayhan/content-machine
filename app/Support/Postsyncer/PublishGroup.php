@@ -13,6 +13,7 @@ final readonly class PublishGroup
      * @param  list<string>  $platforms
      * @param  list<string>  $mediaUrls
      * @param  array<string, string>  $captions
+     * @param  list<string>|null  $threadTweets  Twitter-only: caption + thread segments
      */
     public function __construct(
         public string $language,
@@ -22,5 +23,6 @@ final readonly class PublishGroup
         public array $captions,
         public ?CarbonImmutable $when,
         public bool $publishNow,
+        public ?array $threadTweets = null,
     ) {}
 }

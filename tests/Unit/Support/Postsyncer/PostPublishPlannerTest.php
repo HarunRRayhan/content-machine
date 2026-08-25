@@ -213,4 +213,124 @@ class PostPublishPlannerTest extends TestCase
 
         $this->assertSame(['facebook'], $group->platforms);
     }
+
+    public function test_bilingual_post_emits_separate_language_groups(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+        $captions = json_decode(
+            file_get_contents(base_path('tests/Fixtures/postsyncer/p48_captions.json')),
+            true,
+        );
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'both',
+            'platforms' => ['facebook', 'instagram', 'twitter', 'threads', 'bluesky', 'tiktok'],
+            'captions' => $captions,
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $langs = array_map(fn (PublishGroup $g) => $g->language, $groups);
+        $this->assertContains('bangla', $langs);
+        $this->assertContains('english', $langs);
+        $this->assertGreaterThanOrEqual(2, count($groups));
+
+        $banglaWorkspace = collect($groups)->first(fn (PublishGroup $g) => $g->language === 'bangla');
+        $englishWorkspace = collect($groups)->first(fn (PublishGroup $g) => $g->language === 'english');
+        $this->assertSame('15211', $banglaWorkspace->workspaceId);
+        $this->assertSame('853', $englishWorkspace->workspaceId);
+    }
+
+    public function test_twitter_thread_gets_own_group_threads_stays_separate(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['twitter', 'threads'],
+            'captions' => [
+                'English' => [
+                    'twitter' => [
+                        'caption' => 'Tweet one',
+                        'thread' => ['Tweet two', 'Tweet three'],
+                    ],
+                    'threads' => [
+                        'caption' => 'Threads caption',
+                        'images' => ['https://drive.google.com/file/d/th/view'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $twitterGroup = collect($groups)->first(
+            fn (PublishGroup $g) => $g->platforms === ['twitter'],
+        );
+        $threadsGroup = collect($groups)->first(
+            fn (PublishGroup $g) => in_array('threads', $g->platforms, true),
+        );
+
+        $this->assertNotNull($twitterGroup);
+        $this->assertSame(['Tweet one', 'Tweet two', 'Tweet three'], $twitterGroup->threadTweets);
+        $this->assertNotNull($threadsGroup);
+        $this->assertNotContains('twitter', $threadsGroup->platforms);
+        $this->assertSame(['threads' => 'Threads caption'], $threadsGroup->captions);
+    }
+
+    public function test_different_image_sets_split_into_separate_groups(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook', 'instagram'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB',
+                        'images' => ['https://drive.google.com/file/d/a/view'],
+                    ],
+                    'instagram' => [
+                        'caption' => 'IG',
+                        'images' => ['https://drive.google.com/file/d/b/view'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+
+        $this->assertCount(2, $groups);
+        $mediaSets = array_map(fn (PublishGroup $g) => $g->mediaUrls, $groups);
+        $this->assertContains(['https://drive.google.com/file/d/a/view'], $mediaSets);
+        $this->assertContains(['https://drive.google.com/file/d/b/view'], $mediaSets);
+    }
+
+    public function test_p48_fixture_uses_per_language_covers(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+        $captions = json_decode(
+            file_get_contents(base_path('tests/Fixtures/postsyncer/p48_captions.json')),
+            true,
+        );
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'both',
+            'platforms' => ['facebook'],
+            'captions' => $captions,
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+
+        $bangla = collect($groups)->first(fn (PublishGroup $g) => $g->language === 'bangla');
+        $english = collect($groups)->first(fn (PublishGroup $g) => $g->language === 'english');
+
+        $this->assertSame(['https://drive.google.com/file/d/p48-bn-cover/view'], $bangla->mediaUrls);
+        $this->assertSame(['https://drive.google.com/file/d/p48-en-cover/view'], $english->mediaUrls);
+    }
 }

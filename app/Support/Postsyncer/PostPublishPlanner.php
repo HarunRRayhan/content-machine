@@ -7,7 +7,8 @@ use App\Support\Content\NormalizeCaptions;
 use Carbon\CarbonImmutable;
 
 /**
- * Builds PostSyncer publish groups for a post. v1: one language group per plan call.
+ * Builds PostSyncer publish groups for a post: language workspaces, Twitter thread
+ * isolation, and media-set / first-comment splits.
  */
 class PostPublishPlanner
 {
@@ -21,52 +22,240 @@ class PostPublishPlanner
      */
     public function plan(Post $post, PostsyncerConfig $config, array $options): array
     {
-        $language = $this->resolveLanguage($post);
-        $langConfig = $config->language($language);
-        $workspaceId = $langConfig['workspace_id'] ?? '';
-
-        $mediaUrls = $this->mediaUrlResolver->forPost($post);
-        $postType = $mediaUrls !== [] ? 'photo' : 'text';
-
-        $selected = $this->selectedPlatforms($post, $options);
+        $when = $this->resolveWhen($options['when'] ?? null);
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
+        $selected = $this->selectedPlatforms($post, $options);
+        $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
+        $byLanguage = $this->captionsByLanguage($post);
 
-        $included = [];
-        foreach ($selected as $platform) {
-            $state = $this->platformState($config, $platform, $postType, $language);
+        $groups = [];
+        foreach ($byLanguage as $language => $platformCaptions) {
+            $langConfig = $config->language($language);
+            $workspaceId = $langConfig['workspace_id'] ?? '';
 
-            if ($state === null || $state === 'off') {
+            $included = [];
+            foreach ($selected as $platform) {
+                if (! array_key_exists($platform, $platformCaptions)) {
+                    continue;
+                }
+
+                $mediaUrls = $this->resolveMediaUrls($platformCaptions[$platform], $defaultMediaUrls);
+                $postType = $mediaUrls !== [] ? 'photo' : 'text';
+                $state = $this->platformState($config, $platform, $postType, $language);
+
+                if ($state === null || $state === 'off') {
+                    continue;
+                }
+
+                if ($state === 'ask' && ! $confirmAsk) {
+                    throw new PostsyncerException(
+                        "Platform {$platform} requires explicit confirmation (confirm_ask)."
+                    );
+                }
+
+                $included[$platform] = $platformCaptions[$platform];
+            }
+
+            if ($included === []) {
                 continue;
             }
 
-            if ($state === 'ask' && ! $confirmAsk) {
-                throw new PostsyncerException(
-                    "Platform {$platform} requires explicit confirmation (confirm_ask)."
-                );
-            }
-
-            $included[] = $platform;
+            $groups = array_merge(
+                $groups,
+                $this->splitLanguageGroups($language, $workspaceId ?? '', $included, $defaultMediaUrls, $when),
+            );
         }
 
-        $captions = $this->captionsForPlatforms($post, $included);
-        $when = $this->resolveWhen($options['when'] ?? null);
+        return $groups;
+    }
 
-        return [
-            new PublishGroup(
+    /**
+     * @param  array<string, array{caption: string, first_comment: string, images: list<string>|null, thread: list<string>}>  $platformCaptions
+     * @param  list<string>  $defaultMediaUrls
+     * @return list<PublishGroup>
+     */
+    private function splitLanguageGroups(
+        string $language,
+        int|string $workspaceId,
+        array $platformCaptions,
+        array $defaultMediaUrls,
+        ?CarbonImmutable $when,
+    ): array {
+        $remaining = $platformCaptions;
+        $groups = [];
+
+        if (isset($remaining['twitter']) && $remaining['twitter']['thread'] !== []) {
+            $twitter = $remaining['twitter'];
+            unset($remaining['twitter']);
+
+            $threadTweets = array_values(array_filter(
+                [$twitter['caption'], ...$twitter['thread']],
+                fn (string $segment): bool => trim($segment) !== '',
+            ));
+
+            $groups[] = new PublishGroup(
                 language: $language,
-                workspaceId: $workspaceId ?? '',
-                platforms: $included,
-                mediaUrls: $mediaUrls,
-                captions: $captions,
+                workspaceId: $workspaceId,
+                platforms: ['twitter'],
+                mediaUrls: $this->resolveMediaUrls($twitter, $defaultMediaUrls),
+                captions: ['twitter' => $twitter['caption']],
                 when: $when,
                 publishNow: $when === null,
-            ),
+                threadTweets: $threadTweets,
+            );
+        }
+
+        $buckets = [];
+        foreach ($remaining as $platform => $data) {
+            $mediaUrls = $this->resolveMediaUrls($data, $defaultMediaUrls);
+            $key = implode("\0", $mediaUrls).'|'.($data['first_comment'] ?? '');
+            $buckets[$key]['mediaUrls'] = $mediaUrls;
+            $buckets[$key]['platforms'][$platform] = $data['caption'];
+        }
+
+        foreach ($buckets as $bucket) {
+            $platforms = array_keys($bucket['platforms']);
+            sort($platforms);
+
+            $groups[] = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: $platforms,
+                mediaUrls: $bucket['mediaUrls'],
+                captions: $bucket['platforms'],
+                when: $when,
+                publishNow: $when === null,
+            );
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param  array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}  $platformData
+     * @param  list<string>  $defaultMediaUrls
+     * @return list<string>
+     */
+    private function resolveMediaUrls(array $platformData, array $defaultMediaUrls): array
+    {
+        if (array_key_exists('images', $platformData)) {
+            return $platformData['images'];
+        }
+
+        return $defaultMediaUrls;
+    }
+
+    /**
+     * @return array<string, array<string, array{caption: string, first_comment: string, images: list<string>|null, thread: list<string>}>>
+     */
+    private function captionsByLanguage(Post $post): array
+    {
+        $captions = $post->captions;
+
+        if ($captions === null || $captions === []) {
+            return [];
+        }
+
+        if ($this->isFlatCaptionMap($captions)) {
+            $language = $this->resolveLanguage($post);
+            $out = [];
+            foreach ($captions as $platform => $value) {
+                if (! is_string($platform)) {
+                    continue;
+                }
+                $normalized = $this->normalizePlatformFields(is_array($value) ? $value : ['caption' => $value]);
+                if ($normalized['caption'] !== '') {
+                    $out[strtolower($platform)] = $normalized;
+                }
+            }
+
+            return $out === [] ? [] : [$language => $out];
+        }
+
+        $byLanguage = [];
+        foreach (NormalizeCaptions::forDashboard($captions) as $group) {
+            $language = $this->languageFromPart($group['part']) ?? $this->resolveLanguage($post);
+            foreach ($group['platforms'] as $platform) {
+                $name = strtolower($platform['name']);
+                $normalized = $this->normalizePlatformFields($platform, fromNormalizedCaptions: true);
+                if ($normalized['caption'] !== '') {
+                    $byLanguage[$language][$name] = $normalized;
+                }
+            }
+        }
+
+        return $byLanguage;
+    }
+
+    /**
+     * @param  array<mixed>  $fields
+     * @return array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}
+     */
+    private function normalizePlatformFields(array $fields, bool $fromNormalizedCaptions = false): array
+    {
+        $caption = trim((string) ($fields['caption'] ?? ''));
+        if ($caption === '' && is_string($fields['caption'] ?? null)) {
+            $caption = '';
+        } elseif ($caption === '' && ! is_array($fields['caption'] ?? null) && isset($fields['caption'])) {
+            $caption = trim((string) $fields['caption']);
+        }
+
+        if ($caption === '' && is_string($fields) === false && ! isset($fields['caption']) && count($fields) === 1) {
+            $caption = trim((string) reset($fields));
+        }
+
+        $thread = $fields['thread'] ?? [];
+        if (! is_array($thread)) {
+            $thread = [];
+        }
+
+        $normalized = [
+            'caption' => $caption,
+            'first_comment' => trim((string) ($fields['first_comment'] ?? '')),
+            'thread' => array_values(array_map(
+                fn (mixed $segment): string => is_string($segment) ? trim($segment) : '',
+                $thread,
+            )),
         ];
+
+        if (array_key_exists('images', $fields)) {
+            $raw = $fields['images'];
+            $images = is_array($raw) ? array_values(array_map('strval', $raw)) : [];
+            if ($images !== [] || ! $fromNormalizedCaptions) {
+                $normalized['images'] = $images;
+            }
+        }
+
+        return $normalized;
+    }
+
+    private function languageFromPart(?string $part): ?string
+    {
+        if ($part === null || trim($part) === '') {
+            return null;
+        }
+
+        $p = strtolower(trim($part));
+        if (str_contains($p, 'bangla') || str_contains($p, 'bengali') || $p === 'bn' || $p === 'বাংলা') {
+            return 'bangla';
+        }
+
+        if (str_contains($p, 'english') || $p === 'en' || $p === 'ইংরেজি') {
+            return 'english';
+        }
+
+        return null;
     }
 
     private function resolveLanguage(Post $post): string
     {
-        return strtolower((string) $post->language) === 'en' ? 'english' : 'bangla';
+        $lang = strtolower((string) $post->language);
+
+        if (in_array($lang, ['en', 'english'], true)) {
+            return 'english';
+        }
+
+        return 'bangla';
     }
 
     /**
@@ -110,64 +299,6 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  list<string>  $platforms
-     * @return array<string, string>
-     */
-    private function captionsForPlatforms(Post $post, array $platforms): array
-    {
-        $all = $this->extractCaptions($post);
-        $out = [];
-
-        foreach ($platforms as $platform) {
-            if (array_key_exists($platform, $all)) {
-                $out[$platform] = $all[$platform];
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function extractCaptions(Post $post): array
-    {
-        $captions = $post->captions;
-
-        if ($captions === null || $captions === []) {
-            return [];
-        }
-
-        if ($this->isFlatCaptionMap($captions)) {
-            $out = [];
-            foreach ($captions as $platform => $value) {
-                if (! is_string($platform)) {
-                    continue;
-                }
-                $text = $this->captionText($value);
-                if ($text !== null) {
-                    $out[strtolower($platform)] = $text;
-                }
-            }
-
-            return $out;
-        }
-
-        $out = [];
-        foreach (NormalizeCaptions::forDashboard($captions) as $group) {
-            foreach ($group['platforms'] as $platform) {
-                $name = strtolower($platform['name']);
-                $text = trim($platform['caption']);
-                if ($text !== '') {
-                    $out[$name] = $text;
-                }
-            }
-        }
-
-        return $out;
-    }
-
-    /**
      * @param  array<mixed>  $captions
      */
     private function isFlatCaptionMap(array $captions): bool
@@ -187,23 +318,6 @@ class PostPublishPlanner
         }
 
         return false;
-    }
-
-    private function captionText(mixed $value): ?string
-    {
-        if (is_string($value)) {
-            $text = trim($value);
-
-            return $text !== '' ? $text : null;
-        }
-
-        if (! is_array($value)) {
-            return null;
-        }
-
-        $text = trim((string) ($value['caption'] ?? ''));
-
-        return $text !== '' ? $text : null;
     }
 
     private function resolveWhen(mixed $when): ?CarbonImmutable
