@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\V1\IdeasApiController;
+use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
+use App\Http\Controllers\Api\V1\VideosApiController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -80,4 +82,36 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('ideas/{human_id}', [IdeasApiController::class, 'show'])
         ->middleware('auth.workspace-token:ideas:read')
         ->name('ideas.show');
+
+    Route::get('videos', [VideosApiController::class, 'index'])
+        ->middleware('auth.workspace-token:videos:read')
+        ->name('videos.index');
+
+    Route::post('videos', [VideosApiController::class, 'store'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.store');
+
+    Route::patch('videos/{human_id}', [VideosApiController::class, 'update'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.update');
+
+    Route::get('videos/{human_id}', [VideosApiController::class, 'show'])
+        ->middleware('auth.workspace-token:videos:read')
+        ->name('videos.show');
+
+    Route::get('posts', [PostsApiController::class, 'index'])
+        ->middleware('auth.workspace-token:posts:read')
+        ->name('posts.index');
+
+    Route::post('posts', [PostsApiController::class, 'store'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.store');
+
+    Route::patch('posts/{human_id}', [PostsApiController::class, 'update'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.update');
+
+    Route::get('posts/{human_id}', [PostsApiController::class, 'show'])
+        ->middleware('auth.workspace-token:posts:read')
+        ->name('posts.show');
 });

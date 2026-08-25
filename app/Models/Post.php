@@ -9,14 +9,12 @@ use Database\Factories\PostFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
- * A draft post shell, created by PromoteIdeaAction from an open, kind=post
- * Idea. `title`/`body` are copied in at promotion time, a snapshot of the
- * idea as it stood then, not a live reference, same as an Idea's own
- * `body` is a snapshot of the scratchpad entry it was triaged from.
- * Captions, platforms, and scheduling are a later phase's own tables/
- * columns, not built here.
+ * A post in the content pipeline. Started as a draft shell from
+ * PromoteIdeaAction; now also holds captions, platforms, and language so
+ * personal-content can read/write posts entirely over the API.
  *
  * @property int $id
  * @property int $workspace_id
@@ -24,7 +22,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $number
  * @property string $human_id
  * @property string $title
+ * @property string|null $language
+ * @property string|null $slug
  * @property string|null $body
+ * @property array<string, mixed>|null $captions
+ * @property array<string, mixed>|null $platforms
  * @property string $status
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
@@ -35,9 +37,16 @@ class Post extends Model
     /** @use HasFactory<PostFactory> */
     use BelongsToWorkspace, HasFactory, RecordsHistory;
 
+    public const STATUSES = [
+        'draft',
+        'ready',
+        'scheduled',
+        'posted',
+        'archived',
+        'dropped',
+    ];
+
     /**
-     * The attributes that are mass assignable.
-     *
      * @var list<string>
      */
     protected $fillable = [
@@ -46,14 +55,27 @@ class Post extends Model
         'number',
         'human_id',
         'title',
+        'language',
+        'slug',
         'body',
+        'captions',
+        'platforms',
         'status',
         'created_by_user_id',
     ];
 
     /**
-     * The idea this post was promoted from, if any.
-     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'captions' => 'array',
+            'platforms' => 'array',
+        ];
+    }
+
+    /**
      * @return BelongsTo<Idea, $this>
      */
     public function idea(): BelongsTo
@@ -62,12 +84,18 @@ class Post extends Model
     }
 
     /**
-     * The user who promoted this post into existence, if known.
-     *
      * @return BelongsTo<User, $this>
      */
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /**
+     * @return MorphMany<Attachment, $this>
+     */
+    public function attachments(): MorphMany
+    {
+        return $this->morphMany(Attachment::class, 'attachable')->orderBy('position');
     }
 }

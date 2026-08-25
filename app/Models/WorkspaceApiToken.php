@@ -42,6 +42,10 @@ class WorkspaceApiToken extends Model
         'scratchpad:write',
         'ideas:read',
         'ideas:write',
+        'videos:read',
+        'videos:write',
+        'posts:read',
+        'posts:write',
     ];
 
     /**
