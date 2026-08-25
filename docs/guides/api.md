@@ -55,6 +55,7 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/scratchpad/{public_id}/media/{id}` | read | streams a private photo/audio file |
 | GET | `/api/v1/ideas?kind=post&status=open` | read | cursor-paginated |
 | GET | `/api/v1/ideas/{human_id}` | read | |
+| POST | `/api/v1/ideas` | write | create; pass `human_id` for idempotent import (bumps `id_sequences`) |
 | PATCH | `/api/v1/ideas/{human_id}` | write | `title` required, plus `score`/`trend`/`rationale`/`body` |
 | GET | `/api/v1/videos` | videos:read | filters: `status`, `language` |
 | GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` |

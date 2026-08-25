@@ -35,6 +35,7 @@ class IdeasApiController extends Controller
             ->when($kind !== null, fn ($query) => $query->where('kind', $kind))
             ->when($status !== null, fn ($query) => $query->where('status', $status))
             ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->cursorPaginate(50)
             ->withQueryString();
 
