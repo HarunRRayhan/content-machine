@@ -11,6 +11,7 @@ use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Controllers\Telegram\TelegramBotLinkController;
+use App\Http\Controllers\Videos\VideoPresentationController;
 use App\Http\Controllers\Videos\VideosController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Auth\Middleware\RequirePassword;
@@ -58,6 +59,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
 
         Route::get('videos', [VideosController::class, 'index'])->name('videos.index');
         Route::get('videos/{video}', [VideosController::class, 'show'])->name('videos.show');
+        Route::get('videos/{video}/presentation', [VideoPresentationController::class, 'show'])->name('videos.presentation');
         Route::patch('videos/{video}', [VideosController::class, 'update'])->name('videos.update');
 
         Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Content\NormalizeCaptions;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,14 +17,29 @@ use Inertia\Response;
 class VideosController extends Controller
 {
     /**
-     * List the current workspace's videos, newest first.
+     * List the current workspace's videos, newest first. Filterable by
+     * status, language, and a free-text query over title / human id.
      */
     public function index(Request $request): Response
     {
         $workspace = $this->currentWorkspace($request);
 
+        $status = $request->string('status')->toString() ?: null;
+        $language = $request->string('language')->toString() ?: null;
+        $query = $request->string('q')->toString() ?: null;
+
         $videos = Video::query()
             ->where('workspace_id', $workspace->id)
+            ->when($status, fn ($builder) => $builder->where('status', $status))
+            ->when($language, fn ($builder) => $builder->where('language', $language))
+            ->when($query, function ($builder) use ($query) {
+                $like = '%'.$query.'%';
+                $builder->where(function ($inner) use ($like) {
+                    $inner->where('title', 'ilike', $like)
+                        ->orWhere('human_id', 'ilike', $like)
+                        ->orWhere('slug', 'ilike', $like);
+                });
+            })
             ->latest()
             ->paginate(20)
             ->withQueryString()
@@ -31,6 +47,12 @@ class VideosController extends Controller
 
         return Inertia::render('videos/index', [
             'videos' => $videos,
+            'filters' => [
+                'status' => $status,
+                'language' => $language,
+                'q' => $query,
+            ],
+            'statuses' => Video::STATUSES,
         ]);
     }
 
@@ -82,8 +104,13 @@ class VideosController extends Controller
         return [
             'id' => $video->id,
             'human_id' => $video->human_id,
+            'number' => $video->number,
             'title' => $video->title,
             'status' => $video->status,
+            'language' => $video->language,
+            'has_script' => filled($video->script_markdown),
+            'has_captions' => ! empty($video->captions),
+            'has_deck' => ! empty($video->deck_manifest),
             'created_at' => $video->created_at?->toIso8601String(),
         ];
     }
@@ -96,11 +123,19 @@ class VideosController extends Controller
         return [
             'id' => $video->id,
             'human_id' => $video->human_id,
+            'number' => $video->number,
             'title' => $video->title,
             'body' => $video->body,
+            'script_markdown' => $video->script_markdown,
+            'captions' => NormalizeCaptions::forDashboard($video->captions),
+            'deck_manifest' => $video->deck_manifest,
+            'has_deck' => ! empty($video->deck_manifest),
+            'language' => $video->language,
+            'slug' => $video->slug,
             'status' => $video->status,
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),
+            'updated_at' => $video->updated_at?->toIso8601String(),
         ];
     }
 }
