@@ -31,6 +31,7 @@ class VideosApiController extends Controller
             ->when($status !== null, fn ($query) => $query->where('status', $status))
             ->when($language !== null, fn ($query) => $query->where('language', $language))
             ->orderByDesc('number')
+            ->orderByDesc('id')
             ->cursorPaginate(50)
             ->withQueryString();
 
