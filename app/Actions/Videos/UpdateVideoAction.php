@@ -12,6 +12,8 @@ class UpdateVideoAction
         $attributes = [
             'title' => $data->title,
             'body' => $data->body,
+            'video_drive_url' => $data->videoDriveUrl,
+            'cover_drive_url' => $data->coverDriveUrl,
         ];
 
         if ($data->replaceExtended) {

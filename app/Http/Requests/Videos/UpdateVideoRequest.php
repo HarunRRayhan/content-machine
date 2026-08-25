@@ -17,6 +17,8 @@ class UpdateVideoRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:255'],
             'body' => ['nullable', 'string', 'max:20000'],
+            'video_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
+            'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
         ];
     }
 }

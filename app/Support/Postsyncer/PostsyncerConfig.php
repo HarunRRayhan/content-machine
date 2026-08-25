@@ -99,6 +99,21 @@ class PostsyncerConfig
         return is_string($apiKey) && $apiKey !== '';
     }
 
+    public function isReadyForPublish(): bool
+    {
+        if (! $this->publishEnabled() || ! $this->isConfigured()) {
+            return false;
+        }
+
+        foreach (['bangla', 'english'] as $lang) {
+            if ($this->language($lang)['workspace_id'] === null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
      * @param  array<string, mixed>  $input
      */

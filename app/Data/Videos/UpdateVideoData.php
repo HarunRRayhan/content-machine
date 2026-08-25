@@ -23,6 +23,8 @@ final readonly class UpdateVideoData
         public ?string $scriptMarkdown = null,
         public ?array $captions = null,
         public ?array $deckManifest = null,
+        public ?string $videoDriveUrl = null,
+        public ?string $coverDriveUrl = null,
         public ?string $status = null,
         public bool $replaceExtended = false,
     ) {}
@@ -32,6 +34,8 @@ final readonly class UpdateVideoData
         return new self(
             title: $request->string('title')->toString(),
             body: $request->filled('body') ? $request->string('body')->toString() : null,
+            videoDriveUrl: $request->filled('video_drive_url') ? $request->string('video_drive_url')->toString() : null,
+            coverDriveUrl: $request->filled('cover_drive_url') ? $request->string('cover_drive_url')->toString() : null,
             replaceExtended: false,
         );
     }

@@ -9,6 +9,7 @@ use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -120,6 +121,11 @@ class VideosController extends Controller
      */
     private function presentDetail(Video $video): array
     {
+        $workspace = Workspace::current();
+        $postsyncerConfig = $workspace !== null
+            ? PostsyncerConfig::fromWorkspace($workspace)
+            : null;
+
         return [
             'id' => $video->id,
             'human_id' => $video->human_id,
@@ -130,9 +136,15 @@ class VideosController extends Controller
             'captions' => NormalizeCaptions::forDashboard($video->captions),
             'deck_manifest' => $video->deck_manifest,
             'has_deck' => ! empty($video->deck_manifest),
+            'video_drive_url' => $video->video_drive_url,
+            'cover_drive_url' => $video->cover_drive_url,
             'language' => $video->language,
             'slug' => $video->slug,
             'status' => $video->status,
+            'publish_state' => $video->publish_state,
+            'publish_error' => $video->publish_error,
+            'postsyncer' => $video->postsyncer,
+            'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),

@@ -2,6 +2,7 @@ import { Form, Head, Link } from '@inertiajs/react';
 import { useState } from 'react';
 import CaptionsPanel from '@/components/content/captions-panel';
 import type { CaptionGroup } from '@/components/content/captions-panel';
+import PublishDialog from '@/components/content/publish-dialog';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';
@@ -33,9 +34,14 @@ type PostDetail = {
     platforms: string[];
     images: PostImage[];
     caption_image_names: string[];
+    image_drive_urls: string[];
     language: string | null;
     slug: string | null;
     status: string;
+    publish_state: string;
+    publish_error: string | null;
+    postsyncer: Record<string, unknown> | null;
+    postsyncer_ready: boolean;
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
@@ -45,6 +51,10 @@ type PageProps = {
     post: PostDetail;
 };
 
+function driveUrlsToText(urls: string[]): string {
+    return urls.join('\n');
+}
+
 export default function PostShow({ post }: PageProps) {
     const hasCaptions = post.captions.some(
         (group) => group.platforms.length > 0,
@@ -53,6 +63,15 @@ export default function PostShow({ post }: PageProps) {
         post.images.length > 0 || post.caption_image_names.length > 0;
     const defaultTab = hasCaptions ? 'captions' : 'overview';
     const [tab, setTab] = useState(defaultTab);
+
+    const publishDisabled =
+        !post.postsyncer_ready ||
+        ['queued', 'running'].includes(post.publish_state);
+    const publishDisabledReason = !post.postsyncer_ready
+        ? 'Configure PostSyncer in Settings before scheduling or publishing.'
+        : ['queued', 'running'].includes(post.publish_state)
+          ? 'A publish job is already queued or running.'
+          : null;
 
     return (
         <>
@@ -76,6 +95,9 @@ export default function PostShow({ post }: PageProps) {
                 <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">{post.human_id}</Badge>
                     <Badge variant="secondary">{post.status}</Badge>
+                    {post.publish_state !== 'idle' && (
+                        <Badge variant="outline">{post.publish_state}</Badge>
+                    )}
                     {post.language && (
                         <Badge variant="outline">{post.language}</Badge>
                     )}
@@ -140,12 +162,53 @@ export default function PostShow({ post }: PageProps) {
                                             <InputError message={errors.body} />
                                         </div>
 
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="image_drive_urls">
+                                                Image Drive URLs
+                                            </Label>
+                                            <Textarea
+                                                id="image_drive_urls"
+                                                name="image_drive_urls"
+                                                rows={4}
+                                                placeholder="One Google Drive URL per line"
+                                                defaultValue={driveUrlsToText(
+                                                    post.image_drive_urls,
+                                                )}
+                                            />
+                                            <p className="text-xs text-muted-foreground">
+                                                Used when images are not
+                                                uploaded as attachments.
+                                            </p>
+                                            <InputError
+                                                message={
+                                                    errors.image_drive_urls
+                                                }
+                                            />
+                                        </div>
+
                                         <Button disabled={processing}>
                                             Save changes
                                         </Button>
                                     </>
                                 )}
                             </Form>
+                        </div>
+
+                        <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                            <Heading
+                                variant="small"
+                                title="Publish"
+                                description="Schedule or publish this post through PostSyncer."
+                            />
+
+                            <PublishDialog
+                                disabled={publishDisabled}
+                                disabledReason={publishDisabledReason}
+                                publishState={post.publish_state}
+                                publishError={post.publish_error}
+                                publishUrl={`/dashboard/posts/${post.id}/publish`}
+                                entityLabel="post"
+                            />
                         </div>
                     </TabsContent>
 

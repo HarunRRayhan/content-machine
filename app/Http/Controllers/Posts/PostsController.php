@@ -9,6 +9,7 @@ use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -161,6 +162,11 @@ class PostsController extends Controller
             }
         }
 
+        $workspace = Workspace::current();
+        $postsyncerConfig = $workspace !== null
+            ? PostsyncerConfig::fromWorkspace($workspace)
+            : null;
+
         return [
             'id' => $post->id,
             'human_id' => $post->human_id,
@@ -171,9 +177,14 @@ class PostsController extends Controller
             'platforms' => $post->platforms ?? [],
             'images' => $images,
             'caption_image_names' => array_keys($captionImageNames),
+            'image_drive_urls' => $post->image_drive_urls ?? [],
             'language' => $post->language,
             'slug' => $post->slug,
             'status' => $post->status,
+            'publish_state' => $post->publish_state,
+            'publish_error' => $post->publish_error,
+            'postsyncer' => $post->postsyncer,
+            'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),
