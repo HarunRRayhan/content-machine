@@ -27,6 +27,10 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $body
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $platforms
+ * @property array<int, string>|null $image_drive_urls
+ * @property array<string, mixed>|null $postsyncer
+ * @property string $publish_state
+ * @property string|null $publish_error
  * @property string $status
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
@@ -46,6 +50,14 @@ class Post extends Model
         'dropped',
     ];
 
+    public const PUBLISH_STATES = [
+        'idle',
+        'queued',
+        'running',
+        'succeeded',
+        'failed',
+    ];
+
     /**
      * @var list<string>
      */
@@ -60,6 +72,10 @@ class Post extends Model
         'body',
         'captions',
         'platforms',
+        'image_drive_urls',
+        'postsyncer',
+        'publish_state',
+        'publish_error',
         'status',
         'created_by_user_id',
     ];
@@ -72,6 +88,8 @@ class Post extends Model
         return [
             'captions' => 'array',
             'platforms' => 'array',
+            'image_drive_urls' => 'array',
+            'postsyncer' => 'array',
         ];
     }
 

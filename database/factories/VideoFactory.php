@@ -25,6 +25,7 @@ class VideoFactory extends Factory
             'number' => $number,
             'human_id' => "V-{$number}",
             'title' => fake()->sentence(),
+            'publish_state' => 'idle',
             'status' => 'draft',
         ];
     }
