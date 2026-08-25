@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class PostsyncerSettingsControllerTest extends TestCase
@@ -74,8 +75,8 @@ class PostsyncerSettingsControllerTest extends TestCase
             'api_base' => 'https://postsyncer.com/api/v1',
         ]);
 
-        \Illuminate\Support\Facades\Http::fake([
-            'postsyncer.com/api/v1/accounts' => \Illuminate\Support\Facades\Http::response([
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
                 'data' => [
                     [
                         'id' => 1,
