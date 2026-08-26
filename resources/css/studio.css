@@ -825,10 +825,11 @@
 
 .studio-page .pres-embed {
     width: 100%;
-    min-height: 75vh;
+    min-height: calc(100vh - 220px);
+    height: calc(100vh - 220px);
     border: 0;
     border-radius: 18px;
-    background: #fff;
+    background: var(--background, #fff);
 }
 
 .studio-page .empty {
