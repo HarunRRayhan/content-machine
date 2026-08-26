@@ -62,7 +62,10 @@ class PostsyncerHandleDirectory
             ];
         }
 
-        return $preview;
+        return [
+            'bn' => $preview['bn'],
+            'en' => $preview['en'],
+        ];
     }
 
     /**
@@ -75,7 +78,7 @@ class PostsyncerHandleDirectory
         }
 
         try {
-            $accounts = Cache::remember(
+            return Cache::remember(
                 'postsyncer.accounts.'.$this->cacheKey,
                 now()->addMinutes(10),
                 fn (): array => $this->client->listAllAccounts(),
@@ -83,8 +86,6 @@ class PostsyncerHandleDirectory
         } catch (PostsyncerException) {
             return [];
         }
-
-        return is_array($accounts) ? $accounts : [];
     }
 
     /**
@@ -109,7 +110,10 @@ class PostsyncerHandleDirectory
             }
         }
 
-        return $preview;
+        return [
+            'bn' => $preview['bn'],
+            'en' => $preview['en'],
+        ];
     }
 
     private function langForWorkspace(string $workspaceId): ?string

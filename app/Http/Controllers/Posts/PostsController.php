@@ -276,16 +276,17 @@ class PostsController extends Controller
         }
 
         $workspace = Workspace::current();
-        $postsyncerConfig = $workspace !== null
-            ? PostsyncerConfig::fromWorkspace($workspace)
-            : null;
-        $handles = $postsyncerConfig !== null && $workspace !== null
-            ? (new PostsyncerHandleDirectory(
+        if ($workspace === null) {
+            $postsyncerConfig = null;
+            $handles = ['bn' => [], 'en' => []];
+        } else {
+            $postsyncerConfig = PostsyncerConfig::fromWorkspace($workspace);
+            $handles = (new PostsyncerHandleDirectory(
                 new PostsyncerClient($postsyncerConfig),
                 $postsyncerConfig,
                 (string) $workspace->id,
-            ))->forPreview()
-            : ['bn' => [], 'en' => []];
+            ))->forPreview();
+        }
 
         return [
             'id' => $post->id,
