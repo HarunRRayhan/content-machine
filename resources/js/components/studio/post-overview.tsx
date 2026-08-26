@@ -8,11 +8,17 @@ const POST_PIPELINE = [
     { key: 'posted', label: 'Posted', prompt: '📮 Posted?' },
 ] as const;
 
+type PostImage = {
+    filename: string;
+    url: string | null;
+};
+
 type Props = {
     postId: number;
     title: string;
     status: string;
     platforms: string[];
+    images?: PostImage[];
 };
 
 function mapStudioStatus(status: string): string {
@@ -30,6 +36,7 @@ export default function PostOverview({
     title,
     status,
     platforms,
+    images = [],
 }: Props) {
     const studioStatus = mapStudioStatus(status);
     const archived = studioStatus === 'archived';
@@ -174,6 +181,34 @@ export default function PostOverview({
                         )}
                     </div>
                 </div>
+            </section>
+
+            <section className="pane">
+                <div className="pane-head">
+                    <span className="k">Images</span>
+                </div>
+                {images.length === 0 ? (
+                    <p className="empty">No images on this post yet.</p>
+                ) : (
+                    <div className="post-images-gallery">
+                        {images.map((image) =>
+                            image.url ? (
+                                <img
+                                    key={image.filename}
+                                    src={image.url}
+                                    alt={image.filename}
+                                />
+                            ) : (
+                                <div
+                                    key={image.filename}
+                                    className="mock-img-missing"
+                                >
+                                    {image.filename}
+                                </div>
+                            ),
+                        )}
+                    </div>
+                )}
             </section>
         </div>
     );

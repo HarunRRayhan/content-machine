@@ -32,7 +32,7 @@ request reads as `401`). Abilities:
 | `videos:read` | list/show videos |
 | `videos:write` | create/update videos (incl. import with explicit human_id) |
 | `posts:read` | list/show posts |
-| `posts:write` | create/update posts |
+| `posts:write` | create/update posts, upload post images |
 
 Missing ability → `403`. Bad or revoked token → `401`.
 
@@ -65,6 +65,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/posts/{human_id}` | posts:read | |
 | POST | `/api/v1/posts` | posts:write | create / idempotent import |
 | PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, … |
+| POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
+| GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image |
 
 Captures made through the API are recorded with `source: api`, and every
 status transition / field change they cause is attributed to the token by
@@ -86,7 +88,7 @@ curl -s -X PATCH https://cm.harun.dev/api/v1/scratchpad/01J8... \
 
 ## Not here yet
 
-- Deck/image multipart upload endpoints (manifest fields land via PATCH today;
+- Deck multipart upload endpoints (manifest fields land via PATCH today;
   binary packages are next)
 - Promotion of an idea → video/post over the API (dashboard promote stays)
 - Publishing and scheduling

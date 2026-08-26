@@ -1,4 +1,5 @@
 import { Head, Link } from '@inertiajs/react';
+import { useMemo, useState } from 'react';
 import PublishDialog, {
     PublishStatusBanner,
 } from '@/components/content/publish-dialog';
@@ -8,6 +9,11 @@ import type { LangCode } from '@/lib/lang-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index } from '@/routes/dashboard/posts';
+
+type PostImage = {
+    filename: string;
+    url: string | null;
+};
 
 type PostDetail = {
     id: number;
@@ -28,7 +34,9 @@ type PostDetail = {
         }>;
     }>;
     platforms: string[];
+    images: PostImage[];
     image_urls: Record<string, string>;
+    caption_image_names: string[];
     language: string | null;
     slug: string | null;
     status: string;
@@ -46,7 +54,10 @@ type PageProps = {
     post: PostDetail;
 };
 
+type TabKey = 'overview' | 'captions';
+
 export default function PostShow({ post }: PageProps) {
+    const [tab, setTab] = useState<TabKey>('overview');
     const hasCaptions = post.captions.some(
         (group) => group.platforms.length > 0,
     );
@@ -61,6 +72,17 @@ export default function PostShow({ post }: PageProps) {
         : ['queued', 'running'].includes(post.publish_state)
           ? 'A publish job is already queued or running.'
           : null;
+
+    const overviewImages = useMemo(() => {
+        if (post.images.length > 0) {
+            return post.images;
+        }
+
+        return post.caption_image_names.map((name) => ({
+            filename: name,
+            url: post.image_urls[name] ?? null,
+        }));
+    }, [post.caption_image_names, post.image_urls, post.images]);
 
     return (
         <>
@@ -94,40 +116,64 @@ export default function PostShow({ post }: PageProps) {
                     publishError={post.publish_error}
                 />
 
-                <PostOverview
-                    postId={post.id}
-                    title={post.title}
-                    status={post.status}
-                    platforms={post.platforms}
-                />
+                <div className="tabbar" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === 'overview'}
+                        onClick={() => setTab('overview')}
+                    >
+                        📋 Overview
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === 'captions'}
+                        onClick={() => setTab('captions')}
+                    >
+                        📣 Captions
+                    </button>
+                </div>
 
-                <section className="pane max-w-3xl">
-                    <div className="pane-head">
-                        <span className="k">📤 Publish</span>
-                    </div>
-                    <div className="p-5">
-                        <PublishDialog
-                            disabled={publishDisabled}
-                            disabledReason={publishDisabledReason}
-                            publishState={post.publish_state}
-                            publishError={post.publish_error}
-                            publishUrl={`/dashboard/posts/${post.id}/publish`}
-                            entityLabel="post"
-                            needsConfirmAsk={post.needs_confirm_ask}
+                {tab === 'overview' && (
+                    <div className="space-y-4">
+                        <PostOverview
+                            postId={post.id}
+                            title={post.title}
+                            status={post.status}
+                            platforms={post.platforms}
+                            images={overviewImages}
                         />
+                        <section className="pane max-w-3xl">
+                            <div className="pane-head">
+                                <span className="k">📤 Publish</span>
+                            </div>
+                            <div className="p-5">
+                                <PublishDialog
+                                    disabled={publishDisabled}
+                                    disabledReason={publishDisabledReason}
+                                    publishState={post.publish_state}
+                                    publishError={post.publish_error}
+                                    publishUrl={`/dashboard/posts/${post.id}/publish`}
+                                    entityLabel="post"
+                                    needsConfirmAsk={post.needs_confirm_ask}
+                                />
+                            </div>
+                        </section>
                     </div>
-                </section>
-
-                {hasCaptions ? (
-                    <PostCaptionsPanel
-                        groups={post.captions}
-                        platforms={post.platforms}
-                        imageUrls={post.image_urls}
-                        defaultLang={defaultLang}
-                    />
-                ) : (
-                    <p className="empty">No captions on this post yet.</p>
                 )}
+
+                {tab === 'captions' &&
+                    (hasCaptions ? (
+                        <PostCaptionsPanel
+                            groups={post.captions}
+                            platforms={post.platforms}
+                            imageUrls={post.image_urls}
+                            defaultLang={defaultLang}
+                        />
+                    ) : (
+                        <p className="empty">No captions on this post yet.</p>
+                    ))}
             </div>
         </>
     );

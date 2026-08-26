@@ -7,6 +7,7 @@ use App\Data\Posts\UpdatePostData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Idea;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
@@ -17,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PostsController extends Controller
 {
@@ -116,6 +118,28 @@ class PostsController extends Controller
         ]);
     }
 
+    /**
+     * Stream a post image. The scratchpad disk is private, so this is the
+     * only way the dashboard <img> can load one: same-origin + session
+     * cookie. A media asset outside the current workspace 404s.
+     */
+    public function media(Request $request, Post $post, MediaAsset $mediaAsset): StreamedResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($post->workspace_id !== $workspace->id, 404);
+        abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+
+        return Storage::disk($mediaAsset->disk)->response(
+            $mediaAsset->path,
+            $mediaAsset->original_filename,
+            [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ],
+        );
+    }
+
     public function update(UpdatePostRequest $request, Post $post, UpdatePostAction $updatePostAction): RedirectResponse
     {
         $workspace = $this->currentWorkspace($request);
@@ -208,37 +232,32 @@ class PostsController extends Controller
      */
     private function presentDetail(Post $post): array
     {
-        $images = $post->attachments
-            ->map(function ($attachment) {
-                $media = $attachment->mediaAsset;
-                if ($media === null) {
-                    return null;
-                }
+        $images = [];
+        foreach ($post->attachments as $attachment) {
+            $media = $attachment->mediaAsset;
+            if ($media === null) {
+                continue;
+            }
 
-                $url = null;
-                try {
-                    $url = Storage::disk($media->disk)->url($media->path);
-                } catch (\Throwable) {
-                    $url = null;
-                }
+            $filename = $media->original_filename ?: basename($media->path);
 
-                return [
-                    'id' => $attachment->id,
-                    'role' => $attachment->role,
-                    'platform' => $attachment->platform,
-                    'filename' => $media->original_filename,
-                    'url' => $url,
-                    'mime' => $media->mime,
-                ];
-            })
-            ->filter()
-            ->values()
-            ->all();
+            $images[] = [
+                'id' => $attachment->id,
+                'role' => $attachment->role,
+                'platform' => $attachment->platform,
+                'filename' => $filename,
+                'url' => route('dashboard.posts.media', [$post, $media]),
+                'mime' => $media->mime,
+            ];
+        }
 
-        // Until images are uploaded as attachments, still surface filenames
-        // referenced inside caption blocks so the Images tab isn't empty.
+        $captions = $this->captionsWithInheritedImages(
+            NormalizeCaptions::forDashboard($post->captions),
+            $images,
+        );
+
         $captionImageNames = [];
-        foreach (NormalizeCaptions::forDashboard($post->captions) as $group) {
+        foreach ($captions as $group) {
             foreach ($group['platforms'] as $platform) {
                 foreach ($platform['images'] as $name) {
                     $captionImageNames[$name] = true;
@@ -250,8 +269,7 @@ class PostsController extends Controller
         foreach ($images as $image) {
             if (! empty($image['filename']) && ! empty($image['url'])) {
                 $imageUrls[$image['filename']] = $image['url'];
-                $basename = basename($image['filename']);
-                $imageUrls[$basename] = $image['url'];
+                $imageUrls[basename($image['filename'])] = $image['url'];
             }
         }
 
@@ -266,7 +284,7 @@ class PostsController extends Controller
             'number' => $post->number,
             'title' => $post->title,
             'body' => $post->body,
-            'captions' => NormalizeCaptions::forDashboard($post->captions),
+            'captions' => $captions,
             'platforms' => $post->platforms ?? [],
             'images' => $images,
             'image_urls' => $imageUrls,
@@ -285,5 +303,48 @@ class PostsController extends Controller
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Imported posts often store empty per-platform `images` arrays even
+     * when the post has attached files (the markdown `**Images:**` line
+     * lived at post level). If no platform listed any filenames, fill from
+     * attachments so the preview actually renders <img> tags.
+     *
+     * @param  list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>  $captions
+     * @param  list<array<string, mixed>>  $images
+     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>
+     */
+    private function captionsWithInheritedImages(array $captions, array $images): array
+    {
+        $filenames = [];
+        foreach ($images as $image) {
+            $name = $image['filename'] ?? null;
+            if (is_string($name) && $name !== '') {
+                $filenames[] = $name;
+            }
+        }
+
+        if ($filenames === []) {
+            return $captions;
+        }
+
+        foreach ($captions as $group) {
+            foreach ($group['platforms'] as $platform) {
+                if ($platform['images'] !== []) {
+                    return $captions;
+                }
+            }
+        }
+
+        return array_map(function (array $group) use ($filenames): array {
+            $group['platforms'] = array_map(function (array $platform) use ($filenames): array {
+                $platform['images'] = $filenames;
+
+                return $platform;
+            }, $group['platforms']);
+
+            return $group;
+        }, $captions);
     }
 }

@@ -4,10 +4,14 @@ namespace Tests\Feature\Api;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
+use App\Models\Attachment;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PostsApiTest extends TestCase
@@ -66,5 +70,72 @@ class PostsApiTest extends TestCase
         $this->acting()->getJson('/api/v1/posts')
             ->assertOk()
             ->assertJsonCount(2, 'data');
+    }
+
+    public function test_upload_image_attaches_the_file_and_streams_it_back(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'BP-12',
+            'number' => 12,
+            'title' => 'Open weights meme',
+        ])->assertCreated();
+
+        $this->acting()->post('/api/v1/posts/BP-12/images', [
+            'image' => UploadedFile::fake()->image('cover.png', 10, 10),
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'BP-12')
+            ->assertJsonPath('data.attachments.0.role', 'image');
+
+        $asset = MediaAsset::query()->sole();
+        Storage::disk('scratchpad')->assertExists($asset->path);
+        $this->assertSame('cover.png', $asset->original_filename);
+
+        $this->acting()->get("/api/v1/posts/BP-12/media/{$asset->id}")
+            ->assertOk()
+            ->assertHeader('Content-Type', $asset->mime);
+    }
+
+    public function test_reuploading_the_same_image_to_a_post_is_idempotent(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-3',
+            'number' => 3,
+            'title' => 'Same file twice',
+        ])->assertCreated();
+
+        $file = UploadedFile::fake()->image('cover.png', 12, 12);
+
+        $this->acting()->post('/api/v1/posts/P-3/images', ['image' => $file])->assertCreated();
+        $this->acting()->post('/api/v1/posts/P-3/images', [
+            'image' => UploadedFile::fake()->image('cover.png', 12, 12),
+        ])->assertOk();
+
+        $this->assertSame(1, MediaAsset::query()->count());
+        $this->assertSame(1, Attachment::query()->count());
+    }
+
+    public function test_media_of_another_workspace_is_not_found(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-4',
+            'number' => 4,
+            'title' => 'Mine',
+        ])->assertCreated();
+
+        $foreign = MediaAsset::factory()->create([
+            'disk' => 'scratchpad',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($foreign->path, 'bytes');
+
+        $this->acting()->get("/api/v1/posts/P-4/media/{$foreign->id}")
+            ->assertNotFound();
     }
 }
