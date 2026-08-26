@@ -19,6 +19,9 @@ export default defineConfig({
                 bunny('Instrument Sans', {
                     weights: [400, 500, 600],
                 }),
+                bunny('Noto Sans Bengali', {
+                    weights: [400, 500, 600],
+                }),
                 // Marketing page only (resources/css/marketing.css) — the
                 // dashboard stays on Instrument Sans/shadcn defaults above.
                 bunny('Big Shoulders Stencil Display', {
