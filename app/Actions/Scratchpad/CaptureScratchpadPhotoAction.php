@@ -35,6 +35,7 @@ class CaptureScratchpadPhotoAction
                 'source' => $data->source,
                 'captured_at' => now(),
                 'body' => $data->caption,
+                'language' => $data->language,
                 'status' => 'new',
             ]);
 

@@ -34,6 +34,7 @@ class CaptureTextNoteAction
             'source' => $data->source,
             'captured_at' => now(),
             'body' => $data->body,
+            'language' => $data->language,
             'status' => 'new',
         ]);
 

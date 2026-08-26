@@ -111,6 +111,35 @@ class ScratchpadControllerTest extends TestCase
         ]);
     }
 
+    public function test_store_persists_language()
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $this->post(route('scratchpad.store'), [
+            'body' => 'A Bangla thought.',
+            'language' => 'bn',
+        ])->assertRedirect(route('scratchpad.index'));
+
+        $this->assertDatabaseHas('scratchpad_entries', [
+            'workspace_id' => $workspace->id,
+            'kind' => 'text',
+            'body' => 'A Bangla thought.',
+            'language' => 'bn',
+        ]);
+    }
+
+    public function test_store_rejects_an_invalid_language()
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->post(route('scratchpad.store'), [
+            'body' => 'A thought.',
+            'language' => 'fr',
+        ])->assertSessionHasErrors(['language']);
+
+        $this->assertDatabaseCount('scratchpad_entries', 0);
+    }
+
     public function test_store_validates_an_empty_body()
     {
         $this->actingAsWorkspaceMember();
@@ -353,6 +382,23 @@ class ScratchpadControllerTest extends TestCase
         Queue::assertPushed(ResolveScratchpadLinkJob::class, fn (ResolveScratchpadLinkJob $job) => $job->entry->is($entry));
     }
 
+    public function test_store_link_persists_language()
+    {
+        Queue::fake();
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $this->post(route('scratchpad.link'), [
+            'url' => 'https://example.com/a-post',
+            'language' => 'en',
+        ])->assertRedirect(route('scratchpad.index'));
+
+        $this->assertDatabaseHas('scratchpad_entries', [
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'language' => 'en',
+        ]);
+    }
+
     public function test_store_link_rejects_a_non_url_value()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
@@ -392,6 +438,24 @@ class ScratchpadControllerTest extends TestCase
             'attachable_id' => $entry->id,
             'media_asset_id' => $mediaAsset->id,
             'role' => 'image',
+        ]);
+    }
+
+    public function test_store_photo_persists_language()
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $this->post(route('scratchpad.photo'), [
+            'photo' => UploadedFile::fake()->image('view.jpg', 300, 200),
+            'caption' => 'From the roof',
+            'language' => 'bn',
+        ])->assertRedirect(route('scratchpad.index'));
+
+        $this->assertDatabaseHas('scratchpad_entries', [
+            'workspace_id' => $workspace->id,
+            'kind' => 'photo',
+            'language' => 'bn',
         ]);
     }
 

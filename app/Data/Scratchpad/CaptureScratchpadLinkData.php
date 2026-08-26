@@ -13,6 +13,7 @@ final readonly class CaptureScratchpadLinkData
     public function __construct(
         public string $url,
         public string $source = 'web',
+        public ?string $language = null,
     ) {}
 
     public static function fromRequest(StoreScratchpadLinkRequest $request): self
@@ -20,6 +21,7 @@ final readonly class CaptureScratchpadLinkData
         return new self(
             url: $request->string('url')->toString(),
             source: 'web',
+            language: $request->string('language')->toString() ?: null,
         );
     }
 

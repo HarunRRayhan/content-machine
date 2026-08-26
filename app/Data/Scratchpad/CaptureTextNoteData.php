@@ -15,6 +15,7 @@ final readonly class CaptureTextNoteData
     public function __construct(
         public string $body,
         public string $source = 'web',
+        public ?string $language = null,
     ) {}
 
     public static function fromRequest(StoreScratchpadTextNoteRequest $request): self
@@ -22,6 +23,7 @@ final readonly class CaptureTextNoteData
         return new self(
             body: $request->string('body')->toString(),
             source: 'web',
+            language: $request->string('language')->toString() ?: null,
         );
     }
 
