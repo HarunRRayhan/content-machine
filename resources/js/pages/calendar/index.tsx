@@ -34,7 +34,11 @@ function dateKey(year: number, month: number, day: number): string {
     return `${year}-${pad(month)}-${pad(day)}`;
 }
 
-function shiftMonth(year: number, month: number, delta: number): {
+function shiftMonth(
+    year: number,
+    month: number,
+    delta: number,
+): {
     year: number;
     month: number;
 } {
@@ -65,7 +69,10 @@ function timeLabel(at: string, timezone: string): string {
     }).format(date);
 }
 
-function buildCells(year: number, month: number): Array<{
+function buildCells(
+    year: number,
+    month: number,
+): Array<{
     key: string;
     day: number;
     inMonth: boolean;
@@ -177,7 +184,9 @@ export default function CalendarIndex({
                         >
                             ‹
                         </Link>
-                        <span className="cal-month">{monthLabel(year, month)}</span>
+                        <span className="cal-month">
+                            {monthLabel(year, month)}
+                        </span>
                         <Link
                             href={index.url({
                                 query: { year: next.year, month: next.month },
