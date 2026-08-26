@@ -3,6 +3,7 @@
 
 .studio-page {
     --font-bn: var(--font-sans);
+    --font-bangla: 'Noto Sans Bengali', 'Hind Siliguri', var(--font-sans);
     --font-display: var(--font-sans);
     --font-cue: var(--font-mono);
     --script-scale: 1;
@@ -134,6 +135,12 @@
     text-transform: uppercase;
     font-size: 12px;
     color: var(--ink-faint);
+}
+
+.studio-page .pane-head .k.is-bn {
+    font-family: var(--font-bangla);
+    letter-spacing: 0.04em;
+    text-transform: none;
 }
 
 .studio-page .pane-head .k b {
@@ -575,7 +582,7 @@
 }
 
 .studio-page .cap-tabbar button {
-    font-family: var(--font-bn);
+    font-family: var(--font-sans);
     font-size: 13.5px;
     color: var(--ink-soft);
     background: none;
@@ -615,6 +622,13 @@
     color: var(--accent);
 }
 
+.studio-page .cap-n.is-bn {
+    font-family: var(--font-bangla);
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 13px;
+}
+
 .studio-page .cap-copy {
     margin-left: auto;
     font-family: var(--font-cue);
@@ -647,7 +661,7 @@
 }
 
 .studio-page .cap-langbar button {
-    font-family: var(--font-bn);
+    font-family: var(--font-sans);
     font-size: 14px;
     color: var(--ink-soft);
     background: none;
@@ -670,6 +684,11 @@
 .studio-page .cap-langbar .lflag {
     font-size: 16px;
     line-height: 1;
+}
+
+.studio-page .cap-langbar button.is-bn,
+.studio-page .cap-tabbar button.is-bn {
+    font-family: var(--font-bangla);
 }
 
 .studio-page .cap-tabbar .tbadge {

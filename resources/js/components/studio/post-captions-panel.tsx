@@ -6,6 +6,7 @@ import {
     PLATFORM_META,
     normalizePlatformKey,
     orderPlatformsByLang,
+    platformLabel,
 } from '@/lib/platform-meta';
 
 type CaptionGroupWithLang = CaptionGroup & {
@@ -102,6 +103,7 @@ export default function PostCaptionsPanel({
                             type="button"
                             role="tab"
                             aria-selected={activeLang === lang}
+                            className={lang === 'bn' ? 'is-bn' : undefined}
                             onClick={() => setActiveLang(lang)}
                         >
                             <span className="lflag">
@@ -132,6 +134,8 @@ export default function PostCaptionsPanel({
                     activeTabByGroup[groupIndex] ?? (list.length > 0 ? 0 : -1);
                 const platform = list[active];
                 const tabbed = list.length > 1;
+                const viewLang = group.lang ?? activeLang;
+                const banglaUi = viewLang === 'bn';
 
                 const header =
                     group.lang && LANG_META[group.lang as LangCode]
@@ -146,7 +150,9 @@ export default function PostCaptionsPanel({
                         className="pane"
                     >
                         <div className="pane-head">
-                            <span className="k">{header}</span>
+                            <span className={banglaUi ? 'k is-bn' : 'k'}>
+                                {header}
+                            </span>
                         </div>
 
                         {tabbed && (
@@ -165,6 +171,9 @@ export default function PostCaptionsPanel({
                                             aria-selected={
                                                 platformIndex === active
                                             }
+                                            className={
+                                                banglaUi ? 'is-bn' : undefined
+                                            }
                                             onClick={() =>
                                                 setActiveTabByGroup((prev) => ({
                                                     ...prev,
@@ -182,7 +191,7 @@ export default function PostCaptionsPanel({
                                                     {meta.badge}
                                                 </span>
                                             )}
-                                            {item.name}
+                                            {platformLabel(item.name, viewLang)}
                                         </button>
                                     );
                                 })}
@@ -267,8 +276,17 @@ export default function PostCaptionsPanel({
 
                                 <div className="cap">
                                     <div className="cap-h">
-                                        <span className="cap-n">
-                                            {platform.name}
+                                        <span
+                                            className={
+                                                banglaUi
+                                                    ? 'cap-n is-bn'
+                                                    : 'cap-n'
+                                            }
+                                        >
+                                            {platformLabel(
+                                                platform.name,
+                                                viewLang,
+                                            )}
                                         </span>
                                         <span className="cap-btns">
                                             {platform.title && (

@@ -1,5 +1,5 @@
 export const LANG_META = {
-    bn: { code: 'bn', label: 'Bangla', flag: '🇧🇩' },
+    bn: { code: 'bn', label: 'বাংলা', flag: '🇧🇩' },
     en: { code: 'en', label: 'English', flag: '🇺🇸' },
 } as const;
 

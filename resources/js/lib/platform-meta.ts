@@ -10,16 +10,48 @@ export type PlatformKey =
 
 export const PLATFORM_META: Record<
     PlatformKey,
-    { badge: string; color: string }
+    { badge: string; color: string; labels: { en: string; bn: string } }
 > = {
-    facebook: { badge: 'f', color: '#1877F2' },
-    instagram: { badge: 'IG', color: '#E4405F' },
-    tiktok: { badge: 'TT', color: '#000000' },
-    youtube: { badge: 'YT', color: '#FF0000' },
-    twitter: { badge: 'X', color: '#000000' },
-    threads: { badge: '@', color: '#000000' },
-    bluesky: { badge: 'BS', color: '#1185FE' },
-    linkedin: { badge: 'in', color: '#0A66C2' },
+    facebook: {
+        badge: 'f',
+        color: '#1877F2',
+        labels: { en: 'Facebook', bn: 'ফেসবুক' },
+    },
+    instagram: {
+        badge: 'IG',
+        color: '#E4405F',
+        labels: { en: 'Instagram', bn: 'ইনস্টাগ্রাম' },
+    },
+    tiktok: {
+        badge: 'TT',
+        color: '#000000',
+        labels: { en: 'TikTok', bn: 'টিকটক' },
+    },
+    youtube: {
+        badge: 'YT',
+        color: '#FF0000',
+        labels: { en: 'YouTube', bn: 'ইউটিউব' },
+    },
+    twitter: {
+        badge: 'X',
+        color: '#000000',
+        labels: { en: 'Twitter', bn: 'টুইটার' },
+    },
+    threads: {
+        badge: '@',
+        color: '#000000',
+        labels: { en: 'Threads', bn: 'থ্রেডস' },
+    },
+    bluesky: {
+        badge: 'BS',
+        color: '#1185FE',
+        labels: { en: 'Bluesky', bn: 'ব্লুস্কাই' },
+    },
+    linkedin: {
+        badge: 'in',
+        color: '#0A66C2',
+        labels: { en: 'LinkedIn', bn: 'লিংকডইন' },
+    },
 };
 
 export function normalizePlatformKey(name: string): PlatformKey | null {
@@ -30,6 +62,21 @@ export function normalizePlatformKey(name: string): PlatformKey | null {
     }
 
     return null;
+}
+
+export function platformLabel(
+    name: string,
+    lang: string | null | undefined,
+): string {
+    const key = normalizePlatformKey(name);
+
+    if (key === null) {
+        return name;
+    }
+
+    return lang === 'bn'
+        ? PLATFORM_META[key].labels.bn
+        : PLATFORM_META[key].labels.en;
 }
 
 /** English leads with Twitter; Bangla leads with Facebook. */
