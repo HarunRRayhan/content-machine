@@ -27,6 +27,8 @@ class VideoResource extends JsonResource
             'script_markdown' => $this->script_markdown,
             'captions' => $this->captions,
             'deck_manifest' => $this->deck_manifest,
+            'video_drive_url' => $this->video_drive_url,
+            'cover_drive_url' => $this->cover_drive_url,
             'status' => $this->status,
             'idea_id' => $this->idea_id,
             'created_at' => $this->created_at?->toIso8601String(),
