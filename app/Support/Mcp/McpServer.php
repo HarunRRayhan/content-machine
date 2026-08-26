@@ -46,7 +46,7 @@ final class McpServer
                     'version' => '1.0.0',
                     'title' => 'Content Machine',
                 ],
-                'instructions' => 'Scratch Pad and ideas for this workspace. Capture notes, triage them into PI/VI ideas, and edit those ideas.',
+                'instructions' => 'Scratch Pad, ideas, videos, and posts for this workspace. Capture notes, triage them into PI/VI ideas, and list, fetch, or update videos and posts.',
             ]),
             'ping' => $this->ok($id, []),
             'tools/list' => $this->ok($id, ['tools' => McpToolCatalog::published()]),

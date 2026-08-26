@@ -107,5 +107,5 @@ Content-Type: application/json
 ```
 
 The API access page has copy-paste setup for Claude, Cursor, Codex, ChatGPT,
-Open Code, Command Code, and a generic custom client. Tools cover Scratch Pad
-and ideas (same surface as the personal-content stdio server).
+Open Code, Command Code, and a generic custom client. Tools cover Scratch Pad,
+ideas, videos, and posts.

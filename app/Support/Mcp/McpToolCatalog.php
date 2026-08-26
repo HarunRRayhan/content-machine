@@ -2,9 +2,12 @@
 
 namespace App\Support\Mcp;
 
+use App\Models\Post;
+use App\Models\Video;
+
 /**
- * The tools this workspace exposes over MCP. Same set as the stdio server
- * in personal-content: scratchpad capture/triage plus idea read/edit.
+ * The tools this workspace exposes over MCP: scratchpad capture/triage,
+ * idea read/edit, and video/post list/get/update.
  *
  * @phpstan-type McpTool array{name: string, description: string, inputSchema: array<string, mixed>, ability: string}
  */
@@ -111,6 +114,67 @@ final class McpToolCatalog
                     'rationale' => ['type' => 'string'],
                     'body' => ['type' => 'string'],
                 ], ['human_id', 'title']),
+            ],
+            [
+                'name' => 'list_videos',
+                'description' => 'List videos, newest first (by number). Optionally filter by status or language. Limit 50.',
+                'ability' => 'videos:read',
+                'inputSchema' => self::schema([
+                    'status' => ['type' => 'string', 'enum' => Video::STATUSES],
+                    'language' => ['type' => 'string', 'description' => 'e.g. bn or en'],
+                ]),
+            ],
+            [
+                'name' => 'get_video',
+                'description' => 'Fetch one video by human_id (e.g. BV-50 or V-12).',
+                'ability' => 'videos:read',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string', 'description' => 'The video id, e.g. BV-50 or V-12.'],
+                ], ['human_id']),
+            ],
+            [
+                'name' => 'update_video',
+                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, status.',
+                'ability' => 'videos:write',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string'],
+                    'title' => ['type' => 'string'],
+                    'language' => ['type' => 'string'],
+                    'slug' => ['type' => 'string'],
+                    'body' => ['type' => 'string'],
+                    'script_markdown' => ['type' => 'string'],
+                    'status' => ['type' => 'string', 'enum' => Video::STATUSES],
+                ], ['human_id']),
+            ],
+            [
+                'name' => 'list_posts',
+                'description' => 'List posts, newest first (by number). Optionally filter by status or language. Limit 50.',
+                'ability' => 'posts:read',
+                'inputSchema' => self::schema([
+                    'status' => ['type' => 'string', 'enum' => Post::STATUSES],
+                    'language' => ['type' => 'string', 'description' => 'e.g. bn or en'],
+                ]),
+            ],
+            [
+                'name' => 'get_post',
+                'description' => 'Fetch one post by human_id (e.g. P-50 or BP-7).',
+                'ability' => 'posts:read',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string', 'description' => 'The post id, e.g. P-50 or BP-7.'],
+                ], ['human_id']),
+            ],
+            [
+                'name' => 'update_post',
+                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status.',
+                'ability' => 'posts:write',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string'],
+                    'title' => ['type' => 'string'],
+                    'body' => ['type' => 'string'],
+                    'captions' => ['type' => 'object', 'description' => 'Per-platform caption map.'],
+                    'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    'status' => ['type' => 'string', 'enum' => Post::STATUSES],
+                ], ['human_id']),
             ],
         ];
     }

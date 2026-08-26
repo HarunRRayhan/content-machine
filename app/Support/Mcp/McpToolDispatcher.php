@@ -3,21 +3,29 @@
 namespace App\Support\Mcp;
 
 use App\Actions\Ideas\UpdateIdeaAction;
+use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Scratchpad\TriageScratchpadEntryAction;
 use App\Actions\Scratchpad\UpdateScratchpadEntryAction;
+use App\Actions\Videos\UpdateVideoAction;
 use App\Data\Ideas\UpdateIdeaData;
+use App\Data\Posts\UpdatePostData;
 use App\Data\Scratchpad\CaptureScratchpadLinkData;
 use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Data\Scratchpad\TriageScratchpadEntryData;
 use App\Data\Scratchpad\UpdateScratchpadEntryData;
+use App\Data\Videos\UpdateVideoData;
 use App\Http\Resources\V1\IdeaResource;
+use App\Http\Resources\V1\PostResource;
 use App\Http\Resources\V1\ScratchpadEntryResource;
+use App\Http\Resources\V1\VideoResource;
 use App\Models\Idea;
+use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
+use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\CurrentApiToken;
 use RuntimeException;
@@ -35,6 +43,8 @@ final class McpToolDispatcher
         private readonly DeleteScratchpadEntryAction $deleteScratchpadEntryAction,
         private readonly TriageScratchpadEntryAction $triageScratchpadEntryAction,
         private readonly UpdateIdeaAction $updateIdeaAction,
+        private readonly UpdateVideoAction $updateVideoAction,
+        private readonly UpdatePostAction $updatePostAction,
     ) {}
 
     /**
@@ -80,6 +90,12 @@ final class McpToolDispatcher
             'list_ideas' => $this->listIdeas($arguments),
             'get_idea' => $this->presentIdea($this->findIdea($this->stringArg($arguments, 'human_id'))),
             'update_idea' => $this->updateIdea($arguments),
+            'list_videos' => $this->listVideos($arguments),
+            'get_video' => $this->presentVideo($this->findVideo($this->stringArg($arguments, 'human_id'))),
+            'update_video' => $this->updateVideo($arguments),
+            'list_posts' => $this->listPosts($arguments),
+            'get_post' => $this->presentPost($this->findPost($this->stringArg($arguments, 'human_id'))),
+            'update_post' => $this->updatePost($arguments),
             default => throw new RuntimeException("Unknown tool: {$name}"),
         };
     }
@@ -218,6 +234,118 @@ final class McpToolDispatcher
     }
 
     /**
+     * @param  array<string, mixed>  $arguments
+     * @return list<array<string, mixed>>
+     */
+    private function listVideos(array $arguments): array
+    {
+        $status = $this->optionalString($arguments, 'status');
+        $language = $this->optionalString($arguments, 'language');
+
+        $videos = Video::query()
+            ->when($status !== null, fn ($query) => $query->where('status', $status))
+            ->when($language !== null, fn ($query) => $query->where('language', $language))
+            ->orderByDesc('number')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        $presented = [];
+
+        foreach ($videos as $video) {
+            $presented[] = $this->presentVideo($video);
+        }
+
+        return $presented;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function updateVideo(array $arguments): array
+    {
+        $video = $this->findVideo($this->stringArg($arguments, 'human_id'));
+        $payload = $this->optionalPayload($arguments, ['title', 'language', 'slug', 'body', 'script_markdown', 'status']);
+
+        if ($payload === []) {
+            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, status.');
+        }
+
+        $this->assertAllowedStatus($payload, Video::STATUSES, 'video');
+
+        $this->updateVideoAction->handle($video, UpdateVideoData::fromApiPayload($payload, $video));
+
+        return $this->presentVideo($video->fresh() ?? $video);
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return list<array<string, mixed>>
+     */
+    private function listPosts(array $arguments): array
+    {
+        $status = $this->optionalString($arguments, 'status');
+        $language = $this->optionalString($arguments, 'language');
+
+        $posts = Post::query()
+            ->when($status !== null, fn ($query) => $query->where('status', $status))
+            ->when($language !== null, fn ($query) => $query->where('language', $language))
+            ->orderByDesc('number')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        $presented = [];
+
+        foreach ($posts as $post) {
+            $presented[] = $this->presentPost($post);
+        }
+
+        return $presented;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function updatePost(array $arguments): array
+    {
+        $post = $this->findPost($this->stringArg($arguments, 'human_id'));
+        $payload = $this->optionalPayload($arguments, ['title', 'body', 'status']);
+
+        if (array_key_exists('captions', $arguments)) {
+            $captions = $arguments['captions'];
+
+            if ($captions !== null && ! is_array($captions)) {
+                throw new RuntimeException('captions must be an object.');
+            }
+
+            $payload['captions'] = $captions;
+        }
+
+        if (array_key_exists('platforms', $arguments)) {
+            $platforms = $arguments['platforms'];
+
+            if ($platforms !== null && ! is_array($platforms)) {
+                throw new RuntimeException('platforms must be an array.');
+            }
+
+            $payload['platforms'] = $platforms;
+        }
+
+        if ($payload === []) {
+            throw new RuntimeException('Send at least one of title, body, captions, platforms, status.');
+        }
+
+        $this->assertAllowedStatus($payload, Post::STATUSES, 'post');
+
+        $this->updatePostAction->handle($post, UpdatePostData::fromApiPayload($payload, $post));
+
+        return $this->presentPost($post->fresh(['attachments.mediaAsset']) ?? $post);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function presentEntry(ScratchpadEntry $entry): array
@@ -237,6 +365,30 @@ final class McpToolDispatcher
     {
         /** @var array<string, mixed> $payload */
         $payload = (new IdeaResource($idea))->resolve();
+
+        return $payload;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentVideo(Video $video): array
+    {
+        /** @var array<string, mixed> $payload */
+        $payload = (new VideoResource($video))->resolve();
+
+        return $payload;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentPost(Post $post): array
+    {
+        $post->loadMissing(['attachments.mediaAsset']);
+
+        /** @var array<string, mixed> $payload */
+        $payload = (new PostResource($post))->resolve();
 
         return $payload;
     }
@@ -261,6 +413,73 @@ final class McpToolDispatcher
         }
 
         return $idea;
+    }
+
+    private function findVideo(string $humanId): Video
+    {
+        $video = Video::query()->where('human_id', $humanId)->first();
+
+        if ($video === null) {
+            throw new RuntimeException('Video not found.');
+        }
+
+        return $video;
+    }
+
+    private function findPost(string $humanId): Post
+    {
+        $post = Post::query()->where('human_id', $humanId)->first();
+
+        if ($post === null) {
+            throw new RuntimeException('Post not found.');
+        }
+
+        return $post;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @param  list<string>  $keys
+     * @return array<string, mixed>
+     */
+    private function optionalPayload(array $arguments, array $keys): array
+    {
+        $payload = [];
+
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $arguments)) {
+                continue;
+            }
+
+            $value = $arguments[$key];
+
+            if ($value !== null && ! is_string($value)) {
+                throw new RuntimeException("{$key} must be a string.");
+            }
+
+            $payload[$key] = $value;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @param  list<string>  $allowed
+     */
+    private function assertAllowedStatus(array $payload, array $allowed, string $kind): void
+    {
+        if (! array_key_exists('status', $payload)) {
+            return;
+        }
+
+        $status = $payload['status'];
+
+        if (! is_string($status) || ! in_array($status, $allowed, true)) {
+            $shown = is_string($status) ? $status : '';
+
+            throw new RuntimeException("Invalid {$kind} status [{$shown}].");
+        }
     }
 
     private function actor(): ?User
