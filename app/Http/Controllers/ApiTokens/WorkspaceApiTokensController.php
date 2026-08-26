@@ -46,6 +46,7 @@ class WorkspaceApiTokensController extends Controller
                     'created_at' => $token->created_at?->toIso8601String(),
                 ])
                 ->values(),
+            'mcp_url' => url('/mcp'),
         ]);
     }
 
