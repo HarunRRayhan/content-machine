@@ -134,6 +134,11 @@ export default function PostShow({ post }: PageProps) {
                             title={post.title}
                             status={post.status}
                             platforms={post.platforms}
+                            publishUrl={`/dashboard/posts/${post.id}/publish`}
+                            postsyncerReady={post.postsyncer_ready}
+                            publishState={post.publish_state}
+                            needsConfirmAsk={post.needs_confirm_ask}
+                            postsyncer={post.postsyncer}
                         />
                         <section className="pane max-w-3xl">
                             <div className="pane-head">

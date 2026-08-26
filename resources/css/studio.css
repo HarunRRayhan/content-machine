@@ -313,6 +313,92 @@
     border-color: var(--line-strong);
 }
 
+.studio-page .schedule-it {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.studio-page .schedule-it-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: var(--font-cue);
+    font-size: 11px;
+    color: var(--ink-faint);
+}
+
+.studio-page .schedule-it-label input {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    color: var(--ink);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.studio-page .schedule-it-confirm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--ink-soft);
+}
+
+.studio-page .schedule-it-error {
+    width: 100%;
+    margin: 0;
+    font-size: 13px;
+    color: var(--bad);
+}
+
+.studio-page .schedule-it-hint {
+    width: 100%;
+    margin: 0;
+    font-size: 13px;
+    color: var(--ink-faint);
+}
+
+.studio-page .schedule-log {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+}
+
+.studio-page .schedule-log-h {
+    font-family: var(--font-display);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+}
+
+.studio-page .schedule-log ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.studio-page .schedule-log li {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.studio-page .schedule-log li:last-child {
+    border-bottom: none;
+}
+
+.studio-page .schedule-log b {
+    color: var(--ink);
+}
+
 .studio-page .side-head {
     padding: 18px 20px 8px;
     display: flex;
