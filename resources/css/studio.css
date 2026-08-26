@@ -689,6 +689,7 @@
 .studio-page .cap-langbar button.is-bn,
 .studio-page .cap-tabbar button.is-bn {
     font-family: var(--font-bangla);
+    font-size: 15px;
 }
 
 .studio-page .cap-tabbar .tbadge {

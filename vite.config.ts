@@ -21,6 +21,9 @@ export default defineConfig({
                 }),
                 bunny('Noto Sans Bengali', {
                     weights: [400, 500, 600],
+                    // Default subset is latin only, so বাংলা was falling
+                    // back to a system Bangla face.
+                    subsets: ['bengali', 'latin'],
                 }),
                 // Marketing page only (resources/css/marketing.css) — the
                 // dashboard stays on Instrument Sans/shadcn defaults above.
