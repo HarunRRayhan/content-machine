@@ -139,6 +139,14 @@ class PostsyncerClient
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function getPost(int|string $id): array
+    {
+        return $this->decodeResponse($this->request('get', '/posts/'.$id));
+    }
+
+    /**
      * @param  array<string, mixed>  $body
      */
     private function request(string $method, string $path, array $body = []): Response

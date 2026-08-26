@@ -143,6 +143,24 @@ class PostsyncerClientTest extends TestCase
             && $request->hasHeader('Authorization', 'Bearer test-api-key'));
     }
 
+    public function test_get_post_returns_the_live_payload(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts/130052' => Http::response([
+                'id' => 130052,
+                'status' => 'PUBLISHED',
+                'scheduled_at' => '2026-08-26T09:00:00+06:00',
+            ], 200),
+        ]);
+
+        $client = $this->clientWithKey();
+        $post = $client->getPost(130052);
+
+        $this->assertSame(130052, $post['id']);
+        $this->assertSame('PUBLISHED', $post['status']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts/130052');
+    }
+
     public function test_non_success_response_throws_postsyncer_exception(): void
     {
         Http::fake([
