@@ -5,16 +5,10 @@ import type { LangCode } from '@/lib/lang-meta';
 import type { PlatformKey } from '@/lib/platform-meta';
 import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
 import { resolvePostImages } from '@/lib/resolve-post-images';
+import type { HandleDirectory } from '@/lib/studio-workspaces';
+import { STUDIO_HANDLES } from '@/lib/studio-workspaces';
 
-export type HandlePreview = {
-    handle: string;
-    name: string;
-};
-
-export type HandleDirectory = {
-    bn: Record<string, HandlePreview>;
-    en: Record<string, HandlePreview>;
-};
+export type { HandleDirectory, HandlePreview } from '@/lib/studio-workspaces';
 
 const DISPLAY_NAME = 'Harun R. Rayhan';
 
@@ -24,15 +18,61 @@ const HANDLE_AT: ReadonlySet<PlatformKey> = new Set([
     'bluesky',
 ]);
 
-const REACTIONS: Partial<Record<PlatformKey, string>> = {
-    facebook: '👍 Like   💬 Comment   ↪ Share',
-    instagram: '♡ Like   💬 Comment   ✈ Send   🔖 Save',
-    tiktok: '♡ Like   💬 Comment   ↪ Share',
-    youtube: '👍 Like   💬 Comment   ↪ Share',
-    twitter: '💬 Reply   🔁 Repost   ♡ Like   ↗ Share',
-    threads: '♡ Like   💬 Reply   🔁 Repost   ↗ Share',
-    bluesky: '💬 Reply   🔁 Repost   ♡ Like',
-    linkedin: '👍 Like   💬 Comment   🔁 Repost   ➤ Send',
+const PLATFORM_MOCKUP: Record<
+    PlatformKey,
+    { reactions: string; tip: string; noHashtags?: boolean; label: string }
+> = {
+    facebook: {
+        label: 'Facebook',
+        reactions: '👍 Like   💬 Comment   ↪ Share',
+        tip: 'Practical caption safety margin ~2,000 chars (Facebook rejects the whole post past 2,500). Square or 1.91:1 image.',
+    },
+    instagram: {
+        label: 'Instagram',
+        reactions: '♡ Like   💬 Comment   ✈ Send   🔖 Save',
+        noHashtags: true,
+        tip: "No hashtags on this project's Instagram posts. Square (1:1) or 4:5 image.",
+    },
+    tiktok: {
+        label: 'TikTok',
+        reactions: '♡ Like   💬 Comment   ↪ Share',
+        tip: 'Static images only, no GIFs. Caption cap 4,000 chars.',
+    },
+    youtube: {
+        label: 'YouTube',
+        reactions: '👍 Like   💬 Comment   ↪ Share',
+        tip: 'Image posts are not supported on YouTube: video-only platform.',
+    },
+    twitter: {
+        label: 'Twitter / X',
+        reactions: '💬 Reply   🔁 Repost   ♡ Like   ↗ Share',
+        tip: '280-char cap (free tier). Hashtags live inline in the text, no dedicated field. Native GIF support.',
+    },
+    threads: {
+        label: 'Threads',
+        reactions: '♡ Like   💬 Reply   🔁 Repost   ↗ Share',
+        tip: '500-char cap. GIF support added April 2026.',
+    },
+    bluesky: {
+        label: 'Bluesky',
+        reactions: '💬 Reply   🔁 Repost   ♡ Like',
+        tip: '300-char cap. No native GIF upload (Tenor-embed only). A raw GIF needs MP4 conversion first.',
+    },
+    linkedin: {
+        label: 'LinkedIn',
+        reactions: '👍 Like   💬 Comment   🔁 Repost   ➤ Send',
+        tip: 'English only. 2+ images become a real document-post carousel (one PDF, swipeable), assembled at publish time, not a plain multi-image post.',
+    },
+};
+
+const CAPLIM: Partial<Record<PlatformKey, number>> = {
+    instagram: 2200,
+    facebook: 2000,
+    tiktok: 4000,
+    youtube: 300,
+    twitter: 280,
+    threads: 500,
+    bluesky: 300,
 };
 
 export function formatPlatformHandle(
@@ -53,14 +93,20 @@ export function resolvePreviewHandle(
     lang: LangCode,
     platform: PlatformKey | null,
 ): string {
-    if (!handles || platform === null) {
+    if (platform === null) {
         return '';
     }
 
-    return handles[lang]?.[platform]?.handle ?? '';
+    const live = handles?.[lang]?.[platform]?.handle ?? '';
+
+    if (live !== '') {
+        return live;
+    }
+
+    return STUDIO_HANDLES[lang]?.[platform]?.handle ?? '';
 }
 
-function threadItems(thread: unknown[]): string[] {
+export function threadItems(thread: unknown[]): string[] {
     return thread
         .map((item) => (typeof item === 'string' ? item.trim() : ''))
         .filter((item) => item !== '');
@@ -173,9 +219,9 @@ export function PostCaptionMock({
         key,
         resolvePreviewHandle(handles, lang, key),
     );
-    const noHashtags = key === 'instagram';
+    const cfg = key ? PLATFORM_MOCKUP[key] : null;
+    const noHashtags = cfg?.noHashtags === true;
     const bangla = lang === 'bn';
-    const title = platform.title.trim();
     const caption = platform.caption.trim();
     const firstComment = platform.first_comment.trim();
     const thread = threadItems(platform.thread);
@@ -189,11 +235,13 @@ export function PostCaptionMock({
     const images = platform.images;
     const perTweetImages = thread.length > 0 && images.length > 1;
     const headImages = perTweetImages ? images.slice(0, 1) : images;
-    const reactions = key ? REACTIONS[key] : undefined;
+    const reactions = cfg?.reactions;
+    const capMax = key ? CAPLIM[key] : undefined;
+    const over = capMax !== undefined && caption.length > capMax;
+    const label = cfg?.label ?? platform.name;
 
     return (
         <div className="mock-wrap">
-            <div className="mock-note">Preview</div>
             <div className={key ? `mock mock-${key}` : 'mock'}>
                 <div className="mock-head">
                     <span className="mock-av" style={{ background: color }}>
@@ -212,27 +260,24 @@ export function PostCaptionMock({
                         </span>
                     ) : null}
                 </div>
-                {title ? (
-                    <div className={bangla ? 'mock-cap is-bn' : 'mock-cap'}>
-                        <strong>{title}</strong>
-                    </div>
-                ) : null}
                 {caption ? (
                     <MockCaption
                         text={caption}
                         noHashtags={noHashtags}
                         bangla={bangla}
                     />
-                ) : title ? null : (
+                ) : (
                     <div className="mock-cap">
-                        <p className="empty-inline">No caption yet.</p>
+                        <p className="empty-inline">
+                            No caption resolved for {label} yet.
+                        </p>
                     </div>
                 )}
                 {headImages.length > 0 ? (
                     <MockImages images={headImages} imageUrls={imageUrls} />
                 ) : (
                     <p className="empty mock-imgs-empty">
-                        No image on {meta?.labels.en ?? platform.name}.
+                        No image on {label}.
                     </p>
                 )}
                 {reactions ? <div className="mock-bar">{reactions}</div> : null}
@@ -273,6 +318,25 @@ export function PostCaptionMock({
                                             compact
                                         />
                                     ) : null}
+                                    <div className="mock-meta mock-meta-thread">
+                                        <span
+                                            className={
+                                                capMax !== undefined &&
+                                                tweet.length > capMax
+                                                    ? 'over'
+                                                    : undefined
+                                            }
+                                        >
+                                            {tweet.length}
+                                            {capMax
+                                                ? ` / ${capMax} chars`
+                                                : ' chars'}
+                                            {capMax !== undefined &&
+                                            tweet.length > capMax
+                                                ? ' · over the limit'
+                                                : ''}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -294,7 +358,34 @@ export function PostCaptionMock({
                         </div>
                     </div>
                 ) : null}
+                <div className="mock-meta">
+                    <span className={over ? 'over' : undefined}>
+                        {caption.length}
+                        {capMax ? ` / ${capMax} chars` : ' chars'}
+                        {over ? ' · over the limit' : ''}
+                    </span>
+                    {cfg?.tip ? (
+                        <span className="mock-tip">{cfg.tip}</span>
+                    ) : null}
+                </div>
             </div>
         </div>
     );
+}
+
+export function firstCommentLabel(
+    platformName: string,
+    thread: string[],
+): string {
+    return normalizePlatformKey(platformName) === 'twitter' &&
+        thread.length === 0
+        ? '↳ Tweet 2 (thread)'
+        : '↳ First comment';
+}
+
+export function postCount(text: string): string {
+    const trimmed = text.trim();
+    const words = trimmed ? trimmed.split(/\s+/).length : 0;
+
+    return `${trimmed.length} chars · ${words} words`;
 }
