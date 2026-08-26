@@ -1,6 +1,9 @@
 import { Head, Link } from '@inertiajs/react';
 import { useState } from 'react';
 import type { CaptionGroup } from '@/components/content/captions-panel';
+import PublishDialog, {
+    PublishStatusBanner,
+} from '@/components/content/publish-dialog';
 import PresentationEmbed from '@/components/studio/presentation-embed';
 import ScriptPanel from '@/components/studio/script-panel';
 import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
@@ -39,9 +42,16 @@ type VideoDetail = {
     captions: CaptionGroup[];
     deck_manifest: Record<string, unknown> | null;
     has_deck: boolean;
+    video_drive_url: string | null;
+    cover_drive_url: string | null;
     language: string | null;
     slug: string | null;
     status: string;
+    publish_state: string;
+    publish_error: string | null;
+    postsyncer: Record<string, unknown> | null;
+    postsyncer_ready: boolean;
+    needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
@@ -81,6 +91,15 @@ export default function VideoShow({ video }: PageProps) {
     const [tab, setTab] = useState<TabKey>('overview');
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
 
+    const publishDisabled =
+        !video.postsyncer_ready ||
+        ['queued', 'running'].includes(video.publish_state);
+    const publishDisabledReason = !video.postsyncer_ready
+        ? 'Configure PostSyncer in Settings before scheduling or publishing.'
+        : ['queued', 'running'].includes(video.publish_state)
+          ? 'A publish job is already queued or running.'
+          : null;
+
     return (
         <>
             <Head title={video.title} />
@@ -107,6 +126,11 @@ export default function VideoShow({ video }: PageProps) {
                         </Link>
                     </p>
                 )}
+
+                <PublishStatusBanner
+                    publishState={video.publish_state}
+                    publishError={video.publish_error}
+                />
 
                 <div className="tabbar" role="tablist">
                     <button
@@ -160,15 +184,33 @@ export default function VideoShow({ video }: PageProps) {
                 </div>
 
                 {activeTab === 'overview' && (
-                    <VideoOverview
-                        videoId={video.id}
-                        title={video.title}
-                        status={video.status}
-                        lang={video.parsed.lang}
-                        length={video.parsed.length}
-                        points={video.parsed.points}
-                        storageKey={video.human_id}
-                    />
+                    <div className="space-y-4">
+                        <VideoOverview
+                            videoId={video.id}
+                            title={video.title}
+                            status={video.status}
+                            lang={video.parsed.lang}
+                            length={video.parsed.length}
+                            points={video.parsed.points}
+                            storageKey={video.human_id}
+                        />
+                        <section className="pane max-w-3xl">
+                            <div className="pane-head">
+                                <span className="k">📤 Publish</span>
+                            </div>
+                            <div className="p-5">
+                                <PublishDialog
+                                    disabled={publishDisabled}
+                                    disabledReason={publishDisabledReason}
+                                    publishState={video.publish_state}
+                                    publishError={video.publish_error}
+                                    publishUrl={`/dashboard/videos/${video.id}/publish`}
+                                    entityLabel="video"
+                                    needsConfirmAsk={video.needs_confirm_ask}
+                                />
+                            </div>
+                        </section>
+                    </div>
                 )}
 
                 {activeTab === 'script' && !hasDeck && (

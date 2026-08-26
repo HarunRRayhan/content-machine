@@ -922,10 +922,20 @@
     border: 1px solid transparent;
 }
 
+.studio-page .pill.st-ready {
+    color: var(--ready);
+    background: color-mix(in srgb, var(--ready) 13%, transparent);
+    border-color: color-mix(in srgb, var(--ready) 32%, transparent);
+}
+
 .studio-page .pill.st-draft {
     color: var(--info);
     background: var(--raised);
     border-color: var(--line);
+}
+
+.studio-page .ml-1 {
+    margin-left: 4px;
 }
 
 .studio-page .pill.st-scheduled {

@@ -6,9 +6,12 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\UpdatePostRequest;
+use App\Models\Idea;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Postsyncer\PostPublishPlanner;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -18,8 +21,25 @@ use Inertia\Response;
 class PostsController extends Controller
 {
     /**
-     * List the current workspace's posts, newest first. Filterable by
-     * status, language, and a free-text query over title / human id.
+     * Studio-like status tabs on the posts index. Ideation lists open
+     * post ideas; every other tab filters posts by pipeline status.
+     *
+     * @var list<string>
+     */
+    public const TAB_STATUSES = [
+        'ideation',
+        'draft',
+        'ready',
+        'scheduled',
+        'posted',
+        'archived',
+        'dropped',
+    ];
+
+    /**
+     * List the current workspace's posts (or post ideas on the Ideation
+     * tab), newest first. Filterable by status tab, language, and a
+     * free-text query over title / human id.
      */
     public function index(Request $request): Response
     {
@@ -29,47 +49,53 @@ class PostsController extends Controller
         $language = $request->string('language')->toString() ?: null;
         $query = $request->string('q')->toString() ?: null;
 
-        $posts = Post::query()
-            ->where('workspace_id', $workspace->id)
-            ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
-            ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
-            ->when(in_array($status, ['scheduled', 'posted'], true), fn ($builder) => $builder->where('status', $status))
-            ->when($language, fn ($builder) => $builder->where('language', $language))
-            ->when($query, function ($builder) use ($query) {
-                $like = '%'.$query.'%';
-                $builder->where(function ($inner) use ($like) {
-                    $inner->where('title', 'ilike', $like)
-                        ->orWhere('human_id', 'ilike', $like)
-                        ->orWhere('slug', 'ilike', $like);
-                });
-            })
-            ->latest()
-            ->paginate(20)
-            ->withQueryString()
-            ->through(fn (Post $post) => $this->presentSummary($post));
-
-        $rawCounts = Post::query()
-            ->where('workspace_id', $workspace->id)
-            ->selectRaw('status, count(*) as aggregate')
-            ->groupBy('status')
-            ->pluck('aggregate', 'status');
-
-        $statusCounts = [
-            'draft' => (int) ($rawCounts['draft'] ?? 0) + (int) ($rawCounts['ready'] ?? 0),
-            'scheduled' => (int) ($rawCounts['scheduled'] ?? 0),
-            'posted' => (int) ($rawCounts['posted'] ?? 0),
-            'archived' => (int) ($rawCounts['archived'] ?? 0) + (int) ($rawCounts['dropped'] ?? 0),
-        ];
+        if ($status === 'ideation') {
+            $items = Idea::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('kind', 'post')
+                ->where('status', 'open')
+                ->when($query, function ($builder) use ($query) {
+                    $like = '%'.$query.'%';
+                    $builder->where(function ($inner) use ($like) {
+                        $inner->where('title', 'ilike', $like)
+                            ->orWhere('human_id', 'ilike', $like)
+                            ->orWhere('slug', 'ilike', $like);
+                    });
+                })
+                ->latest()
+                ->paginate(20)
+                ->withQueryString()
+                ->through(fn (Idea $idea) => $this->presentIdeaSummary($idea));
+        } else {
+            $items = Post::query()
+                ->where('workspace_id', $workspace->id)
+                ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
+                ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
+                ->when(in_array($status, ['scheduled', 'posted', 'ready'], true), fn ($builder) => $builder->where('status', $status))
+                ->when($language, fn ($builder) => $builder->where('language', $language))
+                ->when($query, function ($builder) use ($query) {
+                    $like = '%'.$query.'%';
+                    $builder->where(function ($inner) use ($like) {
+                        $inner->where('title', 'ilike', $like)
+                            ->orWhere('human_id', 'ilike', $like)
+                            ->orWhere('slug', 'ilike', $like);
+                    });
+                })
+                ->latest()
+                ->paginate(20)
+                ->withQueryString()
+                ->through(fn (Post $post) => $this->presentSummary($post));
+        }
 
         return Inertia::render('posts/index', [
-            'posts' => $posts,
+            'items' => $items,
             'filters' => [
                 'status' => $status,
                 'language' => $language,
                 'q' => $query,
             ],
-            'statusCounts' => $statusCounts,
-            'statuses' => Post::STATUSES,
+            'counts' => $this->statusCounts($workspace),
+            'tabs' => self::TAB_STATUSES,
         ]);
     }
 
@@ -116,16 +142,59 @@ class PostsController extends Controller
     }
 
     /**
+     * @return array<string, int>
+     */
+    private function statusCounts(Workspace $workspace): array
+    {
+        $postCounts = Post::query()
+            ->where('workspace_id', $workspace->id)
+            ->selectRaw('status, count(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status');
+
+        $counts = [
+            'ideation' => Idea::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('kind', 'post')
+                ->where('status', 'open')
+                ->count(),
+        ];
+
+        foreach (Post::STATUSES as $postStatus) {
+            $counts[$postStatus] = (int) ($postCounts[$postStatus] ?? 0);
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presentIdeaSummary(Idea $idea): array
+    {
+        return [
+            'type' => 'idea',
+            'id' => $idea->id,
+            'human_id' => $idea->human_id,
+            'title' => $idea->title,
+            'score' => $idea->score,
+            'trend' => $idea->trend,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function presentSummary(Post $post): array
     {
         return [
+            'type' => 'post',
             'id' => $post->id,
             'human_id' => $post->human_id,
             'number' => $post->number,
             'title' => $post->title,
             'status' => $post->status,
+            'publish_state' => $post->publish_state,
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
             'has_captions' => ! empty($post->captions),
@@ -186,6 +255,11 @@ class PostsController extends Controller
             }
         }
 
+        $workspace = Workspace::current();
+        $postsyncerConfig = $workspace !== null
+            ? PostsyncerConfig::fromWorkspace($workspace)
+            : null;
+
         return [
             'id' => $post->id,
             'human_id' => $post->human_id,
@@ -197,9 +271,16 @@ class PostsController extends Controller
             'images' => $images,
             'image_urls' => $imageUrls,
             'caption_image_names' => array_keys($captionImageNames),
+            'image_drive_urls' => $post->image_drive_urls ?? [],
             'language' => $post->language,
             'slug' => $post->slug,
             'status' => $post->status,
+            'publish_state' => $post->publish_state,
+            'publish_error' => $post->publish_error,
+            'postsyncer' => $post->postsyncer,
+            'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
+            'needs_confirm_ask' => $postsyncerConfig !== null
+                && app(PostPublishPlanner::class)->needsConfirmAsk($post, $postsyncerConfig),
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Videos;
 
+use App\Models\Idea;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
@@ -34,7 +35,10 @@ class VideosControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $mine = Video::factory()->for($workspace)->create(['title' => 'Mine']);
+        $mine = Video::factory()->for($workspace)->create([
+            'title' => 'Mine',
+            'status' => 'pending',
+        ]);
 
         $otherWorkspace = Workspace::factory()->create();
         Video::factory()->for($otherWorkspace)->create(['title' => 'Not mine']);
@@ -42,8 +46,97 @@ class VideosControllerTest extends TestCase
         $this->get(route('dashboard.videos.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
-                ->has('videos.data', 1)
-                ->where('videos.data.0.id', $mine->id)
+                ->has('items.data', 1)
+                ->where('items.data.0.type', 'video')
+                ->where('items.data.0.id', $mine->id)
+                ->where('filters.status', 'pending')
+            );
+    }
+
+    public function test_index_defaults_to_pending_tab_when_status_is_missing(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Video::factory()->for($workspace)->create(['title' => 'Pending one', 'status' => 'pending']);
+        Video::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
+
+        $this->get(route('dashboard.videos.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.title', 'Pending one')
+                ->where('filters.status', 'pending')
+            );
+    }
+
+    public function test_index_ideation_tab_lists_open_video_ideas(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $idea = Idea::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'status' => 'open',
+            'title' => 'Video idea',
+            'score' => 850,
+            'trend' => 'seasonal',
+        ]);
+
+        Idea::factory()->for($workspace)->promoted()->create(['kind' => 'video', 'title' => 'Promoted']);
+        Idea::factory()->for($workspace)->create(['kind' => 'post', 'status' => 'open', 'title' => 'Post idea']);
+
+        $otherWorkspace = Workspace::factory()->create();
+        Idea::factory()->for($otherWorkspace)->create(['kind' => 'video', 'status' => 'open']);
+
+        $this->get(route('dashboard.videos.index', ['status' => 'ideation']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.type', 'idea')
+                ->where('items.data.0.id', $idea->id)
+                ->where('items.data.0.title', 'Video idea')
+                ->where('items.data.0.score', 850)
+                ->where('items.data.0.trend', 'seasonal')
+                ->where('filters.status', 'ideation')
+            );
+    }
+
+    public function test_index_exposes_counts_for_all_status_tabs(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Video::factory()->for($workspace)->count(2)->create(['status' => 'pending']);
+        Video::factory()->for($workspace)->create(['status' => 'ready']);
+        Video::factory()->for($workspace)->create(['status' => 'recorded']);
+        Idea::factory()->for($workspace)->count(3)->create(['kind' => 'video', 'status' => 'open']);
+
+        $this->get(route('dashboard.videos.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('counts.ideation', 3)
+                ->where('counts.draft', 0)
+                ->where('counts.pending', 2)
+                ->where('counts.ready', 1)
+                ->where('counts.recorded', 1)
+                ->where('counts.scheduled', 0)
+                ->where('counts.posted', 0)
+                ->where('counts.archived', 0)
+                ->where('counts.dropped', 0)
+            );
+    }
+
+    public function test_index_filters_videos_by_status_tab(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Video::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
+        Video::factory()->for($workspace)->create(['title' => 'Pending one', 'status' => 'pending']);
+
+        $this->get(route('dashboard.videos.index', ['status' => 'ready']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.type', 'video')
+                ->where('items.data.0.title', 'Ready one')
+                ->where('filters.status', 'ready')
             );
     }
 
@@ -76,17 +169,17 @@ class VideosControllerTest extends TestCase
             ],
         ]);
         Video::factory()->for($workspace)->create([
-            'title' => 'Draft one',
-            'status' => 'draft',
+            'title' => 'Pending one',
+            'status' => 'pending',
         ]);
 
         $this->get(route('dashboard.videos.index', ['status' => 'ready']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
-                ->has('videos.data', 1)
-                ->where('videos.data.0.title', 'Ready one')
-                ->where('videos.data.0.has_script', true)
-                ->where('videos.data.0.has_captions', true)
+                ->has('items.data', 1)
+                ->where('items.data.0.title', 'Ready one')
+                ->where('items.data.0.has_script', true)
+                ->where('items.data.0.has_captions', true)
                 ->where('filters.status', 'ready')
             );
     }

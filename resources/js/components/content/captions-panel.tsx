@@ -23,7 +23,10 @@ type Props = {
 };
 
 async function copyText(text: string) {
-    if (!text) return;
+    if (!text) {
+        return;
+    }
+
     try {
         await navigator.clipboard.writeText(text);
     } catch {
@@ -49,9 +52,7 @@ export default function CaptionsPanel({
     );
 
     if (!hasAny) {
-        return (
-            <p className="text-sm text-muted-foreground">{emptyLabel}</p>
-        );
+        return <p className="text-sm text-muted-foreground">{emptyLabel}</p>;
     }
 
     return (
@@ -121,7 +122,7 @@ export default function CaptionsPanel({
                                 />
                                 {platform.images.length > 0 && (
                                     <div className="space-y-1">
-                                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                                             Images
                                         </p>
                                         <ul className="list-inside list-disc text-sm">
@@ -152,7 +153,7 @@ function CaptionField({
     return (
         <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     {label}
                 </p>
                 <Button
@@ -167,11 +168,13 @@ function CaptionField({
             </div>
             {value ? (
                 multiline ? (
-                    <pre className="whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-sm">
+                    <pre className="rounded-md bg-muted/50 p-3 text-sm whitespace-pre-wrap">
                         {value}
                     </pre>
                 ) : (
-                    <p className="rounded-md bg-muted/50 p-3 text-sm">{value}</p>
+                    <p className="rounded-md bg-muted/50 p-3 text-sm">
+                        {value}
+                    </p>
                 )
             ) : (
                 <p className="text-sm text-muted-foreground">—</p>

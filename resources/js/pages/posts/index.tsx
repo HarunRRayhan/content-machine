@@ -6,14 +6,26 @@ import {
     studioPostStatus,
 } from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
+import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index, show } from '@/routes/dashboard/posts';
 
-type PostSummary = {
+type IdeaRow = {
+    type: 'idea';
+    id: number;
+    human_id: string;
+    title: string;
+    score: number | null;
+    trend: string | null;
+};
+
+type PostRow = {
+    type: 'post';
     id: number;
     human_id: string;
     number: number;
     title: string;
     status: string;
+    publish_state: string;
     language: string | null;
     platforms: string[];
     has_captions: boolean;
@@ -21,53 +33,86 @@ type PostSummary = {
     created_at: string | null;
 };
 
+type IndexRow = IdeaRow | PostRow;
+
 type PaginationLink = {
     url: string | null;
     label: string;
     active: boolean;
 };
 
-type PaginatedPosts = {
-    data: PostSummary[];
+type PaginatedItems = {
+    data: IndexRow[];
     links: PaginationLink[];
     total: number;
 };
 
 type Filters = {
-    status: string | null;
+    status: string;
     language: string | null;
     q: string | null;
 };
 
 type PageProps = {
-    posts: PaginatedPosts;
+    items: PaginatedItems;
     filters: Filters;
-    statusCounts: Record<string, number>;
+    counts: Record<string, number>;
+    tabs: string[];
 };
 
-const POST_TABS = ['draft', 'scheduled', 'posted', 'archived'] as const;
+const TAB_LABELS: Record<string, string> = {
+    ideation: 'Ideation',
+    draft: 'Draft',
+    ready: 'Ready',
+    scheduled: 'Scheduled',
+    posted: 'Posted',
+    archived: 'Archived',
+    dropped: 'Dropped',
+};
 
 function paginationLabel(label: string): string {
     return label.replace('&laquo;', '«').replace('&raquo;', '»');
 }
 
-export default function PostsIndex({ posts, filters, statusCounts }: PageProps) {
-    const activeTab = (filters.status ?? 'draft') as (typeof POST_TABS)[number];
+function tabQuery(filters: Filters, status: string): Record<string, string> {
+    const query: Record<string, string> = { status };
+
+    if (filters.language) {
+        query.language = filters.language;
+    }
+
+    if (filters.q) {
+        query.q = filters.q;
+    }
+
+    return query;
+}
+
+export default function PostsIndex({
+    items,
+    filters,
+    counts,
+    tabs,
+}: PageProps) {
+    const isIdeation = filters.status === 'ideation';
 
     function applyFilter(next: Partial<Filters>) {
         router.get(
             index.url({
-                query: {
-                    status:
-                        next.status !== undefined
-                            ? next.status
-                            : filters.status,
-                    language:
-                        next.language !== undefined
-                            ? next.language
-                            : filters.language,
-                    q: next.q !== undefined ? next.q : filters.q,
-                },
+                query: tabQuery(
+                    {
+                        status:
+                            next.status !== undefined
+                                ? next.status
+                                : filters.status,
+                        language:
+                            next.language !== undefined
+                                ? next.language
+                                : filters.language,
+                        q: next.q !== undefined ? next.q : filters.q,
+                    },
+                    next.status !== undefined ? next.status : filters.status,
+                ),
             }),
             {},
             { preserveState: true, preserveScroll: true },
@@ -80,6 +125,30 @@ export default function PostsIndex({ posts, filters, statusCounts }: PageProps) 
 
             <div className="studio-page flex h-full flex-1 flex-col gap-2 p-4">
                 <h2 className="home-h">All posts</h2>
+
+                <div className="tabbar statustabs" role="tablist">
+                    {tabs.map((tab) => {
+                        const active = filters.status === tab;
+
+                        return (
+                            <Link
+                                key={tab}
+                                role="tab"
+                                aria-selected={active}
+                                href={index.url({
+                                    query: tabQuery(filters, tab),
+                                })}
+                                preserveScroll
+                                className={active ? undefined : 'opacity-90'}
+                            >
+                                {TAB_LABELS[tab] ?? tab}
+                                <span className="tabn">
+                                    {counts[tab] ?? 0}
+                                </span>
+                            </Link>
+                        );
+                    })}
+                </div>
 
                 <div className="search-row">
                     <input
@@ -96,60 +165,103 @@ export default function PostsIndex({ posts, filters, statusCounts }: PageProps) 
                             }
                         }}
                     />
-                </div>
-
-                <div className="tabbar statustabs" role="tablist">
-                    {POST_TABS.map((tab) => (
-                        <button
-                            key={tab}
-                            type="button"
-                            role="tab"
-                            aria-selected={activeTab === tab}
-                            onClick={() => applyFilter({ status: tab })}
+                    {!isIdeation && (
+                        <select
+                            value={filters.language ?? ''}
+                            onChange={(event) =>
+                                applyFilter({
+                                    language: event.target.value || null,
+                                })
+                            }
+                            className="rounded-md border border-[var(--line)] bg-[var(--bg2)] px-3 py-2 text-sm"
                         >
-                            {POST_STATUS_LABELS[tab]}
-                            <span className="tabn">
-                                {statusCounts[tab] ?? 0}
-                            </span>
-                        </button>
-                    ))}
+                            <option value="">All languages</option>
+                            <option value="bn">Bangla</option>
+                            <option value="en">English</option>
+                        </select>
+                    )}
                 </div>
 
-                {posts.data.length === 0 ? (
-                    <p className="empty">No posts in this stage yet.</p>
+                {items.data.length === 0 ? (
+                    <p className="empty">
+                        No {isIdeation ? 'ideas' : 'posts'} in this tab yet.
+                    </p>
                 ) : (
                     <div className="vtable-wrap">
                         <table className="vtable">
                             <thead>
                                 <tr>
-                                    <th>#</th>
+                                    <th>ID</th>
                                     <th>Title</th>
-                                    <th>Platforms</th>
-                                    <th>Status</th>
+                                    <th>
+                                        {isIdeation ? 'Score' : 'Platforms'}
+                                    </th>
+                                    <th>{isIdeation ? 'Trend' : 'Status'}</th>
                                     <th />
                                 </tr>
                             </thead>
                             <tbody>
-                                {posts.data.map((post) => {
+                                {items.data.map((row) => {
+                                    if (row.type === 'idea') {
+                                        return (
+                                            <tr
+                                                key={`idea-${row.id}`}
+                                                onClick={() =>
+                                                    router.visit(
+                                                        showIdea.url(row.id),
+                                                    )
+                                                }
+                                            >
+                                                <td className="c-num">
+                                                    {row.human_id}
+                                                </td>
+                                                <td className="c-title">
+                                                    {row.title}
+                                                </td>
+                                                <td>
+                                                    {row.score !== null
+                                                        ? `${row.score}/1000`
+                                                        : '—'}
+                                                </td>
+                                                <td>
+                                                    {row.trend ?? '—'}
+                                                </td>
+                                                <td className="c-act">
+                                                    <Link
+                                                        href={showIdea.url(
+                                                            row.id,
+                                                        )}
+                                                        className="viewbtn"
+                                                        onClick={(event) =>
+                                                            event.stopPropagation()
+                                                        }
+                                                    >
+                                                        View
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
+
                                     const studioStatus = studioPostStatus(
-                                        post.status,
+                                        row.status,
                                     );
 
                                     return (
                                         <tr
-                                            key={post.id}
+                                            key={`post-${row.id}`}
                                             onClick={() =>
-                                                router.visit(show.url(post.id))
+                                                router.visit(show.url(row.id))
                                             }
                                         >
                                             <td className="c-num">
-                                                P-{post.number}
+                                                P-{row.number}
                                             </td>
                                             <td className="c-title">
-                                                {post.title}
+                                                {row.title}
                                             </td>
                                             <td className="c-plat">
-                                                {post.platforms.map(
+                                                {row.platforms.map(
                                                     (platform) => {
                                                         const key =
                                                             normalizePlatformKey(
@@ -173,21 +285,7 @@ export default function PostsIndex({ posts, filters, statusCounts }: PageProps) 
                                                             >
                                                                 {meta.badge}
                                                             </span>
-                                                        ) : (
-                                                            <span
-                                                                key={platform}
-                                                                className="platform-badge"
-                                                                style={{
-                                                                    background:
-                                                                        '#666',
-                                                                }}
-                                                                title={
-                                                                    platform
-                                                                }
-                                                            >
-                                                                ?
-                                                            </span>
-                                                        );
+                                                        ) : null;
                                                     },
                                                 )}
                                             </td>
@@ -198,13 +296,23 @@ export default function PostsIndex({ posts, filters, statusCounts }: PageProps) 
                                                     {
                                                         POST_STATUS_LABELS[
                                                             studioStatus
-                                                        ]
+                                                        ] ?? row.status
                                                     }
                                                 </span>
+                                                {[
+                                                    'queued',
+                                                    'running',
+                                                ].includes(
+                                                    row.publish_state,
+                                                ) && (
+                                                    <span className="pill st-scheduled ml-1">
+                                                        {row.publish_state}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="c-act">
                                                 <Link
-                                                    href={show.url(post.id)}
+                                                    href={show.url(row.id)}
                                                     className="viewbtn"
                                                     onClick={(event) =>
                                                         event.stopPropagation()
@@ -221,9 +329,9 @@ export default function PostsIndex({ posts, filters, statusCounts }: PageProps) 
                     </div>
                 )}
 
-                {posts.links.length > 3 && (
+                {items.links.length > 3 && (
                     <nav className="mt-4 flex flex-wrap items-center gap-1">
-                        {posts.links.map((link, position) =>
+                        {items.links.map((link, position) =>
                             link.url ? (
                                 <Link
                                     key={`${link.label}-${position}`}

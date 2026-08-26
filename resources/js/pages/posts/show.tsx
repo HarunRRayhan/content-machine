@@ -1,4 +1,7 @@
 import { Head, Link } from '@inertiajs/react';
+import PublishDialog, {
+    PublishStatusBanner,
+} from '@/components/content/publish-dialog';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostOverview from '@/components/studio/post-overview';
 import type { LangCode } from '@/lib/lang-meta';
@@ -29,6 +32,11 @@ type PostDetail = {
     language: string | null;
     slug: string | null;
     status: string;
+    publish_state: string;
+    publish_error: string | null;
+    postsyncer: Record<string, unknown> | null;
+    postsyncer_ready: boolean;
+    needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
@@ -44,6 +52,15 @@ export default function PostShow({ post }: PageProps) {
     );
     const defaultLang: LangCode | null =
         post.language === 'en' ? 'en' : post.language === 'bn' ? 'bn' : null;
+
+    const publishDisabled =
+        !post.postsyncer_ready ||
+        ['queued', 'running'].includes(post.publish_state);
+    const publishDisabledReason = !post.postsyncer_ready
+        ? 'Configure PostSyncer in Settings before scheduling or publishing.'
+        : ['queued', 'running'].includes(post.publish_state)
+          ? 'A publish job is already queued or running.'
+          : null;
 
     return (
         <>
@@ -72,12 +89,34 @@ export default function PostShow({ post }: PageProps) {
                     </p>
                 )}
 
+                <PublishStatusBanner
+                    publishState={post.publish_state}
+                    publishError={post.publish_error}
+                />
+
                 <PostOverview
                     postId={post.id}
                     title={post.title}
                     status={post.status}
                     platforms={post.platforms}
                 />
+
+                <section className="pane max-w-3xl">
+                    <div className="pane-head">
+                        <span className="k">📤 Publish</span>
+                    </div>
+                    <div className="p-5">
+                        <PublishDialog
+                            disabled={publishDisabled}
+                            disabledReason={publishDisabledReason}
+                            publishState={post.publish_state}
+                            publishError={post.publish_error}
+                            publishUrl={`/dashboard/posts/${post.id}/publish`}
+                            entityLabel="post"
+                            needsConfirmAsk={post.needs_confirm_ask}
+                        />
+                    </div>
+                </section>
 
                 {hasCaptions ? (
                     <PostCaptionsPanel

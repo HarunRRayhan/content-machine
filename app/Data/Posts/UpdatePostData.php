@@ -10,6 +10,7 @@ final readonly class UpdatePostData
     /**
      * @param  array<string, mixed>|null  $captions
      * @param  array<string, mixed>|null  $platforms
+     * @param  array<int, string>|null  $imageDriveUrls
      */
     public function __construct(
         public string $title,
@@ -18,6 +19,7 @@ final readonly class UpdatePostData
         public ?string $slug = null,
         public ?array $captions = null,
         public ?array $platforms = null,
+        public ?array $imageDriveUrls = null,
         public ?string $status = null,
         public bool $replaceExtended = false,
     ) {}
@@ -28,8 +30,37 @@ final readonly class UpdatePostData
             title: $request->string('title')->toString(),
             body: $request->filled('body') ? $request->string('body')->toString() : null,
             status: $request->filled('status') ? $request->string('status')->toString() : null,
+            imageDriveUrls: self::parseDriveUrls($request->input('image_drive_urls')),
             replaceExtended: false,
         );
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private static function parseDriveUrls(mixed $raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        if (is_array($raw)) {
+            $urls = array_values(array_filter(array_map(
+                static fn ($value) => is_string($value) ? trim($value) : '',
+                $raw,
+            ), static fn (string $value) => $value !== ''));
+
+            return $urls === [] ? null : $urls;
+        }
+
+        if (! is_string($raw)) {
+            return null;
+        }
+
+        $lines = preg_split('/\r\n|\r|\n/', $raw) ?: [];
+        $urls = array_values(array_filter(array_map('trim', $lines), static fn (string $line) => $line !== ''));
+
+        return $urls === [] ? null : $urls;
     }
 
     /**

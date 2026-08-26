@@ -20,6 +20,7 @@ class UpdatePostRequest extends FormRequest
             'title' => ['required', 'string', 'max:255'],
             'body' => ['nullable', 'string', 'max:20000'],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
+            'image_drive_urls' => ['nullable', 'string', 'max:10000'],
         ];
     }
 }

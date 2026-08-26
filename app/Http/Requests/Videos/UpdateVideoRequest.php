@@ -20,6 +20,8 @@ class UpdateVideoRequest extends FormRequest
             'title' => ['required', 'string', 'max:255'],
             'body' => ['nullable', 'string', 'max:20000'],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
+            'video_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
+            'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
         ];
     }
 }

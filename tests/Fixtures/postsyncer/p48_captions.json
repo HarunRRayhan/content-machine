@@ -1,0 +1,64 @@
+{
+  "Bangla": {
+    "facebook": {
+      "title": "Another one bites the dust",
+      "caption": "Another one bites the dust. 🪦\n\nআরেকটা domain কিনে ফেললাম।",
+      "first_comment": "",
+      "images": ["https://drive.google.com/file/d/p48-bn-cover/view"],
+      "thread": []
+    },
+    "instagram": {
+      "caption": "Another one bites the dust. 🪦\n\nআরেকটা domain কিনে ফেললাম।",
+      "images": ["https://drive.google.com/file/d/p48-bn-cover/view"],
+      "thread": []
+    },
+    "threads": {
+      "caption": "Another one bites the dust. 🪦\n\nআরেকটা domain কিনে ফেললাম।",
+      "images": ["https://drive.google.com/file/d/p48-bn-cover/view"],
+      "thread": []
+    },
+    "bluesky": {
+      "caption": "Another one bites the dust. 🪦\n\nআরেকটা domain কিনে ফেললাম।",
+      "images": ["https://drive.google.com/file/d/p48-bn-cover/view"],
+      "thread": []
+    },
+    "tiktok": {
+      "caption": "Another one bites the dust. 🪦 আরেকটা domain কিনে ফেললাম।",
+      "images": ["https://drive.google.com/file/d/p48-bn-cover/view"],
+      "thread": []
+    }
+  },
+  "English": {
+    "facebook": {
+      "title": "Another One Bites the Dust",
+      "caption": "Another one bites the dust. 🪦\n\nJust bought another domain.",
+      "images": ["https://drive.google.com/file/d/p48-en-cover/view"],
+      "thread": []
+    },
+    "twitter": {
+      "caption": "Another one bites the dust. 🪦",
+      "images": ["https://drive.google.com/file/d/p48-en-cover/view"],
+      "thread": ["Just bought another domain. How many unused ones are sitting in your account?"]
+    },
+    "threads": {
+      "caption": "Another one bites the dust. 🪦\n\nJust bought another domain.",
+      "images": ["https://drive.google.com/file/d/p48-en-cover/view"],
+      "thread": []
+    },
+    "bluesky": {
+      "caption": "Another one bites the dust. 🪦\n\nJust bought another domain.",
+      "images": ["https://drive.google.com/file/d/p48-en-cover/view"],
+      "thread": []
+    },
+    "instagram": {
+      "caption": "Another one bites the dust. 🪦\n\nJust bought another domain.",
+      "images": ["https://drive.google.com/file/d/p48-en-cover/view"],
+      "thread": []
+    },
+    "tiktok": {
+      "caption": "Another one bites the dust. 🪦 Just bought another domain.",
+      "images": ["https://drive.google.com/file/d/p48-en-cover/view"],
+      "thread": []
+    }
+  }
+}
