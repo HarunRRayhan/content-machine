@@ -28,8 +28,12 @@ type PostDetail = {
         }>;
     }>;
     platforms: string[];
+    images: Array<{
+        filename: string;
+        url: string;
+        mime: string;
+    }>;
     image_urls: Record<string, string>;
-    image_drive_urls: string[];
     handles?: HandleDirectory;
     language: string | null;
     slug: string | null;
@@ -123,7 +127,7 @@ export default function PostShow({ post }: PageProps) {
                         title={post.title}
                         status={post.status}
                         platforms={post.platforms}
-                        imageDriveUrls={post.image_drive_urls}
+                        images={post.images}
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}

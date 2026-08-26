@@ -134,4 +134,31 @@ class UpdatePostActionTest extends TestCase
         $this->assertSame(['facebook'], $updated->platforms);
         $this->assertSame(['https://drive.google.com/file/d/photo/view'], $updated->image_drive_urls);
     }
+
+    public function test_api_payload_can_store_postsyncer_groups_without_wiping_captions(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Scheduled post',
+            'captions' => ['facebook' => 'keep me'],
+            'status' => 'scheduled',
+        ]);
+
+        $groups = [
+            'groups' => [[
+                'post_id' => '132531',
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2026-08-26T21:18:00+06:00',
+                'platforms' => ['facebook'],
+                'language' => 'bangla',
+            ]],
+        ];
+
+        $updated = (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'postsyncer' => $groups,
+        ], $post));
+
+        $this->assertSame($groups, $updated->postsyncer);
+        $this->assertSame(['facebook' => 'keep me'], $updated->captions);
+        $this->assertSame('scheduled', $updated->status);
+    }
 }

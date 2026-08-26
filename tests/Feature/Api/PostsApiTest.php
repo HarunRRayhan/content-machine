@@ -62,6 +62,31 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.status', 'archived');
     }
 
+    public function test_update_can_record_postsyncer_groups(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-51',
+            'number' => 51,
+            'title' => 'Scheduled meme',
+            'status' => 'scheduled',
+        ])->assertCreated();
+
+        $this->acting()->patchJson('/api/v1/posts/P-51', [
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '132531',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-08-26T21:18:00+06:00',
+                    'platforms' => ['facebook'],
+                    'language' => 'bangla',
+                ]],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'scheduled')
+            ->assertJsonPath('data.postsyncer.groups.0.post_id', '132531');
+    }
+
     public function test_index_lists_posts(): void
     {
         Post::factory()->for($this->workspace)->create(['human_id' => 'P-1', 'number' => 1]);

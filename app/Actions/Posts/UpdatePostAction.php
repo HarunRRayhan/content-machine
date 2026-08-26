@@ -18,6 +18,10 @@ class UpdatePostAction
             $attributes['image_drive_urls'] = $data->imageDriveUrls;
         }
 
+        if ($data->hasPostsyncer) {
+            $attributes['postsyncer'] = $data->postsyncer;
+        }
+
         if ($data->status !== null) {
             $attributes['status'] = $data->status;
         }

@@ -1,5 +1,6 @@
 import { Form, router } from '@inertiajs/react';
 import { useState } from 'react';
+import ImageGallery from '@/components/studio/image-gallery';
 import { studioPostStatus } from '@/lib/platform-meta';
 
 const POST_PIPELINE = [
@@ -24,7 +25,11 @@ type Props = {
     title: string;
     status: string;
     platforms: string[];
-    imageDriveUrls: string[];
+    images: Array<{
+        filename: string;
+        url: string;
+        mime: string;
+    }>;
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
@@ -127,7 +132,7 @@ export default function PostOverview({
     title,
     status,
     platforms,
-    imageDriveUrls,
+    images,
     publishUrl,
     postsyncerReady,
     publishState,
@@ -147,16 +152,18 @@ export default function PostOverview({
     const [minWhen] = useState(() => datetimeLocalNowInDhaka());
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
-    const fakeScheduled = studioStatus === 'scheduled' && !hasGroups;
     const publishBusy = ['queued', 'running'].includes(publishState);
     const showScheduleForm =
         !archived &&
         studioStatus !== 'posted' &&
-        (studioStatus === 'draft' || fakeScheduled);
+        studioStatus !== 'scheduled' &&
+        !hasGroups &&
+        studioStatus === 'draft';
     const canSchedule =
         postsyncerReady &&
         !publishBusy &&
-        (studioStatus === 'draft' || fakeScheduled);
+        studioStatus === 'draft' &&
+        !hasGroups;
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
     const scheduledAt = earliestWhen(groups);
@@ -366,66 +373,21 @@ export default function PostOverview({
                                 })}
                             </ul>
                         </div>
-                    ) : fakeScheduled ? (
+                    ) : studioStatus === 'scheduled' ? (
                         <div className="schedule-log">
                             <div className="schedule-log-h">
                                 Scheduled posts
                             </div>
                             <p className="schedule-log-empty">
-                                No PostSyncer schedule yet
+                                Marked scheduled, but Content Machine has no
+                                PostSyncer ids for this post yet.
                             </p>
                         </div>
                     ) : null}
                 </div>
             </section>
 
-            <section className="pane">
-                <div className="pane-head">
-                    <span className="k">Drive URLs</span>
-                </div>
-                <Form
-                    action={`/posts/${postId}`}
-                    method="patch"
-                    className="drive-urls"
-                    options={{ preserveScroll: true }}
-                >
-                    {({ processing, errors }) => (
-                        <>
-                            <input type="hidden" name="title" value={title} />
-                            <label>
-                                Image Drive URLs
-                                <textarea
-                                    name="image_drive_urls"
-                                    defaultValue={imageDriveUrls.join('\n')}
-                                    rows={4}
-                                    placeholder="One Google Drive URL per line"
-                                />
-                            </label>
-                            <p className="drive-urls-hint">
-                                One Google Drive URL per line. Used when this
-                                post has no uploaded attachments.
-                            </p>
-                            <button
-                                type="submit"
-                                className="advance"
-                                disabled={processing}
-                            >
-                                Save
-                            </button>
-                            {errors.image_drive_urls && (
-                                <p className="drive-urls-error">
-                                    {errors.image_drive_urls}
-                                </p>
-                            )}
-                            {errors.title && (
-                                <p className="drive-urls-error">
-                                    {errors.title}
-                                </p>
-                            )}
-                        </>
-                    )}
-                </Form>
-            </section>
+            <ImageGallery images={images} />
         </div>
     );
 }

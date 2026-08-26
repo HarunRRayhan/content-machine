@@ -1,5 +1,6 @@
 import { Form, router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
+import ImageGallery from '@/components/studio/image-gallery';
 
 type TalkingPoint = {
     label: string;
@@ -35,6 +36,11 @@ type Props = {
     length: string;
     points: TalkingPoint[];
     storageKey: string;
+    images: Array<{
+        filename: string;
+        url: string;
+        mime: string;
+    }>;
     videoDriveUrl: string | null;
     coverDriveUrl: string | null;
     publishUrl: string;
@@ -158,6 +164,7 @@ export default function VideoOverview({
     length,
     points,
     storageKey,
+    images,
     videoDriveUrl,
     coverDriveUrl,
     publishUrl,
@@ -590,6 +597,8 @@ export default function VideoOverview({
                     ) : null}
                 </div>
             </section>
+
+            <ImageGallery images={images} />
 
             <section className="pane">
                 <div className="side-head">
