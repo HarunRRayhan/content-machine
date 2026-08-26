@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\Posts;
 
+use App\Models\Post;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdatePostRequest extends FormRequest
 {
@@ -17,6 +19,7 @@ class UpdatePostRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:255'],
             'body' => ['nullable', 'string', 'max:20000'],
+            'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
             'image_drive_urls' => ['nullable', 'string', 'max:10000'],
         ];
     }

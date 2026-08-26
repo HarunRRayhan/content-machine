@@ -15,6 +15,10 @@ class UpdatePostAction
             'image_drive_urls' => $data->imageDriveUrls,
         ];
 
+        if ($data->status !== null) {
+            $attributes['status'] = $data->status;
+        }
+
         if ($data->replaceExtended) {
             $attributes['language'] = $data->language;
             $attributes['slug'] = $data->slug;

@@ -1,19 +1,26 @@
-import { Form, Head, Link } from '@inertiajs/react';
+import { Head, Link } from '@inertiajs/react';
 import { useState } from 'react';
-import CaptionsPanel from '@/components/content/captions-panel';
 import type { CaptionGroup } from '@/components/content/captions-panel';
-import PublishDialog from '@/components/content/publish-dialog';
-import Heading from '@/components/heading';
-import InputError from '@/components/input-error';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Textarea } from '@/components/ui/textarea';
+import PublishDialog, {
+    PublishStatusBanner,
+} from '@/components/content/publish-dialog';
+import PresentationEmbed from '@/components/studio/presentation-embed';
+import ScriptPanel from '@/components/studio/script-panel';
+import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
+import VideoOverview from '@/components/studio/video-overview';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index, update } from '@/routes/dashboard/videos';
+import { index } from '@/routes/dashboard/videos';
+
+type ScriptBlock = {
+    lang: string;
+    body: string;
+};
+
+type TalkingPoint = {
+    label: string;
+    text: string;
+};
 
 type VideoDetail = {
     id: number;
@@ -22,6 +29,16 @@ type VideoDetail = {
     title: string;
     body: string | null;
     script_markdown: string | null;
+    parsed: {
+        lang: string;
+        length: string;
+        parts: number;
+        points: TalkingPoint[];
+        scripts: ScriptBlock[];
+        facts: string[];
+        sources: string;
+        legal: string[];
+    };
     captions: CaptionGroup[];
     deck_manifest: Record<string, unknown> | null;
     has_deck: boolean;
@@ -44,17 +61,35 @@ type PageProps = {
     video: VideoDetail;
 };
 
+type TabKey = 'overview' | 'script' | 'captions' | 'facts' | 'presentation';
+
 export default function VideoShow({ video }: PageProps) {
-    const hasScript = Boolean(video.script_markdown?.trim());
+    const hasScript = video.parsed.scripts.length > 0;
     const hasCaptions = video.captions.some(
         (group) => group.platforms.length > 0,
     );
-    const defaultTab = hasScript
-        ? 'script'
-        : hasCaptions
-          ? 'captions'
-          : 'overview';
-    const [tab, setTab] = useState(defaultTab);
+    const hasDeck = video.has_deck;
+    const hasFacts =
+        video.parsed.facts.length > 0 ||
+        video.parsed.sources !== '' ||
+        video.parsed.legal.length > 0;
+
+    const validTabs: TabKey[] = ['overview'];
+    if (!hasDeck && hasScript) {
+        validTabs.push('script');
+    }
+    if (hasFacts) {
+        validTabs.push('facts');
+    }
+    if (hasCaptions) {
+        validTabs.push('captions');
+    }
+    if (hasDeck) {
+        validTabs.push('presentation');
+    }
+
+    const [tab, setTab] = useState<TabKey>('overview');
+    const activeTab = validTabs.includes(tab) ? tab : 'overview';
 
     const publishDisabled =
         !video.postsyncer_ready ||
@@ -69,42 +104,19 @@ export default function VideoShow({ video }: PageProps) {
         <>
             <Head title={video.title} />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
-                <Link
-                    href={index()}
-                    className="text-sm text-muted-foreground hover:underline"
-                >
-                    &larr; All videos
-                </Link>
-
-                <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">
-                        Video #{video.number}
-                    </p>
-                    <Heading title={video.title} description={video.human_id} />
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{video.human_id}</Badge>
-                    <Badge variant="secondary">{video.status}</Badge>
-                    {video.publish_state !== 'idle' && (
-                        <Badge variant="outline">{video.publish_state}</Badge>
-                    )}
-                    {video.language && (
-                        <Badge variant="outline">{video.language}</Badge>
-                    )}
-                    {video.slug && (
-                        <Badge variant="outline">{video.slug}</Badge>
-                    )}
-                    {hasScript && <Badge variant="outline">script</Badge>}
-                    {hasCaptions && <Badge variant="outline">captions</Badge>}
-                    {video.has_deck && (
-                        <Badge variant="outline">presentation</Badge>
-                    )}
+            <div className="studio-page flex h-full flex-1 flex-col gap-2 p-4">
+                <div className="vhead">
+                    <Link href={index()} className="back">
+                        ← All videos
+                    </Link>
+                    <div className="vhead-t">
+                        <span className="no">Video #{video.number}</span>
+                        <h2>{video.title}</h2>
+                    </div>
                 </div>
 
                 {video.idea_id && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-[var(--ink-soft)]">
                         Promoted from{' '}
                         <Link
                             href={showIdea.url(video.idea_id)}
@@ -115,163 +127,143 @@ export default function VideoShow({ video }: PageProps) {
                     </p>
                 )}
 
-                <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-                    <TabsList className="flex h-auto flex-wrap gap-1">
-                        <TabsTrigger value="overview">Overview</TabsTrigger>
-                        <TabsTrigger value="script">Script</TabsTrigger>
-                        <TabsTrigger value="captions">Captions</TabsTrigger>
-                        <TabsTrigger value="presentation">
-                            Presentation
-                        </TabsTrigger>
-                    </TabsList>
+                <PublishStatusBanner
+                    publishState={video.publish_state}
+                    publishError={video.publish_error}
+                />
 
-                    <TabsContent value="overview" className="space-y-4">
-                        <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                            <Heading variant="small" title="Edit video" />
+                <div className="tabbar" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'overview'}
+                        onClick={() => setTab('overview')}
+                    >
+                        📋 Overview
+                    </button>
+                    {!hasDeck && hasScript && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'script'}
+                            onClick={() => setTab('script')}
+                        >
+                            📄 Script
+                        </button>
+                    )}
+                    {hasCaptions && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'captions'}
+                            onClick={() => setTab('captions')}
+                        >
+                            📣 Captions
+                        </button>
+                    )}
+                    {hasFacts && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'facts'}
+                            onClick={() => setTab('facts')}
+                        >
+                            🔍 Fact-check
+                        </button>
+                    )}
+                    {hasDeck && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'presentation'}
+                            onClick={() => setTab('presentation')}
+                        >
+                            🎬 Presentation
+                        </button>
+                    )}
+                </div>
 
-                            <Form
-                                {...update.form(video.id)}
-                                className="space-y-4"
-                            >
-                                {({ processing, errors }) => (
-                                    <>
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="title">Title</Label>
-                                            <Input
-                                                id="title"
-                                                name="title"
-                                                required
-                                                defaultValue={video.title}
-                                            />
-                                            <InputError
-                                                message={errors.title}
-                                            />
-                                        </div>
+                {activeTab === 'overview' && (
+                    <div className="space-y-4">
+                        <VideoOverview
+                            videoId={video.id}
+                            title={video.title}
+                            status={video.status}
+                            lang={video.parsed.lang}
+                            length={video.parsed.length}
+                            points={video.parsed.points}
+                            storageKey={video.human_id}
+                        />
+                        <section className="pane max-w-3xl">
+                            <div className="pane-head">
+                                <span className="k">📤 Publish</span>
+                            </div>
+                            <div className="p-5">
+                                <PublishDialog
+                                    disabled={publishDisabled}
+                                    disabledReason={publishDisabledReason}
+                                    publishState={video.publish_state}
+                                    publishError={video.publish_error}
+                                    publishUrl={`/dashboard/videos/${video.id}/publish`}
+                                    entityLabel="video"
+                                    needsConfirmAsk={video.needs_confirm_ask}
+                                />
+                            </div>
+                        </section>
+                    </div>
+                )}
 
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="body">
-                                                Notes / body
-                                            </Label>
-                                            <Textarea
-                                                id="body"
-                                                name="body"
-                                                rows={8}
-                                                defaultValue={video.body ?? ''}
-                                            />
-                                            <InputError message={errors.body} />
-                                        </div>
+                {activeTab === 'script' && !hasDeck && (
+                    <ScriptPanel
+                        scripts={video.parsed.scripts}
+                        videoNumber={video.number}
+                        storageKey={video.human_id}
+                    />
+                )}
 
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="video_drive_url">
-                                                Video Drive URL
-                                            </Label>
-                                            <Input
-                                                id="video_drive_url"
-                                                name="video_drive_url"
-                                                type="url"
-                                                defaultValue={
-                                                    video.video_drive_url ?? ''
-                                                }
-                                            />
-                                            <InputError
-                                                message={errors.video_drive_url}
-                                            />
-                                        </div>
+                {activeTab === 'captions' && (
+                    <VideoCaptionsPanel groups={video.captions} />
+                )}
 
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="cover_drive_url">
-                                                Cover Drive URL
-                                            </Label>
-                                            <Input
-                                                id="cover_drive_url"
-                                                name="cover_drive_url"
-                                                type="url"
-                                                defaultValue={
-                                                    video.cover_drive_url ?? ''
-                                                }
-                                            />
-                                            <InputError
-                                                message={errors.cover_drive_url}
-                                            />
-                                        </div>
-
-                                        <Button disabled={processing}>
-                                            Save changes
-                                        </Button>
-                                    </>
-                                )}
-                            </Form>
+                {activeTab === 'facts' && (
+                    <section className="pane max-w-3xl">
+                        <div className="pane-head">
+                            <span className="k">Fact-check</span>
                         </div>
-
-                        <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                            <Heading
-                                variant="small"
-                                title="Publish"
-                                description="Schedule or publish this video through PostSyncer."
-                            />
-
-                            <PublishDialog
-                                disabled={publishDisabled}
-                                disabledReason={publishDisabledReason}
-                                publishState={video.publish_state}
-                                publishError={video.publish_error}
-                                publishUrl={`/dashboard/videos/${video.id}/publish`}
-                                entityLabel="video"
-                                needsConfirmAsk={video.needs_confirm_ask}
-                            />
-                        </div>
-                    </TabsContent>
-
-                    <TabsContent value="script">
-                        {hasScript ? (
-                            <pre className="max-w-4xl rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed whitespace-pre-wrap">
-                                {video.script_markdown}
-                            </pre>
-                        ) : (
-                            <p className="text-sm text-muted-foreground">
-                                No script stored for this video yet.
-                            </p>
-                        )}
-                    </TabsContent>
-
-                    <TabsContent value="captions">
-                        <CaptionsPanel groups={video.captions} />
-                    </TabsContent>
-
-                    <TabsContent value="presentation" className="space-y-3">
-                        {video.has_deck ? (
-                            <>
-                                <p className="text-sm text-muted-foreground">
-                                    Presentation package is stored on this
-                                    video. Fullscreen player opens in a
-                                    dedicated view.
+                        <div className="p-5 text-sm leading-relaxed text-[var(--ink-soft)]">
+                            {video.parsed.facts.length > 0 && (
+                                <ul className="mb-4 list-disc space-y-2 pl-5">
+                                    {video.parsed.facts.map((fact) => (
+                                        <li key={fact}>{fact}</li>
+                                    ))}
+                                </ul>
+                            )}
+                            {video.parsed.sources && (
+                                <p className="mb-4">
+                                    <strong>Sources:</strong>{' '}
+                                    {video.parsed.sources}
                                 </p>
-                                <Button asChild>
-                                    <a
-                                        href={`/dashboard/videos/${video.id}/presentation`}
-                                    >
-                                        Open fullscreen presentation
-                                    </a>
-                                </Button>
-                                {video.deck_manifest && (
-                                    <pre className="max-w-3xl overflow-auto rounded-lg border bg-muted/30 p-3 text-xs">
-                                        {JSON.stringify(
-                                            video.deck_manifest,
-                                            null,
-                                            2,
-                                        )}
-                                    </pre>
-                                )}
-                            </>
-                        ) : (
-                            <p className="text-sm text-muted-foreground">
-                                No presentation deck imported for this video
-                                yet. Decks from Script Studio (BV-46 onward)
-                                will show up here after the media import.
-                            </p>
-                        )}
-                    </TabsContent>
-                </Tabs>
+                            )}
+                            {video.parsed.legal.length > 0 && (
+                                <ul className="list-disc space-y-2 pl-5">
+                                    {video.parsed.legal.map((note) => (
+                                        <li key={note}>{note}</li>
+                                    ))}
+                                </ul>
+                            )}
+                            {!hasFacts && (
+                                <p className="empty">No fact-check notes.</p>
+                            )}
+                        </div>
+                    </section>
+                )}
+
+                {activeTab === 'presentation' && hasDeck && (
+                    <PresentationEmbed
+                        title={video.title}
+                        src={`/dashboard/videos/${video.id}/presentation?embed=1`}
+                    />
+                )}
             </div>
         </>
     );

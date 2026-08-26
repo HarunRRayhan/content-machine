@@ -1,9 +1,10 @@
 import { Head, Link, router } from '@inertiajs/react';
-import Heading from '@/components/heading';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import {
+    PLATFORM_META,
+    POST_STATUS_LABELS,
+    normalizePlatformKey,
+    studioPostStatus,
+} from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index, show } from '@/routes/dashboard/posts';
@@ -122,17 +123,10 @@ export default function PostsIndex({
         <>
             <Head title="Posts" />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
-                <Heading
-                    title="Posts"
-                    description="Bodies, per-platform captions, and images from the content pipeline."
-                />
+            <div className="studio-page flex h-full flex-1 flex-col gap-2 p-4">
+                <h2 className="home-h">All posts</h2>
 
-                <div
-                    role="tablist"
-                    aria-label="Post pipeline status"
-                    className="flex flex-wrap gap-1 border-b pb-1"
-                >
+                <div className="tabbar statustabs" role="tablist">
                     {tabs.map((tab) => {
                         const active = filters.status === tab;
 
@@ -145,28 +139,19 @@ export default function PostsIndex({
                                     query: tabQuery(filters, tab),
                                 })}
                                 preserveScroll
-                                className={cn(
-                                    'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                                    active
-                                        ? 'bg-accent text-accent-foreground'
-                                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-                                )}
+                                className={active ? undefined : 'opacity-90'}
                             >
                                 {TAB_LABELS[tab] ?? tab}
-                                <Badge
-                                    variant={active ? 'default' : 'secondary'}
-                                    className="min-w-5 justify-center px-1.5 py-0 text-xs"
-                                >
+                                <span className="tabn">
                                     {counts[tab] ?? 0}
-                                </Badge>
+                                </span>
                             </Link>
                         );
                     })}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                    <Input
-                        className="max-w-xs"
+                <div className="search-row">
+                    <input
                         placeholder="Search title or id"
                         defaultValue={filters.q ?? ''}
                         onKeyDown={(event) => {
@@ -188,7 +173,7 @@ export default function PostsIndex({
                                     language: event.target.value || null,
                                 })
                             }
-                            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                            className="rounded-md border border-[var(--line)] bg-[var(--bg2)] px-3 py-2 text-sm"
                         >
                             <option value="">All languages</option>
                             <option value="bn">Bangla</option>
@@ -198,27 +183,21 @@ export default function PostsIndex({
                 </div>
 
                 {items.data.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="empty">
                         No {isIdeation ? 'ideas' : 'posts'} in this tab yet.
                     </p>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                    <div className="vtable-wrap">
+                        <table className="vtable">
                             <thead>
-                                <tr className="border-b text-left text-muted-foreground">
-                                    <th className="py-2 pr-4 font-medium">
-                                        ID
-                                    </th>
-                                    <th className="py-2 pr-4 font-medium">
-                                        Title
-                                    </th>
-                                    <th className="py-2 pr-4 font-medium">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Title</th>
+                                    <th>
                                         {isIdeation ? 'Score' : 'Platforms'}
                                     </th>
-                                    <th className="py-2 pr-4 font-medium">
-                                        {isIdeation ? 'Trend' : 'Status'}
-                                    </th>
-                                    <th className="py-2 font-medium">Open</th>
+                                    <th>{isIdeation ? 'Trend' : 'Status'}</th>
+                                    <th />
                                 </tr>
                             </thead>
                             <tbody>
@@ -227,105 +206,119 @@ export default function PostsIndex({
                                         return (
                                             <tr
                                                 key={`idea-${row.id}`}
-                                                className="border-b last:border-0"
+                                                onClick={() =>
+                                                    router.visit(
+                                                        showIdea.url(row.id),
+                                                    )
+                                                }
                                             >
-                                                <td className="py-2 pr-4">
-                                                    <Badge variant="outline">
-                                                        {row.human_id}
-                                                    </Badge>
+                                                <td className="c-num">
+                                                    {row.human_id}
                                                 </td>
-                                                <td className="max-w-md py-2 pr-4 font-medium">
+                                                <td className="c-title">
                                                     {row.title}
                                                 </td>
-                                                <td className="py-2 pr-4 text-muted-foreground">
+                                                <td>
                                                     {row.score !== null
                                                         ? `${row.score}/1000`
                                                         : '—'}
                                                 </td>
-                                                <td className="py-2 pr-4">
-                                                    {row.trend ? (
-                                                        <Badge variant="secondary">
-                                                            {row.trend}
-                                                        </Badge>
-                                                    ) : (
-                                                        <span className="text-muted-foreground">
-                                                            —
-                                                        </span>
-                                                    )}
+                                                <td>
+                                                    {row.trend ?? '—'}
                                                 </td>
-                                                <td className="py-2">
+                                                <td className="c-act">
                                                     <Link
                                                         href={showIdea.url(
                                                             row.id,
                                                         )}
-                                                        className="text-primary underline-offset-4 hover:underline"
+                                                        className="viewbtn"
+                                                        onClick={(event) =>
+                                                            event.stopPropagation()
+                                                        }
                                                     >
-                                                        Open
+                                                        View
                                                     </Link>
                                                 </td>
                                             </tr>
                                         );
                                     }
 
+                                    const studioStatus = studioPostStatus(
+                                        row.status,
+                                    );
+
                                     return (
                                         <tr
                                             key={`post-${row.id}`}
-                                            className="border-b last:border-0"
+                                            onClick={() =>
+                                                router.visit(show.url(row.id))
+                                            }
                                         >
-                                            <td className="py-2 pr-4">
-                                                <Badge variant="outline">
-                                                    {row.human_id}
-                                                </Badge>
+                                            <td className="c-num">
+                                                P-{row.number}
                                             </td>
-                                            <td className="max-w-md py-2 pr-4 font-medium">
+                                            <td className="c-title">
                                                 {row.title}
                                             </td>
-                                            <td className="py-2 pr-4">
-                                                <div className="flex flex-wrap gap-1">
-                                                    {row.platforms.length >
-                                                    0 ? (
-                                                        row.platforms
-                                                            .slice(0, 3)
-                                                            .map((platform) => (
-                                                                <Badge
-                                                                    key={
-                                                                        platform
-                                                                    }
-                                                                    variant="outline"
-                                                                >
-                                                                    {platform}
-                                                                </Badge>
-                                                            ))
-                                                    ) : (
-                                                        <span className="text-muted-foreground">
-                                                            —
-                                                        </span>
-                                                    )}
-                                                </div>
+                                            <td className="c-plat">
+                                                {row.platforms.map(
+                                                    (platform) => {
+                                                        const key =
+                                                            normalizePlatformKey(
+                                                                platform,
+                                                            );
+                                                        const meta = key
+                                                            ? PLATFORM_META[key]
+                                                            : null;
+
+                                                        return meta ? (
+                                                            <span
+                                                                key={platform}
+                                                                className="platform-badge"
+                                                                style={{
+                                                                    background:
+                                                                        meta.color,
+                                                                }}
+                                                                title={
+                                                                    platform
+                                                                }
+                                                            >
+                                                                {meta.badge}
+                                                            </span>
+                                                        ) : null;
+                                                    },
+                                                )}
                                             </td>
-                                            <td className="py-2 pr-4">
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                    <Badge variant="secondary">
-                                                        {row.status}
-                                                    </Badge>
-                                                    {[
-                                                        'queued',
-                                                        'running',
-                                                    ].includes(
-                                                        row.publish_state,
-                                                    ) && (
-                                                        <Badge variant="outline">
-                                                            {row.publish_state}
-                                                        </Badge>
-                                                    )}
-                                                </div>
+                                            <td className="c-status">
+                                                <span
+                                                    className={`pill st-${studioStatus}`}
+                                                >
+                                                    {
+                                                        POST_STATUS_LABELS[
+                                                            studioStatus
+                                                        ] ?? row.status
+                                                    }
+                                                </span>
+                                                {[
+                                                    'queued',
+                                                    'running',
+                                                ].includes(
+                                                    row.publish_state,
+                                                ) && (
+                                                    <span className="pill st-scheduled ml-1">
+                                                        {row.publish_state}
+                                                    </span>
+                                                )}
                                             </td>
-                                            <td className="py-2">
+                                            <td className="c-act">
                                                 <Link
                                                     href={show.url(row.id)}
-                                                    className="text-primary underline-offset-4 hover:underline"
+                                                    className="viewbtn"
+                                                    onClick={(event) =>
+                                                        event.stopPropagation()
+                                                    }
                                                 >
-                                                    Open
+                                                    View
                                                 </Link>
                                             </td>
                                         </tr>
@@ -337,24 +330,26 @@ export default function PostsIndex({
                 )}
 
                 {items.links.length > 3 && (
-                    <nav className="flex flex-wrap items-center gap-1">
-                        {items.links.map((link, position) => (
-                            <Button
-                                key={`${link.label}-${position}`}
-                                variant={link.active ? 'default' : 'outline'}
-                                size="sm"
-                                disabled={link.url === null}
-                                asChild={link.url !== null}
-                            >
-                                {link.url !== null ? (
-                                    <Link href={link.url} preserveScroll>
-                                        {paginationLabel(link.label)}
-                                    </Link>
-                                ) : (
-                                    <span>{paginationLabel(link.label)}</span>
-                                )}
-                            </Button>
-                        ))}
+                    <nav className="mt-4 flex flex-wrap items-center gap-1">
+                        {items.links.map((link, position) =>
+                            link.url ? (
+                                <Link
+                                    key={`${link.label}-${position}`}
+                                    href={link.url}
+                                    preserveScroll
+                                    className={`rounded-md border px-3 py-1 text-sm ${link.active ? 'bg-[var(--accent)] text-white' : ''}`}
+                                >
+                                    {paginationLabel(link.label)}
+                                </Link>
+                            ) : (
+                                <span
+                                    key={`${link.label}-${position}`}
+                                    className="rounded-md border px-3 py-1 text-sm opacity-50"
+                                >
+                                    {paginationLabel(link.label)}
+                                </span>
+                            ),
+                        )}
                     </nav>
                 )}
             </div>

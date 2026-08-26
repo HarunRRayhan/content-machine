@@ -10,6 +10,7 @@ use App\Models\Idea;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Content\ParseVideoScript;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Http\RedirectResponse;
@@ -205,6 +206,10 @@ class VideosController extends Controller
      */
     private function presentDetail(Video $video): array
     {
+        $parsed = ParseVideoScript::fromMarkdown(
+            $video->script_markdown ?? '',
+            $video->language ?? 'bn',
+        );
         $workspace = Workspace::current();
         $postsyncerConfig = $workspace !== null
             ? PostsyncerConfig::fromWorkspace($workspace)
@@ -217,6 +222,7 @@ class VideosController extends Controller
             'title' => $video->title,
             'body' => $video->body,
             'script_markdown' => $video->script_markdown,
+            'parsed' => $parsed,
             'captions' => NormalizeCaptions::forDashboard($video->captions),
             'deck_manifest' => $video->deck_manifest,
             'has_deck' => ! empty($video->deck_manifest),

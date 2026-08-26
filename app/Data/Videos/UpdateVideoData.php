@@ -34,6 +34,7 @@ final readonly class UpdateVideoData
         return new self(
             title: $request->string('title')->toString(),
             body: $request->filled('body') ? $request->string('body')->toString() : null,
+            status: $request->filled('status') ? $request->string('status')->toString() : null,
             videoDriveUrl: $request->filled('video_drive_url') ? $request->string('video_drive_url')->toString() : null,
             coverDriveUrl: $request->filled('cover_drive_url') ? $request->string('cover_drive_url')->toString() : null,
             replaceExtended: false,

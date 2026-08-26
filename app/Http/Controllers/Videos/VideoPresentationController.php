@@ -26,10 +26,13 @@ class VideoPresentationController extends Controller
             abort(404, 'No presentation deck stored for this video.');
         }
 
+        $embed = $request->boolean('embed');
+
         return response()
             ->view('videos.presentation', [
                 'video' => $video,
                 'manifest' => $manifest,
+                'embed' => $embed,
             ])
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }

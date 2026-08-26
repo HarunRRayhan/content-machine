@@ -69,7 +69,9 @@ class PostsController extends Controller
         } else {
             $items = Post::query()
                 ->where('workspace_id', $workspace->id)
-                ->where('status', $status)
+                ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
+                ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
+                ->when(in_array($status, ['scheduled', 'posted', 'ready'], true), fn ($builder) => $builder->where('status', $status))
                 ->when($language, fn ($builder) => $builder->where('language', $language))
                 ->when($query, function ($builder) use ($query) {
                     $like = '%'.$query.'%';
@@ -244,6 +246,15 @@ class PostsController extends Controller
             }
         }
 
+        $imageUrls = [];
+        foreach ($images as $image) {
+            if (! empty($image['filename']) && ! empty($image['url'])) {
+                $imageUrls[$image['filename']] = $image['url'];
+                $basename = basename($image['filename']);
+                $imageUrls[$basename] = $image['url'];
+            }
+        }
+
         $workspace = Workspace::current();
         $postsyncerConfig = $workspace !== null
             ? PostsyncerConfig::fromWorkspace($workspace)
@@ -258,6 +269,7 @@ class PostsController extends Controller
             'captions' => NormalizeCaptions::forDashboard($post->captions),
             'platforms' => $post->platforms ?? [],
             'images' => $images,
+            'image_urls' => $imageUrls,
             'caption_image_names' => array_keys($captionImageNames),
             'image_drive_urls' => $post->image_drive_urls ?? [],
             'language' => $post->language,

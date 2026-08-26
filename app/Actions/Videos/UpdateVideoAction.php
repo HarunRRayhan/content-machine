@@ -16,13 +16,21 @@ class UpdateVideoAction
             'cover_drive_url' => $data->coverDriveUrl,
         ];
 
+        if ($data->status !== null) {
+            $attributes['status'] = $data->status;
+        }
+
         if ($data->replaceExtended) {
             $attributes['language'] = $data->language;
             $attributes['slug'] = $data->slug;
             $attributes['script_markdown'] = $data->scriptMarkdown;
             $attributes['captions'] = $data->captions;
             $attributes['deck_manifest'] = $data->deckManifest;
-            $attributes['status'] = $data->status ?? $video->status;
+            if ($data->status !== null) {
+                $attributes['status'] = $data->status;
+            } else {
+                $attributes['status'] = $video->status;
+            }
         }
 
         $video->forceFill($attributes)->save();
