@@ -7,9 +7,9 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/dist/reveal.css">
     <style>
         :root {
-            --font-bn: "Kohinoor Bangla", "Noto Sans Bengali", "Hind Siliguri", system-ui, sans-serif;
-            --font-display: ui-serif, Georgia, "Times New Roman", serif;
-            --font-cue: ui-monospace, Menlo, Consolas, monospace;
+            --font-bn: "Instrument Sans", "Noto Sans Bengali", "Hind Siliguri", ui-sans-serif, system-ui, sans-serif;
+            --font-display: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+            --font-cue: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
             --cm-bg: oklch(1 0 0);
             --cm-fg: oklch(0.145 0 0);
             --cm-muted: oklch(0.97 0 0);

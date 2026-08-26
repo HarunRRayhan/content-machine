@@ -1,44 +1,32 @@
-/* Script Studio visual language for Content Machine content pages. */
+/* Content pages reuse the dashboard Tailwind theme from app.css.
+   Layout chrome (tables, panes, tabs) stays; cream/serif Studio tokens do not. */
 
 .studio-page {
-    --font-bn:
-        'Kohinoor Bangla', 'Noto Sans Bengali', 'Hind Siliguri', 'Baloo Da 2',
-        ui-sans-serif, system-ui, sans-serif;
-    --font-display: ui-serif, 'New York', Georgia, 'Times New Roman', serif;
-    --font-cue: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    --font-bn: var(--font-sans);
+    --font-display: var(--font-sans);
+    --font-cue: var(--font-mono);
     --script-scale: 1;
-    --bg: #efe7d8;
-    --bg2: #faf5ea;
-    --bg3: #f2ebdc;
-    --raised: #fffdf8;
-    --ink: #2a2119;
-    --ink-soft: #5f5240;
-    --ink-faint: #94836c;
-    --line: rgba(42, 33, 25, 0.12);
-    --line-strong: rgba(42, 33, 25, 0.2);
-    --accent: #c23a22;
-    --accent-soft: #a13018;
-    --amber: #9c6b16;
-    --good: #3f8b52;
-    --warn: #9c6b16;
-    --bad: #c23a22;
-    --info: #3d6ea5;
-    --ready: #6b4fa0;
-    --shadow: 0 18px 44px -26px rgba(80, 55, 30, 0.35);
-    font-family: var(--font-bn);
-    color: var(--ink);
-    background: var(--bg);
-    background-image:
-        radial-gradient(
-            1200px 700px at 84% -8%,
-            color-mix(in srgb, var(--accent) 8%, transparent),
-            transparent 60%
-        ),
-        radial-gradient(
-            900px 600px at -10% 10%,
-            color-mix(in srgb, var(--amber) 7%, transparent),
-            transparent 55%
-        );
+    --bg: var(--background);
+    --bg2: var(--muted);
+    --bg3: var(--secondary);
+    --raised: var(--card);
+    --ink: var(--foreground);
+    --ink-soft: var(--muted-foreground);
+    --ink-faint: var(--muted-foreground);
+    --line: var(--border);
+    --line-strong: var(--ring);
+    --accent: var(--primary);
+    --accent-soft: var(--primary);
+    --amber: var(--chart-4);
+    --good: var(--chart-2);
+    --warn: var(--chart-4);
+    --bad: var(--destructive);
+    --info: var(--chart-3);
+    --ready: var(--chart-1);
+    --shadow: 0 18px 44px -26px rgb(0 0 0 / 0.18);
+    font-family: var(--font-sans);
+    color: var(--foreground);
+    background: var(--background);
     min-height: 100%;
 }
 
@@ -225,7 +213,7 @@
 .studio-page .step.done .dot {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--primary-foreground);
 }
 
 .studio-page .step.done .slabel {
@@ -263,7 +251,7 @@
     font-family: var(--font-bn);
     font-size: 15px;
     font-weight: 600;
-    color: #fff;
+    color: var(--primary-foreground);
     background: var(--accent);
     border: none;
     border-radius: 12px;
@@ -438,7 +426,7 @@
 .studio-page .pt[data-done='true'] .box {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--primary-foreground);
 }
 
 .studio-page .pt[data-done='true'] .txt,
@@ -876,7 +864,7 @@
 .studio-page .statustabs button[aria-selected='true'] .tabn,
 .studio-page .statustabs a[aria-selected='true'] .tabn {
     background: var(--accent);
-    color: #fff;
+    color: var(--primary-foreground);
 }
 
 .studio-page .stats {
@@ -1183,7 +1171,7 @@
 
 .studio-page .pgbtn.cur {
     background: var(--accent);
-    color: #fff;
+    color: var(--primary-foreground);
     border-color: var(--accent);
 }
 
