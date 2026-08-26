@@ -30,4 +30,19 @@ class DeployCommandTest extends TestCase
 
         $this->assertSame(1, User::where('email', 'admin@example.com')->count());
     }
+
+    public function test_it_creates_the_scratchpad_uploads_directory_when_missing()
+    {
+        $root = storage_path('framework/testing/uploads-'.bin2hex(random_bytes(4)));
+        $this->assertDirectoryDoesNotExist($root);
+
+        config(['filesystems.disks.scratchpad.root' => $root]);
+
+        $this->artisan('cm:deploy')->assertExitCode(0);
+
+        $this->assertDirectoryExists($root);
+        $this->assertTrue(is_writable($root));
+
+        rmdir($root);
+    }
 }

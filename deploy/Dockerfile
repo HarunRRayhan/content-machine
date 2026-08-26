@@ -57,8 +57,11 @@ FROM serversideup/php:8.4-fpm-nginx-v4.5.1 AS app
 
 WORKDIR /var/www/html
 
-# The base image's last USER is www-data; switch to root for package
-# installs and ownership fixes, then drop back down before the final image.
+# Stay root through the rest of the image. The serversideup entrypoint
+# drops nginx/php-fpm to www-data; we need root at start so
+# deploy/docker/entrypoint.d/20-writable-uploads.sh can chown the Railway
+# volume mounted at storage/app/uploads (fresh volumes are root:root, and
+# www-data cannot mkdir workspace folders on them).
 USER root
 
 # yt-dlp is pinned by release tag + sha256 of the published checksum file
@@ -89,9 +92,10 @@ COPY --from=assets /app/public/build ./public/build
 COPY . .
 
 COPY deploy/docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY --chmod=755 deploy/docker/entrypoint.d/ /etc/entrypoint.d/
 
-RUN chown -R www-data:www-data storage bootstrap/cache
+RUN mkdir -p storage/app/uploads \
+    && chown -R www-data:www-data storage bootstrap/cache
 
-USER www-data
-
-# Port 8080 is already exposed by the base image.
+# Port 8080 is already exposed by the base image. Do not USER www-data
+# here: the entrypoint must start as root to chown the uploads volume.
