@@ -86,7 +86,7 @@
 </head>
 <body @class(['embed' => $embed])>
     @unless($embed)
-        <a class="back" href="{{ route('dashboard.videos.show', $video) }}">← Back</a>
+        <a class="back" href="{{ route('videos.show', $video) }}">← Back</a>
     @endunless
 
     <div class="pres-shell" id="presShell">

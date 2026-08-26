@@ -74,7 +74,7 @@ class ScratchpadController extends Controller
             'message' => __('Note captured.'),
         ]);
 
-        return to_route('dashboard.scratchpad.index');
+        return to_route('scratchpad.index');
     }
 
     /**
@@ -93,7 +93,7 @@ class ScratchpadController extends Controller
             'message' => __('Photo captured.'),
         ]);
 
-        return to_route('dashboard.scratchpad.index');
+        return to_route('scratchpad.index');
     }
 
     /**
@@ -113,7 +113,7 @@ class ScratchpadController extends Controller
             'message' => __('Voice note captured.'),
         ]);
 
-        return to_route('dashboard.scratchpad.index');
+        return to_route('scratchpad.index');
     }
 
     /**
@@ -133,7 +133,7 @@ class ScratchpadController extends Controller
             'message' => __('Link captured.'),
         ]);
 
-        return to_route('dashboard.scratchpad.index');
+        return to_route('scratchpad.index');
     }
 
     /**
@@ -196,7 +196,7 @@ class ScratchpadController extends Controller
         } catch (RuntimeException $e) {
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
 
-            return to_route('dashboard.scratchpad.show', $entry);
+            return to_route('scratchpad.show', $entry);
         }
 
         Inertia::flash('toast', [
@@ -204,7 +204,7 @@ class ScratchpadController extends Controller
             'message' => $data->target === 'drop' ? __('Entry dropped.') : __('Filed as an idea.'),
         ]);
 
-        return to_route('dashboard.scratchpad.show', $entry);
+        return to_route('scratchpad.show', $entry);
     }
 
     /**
@@ -259,7 +259,7 @@ class ScratchpadController extends Controller
         } catch (RuntimeException $e) {
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
 
-            return to_route('dashboard.scratchpad.show', $entry);
+            return to_route('scratchpad.show', $entry);
         }
 
         Inertia::flash('toast', [
@@ -267,7 +267,7 @@ class ScratchpadController extends Controller
             'message' => __('Note deleted.'),
         ]);
 
-        return to_route('dashboard.scratchpad.index');
+        return to_route('scratchpad.index');
     }
 
     private function currentUser(Request $request): User
@@ -348,7 +348,7 @@ class ScratchpadController extends Controller
                 'id' => $attachment->id,
                 'role' => $attachment->role,
                 'mime' => $attachment->mediaAsset->mime,
-                'media_url' => route('dashboard.scratchpad.media', $attachment->media_asset_id),
+                'media_url' => route('scratchpad.media', $attachment->media_asset_id),
             ])
             ->all();
     }

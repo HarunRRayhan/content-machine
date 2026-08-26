@@ -155,7 +155,7 @@ class PostsController extends Controller
             'message' => __('Post updated.'),
         ]);
 
-        return to_route('dashboard.posts.show', $post);
+        return to_route('posts.show', $post);
     }
 
     private function currentWorkspace(Request $request): Workspace
@@ -248,7 +248,7 @@ class PostsController extends Controller
                 'role' => $attachment->role,
                 'platform' => $attachment->platform,
                 'filename' => $filename,
-                'url' => route('dashboard.posts.media', [$post, $media]),
+                'url' => route('posts.media', [$post, $media]),
                 'mime' => $media->mime,
             ];
         }

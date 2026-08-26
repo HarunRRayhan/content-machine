@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { home } from '@/routes/dashboard';
-import { index, show } from '@/routes/dashboard/scratchpad';
+import { index, show } from '@/routes/scratchpad';
 
 type EntryLink = {
     url: string | null;

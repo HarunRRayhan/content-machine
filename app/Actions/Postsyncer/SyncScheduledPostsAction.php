@@ -3,17 +3,29 @@
 namespace App\Actions\Postsyncer;
 
 use App\Models\Post;
+use App\Models\Video;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 
 /**
- * Live-check scheduled posts against PostSyncer and mark them posted
- * once every stored group is actually PUBLISHED.
+ * Live-check scheduled posts and videos against PostSyncer and mark them
+ * posted once every stored group is actually PUBLISHED.
  */
 class SyncScheduledPostsAction
 {
-    public function handle(): int
+    /**
+     * @return array{posts: int, videos: int}
+     */
+    public function handle(): array
+    {
+        return [
+            'posts' => $this->syncPosts(),
+            'videos' => $this->syncVideos(),
+        ];
+    }
+
+    private function syncPosts(): int
     {
         $marked = 0;
 
@@ -23,7 +35,7 @@ class SyncScheduledPostsAction
             ->get();
 
         foreach ($posts as $post) {
-            if ($this->syncPost($post)) {
+            if ($this->syncRecord($post)) {
                 $marked++;
             }
         }
@@ -31,16 +43,34 @@ class SyncScheduledPostsAction
         return $marked;
     }
 
-    private function syncPost(Post $post): bool
+    private function syncVideos(): int
     {
-        $workspace = $post->workspace;
+        $marked = 0;
+
+        $videos = Video::query()
+            ->where('status', 'scheduled')
+            ->with('workspace')
+            ->get();
+
+        foreach ($videos as $video) {
+            if ($this->syncRecord($video)) {
+                $marked++;
+            }
+        }
+
+        return $marked;
+    }
+
+    private function syncRecord(Post|Video $record): bool
+    {
+        $workspace = $record->workspace;
 
         if ($workspace === null) {
             return false;
         }
 
-        $record = $post->postsyncer ?? [];
-        $groups = is_array($record['groups'] ?? null) ? $record['groups'] : [];
+        $stored = $record->postsyncer ?? [];
+        $groups = is_array($stored['groups'] ?? null) ? $stored['groups'] : [];
 
         if ($groups === []) {
             return false;
@@ -102,14 +132,14 @@ class SyncScheduledPostsAction
         }
 
         $values = [
-            'postsyncer' => array_merge($record, ['groups' => $updated]),
+            'postsyncer' => array_merge($stored, ['groups' => $updated]),
         ];
 
         if ($anyChecked && $allPublished) {
             $values['status'] = 'posted';
         }
 
-        $post->forceFill($values)->save();
+        $record->forceFill($values)->save();
 
         return $anyChecked && $allPublished;
     }

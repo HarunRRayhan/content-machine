@@ -4,7 +4,7 @@ import { videoShowUrl } from '@/lib/content-urls';
 import { scoreBand, trendKind, trendLabel } from '@/lib/studio-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index } from '@/routes/dashboard/videos';
+import { index } from '@/routes/videos';
 
 type IdeaRow = {
     type: 'idea';

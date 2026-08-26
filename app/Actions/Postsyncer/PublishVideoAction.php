@@ -30,9 +30,16 @@ class PublishVideoAction
 
         try {
             $video->loadMissing('workspace');
+            $this->assertFirstPublish($video);
             $config = PostsyncerConfig::fromWorkspace($video->workspace);
             $client = new PostsyncerClient($config);
             $groups = $this->planner->plan($video, $config, $options);
+
+            if ($groups === []) {
+                throw new PostsyncerException(
+                    'No PostSyncer publish groups could be planned for this video.'
+                );
+            }
 
             $publishedGroups = [];
             $anyScheduled = false;
@@ -97,7 +104,7 @@ class PublishVideoAction
             $body['schedule_for'] = [
                 'date' => $group->when->format('Y-m-d'),
                 'time' => $group->when->format('H:i'),
-                'timezone' => config('app.timezone', 'Asia/Dhaka'),
+                'timezone' => $group->when->timezoneName,
             ];
         }
 
@@ -177,6 +184,38 @@ class PublishVideoAction
         $caption = reset($captions);
 
         return is_string($caption) ? $caption : '';
+    }
+
+    private function assertFirstPublish(Video $video): void
+    {
+        $groups = $video->postsyncer['groups'] ?? null;
+
+        if (! is_array($groups)) {
+            return;
+        }
+
+        foreach ($groups as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $postId = $group['post_id'] ?? null;
+
+            if ($this->hasExistingPostId($postId)) {
+                throw new PostsyncerException(
+                    'This video already has PostSyncer posts. Republish is not supported yet.'
+                );
+            }
+        }
+    }
+
+    private function hasExistingPostId(mixed $postId): bool
+    {
+        if (is_int($postId) || is_float($postId)) {
+            return $postId > 0;
+        }
+
+        return is_string($postId) && trim($postId) !== '';
     }
 
     /**

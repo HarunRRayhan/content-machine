@@ -54,7 +54,7 @@ class PublishPostController extends Controller
                 : __('Post queued for immediate publishing.'),
         ]);
 
-        return to_route('dashboard.posts.show', $post);
+        return to_route('posts.show', $post);
     }
 
     private function currentWorkspace(Request $request): Workspace

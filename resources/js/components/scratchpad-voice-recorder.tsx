@@ -34,7 +34,7 @@ type Props = {
  * Record/stop toggle for a voice memo, no waveform, no time limit UI. On
  * stop, assembles the recorded chunks into a Blob and submits it the same
  * way the photo capture form does (a multipart POST to
- * dashboard.scratchpad.voice), relying on Inertia's default
+ * scratchpad.voice), relying on Inertia's default
  * post-redirect-GET to refresh the entry list.
  */
 export function ScratchpadVoiceRecorder({ onSaved }: Props) {

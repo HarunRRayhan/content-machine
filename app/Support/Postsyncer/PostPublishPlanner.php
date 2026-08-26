@@ -52,7 +52,7 @@ class PostPublishPlanner
      */
     public function plan(Post $post, PostsyncerConfig $config, array $options): array
     {
-        $when = $this->resolveWhen($options['when'] ?? null);
+        $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($post));
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
         $selected = $this->selectedPlatforms($post, $options);
         $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
@@ -342,12 +342,19 @@ class PostPublishPlanner
         return false;
     }
 
-    private function resolveWhen(mixed $when): ?CarbonImmutable
+    private function workspaceTimezone(Post $post): string
+    {
+        $timezone = $post->workspace?->timezone;
+
+        return is_string($timezone) && trim($timezone) !== '' ? $timezone : 'Asia/Dhaka';
+    }
+
+    private function resolveWhen(mixed $when, string $timezone): ?CarbonImmutable
     {
         if (! is_string($when) || trim($when) === '') {
             return null;
         }
 
-        return CarbonImmutable::parse($when);
+        return CarbonImmutable::parse($when, $timezone);
     }
 }

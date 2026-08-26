@@ -5,6 +5,10 @@ namespace App\Data\Posts;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
 
+/**
+ * Editable surface for a post. Drive URL columns are written only when
+ * the request sent that key. API PATCH still replaces extended columns.
+ */
 final readonly class UpdatePostData
 {
     /**
@@ -22,6 +26,7 @@ final readonly class UpdatePostData
         public ?array $imageDriveUrls = null,
         public ?string $status = null,
         public bool $replaceExtended = false,
+        public bool $hasImageDriveUrls = false,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -32,6 +37,7 @@ final readonly class UpdatePostData
             status: $request->filled('status') ? $request->string('status')->toString() : null,
             imageDriveUrls: self::parseDriveUrls($request->input('image_drive_urls')),
             replaceExtended: false,
+            hasImageDriveUrls: $request->has('image_drive_urls'),
         );
     }
 

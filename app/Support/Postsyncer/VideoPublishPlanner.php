@@ -23,7 +23,7 @@ class VideoPublishPlanner
     public function needsConfirmAsk(Video $video, PostsyncerConfig $config, array $options = []): bool
     {
         $language = $this->resolveLanguage($video);
-        $selected = $this->selectedPlatforms($options);
+        $selected = $this->selectedPlatforms($video, $config, $options);
         $platformCaptions = $this->captionsForLanguage($video, $language);
 
         foreach ($selected as $platform) {
@@ -51,9 +51,9 @@ class VideoPublishPlanner
         $langConfig = $config->language($language);
         $workspaceId = $langConfig['workspace_id'] ?? '';
 
-        $when = $this->resolveWhen($options['when'] ?? null);
+        $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($video));
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
-        $selected = $this->selectedPlatforms($options);
+        $selected = $this->selectedPlatforms($video, $config, $options);
         $platformCaptions = $this->captionsForLanguage($video, $language);
 
         $media = $this->mediaUrlResolver->forVideo($video);
@@ -177,18 +177,49 @@ class VideoPublishPlanner
      * @param  array<string, mixed>  $options
      * @return list<string>
      */
-    private function selectedPlatforms(array $options): array
+    private function selectedPlatforms(Video $video, PostsyncerConfig $config, array $options): array
     {
         $platforms = $options['platforms'] ?? [];
 
-        if (! is_array($platforms)) {
-            return [];
+        if (is_array($platforms) && $platforms !== []) {
+            return array_values(array_map(
+                fn (mixed $platform): string => strtolower((string) $platform),
+                $platforms,
+            ));
         }
 
-        return array_values(array_map(
-            fn (mixed $platform): string => strtolower((string) $platform),
-            $platforms,
-        ));
+        $language = $this->resolveLanguage($video);
+        $captionKeys = array_keys($this->captionsForLanguage($video, $language));
+
+        if ($captionKeys !== []) {
+            return $captionKeys;
+        }
+
+        return $this->reelDefaultOnPlatforms($config, $language);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function reelDefaultOnPlatforms(PostsyncerConfig $config, string $language): array
+    {
+        $matrix = $config->postTypes();
+        $platforms = is_array($matrix['platforms'] ?? null) ? $matrix['platforms'] : [];
+        $defaults = [];
+
+        foreach (array_keys($platforms) as $platform) {
+            if (! is_string($platform) || $platform === '') {
+                continue;
+            }
+
+            $name = strtolower($platform);
+
+            if ($this->platformState($config, $name, 'reel', $language) === 'on') {
+                $defaults[] = $name;
+            }
+        }
+
+        return $defaults;
     }
 
     private function platformState(
@@ -253,12 +284,19 @@ class VideoPublishPlanner
         return null;
     }
 
-    private function resolveWhen(mixed $when): ?CarbonImmutable
+    private function workspaceTimezone(Video $video): string
+    {
+        $timezone = $video->workspace?->timezone;
+
+        return is_string($timezone) && trim($timezone) !== '' ? $timezone : 'Asia/Dhaka';
+    }
+
+    private function resolveWhen(mixed $when, string $timezone): ?CarbonImmutable
     {
         if (! is_string($when) || trim($when) === '') {
             return null;
         }
 
-        return CarbonImmutable::parse($when);
+        return CarbonImmutable::parse($when, $timezone);
     }
 }

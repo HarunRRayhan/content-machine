@@ -174,6 +174,115 @@ class VideoPublishPlannerTest extends TestCase
         $this->assertFalse($group->publishNow);
         $this->assertInstanceOf(CarbonImmutable::class, $group->when);
         $this->assertSame($when, $group->when->format('Y-m-d H:i:s'));
+        $this->assertSame('Asia/Dhaka', $group->when->timezoneName);
+    }
+
+    public function test_no_platforms_in_options_plans_groups_from_captions(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => [
+                'main' => [
+                    'facebook' => ['caption' => 'FB reel caption'],
+                    'instagram' => ['caption' => 'IG reel caption'],
+                    'tiktok' => ['caption' => 'TT body'],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($video, $config, [
+            'confirm_ask' => false,
+        ]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook', 'instagram', 'tiktok'], $groups[0]->platforms);
+        $this->assertSame([
+            'facebook' => 'FB reel caption',
+            'instagram' => 'IG reel caption',
+            'tiktok' => 'TT body',
+        ], $groups[0]->captions);
+    }
+
+    public function test_empty_platforms_array_plans_groups_from_captions(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => [
+                'facebook' => 'FB',
+                'instagram' => 'IG',
+            ],
+        ]);
+
+        $group = $this->planner->plan($video, $config, [
+            'platforms' => [],
+            'confirm_ask' => false,
+        ])[0];
+
+        $this->assertSame(['facebook', 'instagram'], $group->platforms);
+    }
+
+    public function test_naive_when_is_parsed_in_workspace_timezone(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Later'],
+        ]);
+
+        $group = $this->planner->plan($video, $config, [
+            'when' => '2026-08-26T09:12',
+            'confirm_ask' => false,
+        ])[0];
+
+        $this->assertFalse($group->publishNow);
+        $this->assertSame('Asia/Dhaka', $group->when?->timezoneName);
+        $this->assertSame('2026-08-26 09:12:00', $group->when?->format('Y-m-d H:i:s'));
+    }
+
+    public function test_when_with_offset_keeps_that_offset(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Later'],
+        ]);
+
+        $group = $this->planner->plan($video, $config, [
+            'platforms' => ['facebook'],
+            'when' => '2026-08-26T09:12:00+06:00',
+            'confirm_ask' => false,
+        ])[0];
+
+        $this->assertSame('+06:00', $group->when?->timezoneName);
+        $this->assertSame('2026-08-26 09:12:00', $group->when?->format('Y-m-d H:i:s'));
+    }
+
+    public function test_needs_confirm_ask_uses_caption_keys_when_platforms_omitted(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'en',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['tiktok' => 'TT caption'],
+        ]);
+
+        $this->assertTrue($this->planner->needsConfirmAsk($video, $config));
     }
 
     public function test_throws_when_ask_platform_selected_without_confirm(): void

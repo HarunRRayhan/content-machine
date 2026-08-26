@@ -10,7 +10,7 @@ class CaptureScratchpadLinkDataTest extends TestCase
 {
     public function test_from_request_reads_the_url()
     {
-        $request = StoreScratchpadLinkRequest::create('/dashboard/scratchpad/link', 'POST', [
+        $request = StoreScratchpadLinkRequest::create('/scratchpad/link', 'POST', [
             'url' => 'https://example.com/reel/123',
         ]);
 

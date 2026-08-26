@@ -30,9 +30,16 @@ class PublishPostAction
 
         try {
             $post->loadMissing('workspace');
+            $this->assertFirstPublish($post);
             $config = PostsyncerConfig::fromWorkspace($post->workspace);
             $client = new PostsyncerClient($config);
             $groups = $this->planner->plan($post, $config, $options);
+
+            if ($groups === []) {
+                throw new PostsyncerException(
+                    'No PostSyncer publish groups could be planned for this post.'
+                );
+            }
 
             $publishedGroups = [];
             $anyScheduled = false;
@@ -104,7 +111,7 @@ class PublishPostAction
             $body['schedule_for'] = [
                 'date' => $group->when->format('Y-m-d'),
                 'time' => $group->when->format('H:i'),
-                'timezone' => config('app.timezone', 'Asia/Dhaka'),
+                'timezone' => $group->when->timezoneName,
             ];
         }
 
@@ -175,6 +182,38 @@ class PublishPostAction
         $caption = reset($captions);
 
         return is_string($caption) ? $caption : '';
+    }
+
+    private function assertFirstPublish(Post $post): void
+    {
+        $groups = $post->postsyncer['groups'] ?? null;
+
+        if (! is_array($groups)) {
+            return;
+        }
+
+        foreach ($groups as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $postId = $group['post_id'] ?? null;
+
+            if ($this->hasExistingPostId($postId)) {
+                throw new PostsyncerException(
+                    'This post already has PostSyncer posts. Republish is not supported yet.'
+                );
+            }
+        }
+    }
+
+    private function hasExistingPostId(mixed $postId): bool
+    {
+        if (is_int($postId) || is_float($postId)) {
+            return $postId > 0;
+        }
+
+        return is_string($postId) && trim($postId) !== '';
     }
 
     /**

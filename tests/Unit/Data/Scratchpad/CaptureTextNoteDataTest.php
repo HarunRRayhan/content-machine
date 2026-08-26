@@ -10,7 +10,7 @@ class CaptureTextNoteDataTest extends TestCase
 {
     public function test_from_request_reads_the_body()
     {
-        $request = StoreScratchpadTextNoteRequest::create('/dashboard/scratchpad', 'POST', [
+        $request = StoreScratchpadTextNoteRequest::create('/scratchpad', 'POST', [
             'body' => 'A captured thought.',
         ]);
 

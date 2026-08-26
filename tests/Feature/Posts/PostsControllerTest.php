@@ -34,7 +34,14 @@ class PostsControllerTest extends TestCase
 
     public function test_guests_cannot_view_posts()
     {
-        $this->get(route('dashboard.posts.index'))->assertRedirect(route('login'));
+        $this->get(route('posts.index'))->assertRedirect(route('login'));
+    }
+
+    public function test_legacy_dashboard_index_redirects_to_posts(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->get('/dashboard/posts')->assertRedirect('/posts');
     }
 
     public function test_index_only_lists_the_current_workspaces_posts()
@@ -46,7 +53,7 @@ class PostsControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         Post::factory()->for($otherWorkspace)->create(['title' => 'Not mine']);
 
-        $this->get(route('dashboard.posts.index'))
+        $this->get(route('posts.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/index')
                 ->has('items.data', 1)
@@ -63,7 +70,7 @@ class PostsControllerTest extends TestCase
         Post::factory()->for($workspace)->create(['title' => 'Draft one', 'status' => 'draft']);
         Post::factory()->for($workspace)->create(['title' => 'Scheduled one', 'status' => 'scheduled']);
 
-        $this->get(route('dashboard.posts.index'))
+        $this->get(route('posts.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/index')
                 ->has('items.data', 1)
@@ -90,7 +97,7 @@ class PostsControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         Idea::factory()->for($otherWorkspace)->create(['kind' => 'post', 'status' => 'open']);
 
-        $this->get(route('dashboard.posts.index', ['status' => 'ideation']))
+        $this->get(route('posts.index', ['status' => 'ideation']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/index')
                 ->has('items.data', 1)
@@ -112,7 +119,7 @@ class PostsControllerTest extends TestCase
         Post::factory()->for($workspace)->create(['status' => 'scheduled']);
         Idea::factory()->for($workspace)->count(3)->create(['kind' => 'post', 'status' => 'open']);
 
-        $this->get(route('dashboard.posts.index'))
+        $this->get(route('posts.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('counts.ideation', 3)
                 ->where('counts.draft', 2)
@@ -131,7 +138,7 @@ class PostsControllerTest extends TestCase
         Post::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
         Post::factory()->for($workspace)->create(['title' => 'Draft one', 'status' => 'draft']);
 
-        $this->get(route('dashboard.posts.index', ['status' => 'ready']))
+        $this->get(route('posts.index', ['status' => 'ready']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/index')
                 ->has('items.data', 1)
@@ -147,11 +154,15 @@ class PostsControllerTest extends TestCase
 
         $post = Post::factory()->for($workspace)->create(['title' => 'Hello post']);
 
-        $this->get(route('dashboard.posts.show', $post))
+        $this->get(route('posts.show', $post))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/show')
                 ->where('post.id', $post->id)
                 ->where('post.title', 'Hello post')
+                ->where('post.publish_state', $post->publish_state)
+                ->where('post.postsyncer_ready', false)
+                ->has('post.needs_confirm_ask')
+                ->has('post.postsyncer')
             );
     }
 
@@ -215,7 +226,7 @@ class PostsControllerTest extends TestCase
 
         $post = Post::factory()->for($workspace)->create(['title' => 'Handle post']);
 
-        $this->get(route('dashboard.posts.show', $post))
+        $this->get(route('posts.show', $post))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/show')
                 ->where('post.handles.bn.facebook.handle', 'HarunRRayhan')
@@ -264,22 +275,17 @@ class PostsControllerTest extends TestCase
             );
     }
 
-    public function test_dashboard_show_also_resolves_a_prefixed_human_id(): void
+    public function test_legacy_dashboard_show_redirects_to_posts_show(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $post = Post::factory()->for($workspace)->create([
+        Post::factory()->for($workspace)->create([
             'title' => 'Dashboard custom id',
             'human_id' => 'P-50',
             'number' => 50,
         ]);
 
-        $this->get('/dashboard/posts/P-50')
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->component('posts/show')
-                ->where('post.id', $post->id)
-            );
+        $this->get('/dashboard/posts/P-50')->assertRedirect('/posts/P-50');
     }
 
     public function test_short_url_still_resolves_a_numeric_database_id(): void
@@ -334,9 +340,9 @@ class PostsControllerTest extends TestCase
             'role' => 'image',
         ]);
 
-        $expectedUrl = route('dashboard.posts.media', [$post, $media]);
+        $expectedUrl = route('posts.media', [$post, $media]);
 
-        $this->get(route('dashboard.posts.show', $post))
+        $this->get(route('posts.show', $post))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/show')
                 ->where('post.images.0.url', $expectedUrl)
@@ -378,9 +384,9 @@ class PostsControllerTest extends TestCase
             'platform' => 'linkedin',
         ]);
 
-        $expectedUrl = route('dashboard.posts.media', [$post, $media]);
+        $expectedUrl = route('posts.media', [$post, $media]);
 
-        $this->get(route('dashboard.posts.show', $post))
+        $this->get(route('posts.show', $post))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/show')
                 ->where('post.image_urls', fn ($urls) => ($urls['p-50-linkedin-carousel.pdf'] ?? null) === $expectedUrl)
@@ -427,7 +433,7 @@ class PostsControllerTest extends TestCase
             ]);
         }
 
-        $this->get(route('dashboard.posts.show', $post))
+        $this->get(route('posts.show', $post))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/show')
                 ->where('post.captions', function (mixed $groups): bool {
@@ -461,7 +467,7 @@ class PostsControllerTest extends TestCase
         Storage::disk('scratchpad')->put($media->path, 'jpeg-bytes');
         Attachment::factory()->for($post, 'attachable')->for($media)->create();
 
-        $this->get(route('dashboard.posts.media', [$post, $media]))
+        $this->get(route('posts.media', [$post, $media]))
             ->assertOk()
             ->assertHeader('Content-Type', 'image/jpeg');
     }
@@ -481,7 +487,7 @@ class PostsControllerTest extends TestCase
         Storage::disk('scratchpad')->put($media->path, 'secret');
         Attachment::factory()->for($otherPost, 'attachable')->for($media)->create();
 
-        $this->get(route('dashboard.posts.media', [$otherPost, $media]))->assertNotFound();
+        $this->get(route('posts.media', [$otherPost, $media]))->assertNotFound();
     }
 
     public function test_show_404s_for_a_post_in_a_different_workspace()
@@ -491,7 +497,7 @@ class PostsControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $post = Post::factory()->for($otherWorkspace)->create();
 
-        $this->get(route('dashboard.posts.show', $post))->assertNotFound();
+        $this->get(route('posts.show', $post))->assertNotFound();
     }
 
     public function test_update_edits_the_post()
@@ -499,12 +505,12 @@ class PostsControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $post = Post::factory()->for($workspace)->create(['title' => 'Old']);
 
-        $response = $this->patch(route('dashboard.posts.update', $post), [
+        $response = $this->patch(route('posts.update', $post), [
             'title' => 'New',
             'body' => 'Updated body.',
         ]);
 
-        $response->assertRedirect(route('dashboard.posts.show', $post));
+        $response->assertRedirect(route('posts.show', $post));
 
         $this->assertDatabaseHas('posts', [
             'id' => $post->id,
@@ -520,6 +526,6 @@ class PostsControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $post = Post::factory()->for($otherWorkspace)->create();
 
-        $this->patch(route('dashboard.posts.update', $post), ['title' => 'Nope'])->assertNotFound();
+        $this->patch(route('posts.update', $post), ['title' => 'Nope'])->assertNotFound();
     }
 }

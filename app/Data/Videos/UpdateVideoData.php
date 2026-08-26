@@ -8,6 +8,7 @@ use App\Models\Video;
 /**
  * Editable surface for a video. Dashboard updates only title/body
  * (`replaceExtended=false`); API PATCH replaces the extended columns too.
+ * Drive URL columns are written only when the request sent those keys.
  */
 final readonly class UpdateVideoData
 {
@@ -27,6 +28,8 @@ final readonly class UpdateVideoData
         public ?string $coverDriveUrl = null,
         public ?string $status = null,
         public bool $replaceExtended = false,
+        public bool $hasVideoDriveUrl = false,
+        public bool $hasCoverDriveUrl = false,
     ) {}
 
     public static function fromRequest(UpdateVideoRequest $request): self
@@ -38,6 +41,8 @@ final readonly class UpdateVideoData
             videoDriveUrl: $request->filled('video_drive_url') ? $request->string('video_drive_url')->toString() : null,
             coverDriveUrl: $request->filled('cover_drive_url') ? $request->string('cover_drive_url')->toString() : null,
             replaceExtended: false,
+            hasVideoDriveUrl: $request->has('video_drive_url'),
+            hasCoverDriveUrl: $request->has('cover_drive_url'),
         );
     }
 

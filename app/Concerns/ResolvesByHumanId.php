@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
  * still binds as the regular route key.
  *
  * Used by Post and Video so /posts/P-50 and /videos/BV-46 resolve the
- * same way /dashboard/posts/59 does.
+ * same way /posts/59 does.
  */
 trait ResolvesByHumanId
 {

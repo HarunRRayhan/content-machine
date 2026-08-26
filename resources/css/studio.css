@@ -330,6 +330,19 @@
     color: var(--ink-faint);
 }
 
+.studio-page .schedule-it-label-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.studio-page .schedule-it-tz {
+    font-family: var(--font-cue);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+}
+
 .studio-page .schedule-it-label input {
     font-family: var(--font-sans);
     font-size: 14px;
@@ -360,6 +373,75 @@
     margin: 0;
     font-size: 13px;
     color: var(--ink-faint);
+}
+
+.studio-page .drive-urls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    margin-top: 15px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+}
+
+.studio-page .drive-urls-h {
+    font-family: var(--font-display);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+}
+
+.studio-page .drive-urls-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.studio-page .drive-urls .schedule-it-label {
+    flex: 1 1 220px;
+}
+
+.studio-page .drive-urls .schedule-it-label input,
+.studio-page .drive-urls textarea,
+.studio-page .drive-urls input:not([type='hidden']) {
+    width: 100%;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    color: var(--ink);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.studio-page .drive-urls textarea {
+    min-height: 96px;
+    resize: vertical;
+}
+
+.studio-page .drive-urls label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: var(--font-cue);
+    font-size: 11px;
+    color: var(--ink-faint);
+}
+
+.studio-page .drive-urls-hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ink-faint);
+}
+
+.studio-page .drive-urls-error {
+    margin: 0;
+    font-size: 13px;
+    color: var(--bad);
 }
 
 .studio-page .schedule-log {
@@ -397,6 +479,17 @@
 
 .studio-page .schedule-log b {
     color: var(--ink);
+}
+
+.studio-page .schedule-log-when {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.studio-page .schedule-log-empty {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--ink-faint);
 }
 
 .studio-page .side-head {
