@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react';
 import {
     BookOpen,
+    CalendarDays,
     Clapperboard,
     FolderGit2,
     KeyRound,
@@ -23,6 +24,7 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
+import { index as calendarIndex } from '@/routes/calendar';
 import { home } from '@/routes/dashboard';
 import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
 import { index as teamIndex } from '@/routes/dashboard/team';
@@ -48,6 +50,11 @@ const mainNavItems: NavItem[] = [
         title: 'Videos',
         href: videosIndex(),
         icon: Clapperboard,
+    },
+    {
+        title: 'Calendar',
+        href: calendarIndex(),
+        icon: CalendarDays,
     },
     {
         title: 'AI Models',
