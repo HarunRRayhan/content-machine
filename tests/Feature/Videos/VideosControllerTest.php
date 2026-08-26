@@ -194,6 +194,68 @@ class VideosControllerTest extends TestCase
             );
     }
 
+    public function test_show_resolves_a_prefixed_human_id_on_the_short_url(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create([
+            'title' => 'Custom id video',
+            'human_id' => 'BV-46',
+            'number' => 46,
+        ]);
+
+        $this->get('/videos/BV-46')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.id', $video->id)
+                ->where('video.human_id', 'BV-46')
+                ->where('video.title', 'Custom id video')
+            );
+    }
+
+    public function test_dashboard_show_also_resolves_a_prefixed_human_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create([
+            'title' => 'Dashboard custom id',
+            'human_id' => 'V-12',
+            'number' => 12,
+        ]);
+
+        $this->get('/dashboard/videos/V-12')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.id', $video->id)
+            );
+    }
+
+    public function test_short_url_still_resolves_a_numeric_database_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create(['title' => 'Numeric id video']);
+
+        $this->get('/videos/'.$video->id)
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.id', $video->id)
+            );
+    }
+
+    public function test_short_url_404s_for_a_prefixed_id_in_another_workspace(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        Video::factory()->for($otherWorkspace)->create(['human_id' => 'BV-46', 'number' => 46]);
+
+        $this->get('/videos/BV-46')->assertNotFound();
+    }
+
     public function test_index_filters_by_status_and_exposes_content_flags()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
