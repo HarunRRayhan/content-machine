@@ -27,12 +27,17 @@ class VideoPresentationController extends Controller
         }
 
         $embed = $request->boolean('embed');
+        $theme = $request->string('theme')->toString();
+        if (! in_array($theme, ['light', 'dark'], true)) {
+            $theme = 'light';
+        }
 
         return response()
             ->view('videos.presentation', [
                 'video' => $video,
                 'manifest' => $manifest,
                 'embed' => $embed,
+                'theme' => $theme,
             ])
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
