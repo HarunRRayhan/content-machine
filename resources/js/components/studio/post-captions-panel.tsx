@@ -8,6 +8,7 @@ import {
     orderPlatformsByLang,
     platformLabel,
 } from '@/lib/platform-meta';
+import { resolvePostImages } from '@/lib/resolve-post-images';
 
 type CaptionGroupWithLang = CaptionGroup & {
     lang?: string | null;
@@ -30,21 +31,6 @@ async function copyText(text: string): Promise<void> {
     } catch {
         // ignore
     }
-}
-
-function resolveImages(
-    platformImages: string[],
-    imageUrls: Record<string, string>,
-): Array<{ name: string; url: string | null }> {
-    const names =
-        platformImages.length > 0
-            ? platformImages
-            : [...new Set(Object.keys(imageUrls))];
-
-    return names.map((name) => ({
-        name,
-        url: imageUrls[name] ?? imageUrls[name.split('/').pop() ?? ''] ?? null,
-    }));
 }
 
 function inferLangs(
@@ -251,7 +237,7 @@ export default function PostCaptionsPanel({
                                             </div>
                                         )}
                                         <div className="mock-imgs">
-                                            {resolveImages(
+                                            {resolvePostImages(
                                                 platform.images,
                                                 imageUrls,
                                             ).map((image) =>
