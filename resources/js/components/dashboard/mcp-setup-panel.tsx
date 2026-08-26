@@ -242,7 +242,7 @@ export default function McpSetupPanel({ mcpUrl, token }: Props) {
             <Heading
                 variant="small"
                 title="Connect with MCP"
-                description="Remote Streamable HTTP at the URL below. Same workspace token as the JSON API. Scratch pad and ideas tools show up in the agent you pick."
+                description="Remote Streamable HTTP at the URL below. Same workspace token as the JSON API. Scratch pad, ideas, videos, and posts tools show up in the agent you pick."
             />
 
             <p className="font-mono text-xs break-all text-muted-foreground">
