@@ -1,16 +1,16 @@
 import { Form, Head, Link } from '@inertiajs/react';
 import IdeasController from '@/actions/App/Http/Controllers/Ideas/IdeasController';
-import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { home } from '@/routes/dashboard';
-import { index } from '@/routes/dashboard/ideas';
-import { show as showPost } from '@/routes/dashboard/posts';
-import { show as showVideo } from '@/routes/dashboard/videos';
+import { scoreBand, trendLabel } from '@/lib/studio-meta';
+import { index as ideasIndex } from '@/routes/dashboard/ideas';
+import {
+    index as postsIndex,
+    show as showPost,
+} from '@/routes/dashboard/posts';
+import {
+    index as videosIndex,
+    show as showVideo,
+} from '@/routes/dashboard/videos';
 
 type PromotedEntity = {
     id: number;
@@ -40,121 +40,208 @@ type PageProps = {
     idea: IdeaDetail;
 };
 
-const statusVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
-    open: 'default',
-    promoted: 'secondary',
-    dropped: 'outline',
-};
+function parentIndex(kind: string) {
+    if (kind === 'video') {
+        return videosIndex();
+    }
+
+    if (kind === 'post') {
+        return postsIndex();
+    }
+
+    return ideasIndex();
+}
+
+function ideasListHref(kind: string) {
+    if (kind === 'video') {
+        return videosIndex.url({ query: { status: 'ideation' } });
+    }
+
+    if (kind === 'post') {
+        return postsIndex.url({ query: { status: 'ideation' } });
+    }
+
+    return ideasIndex();
+}
+
+function parentLabel(kind: string) {
+    if (kind === 'video') {
+        return 'Videos';
+    }
+
+    if (kind === 'post') {
+        return 'Posts';
+    }
+
+    return 'Ideas';
+}
+
+function addedLabel(createdAt: string | null) {
+    if (!createdAt) {
+        return null;
+    }
+
+    return createdAt.slice(0, 10);
+}
+
+function scratchBlocks(text: string | null) {
+    if (!text) {
+        return [];
+    }
+
+    return text
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean);
+}
 
 export default function IdeaShow({ idea }: PageProps) {
     const isOpen = idea.status === 'open';
     const isDropped = idea.status === 'dropped';
+    const listHref = ideasListHref(idea.kind);
+    const added = addedLabel(idea.created_at);
+    const why = idea.rationale?.trim() || '';
+    const notes = scratchBlocks(idea.body);
 
     return (
         <>
             <Head title={idea.title} />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
-                <Link
-                    href={index()}
-                    className="text-sm text-muted-foreground hover:underline"
-                >
-                    &larr; Back to Ideas
-                </Link>
-
-                <Heading
-                    title={idea.title}
-                    description={`${idea.human_id} · ${idea.kind}`}
-                />
-
-                <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{idea.human_id}</Badge>
-                    <Badge variant="outline">{idea.kind}</Badge>
-                    {idea.trend && (
-                        <Badge variant="secondary">{idea.trend}</Badge>
-                    )}
-                    <Badge variant={statusVariant[idea.status] ?? 'outline'}>
-                        {idea.status}
-                    </Badge>
+            <div className="studio-page studio-home flex h-full flex-1 flex-col gap-4">
+                <div className="vhead">
+                    <Link href={listHref} className="back">
+                        ← Ideas
+                    </Link>
+                    <div className="vhead-t">
+                        <span className="no">
+                            {idea.human_id || 'Idea · no number yet'}
+                        </span>
+                        <h2>{idea.title}</h2>
+                    </div>
                 </div>
 
-                {isDropped && idea.drop_reason && (
-                    <div className="max-w-2xl rounded-lg border border-destructive/50 bg-destructive/5 p-4">
-                        <p className="text-sm font-medium">Drop reason</p>
-                        <p className="text-sm text-muted-foreground">
-                            {idea.drop_reason}
-                        </p>
+                <section className="pane">
+                    <div className="pane-head">
+                        <span className="k">
+                            💡 <b>Ideation</b>
+                        </span>
+                        <span className={`pill score ${scoreBand(idea.score)}`}>
+                            {idea.score !== null ? `${idea.score}/1000` : '-'}
+                        </span>
                     </div>
-                )}
+                    <div className="doc-chips">
+                        {idea.trend && (
+                            <span className="chip">
+                                {trendLabel(idea.trend)}
+                            </span>
+                        )}
+                        {added && <span className="chip">added {added}</span>}
+                        <span className="chip">{idea.status}</span>
+                    </div>
+                    {why && (
+                        <p className="idea-why">
+                            <strong>
+                                Why{' '}
+                                {idea.score !== null
+                                    ? `${idea.score}/1000`
+                                    : 'this score'}
+                                :
+                            </strong>{' '}
+                            {why}
+                        </p>
+                    )}
+                    {idea.promoted_to && (
+                        <p className="idea-after">
+                            Promoted to{' '}
+                            <Link
+                                href={
+                                    idea.promoted_to.kind === 'video'
+                                        ? showVideo.url(idea.promoted_to.id)
+                                        : showPost.url(idea.promoted_to.id)
+                                }
+                            >
+                                {idea.promoted_to.human_id}:{' '}
+                                {idea.promoted_to.title}
+                            </Link>
+                        </p>
+                    )}
+                    {isDropped && idea.drop_reason && (
+                        <p className="idea-after">
+                            Dropped: {idea.drop_reason}
+                        </p>
+                    )}
+                </section>
 
-                {idea.promoted_to && (
-                    <div className="max-w-2xl rounded-lg border p-4">
-                        <p className="text-sm text-muted-foreground">
-                            Promoted to
-                        </p>
-                        <Link
-                            href={
-                                idea.promoted_to.kind === 'video'
-                                    ? showVideo.url(idea.promoted_to.id)
-                                    : showPost.url(idea.promoted_to.id)
-                            }
-                            className="font-medium hover:underline"
-                        >
-                            {idea.promoted_to.human_id}:{' '}
-                            {idea.promoted_to.title}
-                        </Link>
-                        <p className="text-sm text-muted-foreground">
-                            {idea.promoted_to.status}
-                        </p>
+                <section className="pane">
+                    <div className="pane-head">
+                        <span className="k">
+                            📝 <b>Scratch</b>
+                        </span>
                     </div>
-                )}
+                    <div className="scratch">
+                        {notes.length === 0 ? (
+                            <p className="empty">Nothing scratched down yet.</p>
+                        ) : (
+                            notes.map((block) => <p key={block}>{block}</p>)
+                        )}
+                    </div>
+                </section>
 
                 {isOpen && (
-                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                        <Heading
-                            variant="small"
-                            title="Promote this idea"
-                            description={`Create a draft ${idea.kind} shell from it.`}
-                        />
-
-                        <Form {...IdeasController.promote.form(idea.id)}>
-                            {({ processing }) => (
-                                <Button type="submit" disabled={processing}>
-                                    {idea.kind === 'video'
-                                        ? 'Promote to video'
-                                        : 'Promote to post'}
-                                </Button>
-                            )}
-                        </Form>
-                    </div>
+                    <section className="pane">
+                        <div className="pane-head">
+                            <span className="k">
+                                ↗ <b>Promote</b>
+                            </span>
+                        </div>
+                        <div className="studio-form">
+                            <p className="idea-why">
+                                Create a draft {idea.kind} shell from this idea.
+                            </p>
+                            <Form {...IdeasController.promote.form(idea.id)}>
+                                {({ processing }) => (
+                                    <button
+                                        type="submit"
+                                        className="advance"
+                                        disabled={processing}
+                                    >
+                                        {idea.kind === 'video'
+                                            ? 'Promote to video'
+                                            : 'Promote to post'}
+                                    </button>
+                                )}
+                            </Form>
+                        </div>
+                    </section>
                 )}
 
-                <div className="max-w-2xl space-y-4 rounded-lg border p-4">
-                    <Heading variant="small" title="Edit idea" />
-
+                <section className="pane">
+                    <div className="pane-head">
+                        <span className="k">
+                            ✎ <b>Edit</b>
+                        </span>
+                    </div>
                     <Form
                         {...IdeasController.update.form(idea.id)}
-                        className="space-y-4"
+                        className="studio-form"
                     >
                         {({ processing, errors }) => (
                             <>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="title">Title</Label>
-                                    <Input
-                                        id="title"
-                                        name="title"
-                                        required
-                                        defaultValue={idea.title}
-                                    />
-                                    <InputError message={errors.title} />
-                                </div>
+                                <label htmlFor="title">Title</label>
+                                <input
+                                    id="title"
+                                    name="title"
+                                    required
+                                    defaultValue={idea.title}
+                                />
+                                <InputError message={errors.title} />
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="score">
+                                <div className="studio-form-row">
+                                    <div>
+                                        <label htmlFor="score">
                                             Score (0-1000)
-                                        </Label>
-                                        <Input
+                                        </label>
+                                        <input
                                             id="score"
                                             type="number"
                                             name="score"
@@ -164,14 +251,12 @@ export default function IdeaShow({ idea }: PageProps) {
                                         />
                                         <InputError message={errors.score} />
                                     </div>
-
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="trend">Trend</Label>
+                                    <div>
+                                        <label htmlFor="trend">Trend</label>
                                         <select
                                             id="trend"
                                             name="trend"
                                             defaultValue={idea.trend ?? ''}
-                                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
                                         >
                                             <option value="">Unset</option>
                                             <option value="evergreen">
@@ -185,86 +270,81 @@ export default function IdeaShow({ idea }: PageProps) {
                                     </div>
                                 </div>
 
-                                <div className="grid gap-2">
-                                    <Label htmlFor="rationale">Rationale</Label>
-                                    <Textarea
-                                        id="rationale"
-                                        name="rationale"
-                                        rows={3}
-                                        defaultValue={idea.rationale ?? ''}
-                                    />
-                                    <InputError message={errors.rationale} />
-                                </div>
+                                <label htmlFor="rationale">
+                                    Why this score
+                                </label>
+                                <textarea
+                                    id="rationale"
+                                    name="rationale"
+                                    rows={3}
+                                    defaultValue={idea.rationale ?? ''}
+                                />
+                                <InputError message={errors.rationale} />
 
-                                <div className="grid gap-2">
-                                    <Label htmlFor="body">Body</Label>
-                                    <Textarea
-                                        id="body"
-                                        name="body"
-                                        rows={6}
-                                        defaultValue={idea.body ?? ''}
-                                    />
-                                    <InputError message={errors.body} />
-                                </div>
+                                <label htmlFor="body">Scratch</label>
+                                <textarea
+                                    id="body"
+                                    name="body"
+                                    rows={6}
+                                    defaultValue={idea.body ?? ''}
+                                />
+                                <InputError message={errors.body} />
 
-                                <Button disabled={processing}>
+                                <button
+                                    type="submit"
+                                    className="advance"
+                                    disabled={processing}
+                                >
                                     Save changes
-                                </Button>
+                                </button>
                             </>
                         )}
                     </Form>
-                </div>
+                </section>
 
                 {!isDropped && (
-                    <div className="max-w-2xl space-y-4 rounded-lg border border-destructive/50 p-4">
-                        <Heading
-                            variant="small"
-                            title="Drop this idea"
-                            description="This can't be undone from here."
-                        />
-
+                    <section className="pane">
+                        <div className="pane-head">
+                            <span className="k">
+                                ✕ <b>Drop</b>
+                            </span>
+                        </div>
                         <Form
                             {...IdeasController.drop.form(idea.id)}
-                            className="space-y-4"
+                            className="studio-form"
                         >
                             {({ processing, errors }) => (
                                 <>
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="drop_reason">
-                                            Reason
-                                        </Label>
-                                        <Textarea
-                                            id="drop_reason"
-                                            name="drop_reason"
-                                            required
-                                            rows={2}
-                                            placeholder="Why is this idea being dropped?"
-                                        />
-                                        <InputError
-                                            message={errors.drop_reason}
-                                        />
-                                    </div>
-
-                                    <Button
+                                    <label htmlFor="drop_reason">Reason</label>
+                                    <textarea
+                                        id="drop_reason"
+                                        name="drop_reason"
+                                        required
+                                        rows={2}
+                                        placeholder="Why is this idea being dropped?"
+                                    />
+                                    <InputError message={errors.drop_reason} />
+                                    <button
                                         type="submit"
-                                        variant="destructive"
+                                        className="advance is-danger"
                                         disabled={processing}
                                     >
                                         Drop idea
-                                    </Button>
+                                    </button>
                                 </>
                             )}
                         </Form>
-                    </div>
+                    </section>
                 )}
             </div>
         </>
     );
 }
 
-IdeaShow.layout = {
+IdeaShow.layout = ({ idea }: PageProps) => ({
     breadcrumbs: [
-        { title: 'Dashboard', href: home() },
-        { title: 'Ideas', href: index() },
+        { title: parentLabel(idea.kind), href: parentIndex(idea.kind) },
+        { title: 'Ideas', href: ideasListHref(idea.kind) },
+        { title: idea.title, href: '#' },
     ],
-};
+});

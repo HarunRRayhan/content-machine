@@ -258,6 +258,7 @@
     flex-wrap: wrap;
 }
 
+.studio-page .advance,
 .studio-page .act .advance {
     font-family: var(--font-bn);
     font-size: 15px;
@@ -270,13 +271,19 @@
     cursor: pointer;
 }
 
+.studio-page .advance:hover,
 .studio-page .act .advance:hover {
     filter: brightness(1.06);
 }
 
+.studio-page .advance:disabled,
 .studio-page .act .advance:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+.studio-page .advance.is-danger {
+    background: var(--bad);
 }
 
 .studio-page .act .undo {
@@ -1182,4 +1189,74 @@
 .studio-page .pgbtn.is-disabled {
     opacity: 0.4;
     cursor: default;
+}
+
+.studio-page .idea-why {
+    margin: 12px 20px 18px;
+    color: var(--ink-soft);
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1.55;
+}
+
+.studio-page .idea-after {
+    margin: 0 20px 18px;
+    color: var(--ink-soft);
+    font-size: 14px;
+}
+
+.studio-page .idea-after a {
+    color: var(--accent-soft);
+}
+
+.studio-page .scratch {
+    padding: 6px 20px 20px;
+    color: var(--ink);
+    line-height: 1.65;
+}
+
+.studio-page .scratch p {
+    margin: 10px 0;
+}
+
+.studio-page .scratch .empty {
+    padding: 20px 0 8px;
+}
+
+.studio-page .studio-form {
+    display: grid;
+    gap: 8px;
+    padding: 16px 20px 20px;
+}
+
+.studio-page .studio-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+}
+
+.studio-page .studio-form label {
+    font-family: var(--font-display);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-top: 6px;
+}
+
+.studio-page .studio-form input,
+.studio-page .studio-form select,
+.studio-page .studio-form textarea {
+    font-family: var(--font-bn);
+    font-size: 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 12px;
+    background: var(--bg2);
+    color: var(--ink);
+}
+
+.studio-page .studio-form .advance {
+    justify-self: start;
+    margin-top: 8px;
 }
