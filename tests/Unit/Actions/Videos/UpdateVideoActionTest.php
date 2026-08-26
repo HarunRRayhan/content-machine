@@ -141,4 +141,21 @@ class UpdateVideoActionTest extends TestCase
         $this->assertSame('https://drive.google.com/file/d/video/view', $updated->video_drive_url);
         $this->assertSame('https://drive.google.com/file/d/cover/view', $updated->cover_drive_url);
     }
+
+    public function test_api_payload_writes_drive_urls_when_keys_are_present(): void
+    {
+        $video = Video::factory()->create([
+            'title' => 'Old title',
+            'video_drive_url' => null,
+            'cover_drive_url' => null,
+        ]);
+
+        $updated = (new UpdateVideoAction)->handle($video, UpdateVideoData::fromApiPayload([
+            'video_drive_url' => 'https://drive.google.com/file/d/new-video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/new-cover/view',
+        ], $video));
+
+        $this->assertSame('https://drive.google.com/file/d/new-video/view', $updated->video_drive_url);
+        $this->assertSame('https://drive.google.com/file/d/new-cover/view', $updated->cover_drive_url);
+    }
 }

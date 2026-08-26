@@ -63,6 +63,8 @@ class CreateVideoAction
                 'script_markdown' => $attributes['script_markdown'] ?? null,
                 'captions' => $attributes['captions'] ?? null,
                 'deck_manifest' => $attributes['deck_manifest'] ?? null,
+                'video_drive_url' => $attributes['video_drive_url'] ?? null,
+                'cover_drive_url' => $attributes['cover_drive_url'] ?? null,
                 'status' => $status,
                 'created_by_user_id' => Auth::id(),
             ]);

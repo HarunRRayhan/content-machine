@@ -103,6 +103,52 @@ class VideosApiTest extends TestCase
             ->assertJsonPath('data.script_markdown', 'spoken lines');
     }
 
+    public function test_store_accepts_drive_urls(): void
+    {
+        $this->acting()->postJson('/api/v1/videos', [
+            'human_id' => 'BV-54',
+            'number' => 54,
+            'title' => 'After HyperFrames',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/cover/view',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'BV-54')
+            ->assertJsonPath('data.video_drive_url', 'https://drive.google.com/file/d/video/view')
+            ->assertJsonPath('data.cover_drive_url', 'https://drive.google.com/file/d/cover/view');
+
+        $this->assertDatabaseHas('videos', [
+            'human_id' => 'BV-54',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/cover/view',
+        ]);
+    }
+
+    public function test_patch_accepts_drive_urls(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-11',
+            'number' => 11,
+            'title' => 'Recorded cut',
+            'status' => 'recorded',
+        ]);
+
+        $this->acting()->patchJson('/api/v1/videos/BV-11', [
+            'video_drive_url' => 'https://drive.google.com/file/d/new-video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/new-cover/view',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.video_drive_url', 'https://drive.google.com/file/d/new-video/view')
+            ->assertJsonPath('data.cover_drive_url', 'https://drive.google.com/file/d/new-cover/view');
+
+        $this->assertDatabaseHas('videos', [
+            'human_id' => 'BV-11',
+            'title' => 'Recorded cut',
+            'video_drive_url' => 'https://drive.google.com/file/d/new-video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/new-cover/view',
+        ]);
+    }
+
     public function test_show_of_another_workspaces_video_is_not_found(): void
     {
         Video::factory()->for(Workspace::factory())->create([

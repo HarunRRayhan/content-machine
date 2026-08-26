@@ -59,8 +59,12 @@ final readonly class UpdateVideoData
             scriptMarkdown: array_key_exists('script_markdown', $payload) ? ($payload['script_markdown'] !== null ? (string) $payload['script_markdown'] : null) : $current->script_markdown,
             captions: array_key_exists('captions', $payload) ? (is_array($payload['captions']) ? $payload['captions'] : null) : $current->captions,
             deckManifest: array_key_exists('deck_manifest', $payload) ? (is_array($payload['deck_manifest']) ? $payload['deck_manifest'] : null) : $current->deck_manifest,
+            videoDriveUrl: array_key_exists('video_drive_url', $payload) ? ($payload['video_drive_url'] !== null ? (string) $payload['video_drive_url'] : null) : null,
+            coverDriveUrl: array_key_exists('cover_drive_url', $payload) ? ($payload['cover_drive_url'] !== null ? (string) $payload['cover_drive_url'] : null) : null,
             status: array_key_exists('status', $payload) ? (string) $payload['status'] : $current->status,
             replaceExtended: true,
+            hasVideoDriveUrl: array_key_exists('video_drive_url', $payload),
+            hasCoverDriveUrl: array_key_exists('cover_drive_url', $payload),
         );
     }
 }

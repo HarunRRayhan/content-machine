@@ -57,6 +57,8 @@ class VideosApiController extends Controller
             'script_markdown' => ['nullable', 'string'],
             'captions' => ['nullable', 'array'],
             'deck_manifest' => ['nullable', 'array'],
+            'video_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
+            'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
             'status' => ['nullable', 'string', Rule::in(Video::STATUSES)],
             'idea_id' => ['nullable', 'integer'],
         ]);
@@ -80,6 +82,8 @@ class VideosApiController extends Controller
             'script_markdown' => ['sometimes', 'nullable', 'string'],
             'captions' => ['sometimes', 'nullable', 'array'],
             'deck_manifest' => ['sometimes', 'nullable', 'array'],
+            'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048'],
+            'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048'],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
         ]);
 
