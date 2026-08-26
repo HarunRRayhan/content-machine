@@ -38,7 +38,10 @@ export default function VideoCaptionsPanel({ groups }: Props) {
                 const tabbed = group.platforms.length > 1;
 
                 return (
-                    <section key={`${group.part ?? 'main'}-${groupIndex}`} className="pane">
+                    <section
+                        key={`${group.part ?? 'main'}-${groupIndex}`}
+                        className="pane"
+                    >
                         <div className="pane-head">
                             <span className="k">
                                 Captions
@@ -53,9 +56,7 @@ export default function VideoCaptionsPanel({ groups }: Props) {
                                         key={item.name}
                                         type="button"
                                         role="tab"
-                                        aria-selected={
-                                            platformIndex === active
-                                        }
+                                        aria-selected={platformIndex === active}
                                         onClick={() =>
                                             setActiveByGroup((prev) => ({
                                                 ...prev,
@@ -109,13 +110,7 @@ export default function VideoCaptionsPanel({ groups }: Props) {
     );
 }
 
-function CaptionField({
-    label,
-    value,
-}: {
-    label: string;
-    value: string;
-}) {
+function CaptionField({ label, value }: { label: string; value: string }) {
     return (
         <>
             <div className="cap-h">

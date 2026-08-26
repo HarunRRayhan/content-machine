@@ -163,7 +163,13 @@ export default function VideoOverview({
                                 return [node];
                             }
 
-                            return [node, <span key={`${step.key}-conn`} className="conn" />];
+                            return [
+                                node,
+                                <span
+                                    key={`${step.key}-conn`}
+                                    className="conn"
+                                />,
+                            ];
                         })}
                     </div>
 
@@ -268,7 +274,7 @@ export default function VideoOverview({
                 </div>
 
                 <div
-                    className={`alldone${total > 0 && doneCount === total ? ' show' : ''}`}
+                    className={`alldone${total > 0 && doneCount === total ? 'show' : ''}`}
                 >
                     ✓ All points covered
                 </div>
