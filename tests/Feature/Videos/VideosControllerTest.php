@@ -69,6 +69,46 @@ class VideosControllerTest extends TestCase
             );
     }
 
+    public function test_index_ideation_tab_orders_ideas_by_score_desc(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Idea::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'status' => 'open',
+            'title' => 'Cold idea',
+            'score' => 210,
+        ]);
+        Idea::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'status' => 'open',
+            'title' => 'Hot idea',
+            'score' => 910,
+        ]);
+        Idea::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'status' => 'open',
+            'title' => 'Mid idea',
+            'score' => 620,
+        ]);
+        Idea::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'status' => 'open',
+            'title' => 'Unscored idea',
+            'score' => null,
+        ]);
+
+        $this->get(route('dashboard.videos.index', ['status' => 'ideation']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/index')
+                ->has('items.data', 4)
+                ->where('items.data.0.title', 'Hot idea')
+                ->where('items.data.1.title', 'Mid idea')
+                ->where('items.data.2.title', 'Cold idea')
+                ->where('items.data.3.title', 'Unscored idea')
+            );
+    }
+
     public function test_index_ideation_tab_lists_open_video_ideas(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();

@@ -1,10 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { CaptionGroup } from '@/components/content/captions-panel';
-import { LANG_META, type LangCode } from '@/lib/lang-meta';
-import {
-    PLATFORM_META,
-    normalizePlatformKey,
-} from '@/lib/platform-meta';
+import { LANG_META } from '@/lib/lang-meta';
+import type { LangCode } from '@/lib/lang-meta';
+import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
 
 type CaptionGroupWithLang = CaptionGroup & {
     lang?: string | null;
@@ -97,7 +95,9 @@ export default function PostCaptionsPanel({
                             aria-selected={activeLang === lang}
                             onClick={() => setActiveLang(lang)}
                         >
-                            <span className="lflag">{LANG_META[lang].flag}</span>
+                            <span className="lflag">
+                                {LANG_META[lang].flag}
+                            </span>
                             {LANG_META[lang].label}
                         </button>
                     ))}
@@ -113,14 +113,11 @@ export default function PostCaptionsPanel({
                         return true;
                     }
 
-                    return platformSet.has(
-                        platform.name.trim().toLowerCase(),
-                    );
+                    return platformSet.has(platform.name.trim().toLowerCase());
                 });
                 const list = tabs.length > 0 ? tabs : group.platforms;
                 const active =
-                    activeTabByGroup[groupIndex] ??
-                    (list.length > 0 ? 0 : -1);
+                    activeTabByGroup[groupIndex] ?? (list.length > 0 ? 0 : -1);
                 const platform = list[active];
                 const tabbed = list.length > 1;
 
@@ -132,7 +129,10 @@ export default function PostCaptionsPanel({
                           : 'Captions';
 
                 return (
-                    <section key={`${group.part ?? 'main'}-${groupIndex}`} className="pane">
+                    <section
+                        key={`${group.part ?? 'main'}-${groupIndex}`}
+                        className="pane"
+                    >
                         <div className="pane-head">
                             <span className="k">{header}</span>
                         </div>
@@ -140,9 +140,7 @@ export default function PostCaptionsPanel({
                         {tabbed && (
                             <div className="cap-tabbar" role="tablist">
                                 {list.map((item, platformIndex) => {
-                                    const key = normalizePlatformKey(
-                                        item.name,
-                                    );
+                                    const key = normalizePlatformKey(item.name);
                                     const meta = key
                                         ? PLATFORM_META[key]
                                         : null;
@@ -156,21 +154,17 @@ export default function PostCaptionsPanel({
                                                 platformIndex === active
                                             }
                                             onClick={() =>
-                                                setActiveTabByGroup(
-                                                    (prev) => ({
-                                                        ...prev,
-                                                        [groupIndex]:
-                                                            platformIndex,
-                                                    }),
-                                                )
+                                                setActiveTabByGroup((prev) => ({
+                                                    ...prev,
+                                                    [groupIndex]: platformIndex,
+                                                }))
                                             }
                                         >
                                             {meta && (
                                                 <span
                                                     className="tbadge"
                                                     style={{
-                                                        background:
-                                                            meta.color,
+                                                        background: meta.color,
                                                     }}
                                                 >
                                                     {meta.badge}
@@ -228,7 +222,9 @@ export default function PostCaptionsPanel({
                                         </div>
                                         {platform.title && (
                                             <div className="mock-cap">
-                                                <strong>{platform.title}</strong>
+                                                <strong>
+                                                    {platform.title}
+                                                </strong>
                                             </div>
                                         )}
                                         {platform.caption && (
@@ -271,9 +267,7 @@ export default function PostCaptionsPanel({
                                                     type="button"
                                                     className="cap-copy"
                                                     onClick={() =>
-                                                        copyText(
-                                                            platform.title,
-                                                        )
+                                                        copyText(platform.title)
                                                     }
                                                 >
                                                     ⧉ Title

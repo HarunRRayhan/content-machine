@@ -90,11 +90,13 @@ export default function VideoOverview({
 
     function togglePoint(index: number) {
         const next = new Set(checks);
+
         if (next.has(index)) {
             next.delete(index);
         } else {
             next.add(index);
         }
+
         setChecks(next);
         writeChecks(storageKey, next);
     }
@@ -161,7 +163,13 @@ export default function VideoOverview({
                                 return [node];
                             }
 
-                            return [node, <span key={`${step.key}-conn`} className="conn" />];
+                            return [
+                                node,
+                                <span
+                                    key={`${step.key}-conn`}
+                                    className="conn"
+                                />,
+                            ];
                         })}
                     </div>
 
@@ -266,7 +274,7 @@ export default function VideoOverview({
                 </div>
 
                 <div
-                    className={`alldone${total > 0 && doneCount === total ? ' show' : ''}`}
+                    className={`alldone${total > 0 && doneCount === total ? 'show' : ''}`}
                 >
                     ✓ All points covered
                 </div>

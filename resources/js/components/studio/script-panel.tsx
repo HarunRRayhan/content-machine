@@ -26,6 +26,7 @@ export function renderScriptBodyHtml(text: string): string {
 
     for (const raw of (text || '').split('\n')) {
         const line = raw.replace(/\s+$/, '');
+
         if (line.trim() === '') {
             out.push('<div class="sp"></div>');
             continue;
@@ -33,10 +34,8 @@ export function renderScriptBodyHtml(text: string): string {
 
         const trimmed = line.trim();
         const section = trimmed.match(/^\[(.+)\]$/);
-        if (
-            section &&
-            /HOOK|BODY|REVEAL|CLOSING|CTA/i.test(section[1])
-        ) {
+
+        if (section && /HOOK|BODY|REVEAL|CLOSING|CTA/i.test(section[1])) {
             out.push(
                 `<div class="sec"><span>${escapeHtml(section[1])}</span></div>`,
             );
@@ -70,7 +69,9 @@ export default function ScriptPanel({
             return 0;
         }
 
-        const saved = window.localStorage.getItem(`cm:script-tab:${storageKey}`);
+        const saved = window.localStorage.getItem(
+            `cm:script-tab:${storageKey}`,
+        );
         const parsed = saved !== null ? Number.parseInt(saved, 10) : 0;
 
         return Number.isNaN(parsed) || parsed >= scripts.length ? 0 : parsed;

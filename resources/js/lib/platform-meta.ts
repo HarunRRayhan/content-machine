@@ -24,6 +24,7 @@ export const PLATFORM_META: Record<
 
 export function normalizePlatformKey(name: string): PlatformKey | null {
     const key = name.trim().toLowerCase();
+
     if (key in PLATFORM_META) {
         return key as PlatformKey;
     }

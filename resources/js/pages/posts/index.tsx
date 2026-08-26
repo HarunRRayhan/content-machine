@@ -142,9 +142,7 @@ export default function PostsIndex({
                                 className={active ? undefined : 'opacity-90'}
                             >
                                 {TAB_LABELS[tab] ?? tab}
-                                <span className="tabn">
-                                    {counts[tab] ?? 0}
-                                </span>
+                                <span className="tabn">{counts[tab] ?? 0}</span>
                             </Link>
                         );
                     })}
@@ -223,9 +221,7 @@ export default function PostsIndex({
                                                         ? `${row.score}/1000`
                                                         : '—'}
                                                 </td>
-                                                <td>
-                                                    {row.trend ?? '—'}
-                                                </td>
+                                                <td>{row.trend ?? '—'}</td>
                                                 <td className="c-act">
                                                     <Link
                                                         href={showIdea.url(
@@ -279,9 +275,7 @@ export default function PostsIndex({
                                                                     background:
                                                                         meta.color,
                                                                 }}
-                                                                title={
-                                                                    platform
-                                                                }
+                                                                title={platform}
                                                             >
                                                                 {meta.badge}
                                                             </span>
@@ -293,16 +287,11 @@ export default function PostsIndex({
                                                 <span
                                                     className={`pill st-${studioStatus}`}
                                                 >
-                                                    {
-                                                        POST_STATUS_LABELS[
-                                                            studioStatus
-                                                        ] ?? row.status
-                                                    }
+                                                    {POST_STATUS_LABELS[
+                                                        studioStatus
+                                                    ] ?? row.status}
                                                 </span>
-                                                {[
-                                                    'queued',
-                                                    'running',
-                                                ].includes(
+                                                {['queued', 'running'].includes(
                                                     row.publish_state,
                                                 ) && (
                                                     <span className="pill st-scheduled ml-1">
