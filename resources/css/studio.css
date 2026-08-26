@@ -940,6 +940,72 @@
     font-style: italic;
 }
 
+.studio-page .mock-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0 2px;
+    font-family: var(--font-cue);
+    font-size: 11px;
+    color: var(--ink-faint);
+}
+
+.studio-page .mock-meta-thread {
+    padding: 0;
+    justify-content: flex-start;
+}
+
+.studio-page .mock-meta .over,
+.studio-page .cap-cnt .over {
+    color: var(--bad);
+    font-weight: 600;
+}
+
+.studio-page .mock-tip {
+    text-align: right;
+    max-width: 60%;
+}
+
+.studio-page .cap-cnt {
+    font-family: var(--font-cue);
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+}
+
+.studio-page .cap-cnt b {
+    font-weight: 600;
+    color: inherit;
+}
+
+.studio-page .cap-cnt-ro {
+    text-align: right;
+    margin-top: 6px;
+}
+
+.studio-page .cap-thread {
+    margin: 14px 0 0 22px;
+    padding-left: 16px;
+    border-left: 2px solid var(--line-strong);
+}
+
+.studio-page .cap-thread-h {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.studio-page .cap-thread-label {
+    font-family: var(--font-display);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+}
+
 .studio-page .post-images-gallery {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

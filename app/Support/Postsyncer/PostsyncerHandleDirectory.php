@@ -101,10 +101,11 @@ class PostsyncerHandleDirectory
 
             foreach (UpdatePostsyncerSettingsRequest::PLATFORMS as $platform) {
                 $entry = is_array($platforms[$platform] ?? null) ? $platforms[$platform] : [];
-                $handle = is_string($entry['handle'] ?? null) ? ltrim(trim($entry['handle']), '@') : '';
+                $stored = is_string($entry['handle'] ?? null) ? ltrim(trim($entry['handle']), '@') : '';
+                $studio = StudioWorkspaceHandles::handles()[$previewLang][$platform] ?? '';
 
                 $preview[$previewLang][$platform] = [
-                    'handle' => $handle,
+                    'handle' => $stored !== '' ? $stored : $studio,
                     'name' => 'Harun R. Rayhan',
                 ];
             }

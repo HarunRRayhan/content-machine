@@ -221,7 +221,7 @@ class PostsControllerTest extends TestCase
                 ->where('post.handles.bn.facebook.handle', 'HarunRRayhan')
                 ->where('post.handles.bn.twitter.handle', 'HarunRRayhan')
                 ->where('post.handles.en.twitter.handle', 'harundotdev')
-                ->where('post.handles.en.instagram.handle', '')
+                ->where('post.handles.en.instagram.handle', 'harundotdev')
             );
     }
 

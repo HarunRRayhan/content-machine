@@ -96,7 +96,7 @@ class PostsyncerHandleDirectoryTest extends TestCase
         $this->assertSame('HarunRRayhan', $handles['bn']['twitter']['handle']);
         $this->assertSame('harundotdev', $handles['en']['twitter']['handle']);
         $this->assertSame('Harun R. Rayhan', $handles['en']['twitter']['name']);
-        $this->assertSame('', $handles['en']['instagram']['handle']);
+        $this->assertSame('harundotdev', $handles['en']['instagram']['handle']);
         Http::assertSentCount(1);
     }
 
@@ -112,5 +112,37 @@ class PostsyncerHandleDirectoryTest extends TestCase
 
         $this->assertSame('HarunRRayhan', $handles['bn']['facebook']['handle']);
         $this->assertSame('old-english-twitter', $handles['en']['twitter']['handle']);
+    }
+
+    public function test_it_fills_missing_settings_from_the_studio_workspace_map(): void
+    {
+        Cache::flush();
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'api_base' => 'https://postsyncer.com/api/v1',
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+        $directory = new PostsyncerHandleDirectory(
+            new PostsyncerClient($config),
+            $config,
+            (string) $workspace->id,
+        );
+
+        $handles = $directory->forPreview();
+
+        $this->assertSame('HarunRRayhan', $handles['bn']['facebook']['handle']);
+        $this->assertSame('skillupwithharun', $handles['bn']['youtube']['handle']);
+        $this->assertSame('harundotdev', $handles['en']['twitter']['handle']);
+        $this->assertSame('harun.dev', $handles['en']['bluesky']['handle']);
     }
 }

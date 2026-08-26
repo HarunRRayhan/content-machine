@@ -8,7 +8,12 @@ import {
     orderPlatformsByLang,
     platformLabel,
 } from '@/lib/platform-meta';
-import { PostCaptionMock } from '@/lib/post-caption-mock';
+import {
+    PostCaptionMock,
+    firstCommentLabel,
+    postCount,
+    threadItems,
+} from '@/lib/post-caption-mock';
 import type { HandleDirectory } from '@/lib/post-caption-mock';
 
 type CaptionGroupWithLang = CaptionGroup & {
@@ -238,19 +243,6 @@ export default function PostCaptionsPanel({
                                                     ⧉ Caption
                                                 </button>
                                             )}
-                                            {platform.first_comment && (
-                                                <button
-                                                    type="button"
-                                                    className="cap-copy"
-                                                    onClick={() =>
-                                                        copyText(
-                                                            platform.first_comment,
-                                                        )
-                                                    }
-                                                >
-                                                    ⧉ Comment
-                                                </button>
-                                            )}
                                         </span>
                                     </div>
                                     {platform.title && (
@@ -263,15 +255,65 @@ export default function PostCaptionsPanel({
                                             {platform.caption}
                                         </div>
                                     )}
+                                    {platform.caption && (
+                                        <div className="cap-cnt cap-cnt-ro">
+                                            <b>{postCount(platform.caption)}</b>
+                                        </div>
+                                    )}
                                     {platform.first_comment && (
-                                        <>
-                                            <span className="cap-l">
-                                                First comment
-                                            </span>
+                                        <div className="cap-thread">
+                                            <div className="cap-thread-h">
+                                                <span className="cap-thread-label">
+                                                    {firstCommentLabel(
+                                                        platform.name,
+                                                        threadItems(
+                                                            platform.thread,
+                                                        ),
+                                                    )}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    className="cap-copy"
+                                                    onClick={() =>
+                                                        copyText(
+                                                            platform.first_comment,
+                                                        )
+                                                    }
+                                                >
+                                                    ⧉ Copy
+                                                </button>
+                                            </div>
                                             <div className="cap-b">
                                                 {platform.first_comment}
                                             </div>
-                                        </>
+                                        </div>
+                                    )}
+                                    {threadItems(platform.thread).map(
+                                        (tweet, tweetIndex) => (
+                                            <div
+                                                className="cap-thread"
+                                                key={`thread-${tweetIndex}`}
+                                            >
+                                                <div className="cap-thread-h">
+                                                    <span className="cap-thread-label">
+                                                        ↳ Tweet {tweetIndex + 2}{' '}
+                                                        (thread)
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        className="cap-copy"
+                                                        onClick={() =>
+                                                            copyText(tweet)
+                                                        }
+                                                    >
+                                                        ⧉ Copy
+                                                    </button>
+                                                </div>
+                                                <div className="cap-b">
+                                                    {tweet}
+                                                </div>
+                                            </div>
+                                        ),
                                     )}
                                 </div>
                             </>
