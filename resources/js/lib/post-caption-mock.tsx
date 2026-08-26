@@ -50,7 +50,7 @@ const PLATFORM_MOCKUP: Record<
     twitter: {
         label: 'Twitter / X',
         reactions: '💬 Reply   🔁 Repost   ♡ Like   ↗ Share',
-        tip: '280-char cap (free tier). Hashtags live inline in the text, no dedicated field. Native GIF support.',
+        tip: '25,000-char cap (X Premium). Hashtags live inline in the text, no dedicated field. Native GIF support.',
     },
     threads: {
         label: 'Threads',
@@ -74,7 +74,7 @@ const CAPLIM: Partial<Record<PlatformKey, number>> = {
     facebook: 2000,
     tiktok: 4000,
     youtube: 300,
-    twitter: 280,
+    twitter: 25000,
     threads: 500,
     bluesky: 300,
 };
