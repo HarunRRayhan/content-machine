@@ -1,6 +1,5 @@
 import { Form, router } from '@inertiajs/react';
 import { useState } from 'react';
-import ImageGallery from '@/components/studio/image-gallery';
 import { studioPostStatus } from '@/lib/platform-meta';
 
 const POST_PIPELINE = [
@@ -25,11 +24,6 @@ type Props = {
     title: string;
     status: string;
     platforms: string[];
-    images: Array<{
-        filename: string;
-        url: string;
-        mime: string;
-    }>;
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
@@ -132,7 +126,6 @@ export default function PostOverview({
     title,
     status,
     platforms,
-    images,
     publishUrl,
     postsyncerReady,
     publishState,
@@ -386,8 +379,6 @@ export default function PostOverview({
                     ) : null}
                 </div>
             </section>
-
-            <ImageGallery images={images} />
         </div>
     );
 }
