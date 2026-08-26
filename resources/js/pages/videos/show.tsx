@@ -67,7 +67,6 @@ type PageProps = {
 type TabKey = 'overview' | 'script' | 'captions' | 'facts' | 'presentation';
 
 export default function VideoShow({ video }: PageProps) {
-    const hasScript = video.parsed.scripts.length > 0;
     const hasCaptions = video.captions.some(
         (group) => group.platforms.length > 0,
     );
@@ -77,18 +76,14 @@ export default function VideoShow({ video }: PageProps) {
         video.parsed.sources !== '' ||
         video.parsed.legal.length > 0;
 
-    const validTabs: TabKey[] = ['overview'];
+    const validTabs: TabKey[] = ['overview', 'script'];
 
-    if (!hasDeck && hasScript) {
-        validTabs.push('script');
+    if (hasCaptions) {
+        validTabs.push('captions');
     }
 
     if (hasFacts) {
         validTabs.push('facts');
-    }
-
-    if (hasCaptions) {
-        validTabs.push('captions');
     }
 
     if (hasDeck) {
@@ -139,16 +134,14 @@ export default function VideoShow({ video }: PageProps) {
                     >
                         📋 Overview
                     </button>
-                    {!hasDeck && hasScript && (
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected={activeTab === 'script'}
-                            onClick={() => setTab('script')}
-                        >
-                            📄 Script
-                        </button>
-                    )}
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'script'}
+                        onClick={() => setTab('script')}
+                    >
+                        📄 Script
+                    </button>
                     {hasCaptions && (
                         <button
                             type="button"
@@ -201,7 +194,7 @@ export default function VideoShow({ video }: PageProps) {
                     />
                 )}
 
-                {activeTab === 'script' && !hasDeck && (
+                {activeTab === 'script' && (
                     <ScriptPanel
                         scripts={video.parsed.scripts}
                         videoNumber={video.number}
