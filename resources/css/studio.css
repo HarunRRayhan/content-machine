@@ -755,6 +755,12 @@
     font-weight: 700;
 }
 
+.studio-page .mock-av-sm {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+}
+
 .studio-page .mock-id {
     display: flex;
     flex-direction: column;
@@ -789,7 +795,24 @@
     line-height: 1.65;
     color: var(--ink);
     margin-bottom: 10px;
-    white-space: pre-wrap;
+}
+
+.studio-page .mock-cap.is-bn,
+.studio-page .mock-fc-b.is-bn {
+    font-family: var(--font-bangla);
+}
+
+.studio-page .mock-cap p {
+    margin: 0 0 0.7em;
+}
+
+.studio-page .mock-cap p:last-child {
+    margin-bottom: 0;
+}
+
+.studio-page .mock-tag {
+    color: var(--info);
+    font-weight: 600;
 }
 
 .studio-page .mock-imgs {
@@ -804,6 +827,117 @@
     height: 160px;
     object-fit: cover;
     border-radius: 8px;
+}
+
+.studio-page .mock-imgs.mock-imgs-multi {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.studio-page .mock-imgs.mock-imgs-multi img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+}
+
+.studio-page .mock-imgs-empty {
+    padding: 0;
+    margin-bottom: 10px;
+    text-align: left;
+    font-style: normal;
+    font-family: var(--font-cue);
+    font-size: 12px;
+}
+
+.studio-page .mock-bar {
+    font-family: var(--font-cue);
+    font-size: 12px;
+    color: var(--ink-faint);
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    margin-bottom: 2px;
+}
+
+.studio-page .mock-fc {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+}
+
+.studio-page .mock-fc-b {
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+}
+
+.studio-page .mock-fc-b b {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 12px;
+    color: var(--ink);
+    margin-bottom: 2px;
+}
+
+.studio-page .mock-fc-b p {
+    margin: 0 0 0.6em;
+}
+
+.studio-page .mock-fc-b p:last-child {
+    margin-bottom: 0;
+}
+
+.studio-page .mock-thread {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+}
+
+.studio-page .mock-thread-tag {
+    font-family: var(--font-cue);
+    font-size: 11px;
+    color: var(--info);
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.studio-page .mock-thread-item {
+    display: flex;
+    gap: 10px;
+    position: relative;
+}
+
+.studio-page .mock-thread-line {
+    position: absolute;
+    left: 19px;
+    top: -14px;
+    width: 2px;
+    height: 14px;
+    background: var(--line);
+}
+
+.studio-page .mock-thread-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.studio-page .mock-thread-body .mock-cap {
+    margin-bottom: 6px;
+}
+
+.studio-page .mock-thread-body .mock-imgs {
+    margin: 0 0 8px;
+}
+
+.studio-page .mock-thread-body .mock-imgs img {
+    width: 120px;
+    height: 120px;
+}
+
+.studio-page .empty-inline {
+    color: var(--ink-faint);
+    font-style: italic;
 }
 
 .studio-page .post-images-gallery {

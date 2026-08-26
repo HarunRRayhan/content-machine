@@ -8,7 +8,8 @@ import {
     orderPlatformsByLang,
     platformLabel,
 } from '@/lib/platform-meta';
-import { resolvePostImages } from '@/lib/resolve-post-images';
+import { PostCaptionMock } from '@/lib/post-caption-mock';
+import type { HandleDirectory } from '@/lib/post-caption-mock';
 
 type CaptionGroupWithLang = CaptionGroup & {
     lang?: string | null;
@@ -18,6 +19,7 @@ type Props = {
     groups: CaptionGroupWithLang[];
     platforms: string[];
     imageUrls: Record<string, string>;
+    handles?: HandleDirectory;
     defaultLang?: LangCode | null;
 };
 
@@ -56,6 +58,7 @@ export default function PostCaptionsPanel({
     groups,
     platforms,
     imageUrls,
+    handles,
     defaultLang = null,
 }: Props) {
     const langs = inferLangs(groups, defaultLang);
@@ -120,7 +123,10 @@ export default function PostCaptionsPanel({
                     activeTabByGroup[groupIndex] ?? (list.length > 0 ? 0 : -1);
                 const platform = list[active];
                 const tabbed = list.length > 1;
-                const viewLang = group.lang ?? activeLang;
+                const viewLang: LangCode =
+                    group.lang === 'bn' || group.lang === 'en'
+                        ? group.lang
+                        : activeLang;
                 const banglaUi = viewLang === 'bn';
 
                 const header =
@@ -186,79 +192,12 @@ export default function PostCaptionsPanel({
 
                         {platform && (
                             <>
-                                <div className="mock-wrap">
-                                    <div className="mock-note">Preview</div>
-                                    <div className="mock">
-                                        <div className="mock-head">
-                                            <span
-                                                className="mock-av"
-                                                style={{
-                                                    background: '#c23a22',
-                                                }}
-                                            >
-                                                HR
-                                            </span>
-                                            <div className="mock-id">
-                                                <b>Harun R. Rayhan</b>
-                                                <small>@iamraycula</small>
-                                            </div>
-                                            {(() => {
-                                                const key =
-                                                    normalizePlatformKey(
-                                                        platform.name,
-                                                    );
-                                                const meta = key
-                                                    ? PLATFORM_META[key]
-                                                    : null;
-
-                                                return meta ? (
-                                                    <span
-                                                        className="mock-plat-badge"
-                                                        style={{
-                                                            background:
-                                                                meta.color,
-                                                        }}
-                                                    >
-                                                        {meta.badge}
-                                                    </span>
-                                                ) : null;
-                                            })()}
-                                        </div>
-                                        {platform.title && (
-                                            <div className="mock-cap">
-                                                <strong>
-                                                    {platform.title}
-                                                </strong>
-                                            </div>
-                                        )}
-                                        {platform.caption && (
-                                            <div className="mock-cap whitespace-pre-wrap">
-                                                {platform.caption}
-                                            </div>
-                                        )}
-                                        <div className="mock-imgs">
-                                            {resolvePostImages(
-                                                platform.images,
-                                                imageUrls,
-                                            ).map((image) =>
-                                                image.url ? (
-                                                    <img
-                                                        key={image.name}
-                                                        src={image.url}
-                                                        alt={image.name}
-                                                    />
-                                                ) : (
-                                                    <div
-                                                        key={image.name}
-                                                        className="mock-img-missing"
-                                                    >
-                                                        {image.name}
-                                                    </div>
-                                                ),
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+                                <PostCaptionMock
+                                    platform={platform}
+                                    lang={viewLang}
+                                    handles={handles}
+                                    imageUrls={imageUrls}
+                                />
 
                                 <div className="cap">
                                     <div className="cap-h">
@@ -297,6 +236,19 @@ export default function PostCaptionsPanel({
                                                     }
                                                 >
                                                     ⧉ Caption
+                                                </button>
+                                            )}
+                                            {platform.first_comment && (
+                                                <button
+                                                    type="button"
+                                                    className="cap-copy"
+                                                    onClick={() =>
+                                                        copyText(
+                                                            platform.first_comment,
+                                                        )
+                                                    }
+                                                >
+                                                    ⧉ Comment
                                                 </button>
                                             )}
                                         </span>

@@ -6,6 +6,7 @@ import PublishDialog, {
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostOverview from '@/components/studio/post-overview';
 import type { LangCode } from '@/lib/lang-meta';
+import type { HandleDirectory } from '@/lib/post-caption-mock';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index } from '@/routes/dashboard/posts';
@@ -30,6 +31,7 @@ type PostDetail = {
     }>;
     platforms: string[];
     image_urls: Record<string, string>;
+    handles?: HandleDirectory;
     language: string | null;
     slug: string | null;
     status: string;
@@ -158,6 +160,7 @@ export default function PostShow({ post }: PageProps) {
                             groups={post.captions}
                             platforms={post.platforms}
                             imageUrls={post.image_urls}
+                            handles={post.handles}
                             defaultLang={defaultLang}
                         />
                     ) : (

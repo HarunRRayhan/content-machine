@@ -12,7 +12,9 @@ use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Postsyncer\PostPublishPlanner;
+use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerHandleDirectory;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -277,6 +279,13 @@ class PostsController extends Controller
         $postsyncerConfig = $workspace !== null
             ? PostsyncerConfig::fromWorkspace($workspace)
             : null;
+        $handles = $postsyncerConfig !== null && $workspace !== null
+            ? (new PostsyncerHandleDirectory(
+                new PostsyncerClient($postsyncerConfig),
+                $postsyncerConfig,
+                (string) $workspace->id,
+            ))->forPreview()
+            : ['bn' => [], 'en' => []];
 
         return [
             'id' => $post->id,
@@ -288,6 +297,7 @@ class PostsController extends Controller
             'platforms' => $post->platforms ?? [],
             'images' => $images,
             'image_urls' => $imageUrls,
+            'handles' => $handles,
             'caption_image_names' => array_keys($captionImageNames),
             'image_drive_urls' => $post->image_drive_urls ?? [],
             'language' => $post->language,

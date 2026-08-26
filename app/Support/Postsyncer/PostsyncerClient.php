@@ -58,6 +58,14 @@ class PostsyncerClient
     /**
      * @return list<array<string, mixed>>
      */
+    public function listAllAccounts(): array
+    {
+        return $this->allAccounts();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
     private function allAccounts(): array
     {
         $response = $this->request('get', '/accounts');

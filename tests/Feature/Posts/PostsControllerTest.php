@@ -8,7 +8,10 @@ use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -149,6 +152,76 @@ class PostsControllerTest extends TestCase
                 ->component('posts/show')
                 ->where('post.id', $post->id)
                 ->where('post.title', 'Hello post')
+            );
+    }
+
+    public function test_show_exposes_handles_from_both_postsyncer_workspaces(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'api_base' => 'https://postsyncer.com/api/v1',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['handle' => 'HarunRRayhan', 'account_id' => 7017],
+                    ],
+                ],
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'twitter' => ['handle' => 'old-english-twitter', 'account_id' => 1205],
+                    ],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
+                [
+                    'id' => 7017,
+                    'workspace_id' => 15211,
+                    'platform' => 'facebook',
+                    'username' => null,
+                    'name' => 'Harun R.',
+                ],
+                [
+                    'id' => 7368,
+                    'workspace_id' => 15211,
+                    'platform' => 'twitter',
+                    'username' => 'HarunRRayhan',
+                    'name' => 'Harun R. Rayhan',
+                ],
+                [
+                    'id' => 1205,
+                    'workspace_id' => 853,
+                    'platform' => 'twitter',
+                    'username' => 'harundotdev',
+                    'name' => 'Harun R.',
+                ],
+                [
+                    'id' => 4936,
+                    'workspace_id' => 42761,
+                    'platform' => 'instagram',
+                    'username' => 'armansedits',
+                    'name' => 'Arman',
+                ],
+            ], 200),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create(['title' => 'Handle post']);
+
+        $this->get(route('dashboard.posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.handles.bn.facebook.handle', 'HarunRRayhan')
+                ->where('post.handles.bn.twitter.handle', 'HarunRRayhan')
+                ->where('post.handles.en.twitter.handle', 'harundotdev')
+                ->where('post.handles.en.instagram.handle', '')
             );
     }
 
