@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { CaptionGroup } from '@/components/content/captions-panel';
-import { LANG_META, type LangCode } from '@/lib/lang-meta';
+import { LANG_META  } from '@/lib/lang-meta';
+import type {LangCode} from '@/lib/lang-meta';
 import {
     PLATFORM_META,
     normalizePlatformKey,

@@ -75,15 +75,19 @@ export default function VideoShow({ video }: PageProps) {
         video.parsed.legal.length > 0;
 
     const validTabs: TabKey[] = ['overview'];
+
     if (!hasDeck && hasScript) {
         validTabs.push('script');
     }
+
     if (hasFacts) {
         validTabs.push('facts');
     }
+
     if (hasCaptions) {
         validTabs.push('captions');
     }
+
     if (hasDeck) {
         validTabs.push('presentation');
     }

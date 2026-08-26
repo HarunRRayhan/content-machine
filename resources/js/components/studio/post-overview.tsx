@@ -17,6 +17,7 @@ type Props = {
 
 function mapStudioStatus(status: string): string {
     const mapped = studioPostStatus(status);
+
     if (mapped === 'archived') {
         return 'archived';
     }

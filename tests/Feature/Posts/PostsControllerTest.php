@@ -55,7 +55,7 @@ class PostsControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
 
         Post::factory()->for($workspace)->create(['title' => 'Draft one', 'status' => 'draft']);
-        Post::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
+        Post::factory()->for($workspace)->create(['title' => 'Scheduled one', 'status' => 'scheduled']);
 
         $this->get(route('dashboard.posts.index'))
             ->assertInertia(fn (Assert $page) => $page

@@ -90,11 +90,13 @@ export default function VideoOverview({
 
     function togglePoint(index: number) {
         const next = new Set(checks);
+
         if (next.has(index)) {
             next.delete(index);
         } else {
             next.add(index);
         }
+
         setChecks(next);
         writeChecks(storageKey, next);
     }

@@ -26,6 +26,7 @@ export function renderScriptBodyHtml(text: string): string {
 
     for (const raw of (text || '').split('\n')) {
         const line = raw.replace(/\s+$/, '');
+
         if (line.trim() === '') {
             out.push('<div class="sp"></div>');
             continue;
@@ -33,6 +34,7 @@ export function renderScriptBodyHtml(text: string): string {
 
         const trimmed = line.trim();
         const section = trimmed.match(/^\[(.+)\]$/);
+
         if (
             section &&
             /HOOK|BODY|REVEAL|CLOSING|CTA/i.test(section[1])
