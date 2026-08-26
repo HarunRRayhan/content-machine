@@ -346,9 +346,18 @@ export default function PostsIndex({
     );
 }
 
-PostsIndex.layout = {
-    breadcrumbs: [
-        { title: 'Dashboard', href: home() },
-        { title: 'Posts', href: index() },
-    ],
-};
+PostsIndex.layout = ({ filters }: PageProps) => ({
+    breadcrumbs:
+        filters.status === 'ideation'
+            ? [
+                  { title: 'Posts', href: index() },
+                  {
+                      title: 'Ideas',
+                      href: index.url({ query: { status: 'ideation' } }),
+                  },
+              ]
+            : [
+                  { title: 'Dashboard', href: home() },
+                  { title: 'Posts', href: index() },
+              ],
+});

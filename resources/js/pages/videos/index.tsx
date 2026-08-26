@@ -1,5 +1,6 @@
 import { Head, Link, router } from '@inertiajs/react';
 import type { MouseEvent } from 'react';
+import { scoreBand, trendKind, trendLabel } from '@/lib/studio-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index, show } from '@/routes/dashboard/videos';
@@ -67,54 +68,6 @@ const TAB_LABELS: Record<string, string> = {
     archived: 'Archived',
     dropped: 'Dropped',
 };
-
-function scoreBand(score: number | null): 'hi' | 'mid' | 'lo' {
-    if (score === null) {
-        return 'lo';
-    }
-
-    if (score >= 800) {
-        return 'hi';
-    }
-
-    if (score >= 500) {
-        return 'mid';
-    }
-
-    return 'lo';
-}
-
-function trendKind(trend: string | null): 'evergreen' | 'seasonal' | '' {
-    if (!trend) {
-        return '';
-    }
-
-    const value = trend.toLowerCase();
-
-    if (value.includes('seasonal')) {
-        return 'seasonal';
-    }
-
-    if (value.includes('evergreen')) {
-        return 'evergreen';
-    }
-
-    return '';
-}
-
-function trendLabel(trend: string | null): string {
-    const kind = trendKind(trend);
-
-    if (kind === 'seasonal') {
-        return '🔴 Seasonal';
-    }
-
-    if (kind === 'evergreen') {
-        return '🟢 Evergreen';
-    }
-
-    return trend ?? '';
-}
 
 function paginationLabel(label: string): string {
     return label.replaceAll('&laquo;', '«').replaceAll('&raquo;', '»');
@@ -419,9 +372,18 @@ export default function VideosIndex({
     );
 }
 
-VideosIndex.layout = {
-    breadcrumbs: [
-        { title: 'Dashboard', href: home() },
-        { title: 'Videos', href: index() },
-    ],
-};
+VideosIndex.layout = ({ filters }: PageProps) => ({
+    breadcrumbs:
+        filters.status === 'ideation'
+            ? [
+                  { title: 'Videos', href: index() },
+                  {
+                      title: 'Ideas',
+                      href: index.url({ query: { status: 'ideation' } }),
+                  },
+              ]
+            : [
+                  { title: 'Dashboard', href: home() },
+                  { title: 'Videos', href: index() },
+              ],
+});
