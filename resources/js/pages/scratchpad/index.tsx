@@ -136,45 +136,11 @@ export default function ScratchpadIndex({ entries }: PageProps) {
         <>
             <Head title="Scratch Pad" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-4">
-                    <Heading
-                        title="Scratch Pad"
-                        description="Capture an idea the instant it occurs to you. Sort it out later."
-                    />
-                    <div className="flex shrink-0 items-center gap-2 pt-0.5">
-                        <Button
-                            type="button"
-                            size="icon"
-                            variant={recording ? 'destructive' : 'outline'}
-                            aria-label={
-                                recording
-                                    ? 'Stop recording'
-                                    : 'Record a voice note'
-                            }
-                            disabled={uploading}
-                            onClick={() => {
-                                void toggleVoice();
-                            }}
-                        >
-                            <Mic />
-                        </Button>
-                        <Button
-                            type="button"
-                            size="icon"
-                            variant={mode === 'closed' ? 'outline' : 'default'}
-                            aria-label="Add a note, link, or photo"
-                            aria-expanded={mode !== 'closed'}
-                            onClick={() =>
-                                setMode((current) =>
-                                    current === 'closed' ? 'picking' : 'closed',
-                                )
-                            }
-                        >
-                            <Plus />
-                        </Button>
-                    </div>
-                </div>
+            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4 pb-32">
+                <Heading
+                    title="Scratch Pad"
+                    description="Capture an idea the instant it occurs to you. Sort it out later."
+                />
 
                 <ScratchpadVoiceRecorder
                     ref={voiceRef}
@@ -184,7 +150,7 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                 />
 
                 {mode !== 'closed' && (
-                    <div className="max-w-2xl space-y-4 rounded-lg border p-4">
+                    <div className="sp-capture-sheet space-y-4 rounded-lg border p-4">
                         <CaptureLanguageField
                             language={language}
                             onChange={setLanguage}
@@ -463,6 +429,41 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                         ))}
                     </nav>
                 )}
+
+                <div className="sp-fab-wrap">
+                    <button
+                        type="button"
+                        className={
+                            recording ? 'sp-fab-rec is-recording' : 'sp-fab-rec'
+                        }
+                        aria-label={
+                            recording ? 'Stop recording' : 'Record a voice note'
+                        }
+                        disabled={uploading}
+                        onClick={() => {
+                            void toggleVoice();
+                        }}
+                    >
+                        <Mic />
+                    </button>
+                    <button
+                        type="button"
+                        className={
+                            mode === 'closed'
+                                ? 'sp-fab-add'
+                                : 'sp-fab-add is-open'
+                        }
+                        aria-label="Add a note, link, or photo"
+                        aria-expanded={mode !== 'closed'}
+                        onClick={() =>
+                            setMode((current) =>
+                                current === 'closed' ? 'picking' : 'closed',
+                            )
+                        }
+                    >
+                        <Plus />
+                    </button>
+                </div>
             </div>
         </>
     );

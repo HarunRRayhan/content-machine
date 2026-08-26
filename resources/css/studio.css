@@ -2043,6 +2043,118 @@
     background: color-mix(in srgb, var(--good) 12%, var(--raised));
 }
 
+.sp-fab-wrap {
+    position: fixed;
+    left: 50%;
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transform: translateX(-50%);
+}
+
+@media (min-width: 768px) {
+    .sp-fab-wrap {
+        left: calc(50% + (var(--sidebar-width, 16rem) / 2));
+    }
+
+    .sp-capture-sheet {
+        left: calc(16px + var(--sidebar-width, 16rem));
+    }
+}
+
+.sp-fab-rec,
+.sp-fab-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.sp-fab-rec {
+    width: 66px;
+    height: 66px;
+    color: #fff;
+    background: #c23a22;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+}
+
+.sp-fab-rec svg {
+    width: 28px;
+    height: 28px;
+}
+
+.sp-fab-rec:hover {
+    background: #a13018;
+}
+
+.sp-fab-rec:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+
+.sp-fab-rec.is-recording {
+    background: #c23a22;
+    animation: sp-fab-pulse 1.4s infinite;
+}
+
+.sp-fab-add {
+    width: 48px;
+    height: 48px;
+    color: #2a2119;
+    background: #fffdf8;
+    border: 1px solid rgb(42 33 25 / 0.16);
+    box-shadow: 0 8px 20px rgb(80 55 30 / 0.18);
+}
+
+.sp-fab-add svg {
+    width: 22px;
+    height: 22px;
+}
+
+.sp-fab-add:hover,
+.sp-fab-add.is-open {
+    color: #fff;
+    background: #c23a22;
+    border-color: transparent;
+}
+
+.sp-fab-add.is-open svg {
+    transform: rotate(45deg);
+}
+
+.sp-capture-sheet {
+    position: fixed;
+    right: 16px;
+    bottom: calc(110px + env(safe-area-inset-bottom, 0px));
+    left: 16px;
+    z-index: 59;
+    max-width: 36rem;
+    margin-inline: auto;
+    max-height: min(70vh, 32rem);
+    overflow: auto;
+    background: #fffdf8;
+    box-shadow: 0 18px 44px -26px rgb(80 55 30 / 0.35);
+}
+
+@keyframes sp-fab-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgb(194 58 34 / 0.45);
+    }
+
+    70% {
+        box-shadow: 0 0 0 16px rgb(194 58 34 / 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgb(194 58 34 / 0);
+    }
+}
+
 @media (max-width: 720px) {
     .studio-page .cal-day {
         min-height: 88px;
