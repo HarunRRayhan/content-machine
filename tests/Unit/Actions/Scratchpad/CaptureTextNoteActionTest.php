@@ -29,8 +29,23 @@ class CaptureTextNoteActionTest extends TestCase
         $this->assertSame('web', $entry->source);
         $this->assertSame('new', $entry->status);
         $this->assertSame('Remember to follow up on this.', $entry->body);
+        $this->assertNull($entry->language);
         $this->assertNotNull($entry->captured_at);
         $this->assertNotNull($entry->public_id);
+    }
+
+    public function test_it_stores_the_requested_language()
+    {
+        $workspace = Workspace::factory()->create();
+        $user = User::factory()->create();
+
+        $entry = (new CaptureTextNoteAction)->handle(
+            $workspace,
+            $user,
+            new CaptureTextNoteData(body: 'A Bangla note.', language: 'bn'),
+        );
+
+        $this->assertSame('bn', $entry->language);
     }
 
     public function test_it_records_a_null_to_new_status_transition()

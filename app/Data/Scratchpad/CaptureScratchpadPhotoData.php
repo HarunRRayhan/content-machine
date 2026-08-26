@@ -15,6 +15,7 @@ final readonly class CaptureScratchpadPhotoData
         public UploadedFile $file,
         public ?string $caption,
         public string $source = 'web',
+        public ?string $language = null,
     ) {}
 
     public static function fromRequest(StoreScratchpadPhotoRequest $request): self
@@ -26,6 +27,7 @@ final readonly class CaptureScratchpadPhotoData
             file: $file,
             caption: $request->string('caption')->toString() ?: null,
             source: 'web',
+            language: $request->string('language')->toString() ?: null,
         );
     }
 

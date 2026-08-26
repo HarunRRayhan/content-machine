@@ -28,6 +28,7 @@ class CaptureScratchpadLinkAction
             'source' => $data->source,
             'captured_at' => now(),
             'body' => $data->url,
+            'language' => $data->language,
             'status' => 'new',
             'meta' => ['url' => $data->url],
         ]);

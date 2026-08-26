@@ -4,6 +4,7 @@ namespace App\Http\Requests\Scratchpad;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreScratchpadTextNoteRequest extends FormRequest
 {
@@ -16,6 +17,7 @@ class StoreScratchpadTextNoteRequest extends FormRequest
     {
         return [
             'body' => ['required', 'string', 'max:10000'],
+            'language' => ['nullable', Rule::in(['bn', 'en'])],
         ];
     }
 }

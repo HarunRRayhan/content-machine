@@ -4,6 +4,7 @@ namespace App\Http\Requests\Scratchpad;
 
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreScratchpadPhotoRequest extends FormRequest
 {
@@ -17,6 +18,7 @@ class StoreScratchpadPhotoRequest extends FormRequest
         return [
             'photo' => ['required', 'file', 'max:10240', 'mimes:jpeg,png,webp,gif,heic'],
             'caption' => ['nullable', 'string', 'max:2000'],
+            'language' => ['nullable', Rule::in(['bn', 'en'])],
         ];
     }
 }
