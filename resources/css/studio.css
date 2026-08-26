@@ -1006,6 +1006,15 @@
     height: 160px;
     object-fit: cover;
     border-radius: 8px;
+    cursor: zoom-in;
+}
+
+.studio-page .mock-imgs .mock-img-open {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    line-height: 0;
+    cursor: zoom-in;
 }
 
 .studio-page .mock-imgs.mock-imgs-multi {
@@ -1222,6 +1231,38 @@
     object-fit: cover;
     border-radius: 10px;
     background: var(--surface);
+}
+
+.studio-page .post-images-gallery-shot {
+    display: grid;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: zoom-in;
+}
+
+.studio-page .post-images-gallery-shot img {
+    transition:
+        transform 160ms ease,
+        box-shadow 160ms ease;
+}
+
+.studio-page .post-images-gallery-shot:hover img,
+.studio-page .post-images-gallery-shot:focus-visible img {
+    transform: scale(1.02);
+    box-shadow: 0 16px 28px -22px rgb(0 0 0 / 0.7);
+}
+
+.studio-page .post-images-gallery-shot span {
+    font-family: var(--font-cue);
+    font-size: 11px;
+    color: var(--ink-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .studio-page .mock-img-missing {
@@ -1691,4 +1732,121 @@
 .studio-page .studio-form .advance {
     justify-self: start;
     margin-top: 8px;
+}
+
+/* Portaled outside .studio-page, so these stay top-level. */
+.image-lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgb(7 8 10 / 0.82);
+}
+
+.image-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 81;
+    display: flex;
+    flex-direction: column;
+    color: #f4efe6;
+    outline: none;
+}
+
+.image-lightbox-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 18px;
+    background: rgb(10 11 14 / 0.72);
+    border-bottom: 1px solid rgb(244 239 230 / 0.12);
+    backdrop-filter: blur(10px);
+}
+
+.image-lightbox-count {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #e3b341;
+}
+
+.image-lightbox-zoom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: rgb(244 239 230 / 0.72);
+}
+
+.image-lightbox-zoom button,
+.image-lightbox-close {
+    border: 1px solid rgb(244 239 230 / 0.2);
+    background: rgb(244 239 230 / 0.06);
+    color: #f4efe6;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+.image-lightbox-zoom button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.image-lightbox-close {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+
+.image-lightbox-scroller {
+    flex: 1;
+    overflow: auto;
+    padding: 28px 20px 48px;
+}
+
+.image-lightbox-frame {
+    margin: 0 auto 36px;
+    max-width: none;
+}
+
+.image-lightbox-frame:last-child {
+    margin-bottom: 0;
+}
+
+.image-lightbox-shot {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: zoom-in;
+}
+
+.image-lightbox-shot[data-zoomed='true'] {
+    cursor: zoom-out;
+}
+
+.image-lightbox-shot img {
+    display: block;
+    width: calc(min(92vw, 1100px) * var(--lb-zoom, 1));
+    max-width: none;
+    height: auto;
+    box-shadow: 0 28px 80px -36px rgb(0 0 0 / 0.85);
+}
+
+.image-lightbox-frame figcaption {
+    margin-top: 10px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: rgb(244 239 230 / 0.55);
 }

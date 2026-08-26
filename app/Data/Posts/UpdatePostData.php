@@ -15,6 +15,7 @@ final readonly class UpdatePostData
      * @param  array<string, mixed>|null  $captions
      * @param  array<string, mixed>|null  $platforms
      * @param  array<int, string>|null  $imageDriveUrls
+     * @param  array<string, mixed>|null  $postsyncer
      */
     public function __construct(
         public string $title,
@@ -25,8 +26,10 @@ final readonly class UpdatePostData
         public ?array $platforms = null,
         public ?array $imageDriveUrls = null,
         public ?string $status = null,
+        public ?array $postsyncer = null,
         public bool $replaceExtended = false,
         public bool $hasImageDriveUrls = false,
+        public bool $hasPostsyncer = false,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -82,7 +85,11 @@ final readonly class UpdatePostData
             captions: array_key_exists('captions', $payload) ? (is_array($payload['captions']) ? $payload['captions'] : null) : $current->captions,
             platforms: array_key_exists('platforms', $payload) ? (is_array($payload['platforms']) ? $payload['platforms'] : null) : $current->platforms,
             status: array_key_exists('status', $payload) ? (string) $payload['status'] : $current->status,
+            postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
+                ? $payload['postsyncer']
+                : null,
             replaceExtended: true,
+            hasPostsyncer: array_key_exists('postsyncer', $payload),
         );
     }
 }

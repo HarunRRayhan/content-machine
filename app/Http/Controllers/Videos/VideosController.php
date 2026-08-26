@@ -7,6 +7,7 @@ use App\Data\Videos\UpdateVideoData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Idea;
+use App\Models\MediaAsset;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
@@ -15,8 +16,10 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class VideosController extends Controller
 {
@@ -111,9 +114,33 @@ class VideosController extends Controller
 
         abort_if($video->workspace_id !== $workspace->id, 404);
 
+        $video->load(['attachments.mediaAsset']);
+
         return Inertia::render('videos/show', [
             'video' => $this->presentDetail($video),
         ]);
+    }
+
+    /**
+     * Stream a video image. The scratchpad disk is private, so this is the
+     * only way the dashboard <img> can load one: same-origin + session
+     * cookie. A media asset outside the current workspace 404s.
+     */
+    public function media(Request $request, Video $video, MediaAsset $mediaAsset): StreamedResponse
+    {
+        $workspace = $this->currentWorkspace($request);
+
+        abort_if($video->workspace_id !== $workspace->id, 404);
+        abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+
+        return Storage::disk($mediaAsset->disk)->response(
+            $mediaAsset->path,
+            $mediaAsset->original_filename,
+            [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ],
+        );
     }
 
     public function update(UpdateVideoRequest $request, Video $video, UpdateVideoAction $updateVideoAction): RedirectResponse
@@ -228,6 +255,7 @@ class VideosController extends Controller
             'captions' => NormalizeCaptions::forDashboard($video->captions),
             'deck_manifest' => $video->deck_manifest,
             'has_deck' => ! empty($video->deck_manifest),
+            'images' => $this->presentImages($video),
             'video_drive_url' => $video->video_drive_url,
             'cover_drive_url' => $video->cover_drive_url,
             'language' => $video->language,
@@ -243,5 +271,33 @@ class VideosController extends Controller
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return list<array{id: int, role: string|null, filename: string, url: string, mime: string|null}>
+     */
+    private function presentImages(Video $video): array
+    {
+        $images = [];
+
+        foreach ($video->attachments as $attachment) {
+            $media = $attachment->mediaAsset;
+
+            if ($media === null) {
+                continue;
+            }
+
+            $filename = $media->original_filename ?: basename($media->path);
+
+            $images[] = [
+                'id' => $attachment->id,
+                'role' => $attachment->role,
+                'filename' => $filename,
+                'url' => route('videos.media', [$video, $media]),
+                'mime' => $media->mime,
+            ];
+        }
+
+        return $images;
     }
 }

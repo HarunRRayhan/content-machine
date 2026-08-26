@@ -2,11 +2,14 @@
 
 namespace Tests\Feature\Videos;
 
+use App\Models\Attachment;
 use App\Models\Idea;
+use App\Models\MediaAsset;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -360,5 +363,70 @@ class VideosControllerTest extends TestCase
         $video = Video::factory()->for($otherWorkspace)->create();
 
         $this->patch(route('videos.update', $video), ['title' => 'Nope'])->assertNotFound();
+    }
+
+    public function test_show_exposes_session_media_urls_for_attached_images(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create(['title' => 'With cover']);
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/cover.png',
+            'original_filename' => 'cover.png',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'png-bytes');
+        Attachment::factory()->for($video, 'attachable')->for($media)->create([
+            'role' => 'image',
+        ]);
+
+        $expectedUrl = route('videos.media', [$video, $media]);
+
+        $this->get(route('videos.show', $video))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.images.0.url', $expectedUrl)
+                ->where('video.images.0.filename', 'cover.png')
+            );
+    }
+
+    public function test_media_streams_an_attached_image_for_the_current_workspace(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create();
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/view.jpg',
+            'original_filename' => 'view.jpg',
+            'mime' => 'image/jpeg',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'jpeg-bytes');
+        Attachment::factory()->for($video, 'attachable')->for($media)->create();
+
+        $this->get(route('videos.media', [$video, $media]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/jpeg');
+    }
+
+    public function test_media_404s_for_an_asset_in_a_different_workspace(): void
+    {
+        Storage::fake('scratchpad');
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        $otherVideo = Video::factory()->for($otherWorkspace)->create();
+        $media = MediaAsset::factory()->for($otherWorkspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $otherWorkspace->id.'/secret.jpg',
+            'mime' => 'image/jpeg',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'secret');
+        Attachment::factory()->for($otherVideo, 'attachable')->for($media)->create();
+
+        $this->get(route('videos.media', [$otherVideo, $media]))->assertNotFound();
     }
 }

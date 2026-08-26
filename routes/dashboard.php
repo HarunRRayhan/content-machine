@@ -48,6 +48,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::permanentRedirect('posts/{post}/media/{mediaAsset}', '/posts/{post}/media/{mediaAsset}');
         Route::permanentRedirect('videos', '/videos');
         Route::permanentRedirect('videos/{video}', '/videos/{video}');
+        Route::permanentRedirect('videos/{video}/media/{mediaAsset}', '/videos/{video}/media/{mediaAsset}');
         Route::permanentRedirect('videos/{video}/presentation', '/videos/{video}/presentation');
         Route::permanentRedirect('scratchpad', '/scratchpad');
         Route::permanentRedirect('scratchpad/media/{mediaAsset}', '/scratchpad/media/{mediaAsset}');

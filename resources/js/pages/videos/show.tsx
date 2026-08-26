@@ -40,6 +40,11 @@ type VideoDetail = {
     captions: CaptionGroup[];
     deck_manifest: Record<string, unknown> | null;
     has_deck: boolean;
+    images: Array<{
+        filename: string;
+        url: string;
+        mime: string;
+    }>;
     video_drive_url: string | null;
     cover_drive_url: string | null;
     language: string | null;
@@ -186,6 +191,7 @@ export default function VideoShow({ video }: PageProps) {
                         points={video.parsed.points}
                         storageKey={video.human_id}
                         videoDriveUrl={video.video_drive_url}
+                        images={video.images}
                         coverDriveUrl={video.cover_drive_url}
                         publishUrl={`/videos/${video.id}/publish`}
                         postsyncerReady={video.postsyncer_ready}

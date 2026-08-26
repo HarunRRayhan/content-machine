@@ -528,4 +528,30 @@ class PostsControllerTest extends TestCase
 
         $this->patch(route('posts.update', $post), ['title' => 'Nope'])->assertNotFound();
     }
+
+    public function test_show_exposes_postsyncer_groups_for_a_scheduled_post(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Already scheduled',
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '132531',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-08-26T21:18:00+06:00',
+                    'platforms' => ['facebook'],
+                    'language' => 'bangla',
+                ]],
+            ],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.status', 'scheduled')
+                ->where('post.postsyncer.groups.0.post_id', '132531')
+            );
+    }
 }

@@ -1,6 +1,7 @@
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { CaptionPlatform } from '@/components/content/captions-panel';
+import ImageLightbox from '@/components/studio/image-lightbox';
 import type { LangCode } from '@/lib/lang-meta';
 import type { PlatformKey } from '@/lib/platform-meta';
 import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
@@ -182,6 +183,10 @@ function MockImages({
     compact?: boolean;
 }) {
     const resolved = resolvePostImages(images, imageUrls);
+    const viewable = resolved.flatMap((image) =>
+        image.url ? [{ name: image.name, url: image.url }] : [],
+    );
+    const [openIndex, setOpenIndex] = useState<number | null>(null);
 
     if (resolved.length === 0) {
         return null;
@@ -190,17 +195,37 @@ function MockImages({
     const multi = !compact && resolved.length > 1;
 
     return (
-        <div className={multi ? 'mock-imgs mock-imgs-multi' : 'mock-imgs'}>
-            {resolved.map((image) =>
-                image.url ? (
-                    <img key={image.name} src={image.url} alt={image.name} />
-                ) : (
-                    <div key={image.name} className="mock-img-missing">
-                        {image.name}
-                    </div>
-                ),
-            )}
-        </div>
+        <>
+            <div className={multi ? 'mock-imgs mock-imgs-multi' : 'mock-imgs'}>
+                {resolved.map((image) =>
+                    image.url ? (
+                        <button
+                            key={image.name}
+                            type="button"
+                            className="mock-img-open"
+                            onClick={() =>
+                                setOpenIndex(
+                                    viewable.findIndex(
+                                        (item) => item.name === image.name,
+                                    ),
+                                )
+                            }
+                        >
+                            <img src={image.url} alt={image.name} />
+                        </button>
+                    ) : (
+                        <div key={image.name} className="mock-img-missing">
+                            {image.name}
+                        </div>
+                    ),
+                )}
+            </div>
+            <ImageLightbox
+                images={viewable}
+                startIndex={openIndex}
+                onClose={() => setOpenIndex(null)}
+            />
+        </>
     );
 }
 

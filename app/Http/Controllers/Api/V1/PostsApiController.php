@@ -89,6 +89,8 @@ class PostsApiController extends Controller
             'captions' => ['sometimes', 'nullable', 'array'],
             'platforms' => ['sometimes', 'nullable', 'array'],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
+            'postsyncer' => ['sometimes', 'nullable', 'array'],
+            'postsyncer.groups' => ['sometimes', 'array'],
         ]);
 
         $action->handle($post, UpdatePostData::fromApiPayload($payload, $post));
