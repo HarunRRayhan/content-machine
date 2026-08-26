@@ -4,7 +4,10 @@ import type { CaptionPlatform } from '@/components/content/captions-panel';
 import type { LangCode } from '@/lib/lang-meta';
 import type { PlatformKey } from '@/lib/platform-meta';
 import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
-import { resolvePostImages } from '@/lib/resolve-post-images';
+import {
+    resolveLinkedinCarouselPdf,
+    resolvePostImages,
+} from '@/lib/resolve-post-images';
 import type { HandleDirectory } from '@/lib/studio-workspaces';
 import { STUDIO_HANDLES } from '@/lib/studio-workspaces';
 
@@ -201,6 +204,53 @@ function MockImages({
     );
 }
 
+function MockLinkedInMedia({
+    images,
+    imageUrls,
+}: {
+    images: string[];
+    imageUrls: Record<string, string>;
+}) {
+    const pdf = resolveLinkedinCarouselPdf(images, imageUrls);
+
+    if (images.length >= 2 && pdf) {
+        return (
+            <>
+                <div className="mock-pdf">
+                    <embed src={pdf.url} type="application/pdf" />
+                </div>
+                <div className="mock-pdf-open">
+                    <a href={pdf.url} target="_blank" rel="noopener">
+                        Open PDF in a new tab ↗
+                    </a>
+                </div>
+                <div className="mock-note">
+                    LinkedIn ships these {images.length} slides as one
+                    document-post carousel (PDF).
+                </div>
+            </>
+        );
+    }
+
+    if (images.length >= 2) {
+        return (
+            <>
+                <MockImages images={images} imageUrls={imageUrls} />
+                <div className="mock-note">
+                    Carousel PDF not staged yet. Publish will assemble one from
+                    these {images.length} slides.
+                </div>
+            </>
+        );
+    }
+
+    if (images.length > 0) {
+        return <MockImages images={images} imageUrls={imageUrls} />;
+    }
+
+    return <p className="empty mock-imgs-empty">No image on LinkedIn.</p>;
+}
+
 export function PostCaptionMock({
     platform,
     lang,
@@ -273,7 +323,12 @@ export function PostCaptionMock({
                         </p>
                     </div>
                 )}
-                {headImages.length > 0 ? (
+                {key === 'linkedin' ? (
+                    <MockLinkedInMedia
+                        images={headImages}
+                        imageUrls={imageUrls}
+                    />
+                ) : headImages.length > 0 ? (
                     <MockImages images={headImages} imageUrls={imageUrls} />
                 ) : (
                     <p className="empty mock-imgs-empty">

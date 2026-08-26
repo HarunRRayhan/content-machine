@@ -123,6 +123,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.images');
 
+    Route::post('posts/{human_id}/documents', [PostsApiController::class, 'attachDocument'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.documents');
+
     Route::get('posts/{human_id}/media/{mediaAsset}', [PostsApiController::class, 'media'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.media');

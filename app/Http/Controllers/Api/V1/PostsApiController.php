@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
+use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Posts\StorePostDocumentRequest;
 use App\Http\Requests\Posts\StorePostImageRequest;
 use App\Http\Resources\V1\PostResource;
 use App\Models\MediaAsset;
@@ -105,6 +108,26 @@ class PostsApiController extends Controller
         $user = $user instanceof User ? $user : null;
 
         $post = $action->handle($post, $user, AttachPostImageData::fromApi($file));
+        $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
+        $created = $fresh->attachments()->count() > $alreadyAttached;
+
+        return (new PostResource($fresh))
+            ->response()
+            ->setStatusCode($created ? 201 : 200);
+    }
+
+    public function attachDocument(StorePostDocumentRequest $request, string $humanId, AttachPostDocumentAction $action): JsonResponse
+    {
+        $post = $this->resolvePost($humanId);
+        $alreadyAttached = $post->attachments()->count();
+
+        /** @var UploadedFile $file */
+        $file = $request->file('document');
+
+        $user = $request->user();
+        $user = $user instanceof User ? $user : null;
+
+        $post = $action->handle($post, $user, AttachPostDocumentData::fromApi($file));
         $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
         $created = $fresh->attachments()->count() > $alreadyAttached;
 

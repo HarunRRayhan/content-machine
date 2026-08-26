@@ -346,6 +346,47 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_show_exposes_a_linkedin_carousel_pdf_in_image_urls(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'human_id' => 'P-50',
+            'number' => 50,
+            'title' => 'N+1',
+            'captions' => [
+                'English' => [
+                    'linkedin' => [
+                        'caption' => 'Carousel teaser',
+                        'images' => ['en-1.png', 'en-2.png'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/p-50-linkedin-carousel.pdf',
+            'original_filename' => 'p-50-linkedin-carousel.pdf',
+            'mime' => 'application/pdf',
+            'kind' => 'document',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, '%PDF-1.4');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create([
+            'role' => 'document',
+            'platform' => 'linkedin',
+        ]);
+
+        $expectedUrl = route('dashboard.posts.media', [$post, $media]);
+
+        $this->get(route('dashboard.posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.image_urls', fn ($urls) => ($urls['p-50-linkedin-carousel.pdf'] ?? null) === $expectedUrl)
+            );
+    }
+
     public function test_show_keeps_per_platform_image_lists_and_does_not_fill_an_explicit_none(): void
     {
         Storage::fake('scratchpad');
