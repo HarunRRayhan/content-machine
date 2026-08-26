@@ -1,0 +1,16 @@
+---
+description: Always open a PR, wait for green CI, self-review, then merge without asking
+alwaysApply: true
+---
+
+# Always ship
+
+When a change is done and locally green:
+
+1. Open a PR. Do not ask whether to open one.
+2. Wait until CI is green.
+3. Self-review the PR diff (leftover debug, secrets, unrelated files, match to the PR body).
+4. Squash-merge without asking.
+
+Do not present a "merge locally / open PR / keep as-is" menu for finished work.
+---

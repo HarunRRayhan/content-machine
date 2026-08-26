@@ -90,3 +90,13 @@ first.
 - `.secrets/<service>.env` — operational/infra credentials (Railway tokens, etc.), gitignored,
   separate from the app's own `.env`. See `.secrets/README.md`. Never put an infra token in the
   app's `.env` — a local test run that overwrites `.env` has taken one down before.
+
+## Shipping
+
+When a change is done and locally green (`pest`, `pint`, `phpstan`, and frontend lint/types
+as they apply):
+
+1. Open a PR. Do not ask whether to open one.
+2. Wait until CI is green.
+3. Self-review the PR diff.
+4. Squash-merge without asking. Railway deploys `main`.
