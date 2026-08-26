@@ -1,9 +1,5 @@
 import { Head, Link, router } from '@inertiajs/react';
-import Heading from '@/components/heading';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import type { MouseEvent } from 'react';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index, show } from '@/routes/dashboard/videos';
@@ -44,6 +40,7 @@ type PaginatedItems = {
     data: IndexRow[];
     links: PaginationLink[];
     total: number;
+    from: number | null;
 };
 
 type Filters = {
@@ -71,8 +68,56 @@ const TAB_LABELS: Record<string, string> = {
     dropped: 'Dropped',
 };
 
+function scoreBand(score: number | null): 'hi' | 'mid' | 'lo' {
+    if (score === null) {
+        return 'lo';
+    }
+
+    if (score >= 800) {
+        return 'hi';
+    }
+
+    if (score >= 500) {
+        return 'mid';
+    }
+
+    return 'lo';
+}
+
+function trendKind(trend: string | null): 'evergreen' | 'seasonal' | '' {
+    if (!trend) {
+        return '';
+    }
+
+    const value = trend.toLowerCase();
+
+    if (value.includes('seasonal')) {
+        return 'seasonal';
+    }
+
+    if (value.includes('evergreen')) {
+        return 'evergreen';
+    }
+
+    return '';
+}
+
+function trendLabel(trend: string | null): string {
+    const kind = trendKind(trend);
+
+    if (kind === 'seasonal') {
+        return '🔴 Seasonal';
+    }
+
+    if (kind === 'evergreen') {
+        return '🟢 Evergreen';
+    }
+
+    return trend ?? '';
+}
+
 function paginationLabel(label: string): string {
-    return label.replace('&laquo;', '«').replace('&raquo;', '»');
+    return label.replaceAll('&laquo;', '«').replaceAll('&raquo;', '»');
 }
 
 function tabQuery(filters: Filters, status: string): Record<string, string> {
@@ -89,6 +134,20 @@ function tabQuery(filters: Filters, status: string): Record<string, string> {
     return query;
 }
 
+function visitRow(event: MouseEvent, href: string) {
+    if (
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        (event.target as HTMLElement).closest('a, button')
+    ) {
+        return;
+    }
+
+    router.visit(href);
+}
+
 export default function VideosIndex({
     items,
     filters,
@@ -96,6 +155,16 @@ export default function VideosIndex({
     tabs,
 }: PageProps) {
     const isIdeation = filters.status === 'ideation';
+    const published = counts.posted ?? 0;
+    const recorded = counts.recorded ?? 0;
+    const scheduled = counts.scheduled ?? 0;
+    const total =
+        (counts.pending ?? 0) +
+        (counts.ready ?? 0) +
+        recorded +
+        scheduled +
+        published;
+    const rankStart = items.from ?? 1;
 
     function applyFilter(next: Partial<Filters>) {
         router.get(
@@ -124,17 +193,31 @@ export default function VideosIndex({
         <>
             <Head title="Videos" />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
-                <Heading
-                    title="Videos"
-                    description="Scripts, captions, and presentation decks from the content pipeline."
-                />
+            <div className="studio-page studio-home flex h-full flex-1 flex-col">
+                <div className="home-head">
+                    <h2 className="home-h">All videos</h2>
+                </div>
 
-                <div
-                    role="tablist"
-                    aria-label="Video pipeline status"
-                    className="flex flex-wrap gap-1 border-b pb-1"
-                >
+                <div className="stats">
+                    <div className="stat">
+                        <div className="n">{total}</div>
+                        <div className="k">Total videos</div>
+                    </div>
+                    <div className="stat s-posted">
+                        <div className="n">{published}</div>
+                        <div className="k">Published</div>
+                    </div>
+                    <div className="stat s-recorded">
+                        <div className="n">{recorded}</div>
+                        <div className="k">Recorded</div>
+                    </div>
+                    <div className="stat s-scheduled">
+                        <div className="n">{scheduled}</div>
+                        <div className="k">Scheduled</div>
+                    </div>
+                </div>
+
+                <div className="tabbar statustabs" role="tablist">
                     {tabs.map((tab) => {
                         const active = filters.status === tab;
 
@@ -147,28 +230,16 @@ export default function VideosIndex({
                                     query: tabQuery(filters, tab),
                                 })}
                                 preserveScroll
-                                className={cn(
-                                    'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                                    active
-                                        ? 'bg-accent text-accent-foreground'
-                                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-                                )}
                             >
                                 {TAB_LABELS[tab] ?? tab}
-                                <Badge
-                                    variant={active ? 'default' : 'secondary'}
-                                    className="min-w-5 justify-center px-1.5 py-0 text-xs"
-                                >
-                                    {counts[tab] ?? 0}
-                                </Badge>
+                                <span className="tabn">{counts[tab] ?? 0}</span>
                             </Link>
                         );
                     })}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                    <Input
-                        className="max-w-xs"
+                <div className="search-row">
+                    <input
                         placeholder="Search title or id"
                         defaultValue={filters.q ?? ''}
                         onKeyDown={(event) => {
@@ -190,7 +261,6 @@ export default function VideosIndex({
                                     language: event.target.value || null,
                                 })
                             }
-                            className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
                         >
                             <option value="">All languages</option>
                             <option value="bn">Bangla</option>
@@ -200,140 +270,112 @@ export default function VideosIndex({
                 </div>
 
                 {items.data.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                        No {isIdeation ? 'ideas' : 'videos'} in this tab yet.
+                    <p className="empty">
+                        {isIdeation
+                            ? 'No ideas in the scratch pad yet.'
+                            : items.total === 0 && !filters.q
+                              ? 'No videos in this stage yet.'
+                              : 'No videos match this filter.'}
                     </p>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                    <div className="vtable-wrap">
+                        <table className="vtable">
                             <thead>
-                                <tr className="border-b text-left text-muted-foreground">
-                                    <th className="py-2 pr-4 font-medium">
-                                        ID
-                                    </th>
-                                    <th className="py-2 pr-4 font-medium">
-                                        Title
-                                    </th>
-                                    <th className="py-2 pr-4 font-medium">
-                                        {isIdeation ? 'Score' : 'Content'}
-                                    </th>
-                                    <th className="py-2 pr-4 font-medium">
-                                        {isIdeation ? 'Trend' : 'Status'}
-                                    </th>
-                                    <th className="py-2 font-medium">Open</th>
+                                <tr>
+                                    {isIdeation ? (
+                                        <>
+                                            <th>Rank</th>
+                                            <th>ID</th>
+                                            <th>Idea</th>
+                                            <th>Trend</th>
+                                            <th>Relevancy</th>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <th>ID</th>
+                                            <th>Title</th>
+                                            <th>Status</th>
+                                        </>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody>
-                                {items.data.map((row) => {
+                                {items.data.map((row, position) => {
                                     if (row.type === 'idea') {
+                                        const href = showIdea.url(row.id);
+                                        const kind = trendKind(row.trend);
+
                                         return (
                                             <tr
                                                 key={`idea-${row.id}`}
-                                                className="border-b last:border-0"
+                                                onClick={(event) =>
+                                                    visitRow(event, href)
+                                                }
                                             >
-                                                <td className="py-2 pr-4">
-                                                    <Badge variant="outline">
+                                                <td className="c-rank">
+                                                    {rankStart + position}
+                                                </td>
+                                                <td className="c-num">
+                                                    <Link href={href}>
                                                         {row.human_id}
-                                                    </Badge>
-                                                </td>
-                                                <td className="max-w-md py-2 pr-4 font-medium">
-                                                    {row.title}
-                                                </td>
-                                                <td className="py-2 pr-4 text-muted-foreground">
-                                                    {row.score !== null
-                                                        ? `${row.score}/1000`
-                                                        : '—'}
-                                                </td>
-                                                <td className="py-2 pr-4">
-                                                    {row.trend ? (
-                                                        <Badge variant="secondary">
-                                                            {row.trend}
-                                                        </Badge>
-                                                    ) : (
-                                                        <span className="text-muted-foreground">
-                                                            —
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="py-2">
-                                                    <Link
-                                                        href={showIdea.url(
-                                                            row.id,
-                                                        )}
-                                                        className="text-primary underline-offset-4 hover:underline"
-                                                    >
-                                                        Open
                                                     </Link>
+                                                </td>
+                                                <td className="c-title">
+                                                    <Link href={href}>
+                                                        {row.title}
+                                                    </Link>
+                                                </td>
+                                                <td
+                                                    className={`c-trend${kind ? ` trend-${kind}` : ''}`}
+                                                >
+                                                    {trendLabel(row.trend)}
+                                                </td>
+                                                <td className="c-status">
+                                                    <span
+                                                        className={`pill score ${scoreBand(row.score)}`}
+                                                    >
+                                                        {row.score !== null
+                                                            ? `${row.score}/1000`
+                                                            : '—'}
+                                                    </span>
                                                 </td>
                                             </tr>
                                         );
                                     }
 
+                                    const href = show.url(row.id);
+
                                     return (
                                         <tr
                                             key={`video-${row.id}`}
-                                            className="border-b last:border-0"
+                                            onClick={(event) =>
+                                                visitRow(event, href)
+                                            }
                                         >
-                                            <td className="py-2 pr-4">
-                                                <Badge variant="outline">
-                                                    {row.human_id}
-                                                </Badge>
-                                            </td>
-                                            <td className="max-w-md py-2 pr-4 font-medium">
-                                                {row.title}
-                                            </td>
-                                            <td className="py-2 pr-4">
-                                                <div className="flex flex-wrap gap-1">
-                                                    {row.has_script && (
-                                                        <Badge variant="outline">
-                                                            script
-                                                        </Badge>
-                                                    )}
-                                                    {row.has_captions && (
-                                                        <Badge variant="outline">
-                                                            captions
-                                                        </Badge>
-                                                    )}
-                                                    {row.has_deck && (
-                                                        <Badge variant="outline">
-                                                            deck
-                                                        </Badge>
-                                                    )}
-                                                    {!row.has_script &&
-                                                        !row.has_captions &&
-                                                        !row.has_deck && (
-                                                            <span className="text-muted-foreground">
-                                                                —
-                                                            </span>
-                                                        )}
-                                                </div>
-                                            </td>
-                                            <td className="py-2 pr-4">
-                                                <div className="flex flex-wrap items-center gap-1">
-                                                    <Badge variant="secondary">
-                                                        {TAB_LABELS[
-                                                            row.status
-                                                        ] ?? row.status}
-                                                    </Badge>
-                                                    {[
-                                                        'queued',
-                                                        'running',
-                                                    ].includes(
-                                                        row.publish_state,
-                                                    ) && (
-                                                        <Badge variant="outline">
-                                                            {row.publish_state}
-                                                        </Badge>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="py-2">
-                                                <Link
-                                                    href={show.url(row.id)}
-                                                    className="text-primary underline-offset-4 hover:underline"
-                                                >
-                                                    Open
+                                            <td className="c-num">
+                                                <Link href={href}>
+                                                    #{row.number}
                                                 </Link>
+                                            </td>
+                                            <td className="c-title">
+                                                <Link href={href}>
+                                                    {row.title}
+                                                </Link>
+                                            </td>
+                                            <td className="c-status">
+                                                <span
+                                                    className={`pill st-${row.status}`}
+                                                >
+                                                    {TAB_LABELS[row.status] ??
+                                                        row.status}
+                                                </span>
+                                                {['queued', 'running'].includes(
+                                                    row.publish_state,
+                                                ) && (
+                                                    <span className="pill st-scheduled">
+                                                        {row.publish_state}
+                                                    </span>
+                                                )}
                                             </td>
                                         </tr>
                                     );
@@ -344,24 +386,32 @@ export default function VideosIndex({
                 )}
 
                 {items.links.length > 3 && (
-                    <nav className="flex flex-wrap items-center gap-1">
-                        {items.links.map((link, position) => (
-                            <Button
-                                key={`${link.label}-${position}`}
-                                variant={link.active ? 'default' : 'outline'}
-                                size="sm"
-                                disabled={link.url === null}
-                                asChild={link.url !== null}
-                            >
-                                {link.url !== null ? (
-                                    <Link href={link.url} preserveScroll>
-                                        {paginationLabel(link.label)}
-                                    </Link>
-                                ) : (
-                                    <span>{paginationLabel(link.label)}</span>
-                                )}
-                            </Button>
-                        ))}
+                    <nav className="pager">
+                        {items.links.map((link, position) =>
+                            link.url && !link.active ? (
+                                <Link
+                                    key={`${link.label}-${position}`}
+                                    href={link.url}
+                                    preserveScroll
+                                    className="pgbtn"
+                                >
+                                    {paginationLabel(link.label)}
+                                </Link>
+                            ) : (
+                                <span
+                                    key={`${link.label}-${position}`}
+                                    className={[
+                                        'pgbtn',
+                                        link.active ? 'cur' : '',
+                                        link.url === null ? 'is-disabled' : '',
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' ')}
+                                >
+                                    {paginationLabel(link.label)}
+                                </span>
+                            ),
+                        )}
                     </nav>
                 )}
             </div>

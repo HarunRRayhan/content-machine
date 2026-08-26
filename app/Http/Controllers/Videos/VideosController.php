@@ -28,19 +28,20 @@ class VideosController extends Controller
      */
     public const TAB_STATUSES = [
         'ideation',
-        'draft',
         'pending',
         'ready',
         'recorded',
         'scheduled',
         'posted',
         'archived',
+        'draft',
         'dropped',
     ];
 
     /**
      * List the current workspace's videos (or video ideas on the Ideation
-     * tab), newest first. Filterable by status tab, language, and a
+     * tab). Videos are newest first. Ideas are highest score first, with
+     * null scores last. Filterable by status tab, language, and a
      * free-text query over title / human id.
      */
     public function index(Request $request): Response
@@ -64,7 +65,8 @@ class VideosController extends Controller
                             ->orWhere('slug', 'ilike', $like);
                     });
                 })
-                ->latest()
+                ->orderByRaw('score DESC NULLS LAST')
+                ->orderBy('title')
                 ->paginate(20)
                 ->withQueryString()
                 ->through(fn (Idea $idea) => $this->presentIdeaSummary($idea));
