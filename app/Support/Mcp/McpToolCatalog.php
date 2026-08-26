@@ -1,0 +1,167 @@
+<?php
+
+namespace App\Support\Mcp;
+
+/**
+ * The tools this workspace exposes over MCP. Same set as the stdio server
+ * in personal-content: scratchpad capture/triage plus idea read/edit.
+ *
+ * @phpstan-type McpTool array{name: string, description: string, inputSchema: array<string, mixed>, ability: string}
+ */
+final class McpToolCatalog
+{
+    /**
+     * @return list<McpTool>
+     */
+    public static function tools(): array
+    {
+        return [
+            [
+                'name' => 'list_scratchpad',
+                'description' => 'List Content Machine Scratch Pad entries, newest first. Defaults to status=new (the untriaged inbox); use status=all/triaged/dropped.',
+                'ability' => 'scratchpad:read',
+                'inputSchema' => self::schema([
+                    'status' => ['type' => 'string', 'enum' => ['new', 'triaged', 'dropped', 'all']],
+                    'kind' => ['type' => 'string', 'enum' => ['text', 'link', 'photo', 'voice', 'file']],
+                ]),
+            ],
+            [
+                'name' => 'get_scratchpad',
+                'description' => 'Fetch one Scratch Pad entry in full by its public_id.',
+                'ability' => 'scratchpad:read',
+                'inputSchema' => self::schema([
+                    'public_id' => ['type' => 'string', 'description' => 'The entry ULID from list_scratchpad.'],
+                ], ['public_id']),
+            ],
+            [
+                'name' => 'capture_note',
+                'description' => 'Capture a plain text note into the Scratch Pad.',
+                'ability' => 'scratchpad:write',
+                'inputSchema' => self::schema([
+                    'body' => ['type' => 'string', 'minLength' => 1],
+                ], ['body']),
+            ],
+            [
+                'name' => 'capture_link',
+                'description' => 'Capture a URL into the Scratch Pad. Content Machine resolves it in the background.',
+                'ability' => 'scratchpad:write',
+                'inputSchema' => self::schema([
+                    'url' => ['type' => 'string', 'format' => 'uri'],
+                ], ['url']),
+            ],
+            [
+                'name' => 'update_scratchpad',
+                'description' => 'Edit an entry title, body, or language. Dropped entries refuse edits.',
+                'ability' => 'scratchpad:write',
+                'inputSchema' => self::schema([
+                    'public_id' => ['type' => 'string'],
+                    'title' => ['type' => 'string'],
+                    'body' => ['type' => 'string'],
+                    'language' => ['type' => 'string', 'description' => 'e.g. bn or en'],
+                ], ['public_id']),
+            ],
+            [
+                'name' => 'delete_scratchpad',
+                'description' => 'Hard-delete an untriaged entry. Refused if it is already an idea.',
+                'ability' => 'scratchpad:write',
+                'inputSchema' => self::schema([
+                    'public_id' => ['type' => 'string'],
+                ], ['public_id']),
+            ],
+            [
+                'name' => 'triage_scratchpad',
+                'description' => 'Route an entry: target=post_idea or video_idea files it as PI-N/VI-N (title required); target=drop needs drop_reason.',
+                'ability' => 'scratchpad:write',
+                'inputSchema' => self::schema([
+                    'public_id' => ['type' => 'string'],
+                    'target' => ['type' => 'string', 'enum' => ['post_idea', 'video_idea', 'drop']],
+                    'title' => ['type' => 'string'],
+                    'score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 1000],
+                    'trend' => ['type' => 'string', 'enum' => ['evergreen', 'seasonal']],
+                    'rationale' => ['type' => 'string'],
+                    'drop_reason' => ['type' => 'string'],
+                ], ['public_id', 'target']),
+            ],
+            [
+                'name' => 'list_ideas',
+                'description' => 'List ideas (PI-/VI-), optionally filtered by kind and status.',
+                'ability' => 'ideas:read',
+                'inputSchema' => self::schema([
+                    'kind' => ['type' => 'string', 'enum' => ['post', 'video', 'feature']],
+                    'status' => ['type' => 'string', 'enum' => ['open', 'promoted', 'dropped']],
+                ]),
+            ],
+            [
+                'name' => 'get_idea',
+                'description' => 'Fetch one idea by human_id (e.g. PI-7).',
+                'ability' => 'ideas:read',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string'],
+                ], ['human_id']),
+            ],
+            [
+                'name' => 'update_idea',
+                'description' => 'Edit an idea title (required) and optionally score, trend, rationale, or body.',
+                'ability' => 'ideas:write',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string'],
+                    'title' => ['type' => 'string'],
+                    'score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 1000],
+                    'trend' => ['type' => 'string', 'enum' => ['evergreen', 'seasonal']],
+                    'rationale' => ['type' => 'string'],
+                    'body' => ['type' => 'string'],
+                ], ['human_id', 'title']),
+            ],
+        ];
+    }
+
+    /**
+     * Public tool list for tools/list: ability is internal, not part of MCP.
+     *
+     * @return list<array{name: string, description: string, inputSchema: array<string, mixed>}>
+     */
+    public static function published(): array
+    {
+        return array_map(
+            fn (array $tool): array => [
+                'name' => $tool['name'],
+                'description' => $tool['description'],
+                'inputSchema' => $tool['inputSchema'],
+            ],
+            self::tools(),
+        );
+    }
+
+    /**
+     * @return McpTool|null
+     */
+    public static function find(string $name): ?array
+    {
+        foreach (self::tools() as $tool) {
+            if ($tool['name'] === $name) {
+                return $tool;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $properties
+     * @param  list<string>  $required
+     * @return array<string, mixed>
+     */
+    private static function schema(array $properties, array $required = []): array
+    {
+        $schema = [
+            'type' => 'object',
+            'properties' => $properties,
+        ];
+
+        if ($required !== []) {
+            $schema['required'] = $required;
+        }
+
+        return $schema;
+    }
+}

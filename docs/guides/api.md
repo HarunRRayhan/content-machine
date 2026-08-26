@@ -94,4 +94,18 @@ curl -s -X PATCH https://cm.harun.dev/api/v1/scratchpad/01J8... \
 - Promotion of an idea → video/post over the API (dashboard promote stays)
 - Publishing and scheduling
 - Rate limiting beyond the default per-minute throttle
-- An MCP transport inside Laravel (clients wrap these routes instead)
+
+## MCP
+
+`POST /mcp` is a Streamable HTTP MCP server for the same workspace token.
+Send JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`, `ping`).
+Notifications (no `id`) get HTTP 202.
+
+```
+Authorization: Bearer <your-token>
+Content-Type: application/json
+```
+
+The API access page has copy-paste setup for Claude, Cursor, Codex, ChatGPT,
+Open Code, Command Code, and a generic custom client. Tools cover Scratch Pad
+and ideas (same surface as the personal-content stdio server).

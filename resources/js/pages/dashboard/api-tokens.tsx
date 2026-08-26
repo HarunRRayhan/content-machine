@@ -3,6 +3,7 @@ import { useState } from 'react';
 import WorkspaceApiTokensController, {
     revoke as revokeApiToken,
 } from '@/actions/App/Http/Controllers/ApiTokens/WorkspaceApiTokensController';
+import McpSetupPanel from '@/components/dashboard/mcp-setup-panel';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,7 @@ type ApiToken = {
 type PageProps = {
     api_tokens: ApiToken[];
     newApiToken?: string | null;
+    mcp_url: string;
 };
 
 const API_TOKEN_ABILITIES = [
@@ -33,7 +35,11 @@ const API_TOKEN_ABILITIES = [
     'ideas:write',
 ];
 
-export default function ApiTokens({ api_tokens, newApiToken }: PageProps) {
+export default function ApiTokens({
+    api_tokens,
+    newApiToken,
+    mcp_url,
+}: PageProps) {
     // The freshly minted plaintext arrives once, as a flash prop. Hold the
     // latest value in local state (render-phase adjustment, no effect) so
     // it stays on screen across partial reloads, until the user says
@@ -63,7 +69,7 @@ export default function ApiTokens({ api_tokens, newApiToken }: PageProps) {
                 <div className="flex items-start justify-between gap-4">
                     <Heading
                         title="API access"
-                        description="Bearer tokens that let external clients read and write this workspace's scratchpad and ideas. Tokens are scoped to whichever team workspace you have selected — switch teams to mint for another one."
+                        description="Bearer tokens for the JSON API and the MCP endpoint. Scoped to the team workspace you have selected. Switch teams to mint for another one."
                     />
                     {hasTokens && (
                         <Button
@@ -230,6 +236,8 @@ export default function ApiTokens({ api_tokens, newApiToken }: PageProps) {
                         </Form>
                     </div>
                 )}
+
+                <McpSetupPanel mcpUrl={mcp_url} token={capturedToken} />
 
                 <p className="text-sm text-muted-foreground">
                     Endpoint reference lives in{' '}

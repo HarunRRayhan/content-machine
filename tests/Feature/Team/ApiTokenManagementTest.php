@@ -45,6 +45,7 @@ class ApiTokenManagementTest extends TestCase
                 fn ($page) => $page
                     ->component('dashboard/api-tokens')
                     ->where('api_tokens.0.name', 'personal-content')
+                    ->where('mcp_url', url('/mcp'))
                     ->missing('api_tokens.1'),
             );
     }
