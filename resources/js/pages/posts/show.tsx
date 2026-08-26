@@ -127,7 +127,6 @@ export default function PostShow({ post }: PageProps) {
                         title={post.title}
                         status={post.status}
                         platforms={post.platforms}
-                        images={post.images}
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
