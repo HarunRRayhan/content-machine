@@ -6,9 +6,9 @@
         <title>{{ config('app.name') }} — self-hosted content pipeline</title>
         <meta name="description" content="An open-source pipeline that turns a stray thought into a scheduled post: capture, draft, schedule, publish — self-hosted, no subscription.">
 
-        <link rel="icon" href="/favicon.ico" sizes="any">
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
+        <link rel="icon" href="/favicon.ico?v=3" sizes="32x32">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
 
         @fonts(['big-shoulders-stencil-display', 'big-shoulders', 'ibm-plex-mono'])
         @vite(['resources/css/marketing.css'])
@@ -19,9 +19,9 @@
             <header class="flex items-center justify-between border-b border-cm-border py-6">
                 <a href="/" class="flex items-center gap-3">
                     <svg viewBox="0 0 40 40" class="h-8 w-8 rounded-md" xmlns="http://www.w3.org/2000/svg">
-                        <rect width="40" height="40" rx="9" fill="#171310"/>
-                        <polygon points="8,6 22,20 8,34 14,34 28,20 14,6" fill="#F2600C"/>
-                        <polygon points="20,11 32,20 20,29 25,29 37,20 25,11" fill="#F2600C" opacity="0.42"/>
+                        <rect width="40" height="40" rx="9" fill="#17130f"/>
+                        <polygon points="8,6 22,20 8,34 14,34 28,20 14,6" fill="#c23a22"/>
+                        <polygon points="20,11 32,20 20,29 25,29 37,20 25,11" fill="#c23a22" opacity="0.42"/>
                     </svg>
                     <span class="font-heading text-lg font-semibold tracking-wide text-cm-fg uppercase">
                         {{ config('app.name') }}
