@@ -1,5 +1,5 @@
 import { Head, Link } from '@inertiajs/react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import PublishDialog, {
     PublishStatusBanner,
 } from '@/components/content/publish-dialog';
@@ -9,11 +9,6 @@ import type { LangCode } from '@/lib/lang-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index } from '@/routes/dashboard/posts';
-
-type PostImage = {
-    filename: string;
-    url: string | null;
-};
 
 type PostDetail = {
     id: number;
@@ -34,9 +29,7 @@ type PostDetail = {
         }>;
     }>;
     platforms: string[];
-    images: PostImage[];
     image_urls: Record<string, string>;
-    caption_image_names: string[];
     language: string | null;
     slug: string | null;
     status: string;
@@ -72,17 +65,6 @@ export default function PostShow({ post }: PageProps) {
         : ['queued', 'running'].includes(post.publish_state)
           ? 'A publish job is already queued or running.'
           : null;
-
-    const overviewImages = useMemo(() => {
-        if (post.images.length > 0) {
-            return post.images;
-        }
-
-        return post.caption_image_names.map((name) => ({
-            filename: name,
-            url: post.image_urls[name] ?? null,
-        }));
-    }, [post.caption_image_names, post.image_urls, post.images]);
 
     return (
         <>
@@ -142,7 +124,6 @@ export default function PostShow({ post }: PageProps) {
                             title={post.title}
                             status={post.status}
                             platforms={post.platforms}
-                            images={overviewImages}
                         />
                         <section className="pane max-w-3xl">
                             <div className="pane-head">
