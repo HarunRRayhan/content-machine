@@ -67,8 +67,11 @@ return [
         // container (deploy/Dockerfile's runtime stage sets WORKDIR /var/www/html
         // and COPY . . there, so Laravel's base_path()/storage_path() resolve from
         // that same root), which is exactly where the persistent Railway volume is
-        // mounted. R2/S3 is a later phase; swapping the driver here is a config
-        // change only as long as callers keep going through Storage::disk('scratchpad').
+        // mounted. Fresh Railway volumes are root:root; deploy/docker/entrypoint.d/
+        // 20-writable-uploads.sh chowns that mount to www-data at container start
+        // (cm:deploy also mkdir's the path during preDeploy). R2/S3 is a later
+        // phase; swapping the driver here is a config change only as long as
+        // callers keep going through Storage::disk('scratchpad').
         'scratchpad' => [
             'driver' => 'local',
             'root' => storage_path('app/uploads'),
