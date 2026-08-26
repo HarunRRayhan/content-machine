@@ -8,12 +8,7 @@ import {
     orderPlatformsByLang,
     platformLabel,
 } from '@/lib/platform-meta';
-import {
-    PostCaptionMock,
-    firstCommentLabel,
-    postCount,
-    threadItems,
-} from '@/lib/post-caption-mock';
+import { PostCaptionMock } from '@/lib/post-caption-mock';
 import type { HandleDirectory } from '@/lib/post-caption-mock';
 
 type CaptionGroupWithLang = CaptionGroup & {
@@ -27,18 +22,6 @@ type Props = {
     handles?: HandleDirectory;
     defaultLang?: LangCode | null;
 };
-
-async function copyText(text: string): Promise<void> {
-    if (!text) {
-        return;
-    }
-
-    try {
-        await navigator.clipboard.writeText(text);
-    } catch {
-        // ignore
-    }
-}
 
 function inferLangs(
     groups: CaptionGroupWithLang[],
@@ -196,127 +179,12 @@ export default function PostCaptionsPanel({
                         )}
 
                         {platform && (
-                            <>
-                                <PostCaptionMock
-                                    platform={platform}
-                                    lang={viewLang}
-                                    handles={handles}
-                                    imageUrls={imageUrls}
-                                />
-
-                                <div className="cap">
-                                    <div className="cap-h">
-                                        <span
-                                            className={
-                                                banglaUi
-                                                    ? 'cap-n is-bn'
-                                                    : 'cap-n'
-                                            }
-                                        >
-                                            {platformLabel(
-                                                platform.name,
-                                                viewLang,
-                                            )}
-                                        </span>
-                                        <span className="cap-btns">
-                                            {platform.title && (
-                                                <button
-                                                    type="button"
-                                                    className="cap-copy"
-                                                    onClick={() =>
-                                                        copyText(platform.title)
-                                                    }
-                                                >
-                                                    ⧉ Title
-                                                </button>
-                                            )}
-                                            {platform.caption && (
-                                                <button
-                                                    type="button"
-                                                    className="cap-copy"
-                                                    onClick={() =>
-                                                        copyText(
-                                                            platform.caption,
-                                                        )
-                                                    }
-                                                >
-                                                    ⧉ Caption
-                                                </button>
-                                            )}
-                                        </span>
-                                    </div>
-                                    {platform.title && (
-                                        <div className="cap-t">
-                                            {platform.title}
-                                        </div>
-                                    )}
-                                    {platform.caption && (
-                                        <div className="cap-b">
-                                            {platform.caption}
-                                        </div>
-                                    )}
-                                    {platform.caption && (
-                                        <div className="cap-cnt cap-cnt-ro">
-                                            <b>{postCount(platform.caption)}</b>
-                                        </div>
-                                    )}
-                                    {platform.first_comment && (
-                                        <div className="cap-thread">
-                                            <div className="cap-thread-h">
-                                                <span className="cap-thread-label">
-                                                    {firstCommentLabel(
-                                                        platform.name,
-                                                        threadItems(
-                                                            platform.thread,
-                                                        ),
-                                                    )}
-                                                </span>
-                                                <button
-                                                    type="button"
-                                                    className="cap-copy"
-                                                    onClick={() =>
-                                                        copyText(
-                                                            platform.first_comment,
-                                                        )
-                                                    }
-                                                >
-                                                    ⧉ Copy
-                                                </button>
-                                            </div>
-                                            <div className="cap-b">
-                                                {platform.first_comment}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {threadItems(platform.thread).map(
-                                        (tweet, tweetIndex) => (
-                                            <div
-                                                className="cap-thread"
-                                                key={`thread-${tweetIndex}`}
-                                            >
-                                                <div className="cap-thread-h">
-                                                    <span className="cap-thread-label">
-                                                        ↳ Tweet {tweetIndex + 2}{' '}
-                                                        (thread)
-                                                    </span>
-                                                    <button
-                                                        type="button"
-                                                        className="cap-copy"
-                                                        onClick={() =>
-                                                            copyText(tweet)
-                                                        }
-                                                    >
-                                                        ⧉ Copy
-                                                    </button>
-                                                </div>
-                                                <div className="cap-b">
-                                                    {tweet}
-                                                </div>
-                                            </div>
-                                        ),
-                                    )}
-                                </div>
-                            </>
+                            <PostCaptionMock
+                                platform={platform}
+                                lang={viewLang}
+                                handles={handles}
+                                imageUrls={imageUrls}
+                            />
                         )}
                     </section>
                 );
