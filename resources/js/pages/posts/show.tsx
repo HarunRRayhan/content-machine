@@ -54,8 +54,16 @@ export default function PostShow({ post }: PageProps) {
     const hasCaptions = post.captions.some(
         (group) => group.platforms.length > 0,
     );
-    const defaultLang: LangCode | null =
-        post.language === 'en' ? 'en' : post.language === 'bn' ? 'bn' : null;
+    const hasEnglishCaptions = post.captions.some(
+        (group) => group.lang === 'en',
+    );
+    const defaultLang: LangCode | null = hasEnglishCaptions
+        ? 'en'
+        : post.language === 'en'
+          ? 'en'
+          : post.language === 'bn'
+            ? 'bn'
+            : null;
 
     const publishDisabled =
         !post.postsyncer_ready ||
