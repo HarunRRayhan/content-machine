@@ -26,19 +26,14 @@ type PageProps = {
     api_tokens: ApiToken[];
     newApiToken?: string | null;
     mcp_url: string;
+    available_abilities: string[];
 };
-
-const API_TOKEN_ABILITIES = [
-    'scratchpad:read',
-    'scratchpad:write',
-    'ideas:read',
-    'ideas:write',
-];
 
 export default function ApiTokens({
     api_tokens,
     newApiToken,
     mcp_url,
+    available_abilities,
 }: PageProps) {
     // The freshly minted plaintext arrives once, as a flash prop. Hold the
     // latest value in local state (render-phase adjustment, no effect) so
@@ -208,7 +203,7 @@ export default function ApiTokens({
                                         <legend className="text-sm font-medium">
                                             Abilities
                                         </legend>
-                                        {API_TOKEN_ABILITIES.map((ability) => (
+                                        {available_abilities.map((ability) => (
                                             <label
                                                 key={ability}
                                                 className="flex items-center gap-2 text-sm"

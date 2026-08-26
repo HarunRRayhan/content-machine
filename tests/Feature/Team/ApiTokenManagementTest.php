@@ -46,6 +46,7 @@ class ApiTokenManagementTest extends TestCase
                     ->component('dashboard/api-tokens')
                     ->where('api_tokens.0.name', 'personal-content')
                     ->where('mcp_url', url('/mcp'))
+                    ->where('available_abilities', WorkspaceApiToken::ABILITIES)
                     ->missing('api_tokens.1'),
             );
     }
@@ -56,7 +57,16 @@ class ApiTokenManagementTest extends TestCase
 
         $response = $this->post(route('dashboard.team.api-tokens.store'), [
             'name' => 'Script Studio',
-            'abilities' => ['scratchpad:read', 'scratchpad:write'],
+            'abilities' => [
+                'scratchpad:read',
+                'scratchpad:write',
+                'ideas:read',
+                'ideas:write',
+                'videos:read',
+                'videos:write',
+                'posts:read',
+                'posts:write',
+            ],
         ]);
 
         $response->assertRedirect(route('dashboard.team.api-tokens.index'));
@@ -69,6 +79,8 @@ class ApiTokenManagementTest extends TestCase
 
         $this->assertSame('Script Studio', $token->name);
         $this->assertSame($workspace->id, $token->workspace_id);
+        $this->assertContains('videos:write', $token->abilities);
+        $this->assertContains('posts:write', $token->abilities);
         // Only the hash is stored: 64 hex chars, no cm_-prefixed plaintext
         // anywhere in the row.
         $this->assertSame(64, strlen($token->token_hash));
