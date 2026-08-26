@@ -273,6 +273,65 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_show_keeps_per_platform_image_lists_and_does_not_fill_an_explicit_none(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Split images',
+            'captions' => [
+                'English' => [
+                    'twitter' => [
+                        'caption' => 'No photo',
+                        'images' => [],
+                    ],
+                    'facebook' => [
+                        'caption' => 'Cover only',
+                        'images' => ['en-cover.png'],
+                    ],
+                ],
+                'Bangla' => [
+                    'facebook' => [
+                        'caption' => 'Bangla cover',
+                        'images' => ['bn-cover.png'],
+                    ],
+                ],
+            ],
+        ]);
+
+        foreach (['en-cover.png', 'bn-cover.png', 'extra-slide.png'] as $filename) {
+            $media = MediaAsset::factory()->for($workspace)->create([
+                'disk' => 'scratchpad',
+                'path' => $workspace->id.'/'.$filename,
+                'original_filename' => $filename,
+                'mime' => 'image/png',
+            ]);
+            Storage::disk('scratchpad')->put($media->path, $filename);
+            Attachment::factory()->for($post, 'attachable')->for($media)->create([
+                'role' => 'image',
+            ]);
+        }
+
+        $this->get(route('dashboard.posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.captions', function (mixed $groups): bool {
+                    $byLang = [];
+                    foreach ($groups as $group) {
+                        $byLang[$group['lang']] = [];
+                        foreach ($group['platforms'] as $platform) {
+                            $byLang[$group['lang']][$platform['name']] = $platform['images'];
+                        }
+                    }
+
+                    return ($byLang['en']['twitter'] ?? null) === []
+                        && ($byLang['en']['facebook'] ?? null) === ['en-cover.png']
+                        && ($byLang['bn']['facebook'] ?? null) === ['bn-cover.png'];
+                })
+            );
+    }
+
     public function test_media_streams_an_attached_image_for_the_current_workspace(): void
     {
         Storage::fake('scratchpad');

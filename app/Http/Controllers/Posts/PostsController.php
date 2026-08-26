@@ -309,7 +309,9 @@ class PostsController extends Controller
      * Imported posts often store empty per-platform `images` arrays even
      * when the post has attached files (the markdown `**Images:**` line
      * lived at post level). If no platform listed any filenames, fill from
-     * attachments so the preview actually renders <img> tags.
+     * attachments so the preview actually renders <img> tags. An explicit
+     * empty list on one platform (Twitter `**Images:** none`) is left
+     * empty when any other platform already named files.
      *
      * @param  list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>  $captions
      * @param  list<array<string, mixed>>  $images

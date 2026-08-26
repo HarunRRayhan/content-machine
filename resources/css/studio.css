@@ -590,6 +590,10 @@
     border-radius: 10px;
     padding: 8px 16px;
     cursor: pointer;
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
 }
 
 .studio-page .cap-tabbar button[aria-selected='true'] {
