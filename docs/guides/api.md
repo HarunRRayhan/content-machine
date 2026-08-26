@@ -66,7 +66,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/posts` | posts:write | create / idempotent import |
 | PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, … |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
-| GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image |
+| POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
+| GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
 Captures made through the API are recorded with `source: api`, and every
 status transition / field change they cause is attributed to the token by

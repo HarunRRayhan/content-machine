@@ -138,4 +138,36 @@ class PostsApiTest extends TestCase
         $this->acting()->get("/api/v1/posts/P-4/media/{$foreign->id}")
             ->assertNotFound();
     }
+
+    public function test_upload_pdf_attaches_a_linkedin_document_and_streams_it_back(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-50',
+            'number' => 50,
+            'title' => 'N+1',
+        ])->assertCreated();
+
+        $pdf = UploadedFile::fake()->createWithContent(
+            'p-50-linkedin-carousel.pdf',
+            "%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+        );
+
+        $this->acting()->post('/api/v1/posts/P-50/documents', [
+            'document' => $pdf,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'P-50')
+            ->assertJsonPath('data.attachments.0.role', 'document')
+            ->assertJsonPath('data.attachments.0.filename', 'p-50-linkedin-carousel.pdf');
+
+        $asset = MediaAsset::query()->sole();
+        $this->assertSame('document', $asset->kind);
+        Storage::disk('scratchpad')->assertExists($asset->path);
+
+        $this->acting()->get("/api/v1/posts/P-50/media/{$asset->id}")
+            ->assertOk()
+            ->assertHeader('Content-Type', $asset->mime);
+    }
 }
