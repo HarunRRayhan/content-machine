@@ -1,4 +1,5 @@
 import { Head, Link, router } from '@inertiajs/react';
+import { postShowUrl } from '@/lib/content-urls';
 import {
     PLATFORM_META,
     POST_STATUS_LABELS,
@@ -7,7 +8,7 @@ import {
 } from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index, show } from '@/routes/dashboard/posts';
+import { index } from '@/routes/dashboard/posts';
 
 type IdeaRow = {
     type: 'idea';
@@ -247,11 +248,13 @@ export default function PostsIndex({
                                         <tr
                                             key={`post-${row.id}`}
                                             onClick={() =>
-                                                router.visit(show.url(row.id))
+                                                router.visit(
+                                                    postShowUrl(row.human_id),
+                                                )
                                             }
                                         >
                                             <td className="c-num">
-                                                P-{row.number}
+                                                {row.human_id}
                                             </td>
                                             <td className="c-title">
                                                 {row.title}
@@ -301,7 +304,9 @@ export default function PostsIndex({
                                             </td>
                                             <td className="c-act">
                                                 <Link
-                                                    href={show.url(row.id)}
+                                                    href={postShowUrl(
+                                                        row.human_id,
+                                                    )}
                                                     className="viewbtn"
                                                     onClick={(event) =>
                                                         event.stopPropagation()

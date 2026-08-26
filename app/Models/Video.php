@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Concerns\BelongsToWorkspace;
 use App\Concerns\RecordsHistory;
+use App\Concerns\ResolvesByHumanId;
 use Carbon\CarbonImmutable;
 use Database\Factories\VideoFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -42,7 +43,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 class Video extends Model
 {
     /** @use HasFactory<VideoFactory> */
-    use BelongsToWorkspace, HasFactory, RecordsHistory;
+    use BelongsToWorkspace, HasFactory, RecordsHistory, ResolvesByHumanId;
 
     public const STATUSES = [
         'draft',

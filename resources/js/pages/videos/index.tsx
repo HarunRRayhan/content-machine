@@ -1,9 +1,10 @@
 import { Head, Link, router } from '@inertiajs/react';
 import type { MouseEvent } from 'react';
+import { videoShowUrl } from '@/lib/content-urls';
 import { scoreBand, trendKind, trendLabel } from '@/lib/studio-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index, show } from '@/routes/dashboard/videos';
+import { index } from '@/routes/dashboard/videos';
 
 type IdeaRow = {
     type: 'idea';
@@ -296,7 +297,7 @@ export default function VideosIndex({
                                         );
                                     }
 
-                                    const href = show.url(row.id);
+                                    const href = videoShowUrl(row.human_id);
 
                                     return (
                                         <tr
@@ -307,7 +308,7 @@ export default function VideosIndex({
                                         >
                                             <td className="c-num">
                                                 <Link href={href}>
-                                                    #{row.number}
+                                                    {row.human_id}
                                                 </Link>
                                             </td>
                                             <td className="c-title">

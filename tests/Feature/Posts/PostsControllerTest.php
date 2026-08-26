@@ -152,6 +152,87 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_show_resolves_a_prefixed_human_id_on_the_short_url(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Custom id post',
+            'human_id' => 'P-50',
+            'number' => 50,
+        ]);
+
+        $this->get('/posts/P-50')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.id', $post->id)
+                ->where('post.human_id', 'P-50')
+                ->where('post.title', 'Custom id post')
+            );
+    }
+
+    public function test_show_resolves_an_imported_bangla_human_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Imported post',
+            'human_id' => 'BP-12',
+            'number' => 12,
+        ]);
+
+        $this->get('/posts/BP-12')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.id', $post->id)
+                ->where('post.human_id', 'BP-12')
+            );
+    }
+
+    public function test_dashboard_show_also_resolves_a_prefixed_human_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Dashboard custom id',
+            'human_id' => 'P-50',
+            'number' => 50,
+        ]);
+
+        $this->get('/dashboard/posts/P-50')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.id', $post->id)
+            );
+    }
+
+    public function test_short_url_still_resolves_a_numeric_database_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create(['title' => 'Numeric id post']);
+
+        $this->get('/posts/'.$post->id)
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.id', $post->id)
+            );
+    }
+
+    public function test_short_url_404s_for_a_prefixed_id_in_another_workspace(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        Post::factory()->for($otherWorkspace)->create(['human_id' => 'P-50', 'number' => 50]);
+
+        $this->get('/posts/P-50')->assertNotFound();
+    }
+
     public function test_show_exposes_session_media_urls_for_attached_images(): void
     {
         Storage::fake('scratchpad');

@@ -1,16 +1,11 @@
 import { Form, Head, Link } from '@inertiajs/react';
 import IdeasController from '@/actions/App/Http/Controllers/Ideas/IdeasController';
 import InputError from '@/components/input-error';
+import { postShowUrl, videoShowUrl } from '@/lib/content-urls';
 import { scoreBand, trendLabel } from '@/lib/studio-meta';
 import { index as ideasIndex } from '@/routes/dashboard/ideas';
-import {
-    index as postsIndex,
-    show as showPost,
-} from '@/routes/dashboard/posts';
-import {
-    index as videosIndex,
-    show as showVideo,
-} from '@/routes/dashboard/videos';
+import { index as postsIndex } from '@/routes/dashboard/posts';
+import { index as videosIndex } from '@/routes/dashboard/videos';
 
 type PromotedEntity = {
     id: number;
@@ -156,8 +151,10 @@ export default function IdeaShow({ idea }: PageProps) {
                             <Link
                                 href={
                                     idea.promoted_to.kind === 'video'
-                                        ? showVideo.url(idea.promoted_to.id)
-                                        : showPost.url(idea.promoted_to.id)
+                                        ? videoShowUrl(
+                                              idea.promoted_to.human_id,
+                                          )
+                                        : postShowUrl(idea.promoted_to.human_id)
                                 }
                             >
                                 {idea.promoted_to.human_id}:{' '}
