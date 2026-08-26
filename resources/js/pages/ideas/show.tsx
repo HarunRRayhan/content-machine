@@ -4,8 +4,8 @@ import InputError from '@/components/input-error';
 import { postShowUrl, videoShowUrl } from '@/lib/content-urls';
 import { scoreBand, trendLabel } from '@/lib/studio-meta';
 import { index as ideasIndex } from '@/routes/dashboard/ideas';
-import { index as postsIndex } from '@/routes/dashboard/posts';
-import { index as videosIndex } from '@/routes/dashboard/videos';
+import { index as postsIndex } from '@/routes/posts';
+import { index as videosIndex } from '@/routes/videos';
 
 type PromotedEntity = {
     id: number;

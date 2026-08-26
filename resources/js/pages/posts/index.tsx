@@ -8,7 +8,7 @@ import {
 } from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index } from '@/routes/dashboard/posts';
+import { index } from '@/routes/posts';
 
 type IdeaRow = {
     type: 'idea';

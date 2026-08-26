@@ -12,8 +12,11 @@ class UpdatePostAction
         $attributes = [
             'title' => $data->title,
             'body' => $data->body,
-            'image_drive_urls' => $data->imageDriveUrls,
         ];
+
+        if ($data->hasImageDriveUrls) {
+            $attributes['image_drive_urls'] = $data->imageDriveUrls;
+        }
 
         if ($data->status !== null) {
             $attributes['status'] = $data->status;

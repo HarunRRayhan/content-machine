@@ -43,7 +43,7 @@ class VideoPresentationControllerTest extends TestCase
             'deck_manifest' => $this->deckManifest(),
         ]);
 
-        $this->get(route('dashboard.videos.presentation', $video))
+        $this->get(route('videos.presentation', $video))
             ->assertRedirect(route('login'));
     }
 
@@ -54,7 +54,7 @@ class VideoPresentationControllerTest extends TestCase
             'deck_manifest' => null,
         ]);
 
-        $this->get(route('dashboard.videos.presentation', $video))->assertNotFound();
+        $this->get(route('videos.presentation', $video))->assertNotFound();
     }
 
     public function test_show_404s_for_a_video_in_a_different_workspace(): void
@@ -66,7 +66,7 @@ class VideoPresentationControllerTest extends TestCase
             'deck_manifest' => $this->deckManifest(),
         ]);
 
-        $this->get(route('dashboard.videos.presentation', $video))->assertNotFound();
+        $this->get(route('videos.presentation', $video))->assertNotFound();
     }
 
     public function test_embed_keeps_the_script_notes_column(): void
@@ -76,7 +76,7 @@ class VideoPresentationControllerTest extends TestCase
             'deck_manifest' => $this->deckManifest(),
         ]);
 
-        $html = $this->get(route('dashboard.videos.presentation', [
+        $html = $this->get(route('videos.presentation', [
             'video' => $video,
             'embed' => 1,
         ]))->assertOk()->getContent();
@@ -95,7 +95,7 @@ class VideoPresentationControllerTest extends TestCase
             'deck_manifest' => $this->deckManifest(),
         ]);
 
-        $html = $this->get(route('dashboard.videos.presentation', $video))
+        $html = $this->get(route('videos.presentation', $video))
             ->assertOk()
             ->getContent();
 

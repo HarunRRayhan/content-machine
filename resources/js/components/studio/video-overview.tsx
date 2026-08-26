@@ -1,4 +1,4 @@
-import { router } from '@inertiajs/react';
+import { Form, router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 
 type TalkingPoint = {
@@ -6,13 +6,26 @@ type TalkingPoint = {
     text: string;
 };
 
+export type PostsyncerGroup = {
+    post_id?: string;
+    status?: string;
+    scheduled_at?: string | null;
+    published_at?: string | null;
+    platforms?: string[];
+    language?: string;
+};
+
 const PIPELINE = [
     { key: 'pending', label: 'Pending', prompt: null },
     { key: 'ready', label: 'Ready', prompt: '✅ Ready?' },
     { key: 'recorded', label: 'Recorded', prompt: '🎥 Recorded?' },
-    { key: 'scheduled', label: 'Scheduled', prompt: '🗓️ Scheduled?' },
-    { key: 'posted', label: 'Published', prompt: '📮 Published?' },
+    { key: 'scheduled', label: 'Scheduled', prompt: null },
+    { key: 'posted', label: 'Published', prompt: null },
 ] as const;
+
+const DHAKA_TZ = 'Asia/Dhaka';
+
+const MANUAL_STATUSES = new Set(['pending', 'ready', 'recorded', 'archived']);
 
 type Props = {
     videoId: number;
@@ -22,7 +35,94 @@ type Props = {
     length: string;
     points: TalkingPoint[];
     storageKey: string;
+    videoDriveUrl: string | null;
+    coverDriveUrl: string | null;
+    publishUrl: string;
+    postsyncerReady: boolean;
+    publishState: string;
+    needsConfirmAsk: boolean;
+    postsyncer: Record<string, unknown> | null;
 };
+
+function publishGroups(
+    postsyncer: Record<string, unknown> | null,
+): PostsyncerGroup[] {
+    const groups = postsyncer?.groups;
+
+    if (!Array.isArray(groups)) {
+        return [];
+    }
+
+    return groups.filter(
+        (group): group is PostsyncerGroup =>
+            group !== null && typeof group === 'object',
+    );
+}
+
+function groupWhen(group: PostsyncerGroup): string | null {
+    return group.published_at ?? group.scheduled_at ?? null;
+}
+
+function formatWhen(value: string | null | undefined): string | null {
+    if (!value) {
+        return null;
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat('en-GB', {
+        timeZone: DHAKA_TZ,
+        dateStyle: 'medium',
+        timeStyle: 'short',
+    }).format(date);
+}
+
+function earliestWhen(groups: PostsyncerGroup[]): string | null {
+    let best: Date | null = null;
+    let bestRaw: string | null = null;
+
+    for (const group of groups) {
+        const raw = groupWhen(group);
+
+        if (!raw) {
+            continue;
+        }
+
+        const date = new Date(raw);
+
+        if (Number.isNaN(date.getTime())) {
+            continue;
+        }
+
+        if (!best || date < best) {
+            best = date;
+            bestRaw = raw;
+        }
+    }
+
+    return formatWhen(bestRaw);
+}
+
+function datetimeLocalNowInDhaka(date = new Date()): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: DHAKA_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+
+    const get = (type: Intl.DateTimeFormatPartTypes): string =>
+        parts.find((part) => part.type === type)?.value ?? '';
+
+    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
 
 function checksKey(storageKey: string): string {
     return `cm:points:${storageKey}`;
@@ -58,11 +158,20 @@ export default function VideoOverview({
     length,
     points,
     storageKey,
+    videoDriveUrl,
+    coverDriveUrl,
+    publishUrl,
+    postsyncerReady,
+    publishState,
+    needsConfirmAsk,
+    postsyncer,
 }: Props) {
     const [checks, setChecks] = useState<Set<number>>(() =>
         readChecks(storageKey),
     );
     const [busy, setBusy] = useState(false);
+    const [confirmAskChecked, setConfirmAskChecked] = useState(false);
+    const [minWhen] = useState(() => datetimeLocalNowInDhaka());
 
     const studioStatus = useMemo(() => {
         if (status === 'draft' || status === 'dropped') {
@@ -108,16 +217,49 @@ export default function VideoOverview({
     }
 
     function advanceStatus(nextStatus: string) {
+        const allowed =
+            MANUAL_STATUSES.has(nextStatus) ||
+            (nextStatus === 'posted' && studioStatus === 'archived');
+
+        if (!allowed) {
+            return;
+        }
+
         setBusy(true);
         router.patch(
-            `/dashboard/videos/${videoId}`,
-            { title, status: nextStatus },
+            `/videos/${videoId}`,
+            {
+                title,
+                status: nextStatus,
+                video_drive_url: videoDriveUrl ?? '',
+                cover_drive_url: coverDriveUrl ?? '',
+            },
             {
                 preserveScroll: true,
                 onFinish: () => setBusy(false),
             },
         );
     }
+
+    const groups = publishGroups(postsyncer);
+    const hasGroups = groups.length > 0;
+    const fakeScheduled = studioStatus === 'scheduled' && !hasGroups;
+    const publishBusy = ['queued', 'running'].includes(publishState);
+    const showScheduleForm =
+        !archived &&
+        studioStatus !== 'posted' &&
+        (studioStatus === 'recorded' || fakeScheduled);
+    const hasVideoDriveUrl = Boolean(videoDriveUrl?.trim());
+    const missingVideoDriveUrl =
+        !hasVideoDriveUrl && studioStatus === 'recorded';
+    const canSchedule =
+        postsyncerReady &&
+        !publishBusy &&
+        hasVideoDriveUrl &&
+        (studioStatus === 'recorded' || fakeScheduled);
+    const scheduleDisabled =
+        !canSchedule || (needsConfirmAsk && !confirmAskChecked);
+    const scheduledAt = earliestWhen(groups);
 
     const chips = [
         lang ? (
@@ -173,6 +315,74 @@ export default function VideoOverview({
                         })}
                     </div>
 
+                    <Form
+                        action={`/videos/${videoId}`}
+                        method="patch"
+                        className="drive-urls"
+                        options={{ preserveScroll: true }}
+                    >
+                        {({ processing, errors }) => (
+                            <>
+                                <input
+                                    type="hidden"
+                                    name="title"
+                                    value={title}
+                                />
+                                <div className="drive-urls-h">Drive URLs</div>
+                                <div className="drive-urls-row">
+                                    <label className="schedule-it-label">
+                                        Video Drive URL
+                                        <input
+                                            name="video_drive_url"
+                                            type="url"
+                                            defaultValue={videoDriveUrl ?? ''}
+                                            placeholder="https://drive.google.com/file/d/..."
+                                            maxLength={2048}
+                                        />
+                                    </label>
+                                    <label className="schedule-it-label">
+                                        Cover Drive URL
+                                        <input
+                                            name="cover_drive_url"
+                                            type="url"
+                                            defaultValue={coverDriveUrl ?? ''}
+                                            placeholder="https://drive.google.com/file/d/..."
+                                            maxLength={2048}
+                                        />
+                                    </label>
+                                    <button
+                                        type="submit"
+                                        className="advance"
+                                        disabled={processing || busy}
+                                    >
+                                        Save
+                                    </button>
+                                </div>
+                                {errors.video_drive_url && (
+                                    <p className="schedule-it-error">
+                                        {errors.video_drive_url}
+                                    </p>
+                                )}
+                                {errors.cover_drive_url && (
+                                    <p className="schedule-it-error">
+                                        {errors.cover_drive_url}
+                                    </p>
+                                )}
+                                {errors.title && (
+                                    <p className="schedule-it-error">
+                                        {errors.title}
+                                    </p>
+                                )}
+                                {missingVideoDriveUrl && (
+                                    <p className="schedule-it-hint">
+                                        Cannot schedule a reel without a video
+                                        Drive URL.
+                                    </p>
+                                )}
+                            </>
+                        )}
+                    </Form>
+
                     <div className="act">
                         {archived ? (
                             <>
@@ -188,7 +398,7 @@ export default function VideoOverview({
                                     ↩︎ Unarchive
                                 </button>
                             </>
-                        ) : stage >= PIPELINE.length - 1 ? (
+                        ) : studioStatus === 'posted' ? (
                             <>
                                 <span className="badge">
                                     📮 Published · done ✓
@@ -201,7 +411,92 @@ export default function VideoOverview({
                                 >
                                     🗄️ Archive
                                 </button>
-                                {stage > 0 && (
+                            </>
+                        ) : showScheduleForm ? (
+                            <>
+                                <Form
+                                    action={publishUrl}
+                                    method="post"
+                                    className="schedule-it"
+                                >
+                                    {({ processing, errors }) => (
+                                        <>
+                                            <label className="schedule-it-label">
+                                                <span className="schedule-it-label-row">
+                                                    Schedule it
+                                                    <span className="schedule-it-tz">
+                                                        {DHAKA_TZ}
+                                                    </span>
+                                                </span>
+                                                <input
+                                                    name="when"
+                                                    type="datetime-local"
+                                                    required
+                                                    min={minWhen}
+                                                    disabled={!canSchedule}
+                                                />
+                                            </label>
+                                            {needsConfirmAsk && (
+                                                <label className="schedule-it-confirm">
+                                                    <input
+                                                        type="checkbox"
+                                                        name="confirm_ask"
+                                                        value="1"
+                                                        checked={
+                                                            confirmAskChecked
+                                                        }
+                                                        onChange={(event) =>
+                                                            setConfirmAskChecked(
+                                                                event.target
+                                                                    .checked,
+                                                            )
+                                                        }
+                                                    />
+                                                    Confirm ask-gated platforms
+                                                </label>
+                                            )}
+                                            <button
+                                                type="submit"
+                                                className="advance"
+                                                disabled={
+                                                    processing ||
+                                                    scheduleDisabled
+                                                }
+                                            >
+                                                🗓️ Schedule it
+                                            </button>
+                                            {errors.when && (
+                                                <p className="schedule-it-error">
+                                                    {errors.when}
+                                                </p>
+                                            )}
+                                            {errors.publish && (
+                                                <p className="schedule-it-error">
+                                                    {errors.publish}
+                                                </p>
+                                            )}
+                                            {!postsyncerReady && (
+                                                <p className="schedule-it-hint">
+                                                    Configure PostSyncer in
+                                                    Settings before scheduling.
+                                                </p>
+                                            )}
+                                            {missingVideoDriveUrl && (
+                                                <p className="schedule-it-hint">
+                                                    Cannot schedule a reel
+                                                    without a video Drive URL.
+                                                </p>
+                                            )}
+                                            {publishBusy && (
+                                                <p className="schedule-it-hint">
+                                                    A publish job is already
+                                                    queued or running.
+                                                </p>
+                                            )}
+                                        </>
+                                    )}
+                                </Form>
+                                {studioStatus === 'recorded' && stage > 0 && (
                                     <button
                                         type="button"
                                         className="undo"
@@ -216,6 +511,13 @@ export default function VideoOverview({
                                     </button>
                                 )}
                             </>
+                        ) : studioStatus === 'scheduled' ? (
+                            <span className="badge">
+                                🗓️ Scheduled
+                                {scheduledAt
+                                    ? ` · ${scheduledAt} ${DHAKA_TZ}`
+                                    : ''}
+                            </span>
                         ) : (
                             <>
                                 <button
@@ -245,6 +547,47 @@ export default function VideoOverview({
                             </>
                         )}
                     </div>
+
+                    {hasGroups ? (
+                        <div className="schedule-log">
+                            <div className="schedule-log-h">
+                                Scheduled posts
+                            </div>
+                            <ul>
+                                {groups.map((group, index) => {
+                                    const when = formatWhen(groupWhen(group));
+
+                                    return (
+                                        <li
+                                            key={`${group.post_id ?? 'group'}-${index}`}
+                                        >
+                                            <span className="schedule-log-when">
+                                                {when
+                                                    ? `${when} ${DHAKA_TZ}`
+                                                    : 'No time yet'}
+                                            </span>
+                                            {group.platforms &&
+                                            group.platforms.length > 0
+                                                ? ` · ${group.platforms.join(', ')}`
+                                                : ''}
+                                            {group.post_id
+                                                ? ` · PostSyncer #${group.post_id}`
+                                                : ''}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                    ) : fakeScheduled ? (
+                        <div className="schedule-log">
+                            <div className="schedule-log-h">
+                                Scheduled posts
+                            </div>
+                            <p className="schedule-log-empty">
+                                No PostSyncer schedule yet
+                            </p>
+                        </div>
+                    ) : null}
                 </div>
             </section>
 

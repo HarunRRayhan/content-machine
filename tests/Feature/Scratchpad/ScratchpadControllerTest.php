@@ -37,7 +37,22 @@ class ScratchpadControllerTest extends TestCase
 
     public function test_guests_cannot_view_the_scratchpad()
     {
-        $this->get(route('dashboard.scratchpad.index'))->assertRedirect(route('login'));
+        $this->get(route('scratchpad.index'))->assertRedirect(route('login'));
+    }
+
+    public function test_legacy_dashboard_index_redirects_to_scratchpad(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->get('/dashboard/scratchpad')->assertRedirect('/scratchpad');
+    }
+
+    public function test_legacy_dashboard_show_redirects_to_scratchpad_show(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create();
+
+        $this->get('/dashboard/scratchpad/'.$entry->id)->assertRedirect('/scratchpad/'.$entry->id);
     }
 
     public function test_index_only_lists_the_current_workspaces_entries()
@@ -49,7 +64,7 @@ class ScratchpadControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         ScratchpadEntry::factory()->for($otherWorkspace)->create(['body' => 'Not mine']);
 
-        $this->get(route('dashboard.scratchpad.index'))
+        $this->get(route('scratchpad.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('scratchpad/index')
                 ->has('entries.data', 1)
@@ -61,11 +76,11 @@ class ScratchpadControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.store'), [
+        $response = $this->post(route('scratchpad.store'), [
             'body' => 'A quick captured thought.',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
 
         $this->assertDatabaseHas('scratchpad_entries', [
             'workspace_id' => $workspace->id,
@@ -80,7 +95,7 @@ class ScratchpadControllerTest extends TestCase
     {
         [$user] = $this->actingAsWorkspaceMember();
 
-        $this->post(route('dashboard.scratchpad.store'), [
+        $this->post(route('scratchpad.store'), [
             'body' => 'A quick captured thought.',
         ]);
 
@@ -100,7 +115,7 @@ class ScratchpadControllerTest extends TestCase
     {
         $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.store'), [
+        $response = $this->post(route('scratchpad.store'), [
             'body' => '',
         ]);
 
@@ -114,7 +129,7 @@ class ScratchpadControllerTest extends TestCase
 
         $entry = ScratchpadEntry::factory()->for($workspace)->create(['body' => 'Hello there']);
 
-        $this->get(route('dashboard.scratchpad.show', $entry))
+        $this->get(route('scratchpad.show', $entry))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('scratchpad/show')
                 ->where('entry.id', $entry->id)
@@ -129,7 +144,7 @@ class ScratchpadControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->for($otherWorkspace)->create();
 
-        $this->get(route('dashboard.scratchpad.show', $entry))->assertNotFound();
+        $this->get(route('scratchpad.show', $entry))->assertNotFound();
     }
 
     public function test_triage_as_post_idea_files_an_idea_and_marks_the_entry_triaged()
@@ -137,7 +152,7 @@ class ScratchpadControllerTest extends TestCase
         [$user, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create(['body' => 'Raw capture.']);
 
-        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $response = $this->post(route('scratchpad.triage', $entry), [
             'target' => 'post_idea',
             'title' => 'A filed idea',
             'score' => 600,
@@ -145,7 +160,7 @@ class ScratchpadControllerTest extends TestCase
             'rationale' => 'Timely.',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
+        $response->assertRedirect(route('scratchpad.show', $entry));
 
         $this->assertDatabaseHas('scratchpad_entries', [
             'id' => $entry->id,
@@ -164,10 +179,10 @@ class ScratchpadControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create();
 
-        $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $this->post(route('scratchpad.triage', $entry), [
             'target' => 'video_idea',
             'title' => 'A filed video idea',
-        ])->assertRedirect(route('dashboard.scratchpad.show', $entry));
+        ])->assertRedirect(route('scratchpad.show', $entry));
 
         $idea = Idea::sole();
         $this->assertSame('video', $idea->kind);
@@ -178,7 +193,7 @@ class ScratchpadControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create();
 
-        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $response = $this->post(route('scratchpad.triage', $entry), [
             'target' => 'post_idea',
         ]);
 
@@ -191,12 +206,12 @@ class ScratchpadControllerTest extends TestCase
         [$user, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create();
 
-        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $response = $this->post(route('scratchpad.triage', $entry), [
             'target' => 'drop',
             'drop_reason' => 'Not useful.',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
+        $response->assertRedirect(route('scratchpad.show', $entry));
 
         $this->assertDatabaseHas('scratchpad_entries', [
             'id' => $entry->id,
@@ -212,7 +227,7 @@ class ScratchpadControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create();
 
-        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $response = $this->post(route('scratchpad.triage', $entry), [
             'target' => 'drop',
         ]);
 
@@ -226,7 +241,7 @@ class ScratchpadControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->for($otherWorkspace)->create();
 
-        $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $this->post(route('scratchpad.triage', $entry), [
             'target' => 'drop',
             'drop_reason' => 'Nope.',
         ])->assertNotFound();
@@ -251,7 +266,7 @@ class ScratchpadControllerTest extends TestCase
         });
         AiProviderCredential::factory()->withModel()->for($workspace)->create();
 
-        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+        $this->post(route('scratchpad.suggest-triage', $entry), [
             'target' => 'post_idea',
         ])->assertInertia(fn (Assert $page) => $page
             ->component('scratchpad/show')
@@ -271,7 +286,7 @@ class ScratchpadControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create();
 
-        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+        $this->post(route('scratchpad.suggest-triage', $entry), [
             'target' => 'video_idea',
         ])->assertInertia(fn (Assert $page) => $page
             ->component('scratchpad/show')
@@ -285,7 +300,7 @@ class ScratchpadControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create();
 
-        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+        $this->post(route('scratchpad.suggest-triage', $entry), [
             'target' => 'drop',
         ])->assertSessionHasErrors(['target']);
     }
@@ -297,7 +312,7 @@ class ScratchpadControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $entry = ScratchpadEntry::factory()->for($otherWorkspace)->create();
 
-        $this->post(route('dashboard.scratchpad.suggest-triage', $entry), [
+        $this->post(route('scratchpad.suggest-triage', $entry), [
             'target' => 'post_idea',
         ])->assertNotFound();
     }
@@ -307,12 +322,12 @@ class ScratchpadControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->triaged()->create();
 
-        $response = $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $response = $this->post(route('scratchpad.triage', $entry), [
             'target' => 'drop',
             'drop_reason' => 'Too late.',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.show', $entry));
+        $response->assertRedirect(route('scratchpad.show', $entry));
         $response->assertInertiaFlash('toast.type', 'error');
     }
 
@@ -321,11 +336,11 @@ class ScratchpadControllerTest extends TestCase
         Queue::fake();
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.link'), [
+        $response = $this->post(route('scratchpad.link'), [
             'url' => 'https://example.com/a-post',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
 
         $entry = ScratchpadEntry::sole();
         $this->assertSame($workspace->id, $entry->workspace_id);
@@ -342,7 +357,7 @@ class ScratchpadControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.link'), [
+        $response = $this->post(route('scratchpad.link'), [
             'url' => 'not a url',
         ]);
 
@@ -355,12 +370,12 @@ class ScratchpadControllerTest extends TestCase
         Storage::fake('scratchpad');
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.photo'), [
+        $response = $this->post(route('scratchpad.photo'), [
             'photo' => UploadedFile::fake()->image('view.jpg', 300, 200),
             'caption' => 'From the roof',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
 
         $entry = ScratchpadEntry::sole();
         $this->assertSame($workspace->id, $entry->workspace_id);
@@ -385,7 +400,7 @@ class ScratchpadControllerTest extends TestCase
         Storage::fake('scratchpad');
         $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.photo'), []);
+        $response = $this->post(route('scratchpad.photo'), []);
 
         $response->assertSessionHasErrors(['photo']);
         $this->assertDatabaseCount('scratchpad_entries', 0);
@@ -396,12 +411,12 @@ class ScratchpadControllerTest extends TestCase
         Storage::fake('scratchpad');
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.voice'), [
+        $response = $this->post(route('scratchpad.voice'), [
             'audio' => UploadedFile::fake()->create('note.webm', 200, 'audio/webm'),
             'language' => 'bn',
         ]);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
 
         $entry = ScratchpadEntry::sole();
         $this->assertSame($workspace->id, $entry->workspace_id);
@@ -426,7 +441,7 @@ class ScratchpadControllerTest extends TestCase
         Storage::fake('scratchpad');
         $this->actingAsWorkspaceMember();
 
-        $response = $this->post(route('dashboard.scratchpad.voice'), []);
+        $response = $this->post(route('scratchpad.voice'), []);
 
         $response->assertSessionHasErrors(['audio']);
         $this->assertDatabaseCount('scratchpad_entries', 0);
@@ -456,12 +471,12 @@ class ScratchpadControllerTest extends TestCase
         ));
         $file = new UploadedFile($tmpPath, 'voice-note.webm', 'audio/webm', null, true);
 
-        $response = $this->post(route('dashboard.scratchpad.voice'), [
+        $response = $this->post(route('scratchpad.voice'), [
             'audio' => $file,
         ]);
         unlink($tmpPath);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
         $response->assertSessionHasNoErrors();
 
         $entry = ScratchpadEntry::sole();
@@ -495,12 +510,12 @@ class ScratchpadControllerTest extends TestCase
         ));
         $file = new UploadedFile($tmpPath, 'voice-note.mp4', 'audio/mp4', null, true);
 
-        $response = $this->post(route('dashboard.scratchpad.voice'), [
+        $response = $this->post(route('scratchpad.voice'), [
             'audio' => $file,
         ]);
         unlink($tmpPath);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
         $response->assertSessionHasNoErrors();
 
         $entry = ScratchpadEntry::sole();
@@ -536,12 +551,12 @@ class ScratchpadControllerTest extends TestCase
         ));
         $file = new UploadedFile($tmpPath, 'voice-note.webm', 'text/html', null, true);
 
-        $response = $this->post(route('dashboard.scratchpad.voice'), [
+        $response = $this->post(route('scratchpad.voice'), [
             'audio' => $file,
         ]);
         unlink($tmpPath);
 
-        $response->assertRedirect(route('dashboard.scratchpad.index'));
+        $response->assertRedirect(route('scratchpad.index'));
         $response->assertSessionHasNoErrors();
 
         $mediaAsset = MediaAsset::sole();
@@ -554,13 +569,13 @@ class ScratchpadControllerTest extends TestCase
         Storage::fake('scratchpad');
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $this->post(route('dashboard.scratchpad.photo'), [
+        $this->post(route('scratchpad.photo'), [
             'photo' => UploadedFile::fake()->image('view.jpg'),
         ]);
 
         $mediaAsset = MediaAsset::sole();
 
-        $response = $this->get(route('dashboard.scratchpad.media', $mediaAsset));
+        $response = $this->get(route('scratchpad.media', $mediaAsset));
 
         $response->assertOk();
         $response->assertHeader('Content-Type', $mediaAsset->mime);
@@ -576,7 +591,7 @@ class ScratchpadControllerTest extends TestCase
         $mediaAsset = MediaAsset::factory()->for($otherWorkspace)->create();
         Attachment::factory()->for($otherEntry, 'attachable')->for($mediaAsset)->create();
 
-        $this->get(route('dashboard.scratchpad.media', $mediaAsset))->assertNotFound();
+        $this->get(route('scratchpad.media', $mediaAsset))->assertNotFound();
     }
 
     public function test_index_includes_attachments_for_a_photo_entry()
@@ -584,17 +599,17 @@ class ScratchpadControllerTest extends TestCase
         Storage::fake('scratchpad');
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $this->post(route('dashboard.scratchpad.photo'), [
+        $this->post(route('scratchpad.photo'), [
             'photo' => UploadedFile::fake()->image('view.jpg'),
         ]);
 
         $entry = ScratchpadEntry::sole();
 
-        $this->get(route('dashboard.scratchpad.index'))
+        $this->get(route('scratchpad.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('scratchpad/index')
                 ->has('entries.data.0.attachments', 1)
-                ->where('entries.data.0.attachments.0.media_url', route('dashboard.scratchpad.media', $entry->attachments()->sole()->media_asset_id))
+                ->where('entries.data.0.attachments.0.media_url', route('scratchpad.media', $entry->attachments()->sole()->media_asset_id))
             );
     }
 }

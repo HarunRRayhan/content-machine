@@ -22,6 +22,6 @@ class DashboardTest extends TestCase
 
         $this->actingAs($user)
             ->get(route('dashboard.home'))
-            ->assertRedirect(route('dashboard.scratchpad.index'));
+            ->assertRedirect(route('scratchpad.index'));
     }
 }

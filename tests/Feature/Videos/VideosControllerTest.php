@@ -28,7 +28,14 @@ class VideosControllerTest extends TestCase
 
     public function test_guests_cannot_view_videos()
     {
-        $this->get(route('dashboard.videos.index'))->assertRedirect(route('login'));
+        $this->get(route('videos.index'))->assertRedirect(route('login'));
+    }
+
+    public function test_legacy_dashboard_index_redirects_to_videos(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->get('/dashboard/videos')->assertRedirect('/videos');
     }
 
     public function test_index_only_lists_the_current_workspaces_videos()
@@ -43,7 +50,7 @@ class VideosControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         Video::factory()->for($otherWorkspace)->create(['title' => 'Not mine']);
 
-        $this->get(route('dashboard.videos.index'))
+        $this->get(route('videos.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
                 ->has('items.data', 1)
@@ -60,7 +67,7 @@ class VideosControllerTest extends TestCase
         Video::factory()->for($workspace)->create(['title' => 'Pending one', 'status' => 'pending']);
         Video::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
 
-        $this->get(route('dashboard.videos.index'))
+        $this->get(route('videos.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
                 ->has('items.data', 1)
@@ -98,7 +105,7 @@ class VideosControllerTest extends TestCase
             'score' => null,
         ]);
 
-        $this->get(route('dashboard.videos.index', ['status' => 'ideation']))
+        $this->get(route('videos.index', ['status' => 'ideation']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
                 ->has('items.data', 4)
@@ -127,7 +134,7 @@ class VideosControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         Idea::factory()->for($otherWorkspace)->create(['kind' => 'video', 'status' => 'open']);
 
-        $this->get(route('dashboard.videos.index', ['status' => 'ideation']))
+        $this->get(route('videos.index', ['status' => 'ideation']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
                 ->has('items.data', 1)
@@ -149,7 +156,7 @@ class VideosControllerTest extends TestCase
         Video::factory()->for($workspace)->create(['status' => 'recorded']);
         Idea::factory()->for($workspace)->count(3)->create(['kind' => 'video', 'status' => 'open']);
 
-        $this->get(route('dashboard.videos.index'))
+        $this->get(route('videos.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('counts.ideation', 3)
                 ->where('counts.draft', 0)
@@ -170,7 +177,7 @@ class VideosControllerTest extends TestCase
         Video::factory()->for($workspace)->create(['title' => 'Ready one', 'status' => 'ready']);
         Video::factory()->for($workspace)->create(['title' => 'Pending one', 'status' => 'pending']);
 
-        $this->get(route('dashboard.videos.index', ['status' => 'ready']))
+        $this->get(route('videos.index', ['status' => 'ready']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
                 ->has('items.data', 1)
@@ -186,11 +193,15 @@ class VideosControllerTest extends TestCase
 
         $video = Video::factory()->for($workspace)->create(['title' => 'Hello video']);
 
-        $this->get(route('dashboard.videos.show', $video))
+        $this->get(route('videos.show', $video))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/show')
                 ->where('video.id', $video->id)
                 ->where('video.title', 'Hello video')
+                ->where('video.publish_state', $video->publish_state)
+                ->where('video.postsyncer_ready', false)
+                ->has('video.needs_confirm_ask')
+                ->has('video.postsyncer')
             );
     }
 
@@ -214,22 +225,17 @@ class VideosControllerTest extends TestCase
             );
     }
 
-    public function test_dashboard_show_also_resolves_a_prefixed_human_id(): void
+    public function test_legacy_dashboard_show_redirects_to_videos_show(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $video = Video::factory()->for($workspace)->create([
+        Video::factory()->for($workspace)->create([
             'title' => 'Dashboard custom id',
             'human_id' => 'V-12',
             'number' => 12,
         ]);
 
-        $this->get('/dashboard/videos/V-12')
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->component('videos/show')
-                ->where('video.id', $video->id)
-            );
+        $this->get('/dashboard/videos/V-12')->assertRedirect('/videos/V-12');
     }
 
     public function test_short_url_still_resolves_a_numeric_database_id(): void
@@ -275,7 +281,7 @@ class VideosControllerTest extends TestCase
             'status' => 'pending',
         ]);
 
-        $this->get(route('dashboard.videos.index', ['status' => 'ready']))
+        $this->get(route('videos.index', ['status' => 'ready']))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/index')
                 ->has('items.data', 1)
@@ -306,7 +312,7 @@ class VideosControllerTest extends TestCase
             ],
         ]);
 
-        $this->get(route('dashboard.videos.show', $video))
+        $this->get(route('videos.show', $video))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/show')
                 ->where('video.script_markdown', "## Hook\n\nSay this.")
@@ -324,7 +330,7 @@ class VideosControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $video = Video::factory()->for($otherWorkspace)->create();
 
-        $this->get(route('dashboard.videos.show', $video))->assertNotFound();
+        $this->get(route('videos.show', $video))->assertNotFound();
     }
 
     public function test_update_edits_the_video()
@@ -332,12 +338,12 @@ class VideosControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $video = Video::factory()->for($workspace)->create(['title' => 'Old']);
 
-        $response = $this->patch(route('dashboard.videos.update', $video), [
+        $response = $this->patch(route('videos.update', $video), [
             'title' => 'New',
             'body' => 'Updated body.',
         ]);
 
-        $response->assertRedirect(route('dashboard.videos.show', $video));
+        $response->assertRedirect(route('videos.show', $video));
 
         $this->assertDatabaseHas('videos', [
             'id' => $video->id,
@@ -353,6 +359,6 @@ class VideosControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $video = Video::factory()->for($otherWorkspace)->create();
 
-        $this->patch(route('dashboard.videos.update', $video), ['title' => 'Nope'])->assertNotFound();
+        $this->patch(route('videos.update', $video), ['title' => 'Nope'])->assertNotFound();
     }
 }

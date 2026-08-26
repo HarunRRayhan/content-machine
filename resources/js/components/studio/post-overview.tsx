@@ -8,6 +8,8 @@ const POST_PIPELINE = [
     { key: 'posted', label: 'Posted' },
 ] as const;
 
+const DHAKA_TZ = 'Asia/Dhaka';
+
 export type PostsyncerGroup = {
     post_id?: string;
     status?: string;
@@ -22,6 +24,7 @@ type Props = {
     title: string;
     status: string;
     platforms: string[];
+    imageDriveUrls: string[];
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
@@ -54,6 +57,10 @@ function publishGroups(
     );
 }
 
+function groupWhen(group: PostsyncerGroup): string | null {
+    return group.published_at ?? group.scheduled_at ?? null;
+}
+
 function formatWhen(value: string | null | undefined): string | null {
     if (!value) {
         return null;
@@ -66,22 +73,53 @@ function formatWhen(value: string | null | undefined): string | null {
     }
 
     return new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Dhaka',
+        timeZone: DHAKA_TZ,
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(date);
 }
 
-function languageLabel(language: string | undefined): string {
-    if (language === 'bangla' || language === 'bn') {
-        return 'Bangla';
+function earliestWhen(groups: PostsyncerGroup[]): string | null {
+    let best: Date | null = null;
+    let bestRaw: string | null = null;
+
+    for (const group of groups) {
+        const raw = groupWhen(group);
+
+        if (!raw) {
+            continue;
+        }
+
+        const date = new Date(raw);
+
+        if (Number.isNaN(date.getTime())) {
+            continue;
+        }
+
+        if (!best || date < best) {
+            best = date;
+            bestRaw = raw;
+        }
     }
 
-    if (language === 'english' || language === 'en') {
-        return 'English';
-    }
+    return formatWhen(bestRaw);
+}
 
-    return language ?? 'Post';
+function datetimeLocalNowInDhaka(date = new Date()): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: DHAKA_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+
+    const get = (type: Intl.DateTimeFormatPartTypes): string =>
+        parts.find((part) => part.type === type)?.value ?? '';
+
+    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
 }
 
 export default function PostOverview({
@@ -89,6 +127,7 @@ export default function PostOverview({
     title,
     status,
     platforms,
+    imageDriveUrls,
     publishUrl,
     postsyncerReady,
     publishState,
@@ -105,17 +144,31 @@ export default function PostOverview({
           );
     const [busy, setBusy] = useState(false);
     const [confirmAskChecked, setConfirmAskChecked] = useState(false);
+    const [minWhen] = useState(() => datetimeLocalNowInDhaka());
     const groups = publishGroups(postsyncer);
+    const hasGroups = groups.length > 0;
+    const fakeScheduled = studioStatus === 'scheduled' && !hasGroups;
     const publishBusy = ['queued', 'running'].includes(publishState);
+    const showScheduleForm =
+        !archived &&
+        studioStatus !== 'posted' &&
+        (studioStatus === 'draft' || fakeScheduled);
     const canSchedule =
-        postsyncerReady && !publishBusy && studioStatus === 'draft';
+        postsyncerReady &&
+        !publishBusy &&
+        (studioStatus === 'draft' || fakeScheduled);
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
+    const scheduledAt = earliestWhen(groups);
 
-    function advanceStatus(nextStatus: string) {
+    function advanceStatus(nextStatus: 'archived' | 'posted') {
+        if (nextStatus === 'posted' && studioStatus !== 'archived') {
+            return;
+        }
+
         setBusy(true);
         router.patch(
-            `/dashboard/posts/${postId}`,
+            `/posts/${postId}`,
             { title, status: nextStatus },
             {
                 preserveScroll: true,
@@ -199,9 +252,7 @@ export default function PostOverview({
                                     🗄️ Archive
                                 </button>
                             </>
-                        ) : studioStatus === 'scheduled' ? (
-                            <span className="badge">🗓️ Scheduled</span>
-                        ) : (
+                        ) : showScheduleForm ? (
                             <Form
                                 action={publishUrl}
                                 method="post"
@@ -210,11 +261,17 @@ export default function PostOverview({
                                 {({ processing, errors }) => (
                                     <>
                                         <label className="schedule-it-label">
-                                            Schedule it
+                                            <span className="schedule-it-label-row">
+                                                Schedule it
+                                                <span className="schedule-it-tz">
+                                                    {DHAKA_TZ}
+                                                </span>
+                                            </span>
                                             <input
                                                 name="when"
                                                 type="datetime-local"
                                                 required
+                                                min={minWhen}
                                                 disabled={!canSchedule}
                                             />
                                         </label>
@@ -269,27 +326,34 @@ export default function PostOverview({
                                     </>
                                 )}
                             </Form>
+                        ) : (
+                            <span className="badge">
+                                🗓️ Scheduled
+                                {scheduledAt
+                                    ? ` · ${scheduledAt} ${DHAKA_TZ}`
+                                    : ''}
+                            </span>
                         )}
                     </div>
 
-                    {groups.length > 0 && (
+                    {hasGroups ? (
                         <div className="schedule-log">
                             <div className="schedule-log-h">
                                 Scheduled posts
                             </div>
                             <ul>
                                 {groups.map((group, index) => {
-                                    const when =
-                                        formatWhen(group.published_at) ??
-                                        formatWhen(group.scheduled_at);
+                                    const when = formatWhen(groupWhen(group));
 
                                     return (
                                         <li
                                             key={`${group.post_id ?? 'group'}-${index}`}
                                         >
-                                            <b>
-                                                {languageLabel(group.language)}
-                                            </b>
+                                            <span className="schedule-log-when">
+                                                {when
+                                                    ? `${when} ${DHAKA_TZ}`
+                                                    : 'No time yet'}
+                                            </span>
                                             {group.platforms &&
                                             group.platforms.length > 0
                                                 ? ` · ${group.platforms.join(', ')}`
@@ -297,19 +361,70 @@ export default function PostOverview({
                                             {group.post_id
                                                 ? ` · PostSyncer #${group.post_id}`
                                                 : ''}
-                                            {when
-                                                ? ` · ${when} Asia/Dhaka`
-                                                : ''}
-                                            {group.status
-                                                ? ` · ${group.status}`
-                                                : ''}
                                         </li>
                                     );
                                 })}
                             </ul>
                         </div>
-                    )}
+                    ) : fakeScheduled ? (
+                        <div className="schedule-log">
+                            <div className="schedule-log-h">
+                                Scheduled posts
+                            </div>
+                            <p className="schedule-log-empty">
+                                No PostSyncer schedule yet
+                            </p>
+                        </div>
+                    ) : null}
                 </div>
+            </section>
+
+            <section className="pane">
+                <div className="pane-head">
+                    <span className="k">Drive URLs</span>
+                </div>
+                <Form
+                    action={`/posts/${postId}`}
+                    method="patch"
+                    className="drive-urls"
+                    options={{ preserveScroll: true }}
+                >
+                    {({ processing, errors }) => (
+                        <>
+                            <input type="hidden" name="title" value={title} />
+                            <label>
+                                Image Drive URLs
+                                <textarea
+                                    name="image_drive_urls"
+                                    defaultValue={imageDriveUrls.join('\n')}
+                                    rows={4}
+                                    placeholder="One Google Drive URL per line"
+                                />
+                            </label>
+                            <p className="drive-urls-hint">
+                                One Google Drive URL per line. Used when this
+                                post has no uploaded attachments.
+                            </p>
+                            <button
+                                type="submit"
+                                className="advance"
+                                disabled={processing}
+                            >
+                                Save
+                            </button>
+                            {errors.image_drive_urls && (
+                                <p className="drive-urls-error">
+                                    {errors.image_drive_urls}
+                                </p>
+                            )}
+                            {errors.title && (
+                                <p className="drive-urls-error">
+                                    {errors.title}
+                                </p>
+                            )}
+                        </>
+                    )}
+                </Form>
             </section>
         </div>
     );

@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index } from '@/routes/dashboard/scratchpad';
+import { index } from '@/routes/scratchpad';
 
 type TriagedIdea = {
     id: number;

@@ -1,21 +1,10 @@
 <?php
 
-use App\Http\Controllers\Posts\PostsController;
 use App\Http\Controllers\TeamInvitationController;
 use App\Http\Controllers\Telegram\TelegramWebhookController;
-use App\Http\Controllers\Videos\VideosController;
-use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
-
-// Short show URLs: /posts/P-50 and /videos/BV-46. A prefixed segment
-// binds to human_id (see ResolvesByHumanId); a bare number still binds
-// to the primary key. Same auth + workspace gate as the dashboard show.
-Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])->group(function () {
-    Route::get('posts/{post}', [PostsController::class, 'show'])->name('posts.show');
-    Route::get('videos/{video}', [VideosController::class, 'show'])->name('videos.show');
-});
 
 Route::get('invitations/{token}', [TeamInvitationController::class, 'show'])->name('invitations.show');
 Route::post('invitations/{token}', [TeamInvitationController::class, 'accept'])

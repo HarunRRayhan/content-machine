@@ -54,7 +54,7 @@ class PublishVideoController extends Controller
                 : __('Video queued for immediate publishing.'),
         ]);
 
-        return to_route('dashboard.videos.show', $video);
+        return to_route('videos.show', $video);
     }
 
     private function currentWorkspace(Request $request): Workspace

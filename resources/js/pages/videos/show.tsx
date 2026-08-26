@@ -1,16 +1,14 @@
 import { Head, Link } from '@inertiajs/react';
 import { useState } from 'react';
 import type { CaptionGroup } from '@/components/content/captions-panel';
-import PublishDialog, {
-    PublishStatusBanner,
-} from '@/components/content/publish-dialog';
+import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PresentationEmbed from '@/components/studio/presentation-embed';
 import ScriptPanel from '@/components/studio/script-panel';
 import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
 import VideoOverview from '@/components/studio/video-overview';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { index } from '@/routes/dashboard/videos';
+import { index } from '@/routes/videos';
 
 type ScriptBlock = {
     lang: string;
@@ -94,15 +92,6 @@ export default function VideoShow({ video }: PageProps) {
 
     const [tab, setTab] = useState<TabKey>('overview');
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
-
-    const publishDisabled =
-        !video.postsyncer_ready ||
-        ['queued', 'running'].includes(video.publish_state);
-    const publishDisabledReason = !video.postsyncer_ready
-        ? 'Configure PostSyncer in Settings before scheduling or publishing.'
-        : ['queued', 'running'].includes(video.publish_state)
-          ? 'A publish job is already queued or running.'
-          : null;
 
     return (
         <>
@@ -188,33 +177,22 @@ export default function VideoShow({ video }: PageProps) {
                 </div>
 
                 {activeTab === 'overview' && (
-                    <div className="space-y-4">
-                        <VideoOverview
-                            videoId={video.id}
-                            title={video.title}
-                            status={video.status}
-                            lang={video.parsed.lang}
-                            length={video.parsed.length}
-                            points={video.parsed.points}
-                            storageKey={video.human_id}
-                        />
-                        <section className="pane max-w-3xl">
-                            <div className="pane-head">
-                                <span className="k">📤 Publish</span>
-                            </div>
-                            <div className="p-5">
-                                <PublishDialog
-                                    disabled={publishDisabled}
-                                    disabledReason={publishDisabledReason}
-                                    publishState={video.publish_state}
-                                    publishError={video.publish_error}
-                                    publishUrl={`/dashboard/videos/${video.id}/publish`}
-                                    entityLabel="video"
-                                    needsConfirmAsk={video.needs_confirm_ask}
-                                />
-                            </div>
-                        </section>
-                    </div>
+                    <VideoOverview
+                        videoId={video.id}
+                        title={video.title}
+                        status={video.status}
+                        lang={video.parsed.lang}
+                        length={video.parsed.length}
+                        points={video.parsed.points}
+                        storageKey={video.human_id}
+                        videoDriveUrl={video.video_drive_url}
+                        coverDriveUrl={video.cover_drive_url}
+                        publishUrl={`/videos/${video.id}/publish`}
+                        postsyncerReady={video.postsyncer_ready}
+                        publishState={video.publish_state}
+                        needsConfirmAsk={video.needs_confirm_ask}
+                        postsyncer={video.postsyncer}
+                    />
                 )}
 
                 {activeTab === 'script' && !hasDeck && (
@@ -265,7 +243,7 @@ export default function VideoShow({ video }: PageProps) {
                 {activeTab === 'presentation' && hasDeck && (
                     <PresentationEmbed
                         title={video.title}
-                        src={`/dashboard/videos/${video.id}/presentation?embed=1`}
+                        src={`/videos/${video.id}/presentation?embed=1`}
                     />
                 )}
             </div>

@@ -56,7 +56,7 @@ class PublishPostControllerTest extends TestCase
     {
         $post = Post::factory()->create();
 
-        $this->post(route('dashboard.posts.publish', $post))
+        $this->post(route('posts.publish', $post))
             ->assertRedirect(route('login'));
     }
 
@@ -71,12 +71,12 @@ class PublishPostControllerTest extends TestCase
             'publish_state' => 'idle',
         ]);
 
-        $response = $this->post(route('dashboard.posts.publish', $post), [
+        $response = $this->post(route('posts.publish', $post), [
             'when' => '2026-08-26T10:00:00+06:00',
             'confirm_ask' => true,
         ]);
 
-        $response->assertRedirect(route('dashboard.posts.show', $post));
+        $response->assertRedirect(route('posts.show', $post));
 
         $this->assertSame('queued', $post->fresh()->publish_state);
         $this->assertNull($post->fresh()->publish_error);
@@ -103,11 +103,11 @@ class PublishPostControllerTest extends TestCase
             'publish_state' => 'idle',
         ]);
 
-        $response = $this->post(route('dashboard.posts.publish', $post), [
+        $response = $this->post(route('posts.publish', $post), [
             'confirm_ask' => true,
         ]);
 
-        $response->assertRedirect(route('dashboard.posts.show', $post));
+        $response->assertRedirect(route('posts.show', $post));
 
         $this->assertSame('queued', $post->fresh()->publish_state);
 
@@ -127,9 +127,9 @@ class PublishPostControllerTest extends TestCase
 
         $post = Post::factory()->for($workspace)->create();
 
-        $this->post(route('dashboard.posts.publish', $post), [
+        $this->post(route('posts.publish', $post), [
             'when' => null,
-        ])->assertRedirect(route('dashboard.posts.show', $post));
+        ])->assertRedirect(route('posts.show', $post));
 
         Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
             return $job->post->is($post)
@@ -145,7 +145,7 @@ class PublishPostControllerTest extends TestCase
         $otherWorkspace = Workspace::factory()->create();
         $post = Post::factory()->for($otherWorkspace)->create();
 
-        $this->post(route('dashboard.posts.publish', $post))->assertNotFound();
+        $this->post(route('posts.publish', $post))->assertNotFound();
 
         Queue::assertNothingPushed();
     }
@@ -157,7 +157,7 @@ class PublishPostControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $post = Post::factory()->for($workspace)->create();
 
-        $this->post(route('dashboard.posts.publish', $post))
+        $this->post(route('posts.publish', $post))
             ->assertRedirect()
             ->assertSessionHasErrors('publish');
 
@@ -176,7 +176,7 @@ class PublishPostControllerTest extends TestCase
             'publish_state' => 'queued',
         ]);
 
-        $this->post(route('dashboard.posts.publish', $post))
+        $this->post(route('posts.publish', $post))
             ->assertRedirect()
             ->assertSessionHasErrors('publish');
 

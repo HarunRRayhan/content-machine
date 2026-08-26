@@ -191,13 +191,13 @@ class IdeasControllerTest extends TestCase
         [$user, $workspace] = $this->actingAsWorkspaceMember();
         $entry = ScratchpadEntry::factory()->for($workspace)->create(['body' => 'Raw capture.']);
 
-        $this->post(route('dashboard.scratchpad.triage', $entry), [
+        $this->post(route('scratchpad.triage', $entry), [
             'target' => 'post_idea',
             'title' => 'A promoted idea',
             'score' => 800,
             'trend' => 'evergreen',
             'rationale' => 'Strong fit.',
-        ])->assertRedirect(route('dashboard.scratchpad.show', $entry));
+        ])->assertRedirect(route('scratchpad.show', $entry));
 
         $idea = Idea::sole();
         $this->assertSame('A promoted idea', $idea->title);
@@ -211,7 +211,7 @@ class IdeasControllerTest extends TestCase
                 ->where('idea.body', 'Raw capture.')
             );
 
-        $this->get(route('dashboard.scratchpad.show', $entry))
+        $this->get(route('scratchpad.show', $entry))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('scratchpad/show')
                 ->where('entry.status', 'triaged')

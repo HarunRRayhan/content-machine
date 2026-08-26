@@ -14,6 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: [
             __DIR__.'/../routes/web.php',
+            __DIR__.'/../routes/posts.php',
+            __DIR__.'/../routes/videos.php',
+            __DIR__.'/../routes/scratchpad.php',
             __DIR__.'/../routes/dashboard.php',
         ],
         api: __DIR__.'/../routes/api.php',

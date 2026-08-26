@@ -12,9 +12,15 @@ class UpdateVideoAction
         $attributes = [
             'title' => $data->title,
             'body' => $data->body,
-            'video_drive_url' => $data->videoDriveUrl,
-            'cover_drive_url' => $data->coverDriveUrl,
         ];
+
+        if ($data->hasVideoDriveUrl) {
+            $attributes['video_drive_url'] = $data->videoDriveUrl;
+        }
+
+        if ($data->hasCoverDriveUrl) {
+            $attributes['cover_drive_url'] = $data->coverDriveUrl;
+        }
 
         if ($data->status !== null) {
             $attributes['status'] = $data->status;

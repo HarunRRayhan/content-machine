@@ -158,6 +158,48 @@ class PostPublishPlannerTest extends TestCase
         $this->assertFalse($group->publishNow);
         $this->assertInstanceOf(CarbonImmutable::class, $group->when);
         $this->assertSame($when, $group->when->format('Y-m-d H:i:s'));
+        $this->assertSame('Asia/Dhaka', $group->when->timezoneName);
+    }
+
+    public function test_naive_when_is_parsed_in_workspace_timezone(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Later'],
+        ]);
+
+        $group = $this->planner->plan($post, $config, [
+            'when' => '2026-08-26T09:12',
+            'confirm_ask' => false,
+        ])[0];
+
+        $this->assertFalse($group->publishNow);
+        $this->assertSame('Asia/Dhaka', $group->when?->timezoneName);
+        $this->assertSame('2026-08-26 09:12:00', $group->when?->format('Y-m-d H:i:s'));
+    }
+
+    public function test_when_with_offset_keeps_that_offset(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Later'],
+        ]);
+
+        $group = $this->planner->plan($post, $config, [
+            'when' => '2026-08-26T09:12:00+06:00',
+            'confirm_ask' => false,
+        ])[0];
+
+        $this->assertSame('+06:00', $group->when?->timezoneName);
+        $this->assertSame('2026-08-26 09:12:00', $group->when?->format('Y-m-d H:i:s'));
     }
 
     public function test_throws_when_ask_platform_selected_without_confirm(): void

@@ -144,7 +144,146 @@ class PublishVideoActionTest extends TestCase
 
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts'
             && $request['schedule_type'] === 'schedule'
-            && $request['schedule_for']['date'] === '2026-08-26');
+            && $request['schedule_for']['date'] === '2026-08-26'
+            && $request['schedule_for']['timezone'] === '+06:00');
+    }
+
+    public function test_naive_when_sends_workspace_timezone_on_schedule_for(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 99,
+                'status' => 'scheduled',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Scheduled reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'when' => '2026-08-26T09:12',
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('scheduled', $video->status);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts'
+            && $request['schedule_type'] === 'schedule'
+            && $request['schedule_for']['date'] === '2026-08-26'
+            && $request['schedule_for']['time'] === '09:12'
+            && $request['schedule_for']['timezone'] === 'Asia/Dhaka');
+    }
+
+    public function test_empty_plan_fails_and_leaves_status_unchanged(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => [],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('No PostSyncer publish groups', $video->publish_error);
+        $this->assertSame('recorded', $video->status);
+        $this->assertNull($video->postsyncer);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_second_publish_is_refused_when_groups_have_post_ids(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Already scheduled'],
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '42',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-08-26T09:12:00+06:00',
+                    'platforms' => ['facebook'],
+                    'language' => 'bangla',
+                ]],
+            ],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('already has PostSyncer posts', $video->publish_error);
+        $this->assertSame('scheduled', $video->status);
+        $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_empty_groups_without_post_ids_is_treated_as_first_publish(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 77,
+                'status' => 'published',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Retry after empty plan'],
+            'postsyncer' => ['groups' => []],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('posted', $video->status);
+        $this->assertSame('77', $video->postsyncer['groups'][0]['post_id']);
     }
 
     public function test_failure_leaves_pipeline_status_and_sets_publish_error(): void
