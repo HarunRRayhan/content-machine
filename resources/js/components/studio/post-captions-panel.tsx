@@ -31,7 +31,12 @@ function resolveImages(
     platformImages: string[],
     imageUrls: Record<string, string>,
 ): Array<{ name: string; url: string | null }> {
-    return platformImages.map((name) => ({
+    const names =
+        platformImages.length > 0
+            ? platformImages
+            : [...new Set(Object.keys(imageUrls))];
+
+    return names.map((name) => ({
         name,
         url: imageUrls[name] ?? imageUrls[name.split('/').pop() ?? ''] ?? null,
     }));
@@ -180,10 +185,7 @@ export default function PostCaptionsPanel({
                         {platform && (
                             <>
                                 <div className="mock-wrap">
-                                    <div className="mock-note">
-                                        Preview · images resolve from Content
-                                        Machine storage when uploaded
-                                    </div>
+                                    <div className="mock-note">Preview</div>
                                     <div className="mock">
                                         <div className="mock-head">
                                             <span

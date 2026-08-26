@@ -2,11 +2,14 @@
 
 namespace Tests\Feature\Posts;
 
+use App\Models\Attachment;
 use App\Models\Idea;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
@@ -147,6 +150,84 @@ class PostsControllerTest extends TestCase
                 ->where('post.id', $post->id)
                 ->where('post.title', 'Hello post')
             );
+    }
+
+    public function test_show_exposes_session_media_urls_for_attached_images(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'With cover',
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'Hello',
+                        'images' => [],
+                    ],
+                ],
+            ],
+        ]);
+
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/cover.png',
+            'original_filename' => 'cover.png',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'png-bytes');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create([
+            'role' => 'image',
+        ]);
+
+        $expectedUrl = route('dashboard.posts.media', [$post, $media]);
+
+        $this->get(route('dashboard.posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.images.0.url', $expectedUrl)
+                ->where('post.images.0.filename', 'cover.png')
+                ->where('post.captions.0.platforms.0.images.0', 'cover.png')
+                ->where('post.image_urls', fn ($urls) => ($urls['cover.png'] ?? null) === $expectedUrl)
+            );
+    }
+
+    public function test_media_streams_an_attached_image_for_the_current_workspace(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create();
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/view.jpg',
+            'original_filename' => 'view.jpg',
+            'mime' => 'image/jpeg',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'jpeg-bytes');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create();
+
+        $this->get(route('dashboard.posts.media', [$post, $media]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/jpeg');
+    }
+
+    public function test_media_404s_for_an_asset_in_a_different_workspace(): void
+    {
+        Storage::fake('scratchpad');
+        $this->actingAsWorkspaceMember();
+
+        $otherWorkspace = Workspace::factory()->create();
+        $otherPost = Post::factory()->for($otherWorkspace)->create();
+        $media = MediaAsset::factory()->for($otherWorkspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $otherWorkspace->id.'/secret.jpg',
+            'mime' => 'image/jpeg',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'secret');
+        Attachment::factory()->for($otherPost, 'attachable')->for($media)->create();
+
+        $this->get(route('dashboard.posts.media', [$otherPost, $media]))->assertNotFound();
     }
 
     public function test_show_404s_for_a_post_in_a_different_workspace()

@@ -58,6 +58,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
 
         Route::get('posts', [PostsController::class, 'index'])->name('posts.index');
         Route::get('posts/{post}', [PostsController::class, 'show'])->name('posts.show');
+        Route::get('posts/{post}/media/{mediaAsset}', [PostsController::class, 'media'])->name('posts.media');
         Route::patch('posts/{post}', [PostsController::class, 'update'])->name('posts.update');
         Route::post('posts/{post}/publish', PublishPostController::class)->name('posts.publish');
 
