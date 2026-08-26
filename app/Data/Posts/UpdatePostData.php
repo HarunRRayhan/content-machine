@@ -27,6 +27,7 @@ final readonly class UpdatePostData
         return new self(
             title: $request->string('title')->toString(),
             body: $request->filled('body') ? $request->string('body')->toString() : null,
+            status: $request->filled('status') ? $request->string('status')->toString() : null,
             replaceExtended: false,
         );
     }

@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\Videos;
 
+use App\Models\Video;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateVideoRequest extends FormRequest
 {
@@ -17,6 +19,7 @@ class UpdateVideoRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:255'],
             'body' => ['nullable', 'string', 'max:20000'],
+            'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
         ];
     }
 }

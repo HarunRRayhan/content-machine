@@ -10,7 +10,7 @@ final class NormalizeCaptions
 {
     /**
      * @param  array<mixed>|null  $captions
-     * @return list<array{part: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>
+     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>
      */
     public static function forDashboard(?array $captions): array
     {
@@ -20,10 +20,10 @@ final class NormalizeCaptions
 
         // Already Studio-shaped: [{ part, platforms: [...] }]
         if (array_is_list($captions) && isset($captions[0]) && is_array($captions[0]) && array_key_exists('platforms', $captions[0])) {
-            return array_values(array_map(
+            return array_map(
                 fn (mixed $group): array => self::normalizeGroup(is_array($group) ? $group : []),
                 $captions,
-            ));
+            );
         }
 
         // Import shape: { "main"|"Part 1": { "tiktok": { title, caption, ... }, ... } }
@@ -60,6 +60,7 @@ final class NormalizeCaptions
 
             $groups[] = [
                 'part' => is_string($part) && ! in_array(strtolower($part), ['main', 'general'], true) ? $part : null,
+                'lang' => self::langOf(null, is_string($part) ? $part : null),
                 'platforms' => $normalizedPlatforms,
             ];
         }
@@ -69,7 +70,7 @@ final class NormalizeCaptions
 
     /**
      * @param  array<mixed>  $group
-     * @return array{part: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}
+     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}
      */
     private static function normalizeGroup(array $group): array
     {
@@ -86,8 +87,30 @@ final class NormalizeCaptions
 
         return [
             'part' => is_string($part) && $part !== '' ? $part : null,
+            'lang' => self::langOf($group['lang'] ?? null, is_string($part) ? $part : null),
             'platforms' => $platforms,
         ];
+    }
+
+    private static function langOf(mixed $explicit, ?string $part): ?string
+    {
+        if (is_string($explicit) && in_array($explicit, ['bn', 'en'], true)) {
+            return $explicit;
+        }
+
+        if ($part === null) {
+            return null;
+        }
+
+        $lower = strtolower($part);
+        if (str_contains($lower, 'bangla') || str_contains($lower, 'bengali') || in_array($lower, ['bn', 'বাংলা'], true)) {
+            return 'bn';
+        }
+        if (str_contains($lower, 'english') || in_array($lower, ['en', 'ইংরেজি'], true)) {
+            return 'en';
+        }
+
+        return null;
     }
 
     /**

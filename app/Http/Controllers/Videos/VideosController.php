@@ -9,6 +9,7 @@ use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Content\ParseVideoScript;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -120,6 +121,11 @@ class VideosController extends Controller
      */
     private function presentDetail(Video $video): array
     {
+        $parsed = ParseVideoScript::fromMarkdown(
+            $video->script_markdown ?? '',
+            $video->language ?? 'bn',
+        );
+
         return [
             'id' => $video->id,
             'human_id' => $video->human_id,
@@ -127,6 +133,7 @@ class VideosController extends Controller
             'title' => $video->title,
             'body' => $video->body,
             'script_markdown' => $video->script_markdown,
+            'parsed' => $parsed,
             'captions' => NormalizeCaptions::forDashboard($video->captions),
             'deck_manifest' => $video->deck_manifest,
             'has_deck' => ! empty($video->deck_manifest),

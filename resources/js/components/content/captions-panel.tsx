@@ -13,6 +13,7 @@ export type CaptionPlatform = {
 
 export type CaptionGroup = {
     part: string | null;
+    lang?: string | null;
     platforms: CaptionPlatform[];
 };
 

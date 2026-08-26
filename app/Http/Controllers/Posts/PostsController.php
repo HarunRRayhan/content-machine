@@ -25,13 +25,15 @@ class PostsController extends Controller
     {
         $workspace = $this->currentWorkspace($request);
 
-        $status = $request->string('status')->toString() ?: null;
+        $status = $request->string('status')->toString() ?: 'draft';
         $language = $request->string('language')->toString() ?: null;
         $query = $request->string('q')->toString() ?: null;
 
         $posts = Post::query()
             ->where('workspace_id', $workspace->id)
-            ->when($status, fn ($builder) => $builder->where('status', $status))
+            ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
+            ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
+            ->when(in_array($status, ['scheduled', 'posted'], true), fn ($builder) => $builder->where('status', $status))
             ->when($language, fn ($builder) => $builder->where('language', $language))
             ->when($query, function ($builder) use ($query) {
                 $like = '%'.$query.'%';
@@ -46,6 +48,19 @@ class PostsController extends Controller
             ->withQueryString()
             ->through(fn (Post $post) => $this->presentSummary($post));
 
+        $rawCounts = Post::query()
+            ->where('workspace_id', $workspace->id)
+            ->selectRaw('status, count(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status');
+
+        $statusCounts = [
+            'draft' => (int) ($rawCounts['draft'] ?? 0) + (int) ($rawCounts['ready'] ?? 0),
+            'scheduled' => (int) ($rawCounts['scheduled'] ?? 0),
+            'posted' => (int) ($rawCounts['posted'] ?? 0),
+            'archived' => (int) ($rawCounts['archived'] ?? 0) + (int) ($rawCounts['dropped'] ?? 0),
+        ];
+
         return Inertia::render('posts/index', [
             'posts' => $posts,
             'filters' => [
@@ -53,6 +68,7 @@ class PostsController extends Controller
                 'language' => $language,
                 'q' => $query,
             ],
+            'statusCounts' => $statusCounts,
             'statuses' => Post::STATUSES,
         ]);
     }
@@ -161,6 +177,15 @@ class PostsController extends Controller
             }
         }
 
+        $imageUrls = [];
+        foreach ($images as $image) {
+            if (! empty($image['filename']) && ! empty($image['url'])) {
+                $imageUrls[$image['filename']] = $image['url'];
+                $basename = basename($image['filename']);
+                $imageUrls[$basename] = $image['url'];
+            }
+        }
+
         return [
             'id' => $post->id,
             'human_id' => $post->human_id,
@@ -170,6 +195,7 @@ class PostsController extends Controller
             'captions' => NormalizeCaptions::forDashboard($post->captions),
             'platforms' => $post->platforms ?? [],
             'images' => $images,
+            'image_urls' => $imageUrls,
             'caption_image_names' => array_keys($captionImageNames),
             'language' => $post->language,
             'slug' => $post->slug,

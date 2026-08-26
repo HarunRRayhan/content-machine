@@ -14,6 +14,10 @@ class UpdatePostAction
             'body' => $data->body,
         ];
 
+        if ($data->status !== null) {
+            $attributes['status'] = $data->status;
+        }
+
         if ($data->replaceExtended) {
             $attributes['language'] = $data->language;
             $attributes['slug'] = $data->slug;

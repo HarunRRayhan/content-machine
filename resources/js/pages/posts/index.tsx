@@ -1,8 +1,10 @@
 import { Head, Link, router } from '@inertiajs/react';
-import Heading from '@/components/heading';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import {
+    PLATFORM_META,
+    POST_STATUS_LABELS,
+    normalizePlatformKey,
+    studioPostStatus,
+} from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
 import { index, show } from '@/routes/dashboard/posts';
 
@@ -40,14 +42,18 @@ type Filters = {
 type PageProps = {
     posts: PaginatedPosts;
     filters: Filters;
-    statuses: string[];
+    statusCounts: Record<string, number>;
 };
+
+const POST_TABS = ['draft', 'scheduled', 'posted', 'archived'] as const;
 
 function paginationLabel(label: string): string {
     return label.replace('&laquo;', '«').replace('&raquo;', '»');
 }
 
-export default function PostsIndex({ posts, filters, statuses }: PageProps) {
+export default function PostsIndex({ posts, filters, statusCounts }: PageProps) {
+    const activeTab = (filters.status ?? 'draft') as (typeof POST_TABS)[number];
+
     function applyFilter(next: Partial<Filters>) {
         router.get(
             index.url({
@@ -72,15 +78,11 @@ export default function PostsIndex({ posts, filters, statuses }: PageProps) {
         <>
             <Head title="Posts" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
-                <Heading
-                    title="Posts"
-                    description="Bodies, per-platform captions, and images from the content pipeline."
-                />
+            <div className="studio-page flex h-full flex-1 flex-col gap-2 p-4">
+                <h2 className="home-h">All posts</h2>
 
-                <div className="flex flex-wrap items-center gap-3">
-                    <Input
-                        className="max-w-xs"
+                <div className="search-row">
+                    <input
                         placeholder="Search title or id"
                         defaultValue={filters.q ?? ''}
                         onKeyDown={(event) => {
@@ -94,91 +96,152 @@ export default function PostsIndex({ posts, filters, statuses }: PageProps) {
                             }
                         }}
                     />
-                    <select
-                        value={filters.status ?? ''}
-                        onChange={(event) =>
-                            applyFilter({
-                                status: event.target.value || null,
-                            })
-                        }
-                        className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                    >
-                        <option value="">All statuses</option>
-                        {statuses.map((status) => (
-                            <option key={status} value={status}>
-                                {status}
-                            </option>
-                        ))}
-                    </select>
-                    <select
-                        value={filters.language ?? ''}
-                        onChange={(event) =>
-                            applyFilter({
-                                language: event.target.value || null,
-                            })
-                        }
-                        className="flex h-9 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                    >
-                        <option value="">All languages</option>
-                        <option value="bn">Bangla</option>
-                        <option value="en">English</option>
-                    </select>
                 </div>
 
-                <div className="space-y-3">
-                    {posts.data.length === 0 && (
-                        <p className="text-sm text-muted-foreground">
-                            No posts match these filters.
-                        </p>
-                    )}
-
-                    {posts.data.map((post) => (
-                        <Link
-                            key={post.id}
-                            href={show.url(post.id)}
-                            className="block space-y-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+                <div className="tabbar statustabs" role="tablist">
+                    {POST_TABS.map((tab) => (
+                        <button
+                            key={tab}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === tab}
+                            onClick={() => applyFilter({ status: tab })}
                         >
-                            <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant="outline">{post.human_id}</Badge>
-                                <Badge variant="secondary">{post.status}</Badge>
-                                {post.language && (
-                                    <Badge variant="outline">
-                                        {post.language}
-                                    </Badge>
-                                )}
-                                {post.has_captions && (
-                                    <Badge variant="outline">captions</Badge>
-                                )}
-                                {post.platforms.slice(0, 3).map((platform) => (
-                                    <Badge key={platform} variant="outline">
-                                        {platform}
-                                    </Badge>
-                                ))}
-                            </div>
-                            <p className="font-medium">{post.title}</p>
-                        </Link>
+                            {POST_STATUS_LABELS[tab]}
+                            <span className="tabn">
+                                {statusCounts[tab] ?? 0}
+                            </span>
+                        </button>
                     ))}
                 </div>
 
+                {posts.data.length === 0 ? (
+                    <p className="empty">No posts in this stage yet.</p>
+                ) : (
+                    <div className="vtable-wrap">
+                        <table className="vtable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Title</th>
+                                    <th>Platforms</th>
+                                    <th>Status</th>
+                                    <th />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {posts.data.map((post) => {
+                                    const studioStatus = studioPostStatus(
+                                        post.status,
+                                    );
+
+                                    return (
+                                        <tr
+                                            key={post.id}
+                                            onClick={() =>
+                                                router.visit(show.url(post.id))
+                                            }
+                                        >
+                                            <td className="c-num">
+                                                P-{post.number}
+                                            </td>
+                                            <td className="c-title">
+                                                {post.title}
+                                            </td>
+                                            <td className="c-plat">
+                                                {post.platforms.map(
+                                                    (platform) => {
+                                                        const key =
+                                                            normalizePlatformKey(
+                                                                platform,
+                                                            );
+                                                        const meta = key
+                                                            ? PLATFORM_META[key]
+                                                            : null;
+
+                                                        return meta ? (
+                                                            <span
+                                                                key={platform}
+                                                                className="platform-badge"
+                                                                style={{
+                                                                    background:
+                                                                        meta.color,
+                                                                }}
+                                                                title={
+                                                                    platform
+                                                                }
+                                                            >
+                                                                {meta.badge}
+                                                            </span>
+                                                        ) : (
+                                                            <span
+                                                                key={platform}
+                                                                className="platform-badge"
+                                                                style={{
+                                                                    background:
+                                                                        '#666',
+                                                                }}
+                                                                title={
+                                                                    platform
+                                                                }
+                                                            >
+                                                                ?
+                                                            </span>
+                                                        );
+                                                    },
+                                                )}
+                                            </td>
+                                            <td className="c-status">
+                                                <span
+                                                    className={`pill st-${studioStatus}`}
+                                                >
+                                                    {
+                                                        POST_STATUS_LABELS[
+                                                            studioStatus
+                                                        ]
+                                                    }
+                                                </span>
+                                            </td>
+                                            <td className="c-act">
+                                                <Link
+                                                    href={show.url(post.id)}
+                                                    className="viewbtn"
+                                                    onClick={(event) =>
+                                                        event.stopPropagation()
+                                                    }
+                                                >
+                                                    View
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
                 {posts.links.length > 3 && (
-                    <nav className="flex flex-wrap items-center gap-1">
-                        {posts.links.map((link, position) => (
-                            <Button
-                                key={`${link.label}-${position}`}
-                                variant={link.active ? 'default' : 'outline'}
-                                size="sm"
-                                disabled={link.url === null}
-                                asChild={link.url !== null}
-                            >
-                                {link.url !== null ? (
-                                    <Link href={link.url} preserveScroll>
-                                        {paginationLabel(link.label)}
-                                    </Link>
-                                ) : (
-                                    <span>{paginationLabel(link.label)}</span>
-                                )}
-                            </Button>
-                        ))}
+                    <nav className="mt-4 flex flex-wrap items-center gap-1">
+                        {posts.links.map((link, position) =>
+                            link.url ? (
+                                <Link
+                                    key={`${link.label}-${position}`}
+                                    href={link.url}
+                                    preserveScroll
+                                    className={`rounded-md border px-3 py-1 text-sm ${link.active ? 'bg-[var(--accent)] text-white' : ''}`}
+                                >
+                                    {paginationLabel(link.label)}
+                                </Link>
+                            ) : (
+                                <span
+                                    key={`${link.label}-${position}`}
+                                    className="rounded-md border px-3 py-1 text-sm opacity-50"
+                                >
+                                    {paginationLabel(link.label)}
+                                </span>
+                            ),
+                        )}
                     </nav>
                 )}
             </div>
