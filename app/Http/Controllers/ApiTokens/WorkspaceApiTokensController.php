@@ -47,6 +47,9 @@ class WorkspaceApiTokensController extends Controller
                 ])
                 ->values(),
             'mcp_url' => url('/mcp'),
+            // Same list the request validates against, so the mint form
+            // cannot drift from WorkspaceApiToken::ABILITIES.
+            'available_abilities' => WorkspaceApiToken::ABILITIES,
         ]);
     }
 

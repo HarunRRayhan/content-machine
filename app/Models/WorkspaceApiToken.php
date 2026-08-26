@@ -32,10 +32,9 @@ class WorkspaceApiToken extends Model
     use HasFactory, HasHashedToken;
 
     /**
-     * The abilities a token can hold. The scratchpad + ideas pair is what
-     * personal-content's capture/triage loop needs today; later surfaces
-     * (posts/videos) add their own abilities here rather than widening
-     * these.
+     * The abilities a token can hold. Scratchpad and ideas cover capture
+     * and triage; videos and posts cover the matching JSON API surfaces.
+     * The mint form is driven from this list so it cannot drift.
      */
     final public const ABILITIES = [
         'scratchpad:read',
