@@ -640,9 +640,10 @@
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 4px;
-    margin: 0 2px 16px;
+    margin: 0 auto 16px;
     width: fit-content;
     flex-wrap: wrap;
+    justify-content: center;
 }
 
 .studio-page .cap-langbar button {
