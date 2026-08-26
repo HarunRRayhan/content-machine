@@ -32,6 +32,41 @@ export function normalizePlatformKey(name: string): PlatformKey | null {
     return null;
 }
 
+/** English leads with Twitter; Bangla leads with Facebook. */
+export function leadPlatformForLang(
+    lang: string | null | undefined,
+): PlatformKey | null {
+    if (lang === 'en') {
+        return 'twitter';
+    }
+
+    if (lang === 'bn') {
+        return 'facebook';
+    }
+
+    return null;
+}
+
+export function orderPlatformsByLang<T extends { name: string }>(
+    platforms: T[],
+    lang: string | null | undefined,
+): T[] {
+    const lead = leadPlatformForLang(lang);
+
+    if (lead === null) {
+        return platforms;
+    }
+
+    const first = platforms.filter(
+        (platform) => normalizePlatformKey(platform.name) === lead,
+    );
+    const rest = platforms.filter(
+        (platform) => normalizePlatformKey(platform.name) !== lead,
+    );
+
+    return [...first, ...rest];
+}
+
 export const POST_STATUS_LABELS: Record<string, string> = {
     draft: 'Draft',
     ready: 'Draft',

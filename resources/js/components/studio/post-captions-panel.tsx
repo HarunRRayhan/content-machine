@@ -1,8 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { CaptionGroup } from '@/components/content/captions-panel';
-import { LANG_META } from '@/lib/lang-meta';
+import { LANG_META, orderLangs } from '@/lib/lang-meta';
 import type { LangCode } from '@/lib/lang-meta';
-import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
+import {
+    PLATFORM_META,
+    normalizePlatformKey,
+    orderPlatformsByLang,
+} from '@/lib/platform-meta';
 
 type CaptionGroupWithLang = CaptionGroup & {
     lang?: string | null;
@@ -51,14 +55,14 @@ function inferLangs(
         .filter((lang): lang is LangCode => lang === 'bn' || lang === 'en');
 
     if (tagged.length > 0) {
-        return [...new Set(tagged)];
+        return orderLangs(tagged);
     }
 
     if (defaultLang) {
         return [defaultLang];
     }
 
-    return groups.length > 0 ? ['bn'] : [];
+    return groups.length > 0 ? ['en'] : [];
 }
 
 export default function PostCaptionsPanel({
@@ -69,7 +73,7 @@ export default function PostCaptionsPanel({
 }: Props) {
     const langs = inferLangs(groups, defaultLang);
     const multiLang = langs.length > 1;
-    const [activeLang, setActiveLang] = useState<LangCode>(langs[0] ?? 'bn');
+    const [activeLang, setActiveLang] = useState<LangCode>(langs[0] ?? 'en');
     const [activeTabByGroup, setActiveTabByGroup] = useState<
         Record<number, number>
     >({});
@@ -120,7 +124,10 @@ export default function PostCaptionsPanel({
 
                     return platformSet.has(platform.name.trim().toLowerCase());
                 });
-                const list = tabs.length > 0 ? tabs : group.platforms;
+                const list = orderPlatformsByLang(
+                    tabs.length > 0 ? tabs : group.platforms,
+                    group.lang ?? activeLang,
+                );
                 const active =
                     activeTabByGroup[groupIndex] ?? (list.length > 0 ? 0 : -1);
                 const platform = list[active];
