@@ -781,6 +781,21 @@
     border-radius: 8px;
 }
 
+.studio-page .post-images-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 16px;
+}
+
+.studio-page .post-images-gallery img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 10px;
+    background: var(--surface);
+}
+
 .studio-page .mock-img-missing {
     width: 160px;
     height: 160px;
