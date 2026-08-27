@@ -1,7 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export type PlatformEntry = {
@@ -27,6 +26,11 @@ export type AvailableWorkspace = {
     accounts: WorkspaceAccount[];
 };
 
+export type PostTypesConfig = {
+    platforms?: Record<string, Record<string, string | null>>;
+    overrides?: Record<string, Record<string, Record<string, string | null>>>;
+};
+
 export function workspaceOptionLabel(workspace: AvailableWorkspace): string {
     if (workspace.name !== '' && workspace.name !== workspace.id) {
         return `${workspace.name} (${workspace.id})`;
@@ -50,8 +54,8 @@ export function platformsFromAccounts(
         const current = existing[platform];
 
         next[platform] = {
-            account_id: account?.id ?? current?.account_id ?? '',
-            handle: account?.handle ?? current?.handle ?? '',
+            account_id: account?.id ?? '',
+            handle: account?.handle ?? '',
             enabled:
                 current?.enabled !== undefined
                     ? current.enabled
@@ -62,12 +66,37 @@ export function platformsFromAccounts(
     return next;
 }
 
-function platformLabel(platform: string): string {
+export function connectedPlatforms(
+    platformsByName: Record<string, PlatformEntry>,
+    platformNames: string[],
+): string[] {
+    return platformNames.filter((platform) =>
+        Boolean(platformsByName[platform]?.account_id),
+    );
+}
+
+export function platformLabel(platform: string): string {
     return platform.charAt(0).toUpperCase() + platform.slice(1);
 }
 
 export function languageLabel(language: string): string {
     return language === 'bangla' ? 'Bangla' : 'English';
+}
+
+export function activeTypeLabels(
+    language: string,
+    platform: string,
+    postTypes: PostTypesConfig,
+    postTypeNames: string[],
+): string[] {
+    const base = postTypes.platforms?.[platform] ?? {};
+    const override = postTypes.overrides?.[language]?.[platform] ?? {};
+
+    return postTypeNames.filter((type) => {
+        const state = override[type] ?? base[type] ?? '';
+
+        return state === 'on' || state === 'ask';
+    });
 }
 
 export function PostsyncerLanguageSection({
@@ -76,6 +105,8 @@ export function PostsyncerLanguageSection({
     platformsByName,
     platforms,
     availableWorkspaces,
+    postTypes,
+    postTypeNames,
     onWorkspaceChange,
     onPlatformChange,
     onRefresh,
@@ -86,6 +117,8 @@ export function PostsyncerLanguageSection({
     platformsByName: Record<string, PlatformEntry>;
     platforms: string[];
     availableWorkspaces: AvailableWorkspace[];
+    postTypes: PostTypesConfig;
+    postTypeNames: string[];
     onWorkspaceChange: (language: string, workspaceId: string) => void;
     onPlatformChange: (
         language: string,
@@ -95,26 +128,35 @@ export function PostsyncerLanguageSection({
     onRefresh: (language: string, workspaceId: string) => void;
     refreshing: boolean;
 }) {
+    const pulled = connectedPlatforms(platformsByName, platforms);
+    const workspacePicked = workspaceId !== '';
+
     return (
         <div className="space-y-4">
             <div className="flex items-center justify-between gap-4">
                 <Heading
                     variant="small"
                     title={`${languageLabel(language)} workspace`}
-                    description="Pick a workspace. Accounts fill in; then enable or disable each platform."
+                    description={
+                        workspacePicked
+                            ? 'These handles are in that workspace. Turn on the ones you want to use.'
+                            : 'Pick a workspace. We will pull its accounts next.'
+                    }
                 />
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={refreshing || workspaceId === ''}
-                    onClick={() => onRefresh(language, workspaceId)}
-                >
-                    <RefreshCw
-                        className={`mr-2 size-4 ${refreshing ? 'animate-spin' : ''}`}
-                    />
-                    Refresh accounts
-                </Button>
+                {workspacePicked && (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={refreshing}
+                        onClick={() => onRefresh(language, workspaceId)}
+                    >
+                        <RefreshCw
+                            className={`mr-2 size-4 ${refreshing ? 'animate-spin' : ''}`}
+                        />
+                        Refresh
+                    </Button>
+                )}
             </div>
 
             <div className="grid gap-2">
@@ -134,7 +176,7 @@ export function PostsyncerLanguageSection({
                             {workspaceOptionLabel(workspace)}
                         </option>
                     ))}
-                    {workspaceId !== '' &&
+                    {workspacePicked &&
                         !availableWorkspaces.some(
                             (workspace) => workspace.id === workspaceId,
                         ) && (
@@ -145,98 +187,102 @@ export function PostsyncerLanguageSection({
                 </select>
             </div>
 
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                    <thead>
-                        <tr className="border-b text-left">
-                            <th className="py-2 pr-4 font-medium">Use</th>
-                            <th className="py-2 pr-4 font-medium">Platform</th>
-                            <th className="py-2 pr-4 font-medium">
-                                Account id
-                            </th>
-                            <th className="py-2 font-medium">Handle</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {platforms.map((platform) => {
-                            const entry = platformsByName[platform] ?? {
-                                account_id: '',
-                                handle: '',
-                                enabled: false,
-                            };
+            <div className="hidden">
+                {platforms.map((platform) => {
+                    const entry = platformsByName[platform] ?? {
+                        account_id: '',
+                        handle: '',
+                        enabled: false,
+                    };
 
-                            return (
-                                <tr
-                                    key={platform}
-                                    className="border-b last:border-0"
-                                >
-                                    <td className="py-2 pr-4">
-                                        <input
-                                            type="hidden"
-                                            name={`languages[${language}][platforms][${platform}][enabled]`}
-                                            value={entry.enabled ? '1' : '0'}
-                                        />
-                                        <input
-                                            type="checkbox"
-                                            checked={entry.enabled}
-                                            aria-label={`Enable ${platformLabel(platform)}`}
-                                            onChange={(event) =>
-                                                onPlatformChange(
-                                                    language,
-                                                    platform,
-                                                    {
-                                                        enabled:
-                                                            event.target
-                                                                .checked,
-                                                    },
-                                                )
-                                            }
-                                            className="size-4 rounded border-input"
-                                        />
-                                    </td>
-                                    <td className="py-2 pr-4">
-                                        {platformLabel(platform)}
-                                    </td>
-                                    <td className="py-2 pr-4">
-                                        <Input
-                                            name={`languages[${language}][platforms][${platform}][account_id]`}
-                                            value={entry.account_id ?? ''}
-                                            onChange={(event) =>
-                                                onPlatformChange(
-                                                    language,
-                                                    platform,
-                                                    {
-                                                        account_id:
-                                                            event.target.value,
-                                                    },
-                                                )
-                                            }
-                                            placeholder="Account id"
-                                        />
-                                    </td>
-                                    <td className="py-2">
-                                        <Input
-                                            name={`languages[${language}][platforms][${platform}][handle]`}
-                                            value={entry.handle}
-                                            onChange={(event) =>
-                                                onPlatformChange(
-                                                    language,
-                                                    platform,
-                                                    {
-                                                        handle: event.target
-                                                            .value,
-                                                    },
-                                                )
-                                            }
-                                            placeholder="@handle"
-                                        />
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
+                    return (
+                        <div key={`fields-${platform}`}>
+                            <input
+                                type="hidden"
+                                name={`languages[${language}][platforms][${platform}][enabled]`}
+                                value={entry.enabled ? '1' : '0'}
+                            />
+                            <input
+                                type="hidden"
+                                name={`languages[${language}][platforms][${platform}][account_id]`}
+                                value={entry.account_id ?? ''}
+                            />
+                            <input
+                                type="hidden"
+                                name={`languages[${language}][platforms][${platform}][handle]`}
+                                value={entry.handle}
+                            />
+                        </div>
+                    );
+                })}
             </div>
+
+            {workspacePicked && refreshing && pulled.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                    Pulling accounts…
+                </p>
+            )}
+
+            {workspacePicked && !refreshing && pulled.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                    No social accounts came back for this workspace.
+                </p>
+            )}
+
+            {workspacePicked && pulled.length > 0 && (
+                <ul className="divide-y rounded-lg border">
+                    {pulled.map((platform) => {
+                        const entry = platformsByName[platform];
+                        const handle =
+                            entry.handle !== ''
+                                ? entry.handle
+                                : platformLabel(platform);
+                        const types = activeTypeLabels(
+                            language,
+                            platform,
+                            postTypes,
+                            postTypeNames,
+                        );
+
+                        return (
+                            <li
+                                key={platform}
+                                className="flex items-start justify-between gap-4 px-4 py-3"
+                            >
+                                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                                    <input
+                                        type="checkbox"
+                                        checked={entry.enabled}
+                                        aria-label={`Use ${handle} on ${platformLabel(platform)}`}
+                                        onChange={(event) =>
+                                            onPlatformChange(
+                                                language,
+                                                platform,
+                                                {
+                                                    enabled:
+                                                        event.target.checked,
+                                                },
+                                            )
+                                        }
+                                        className="mt-1 size-4 rounded border-input"
+                                    />
+                                    <span className="min-w-0">
+                                        <span className="block font-medium">
+                                            {handle}
+                                        </span>
+                                        <span className="block text-sm text-muted-foreground">
+                                            {platformLabel(platform)}
+                                            {types.length > 0
+                                                ? ` · ${types.join(', ')}`
+                                                : ''}
+                                        </span>
+                                    </span>
+                                </label>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
         </div>
     );
 }

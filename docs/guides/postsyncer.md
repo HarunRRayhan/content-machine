@@ -27,11 +27,11 @@ them. The old `/dashboard/settings/postsyncer` URL redirects to General.
 | **Publish enabled** | Cutover flag. When off, Schedule/Publish buttons stay hidden even if the API key is set. Turn on only after settings validate and you are ready to move off Script Studio. |
 | **Default language** | The workspace used for publishing. English if unset. |
 | **Extra language workspaces** | Optional. Add Bangla or English only if you post in that language. |
-| **Workspace** | Picker shows `Name (id)`. Picking one fills account id and handle for every social account in that workspace. |
-| **Use** | Per-platform enable/disable for that language set. Found accounts start on; turn off any you do not want. |
-| **Per-platform account id + handle** | One row per platform in each language block |
-| **Post-type matrix** | Pre-filled from Script Studio (`web/post_types.json`). Language overrides stay on save. |
-| **Refresh accounts** | Reloads accounts for the workspace currently selected in the dropdown, not only the last saved id. |
+| **Workspace** | Picker shows `Name (id)`. The account list stays hidden until you pick one. |
+| **Accounts** | Pulled from that workspace only. Handle and platform, plus which post types Script Studio allows. No manual id or handle entry. |
+| **Active** | Turn on the handles you want to use. Missing platforms stay off. |
+| **Post-type rules** | Copied from Script Studio and saved with the page. Shown as a short type list on each pulled handle, not as a blank matrix. |
+| **Refresh** | Reloads accounts for the workspace currently selected in the dropdown. |
 | **Connection** | The Workspaces page says whether PostSyncer returned workspaces for the saved API key. |
 
 Schedule and Publish stay disabled until the API key is set, the default
