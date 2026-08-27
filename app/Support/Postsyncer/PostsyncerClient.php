@@ -44,7 +44,7 @@ class PostsyncerClient
             $workspaces[] = [
                 'id' => $id,
                 'name' => $this->workspaceName($row, $id),
-                'accounts' => MapPostsyncerAccounts::present($accounts),
+                'accounts' => MapPostsyncerAccounts::present($accounts, $id),
             ];
         }
 

@@ -13,7 +13,7 @@ final class MapPostsyncerAccounts
      * @param  array<string, mixed>  $existing
      * @return array<string, array{account_id: int|string|null, handle: string, enabled: bool}>
      */
-    public static function toPlatforms(array $platforms, array $accounts, array $existing = []): array
+    public static function toPlatforms(array $platforms, array $accounts, array $existing = [], int|string|null $workspaceId = null): array
     {
         $suggested = [];
 
@@ -38,10 +38,8 @@ final class MapPostsyncerAccounts
             }
 
             $current = is_array($existing[$platform] ?? null) ? $existing[$platform] : [];
-            $username = $account['username'] ?? $account['handle'] ?? $account['name'] ?? $account['display_name'] ?? null;
-            $handle = is_string($username) && $username !== ''
-                ? self::handle($username)
-                : $suggested[$platform]['handle'];
+            $handle = self::accountHandle($account, $workspaceId);
+            $handle = $handle !== '' ? $handle : $suggested[$platform]['handle'];
 
             $suggested[$platform] = [
                 'account_id' => $account['id'] ?? $suggested[$platform]['account_id'],
@@ -59,7 +57,7 @@ final class MapPostsyncerAccounts
      * @param  array<mixed>  $accounts
      * @return list<array{id: string, platform: string, handle: string}>
      */
-    public static function present(array $accounts): array
+    public static function present(array $accounts, int|string|null $workspaceId = null): array
     {
         $presented = [];
 
@@ -75,12 +73,10 @@ final class MapPostsyncerAccounts
                 continue;
             }
 
-            $username = $account['username'] ?? $account['handle'] ?? $account['name'] ?? $account['display_name'] ?? '';
-
             $presented[] = [
                 'id' => (string) $id,
                 'platform' => $platform,
-                'handle' => is_string($username) ? self::handle($username) : '',
+                'handle' => self::accountHandle($account, $workspaceId),
             ];
         }
 
@@ -114,6 +110,31 @@ final class MapPostsyncerAccounts
         $name = strtolower(trim((string) $platform));
 
         return $name === 'x' ? 'twitter' : $name;
+    }
+
+    /**
+     * PostSyncer often sends LinkedIn/Facebook `username` as null and
+     * puts the person's name in `name`. Never treat that as a handle.
+     *
+     * @param  array<string, mixed>  $account
+     */
+    public static function accountHandle(array $account, int|string|null $workspaceId = null): string
+    {
+        foreach (['username', 'handle'] as $key) {
+            $value = $account[$key] ?? null;
+
+            if (is_string($value) && trim($value) !== '') {
+                return self::handle($value);
+            }
+        }
+
+        $workspaceId ??= $account['workspace_id'] ?? null;
+        $studio = StudioWorkspaceHandles::handleFor(
+            self::platformName($account['platform'] ?? ''),
+            $workspaceId,
+        );
+
+        return $studio !== '' ? self::handle($studio) : '';
     }
 
     public static function handle(mixed $value): string
