@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Videos\CreateVideoAction;
 use App\Actions\Videos\UpdateVideoAction;
 use App\Data\Videos\UpdateVideoData;
@@ -90,6 +91,30 @@ class VideosApiController extends Controller
         $action->handle($video, UpdateVideoData::fromApiPayload($payload, $video));
 
         return new VideoResource($video->fresh());
+    }
+
+    public function publish(Request $request, string $humanId, EnqueueVideoPublishAction $action): VideoResource
+    {
+        $video = $this->resolveVideo($humanId);
+
+        $payload = $request->validate([
+            'when' => ['nullable', 'string', 'max:64'],
+            'platforms' => ['nullable', 'array'],
+            'platforms.*' => ['string', 'max:64'],
+            'confirm_ask' => ['nullable', 'boolean'],
+        ]);
+
+        $options = array_filter([
+            'when' => $payload['when'] ?? null,
+            'platforms' => $payload['platforms'] ?? null,
+            'confirm_ask' => array_key_exists('confirm_ask', $payload)
+                ? (bool) $payload['confirm_ask']
+                : null,
+        ], fn ($value) => $value !== null);
+
+        $video = $action->handle($video, $this->currentWorkspace(), $options);
+
+        return new VideoResource($video);
     }
 
     private function resolveVideo(string $humanId): Video

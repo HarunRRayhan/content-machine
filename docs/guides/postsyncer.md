@@ -149,9 +149,14 @@ Search and language filters apply on every tab except Ideation.
    with a future `when` (never omit `when` on a probe). Confirm PostSyncer ids
    and `SCHEDULED`, then delete the PostSyncer post so it never goes live.
 4. Schedule one **video** with Video + Cover Drive URLs.
-5. Point Script Studio at the CM publish API and set
-   `CONTENT_MACHINE_PUBLISH=1` on the Script Studio server, then restart it.
-   Local scheduling must go to CM; CM talks to PostSyncer.
+5. Script Studio no longer talks to PostSyncer. Local video/post work uploads
+   to CM (`content_machine.py`). Schedule only through CM, dashboard or
+   `POST /api/v1/posts|videos/{human_id}/publish`.
+
+The Laravel scheduler already runs on Railway `cm-worker` (`php artisan
+schedule:work`). `postsyncer:sync-scheduled` every five minutes live-checks
+PostSyncer and marks a scheduled post or video `posted` once every group is
+`PUBLISHED`. Do not add a separate cron service.
 
 Markdown `**PostSyncer:**` lines in personal-content post files remain an
 archive after cutover; CM records are the source of truth.
