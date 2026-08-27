@@ -2,14 +2,18 @@
 
 namespace App\Support\Postsyncer;
 
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\Video;
 use App\Support\GoogleDrive\GoogleDriveLink;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use InvalidArgumentException;
 
 class MediaUrlResolver
 {
+    private const SIGNED_URL_TTL_HOURS = 3;
+
     /**
      * @return list<string>
      */
@@ -18,13 +22,51 @@ class MediaUrlResolver
         $post->loadMissing(['attachments.mediaAsset']);
 
         if ($post->attachments->isNotEmpty()) {
-            return $this->urlsFromAttachments($post);
+            $attachmentUrls = $this->attachmentUrlsInOrder($post);
+            if ($attachmentUrls !== []) {
+                return $attachmentUrls;
+            }
         }
 
         return array_map(
             fn (string $url): string => GoogleDriveLink::toFetchUrl($url),
             array_values($post->image_drive_urls ?? []),
         );
+    }
+
+    /**
+     * Resolve platform image entries: Drive URLs, or attachment filenames from imports.
+     *
+     * @param  list<string>  $images
+     * @return list<string>
+     */
+    public function resolveNamedImages(Post $post, array $images): array
+    {
+        if ($images === []) {
+            return [];
+        }
+
+        $byFilename = $this->attachmentUrlsByFilename($post);
+        $urls = [];
+
+        foreach ($images as $image) {
+            $image = trim($image);
+            if ($image === '') {
+                continue;
+            }
+
+            if (str_starts_with($image, 'http://') || str_starts_with($image, 'https://')) {
+                $urls[] = GoogleDriveLink::toFetchUrl($image);
+
+                continue;
+            }
+
+            if (isset($byFilename[$image])) {
+                $urls[] = $byFilename[$image];
+            }
+        }
+
+        return $urls;
     }
 
     /**
@@ -47,27 +89,71 @@ class MediaUrlResolver
     /**
      * @return list<string>
      */
-    private function urlsFromAttachments(Post $post): array
+    private function attachmentUrlsInOrder(Post $post): array
     {
         $urls = [];
 
-        foreach ($post->attachments as $attachment) {
+        foreach ($post->attachments->sortBy('position') as $attachment) {
             $media = $attachment->mediaAsset;
-            if ($media === null) {
+            if ($media === null || ! $this->attachmentIsReadable($media)) {
                 continue;
             }
 
-            try {
-                $url = Storage::disk($media->disk)->url($media->path);
-            } catch (\Throwable) {
-                continue;
-            }
-
-            if ($url !== '') {
-                $urls[] = $url;
-            }
+            $urls[] = $this->signedPostMediaUrl($post, $media);
         }
 
         return $urls;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function attachmentUrlsByFilename(Post $post): array
+    {
+        $post->loadMissing(['attachments.mediaAsset']);
+        $map = [];
+
+        foreach ($post->attachments->sortBy('position') as $attachment) {
+            $media = $attachment->mediaAsset;
+            if ($media === null || ! $this->attachmentIsReadable($media)) {
+                continue;
+            }
+
+            $url = $this->signedPostMediaUrl($post, $media);
+
+            if (filled($media->original_filename)) {
+                $map[$media->original_filename] = $url;
+            }
+
+            $basename = basename($media->path);
+            if ($basename !== '') {
+                $map[$basename] = $url;
+            }
+        }
+
+        return $map;
+    }
+
+    private function signedPostMediaUrl(Post $post, MediaAsset $media): string
+    {
+        return URL::temporarySignedRoute(
+            'publish-media.post',
+            now()->addHours(self::SIGNED_URL_TTL_HOURS),
+            ['post' => $post->id, 'mediaAsset' => $media->id],
+            absolute: true,
+        );
+    }
+
+    private function attachmentIsReadable(MediaAsset $media): bool
+    {
+        if (! is_array(config("filesystems.disks.{$media->disk}"))) {
+            return false;
+        }
+
+        try {
+            return Storage::disk($media->disk)->exists($media->path);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }
