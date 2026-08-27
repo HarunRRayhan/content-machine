@@ -8,6 +8,7 @@ import {
     KeySquare,
     NotebookPen,
     Send,
+    Settings,
     SquarePen,
     Users,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ import { index as apiTokensIndex } from '@/routes/dashboard/team/api-tokens';
 import { edit as telegramEdit } from '@/routes/dashboard/telegram';
 import { index as postsIndex } from '@/routes/posts';
 import { index as scratchpadIndex } from '@/routes/scratchpad';
+import { index as settingsIndex } from '@/routes/settings';
 import { index as videosIndex } from '@/routes/videos';
 import type { NavItem } from '@/types';
 
@@ -75,6 +77,12 @@ const mainNavItems: NavItem[] = [
         title: 'Telegram',
         href: telegramEdit(),
         icon: Send,
+    },
+    {
+        title: 'Settings',
+        href: settingsIndex(),
+        icon: Settings,
+        matchPrefix: true,
     },
 ];
 

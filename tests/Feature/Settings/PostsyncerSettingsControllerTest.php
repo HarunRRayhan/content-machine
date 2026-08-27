@@ -30,15 +30,31 @@ class PostsyncerSettingsControllerTest extends TestCase
 
     public function test_guests_are_redirected_to_login(): void
     {
-        $this->get(route('dashboard.postsyncer.edit'))
+        $this->get(route('settings.postsyncer.edit'))
             ->assertRedirect(route('login'));
+    }
+
+    public function test_settings_index_redirects_to_postsyncer(): void
+    {
+        $this->actingAsWorkspaceOwner();
+
+        $this->get(route('settings.index'))
+            ->assertRedirect('/settings/postsyncer');
+    }
+
+    public function test_legacy_dashboard_url_redirects_to_settings(): void
+    {
+        $this->actingAsWorkspaceOwner();
+
+        $this->get('/dashboard/settings/postsyncer')
+            ->assertRedirect('/settings/postsyncer');
     }
 
     public function test_owner_can_update_publish_enabled(): void
     {
         [, $workspace] = $this->actingAsWorkspaceOwner();
 
-        $this->put(route('dashboard.postsyncer.update'), [
+        $this->put(route('settings.postsyncer.update'), [
             'publish_enabled' => true,
             'api_base' => 'https://postsyncer.com/api/v1',
             'upload_base' => 'https://upload.postsyncer.com/api/v1',
@@ -48,7 +64,7 @@ class PostsyncerSettingsControllerTest extends TestCase
             ],
             'post_types' => ['platforms' => [], 'overrides' => []],
         ])
-            ->assertRedirect(route('dashboard.postsyncer.edit'));
+            ->assertRedirect(route('settings.postsyncer.edit'));
 
         $this->assertTrue(PostsyncerConfig::fromWorkspace($workspace->fresh())->publishEnabled());
     }
@@ -57,10 +73,10 @@ class PostsyncerSettingsControllerTest extends TestCase
     {
         $this->actingAsWorkspaceOwner();
 
-        $this->get(route('dashboard.postsyncer.edit'))
+        $this->get(route('settings.postsyncer.edit'))
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->component('settings/postsyncer')
+                ->component('workspace-settings/postsyncer')
                 ->where('apiKeyConfigured', false)
                 ->where('availableWorkspaces', [])
                 ->where('workspacesLoadError', null));
@@ -96,10 +112,10 @@ class PostsyncerSettingsControllerTest extends TestCase
             ], 200),
         ]);
 
-        $this->get(route('dashboard.postsyncer.edit'))
+        $this->get(route('settings.postsyncer.edit'))
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->component('settings/postsyncer')
+                ->component('workspace-settings/postsyncer')
                 ->where('apiKeyConfigured', true)
                 ->where('availableWorkspaces', [
                     ['id' => '15211', 'label' => 'Bangla'],
