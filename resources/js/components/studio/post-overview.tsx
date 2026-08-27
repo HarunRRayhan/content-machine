@@ -1,6 +1,14 @@
 import { Form, router } from '@inertiajs/react';
 import { useState } from 'react';
+import {
+    PlatformChipRow,
+    WorkspacePlatformChips,
+    WorkspaceScheduleLog,
+    bucketsFromGroups,
+} from '@/components/studio/workspace-schedule';
+import type { PostsyncerGroup } from '@/components/studio/workspace-schedule';
 import { studioPostStatus } from '@/lib/platform-meta';
+import type { HandleDirectory } from '@/lib/studio-workspaces';
 
 const POST_PIPELINE = [
     { key: 'draft', label: 'Draft' },
@@ -10,25 +18,18 @@ const POST_PIPELINE = [
 
 const DHAKA_TZ = 'Asia/Dhaka';
 
-export type PostsyncerGroup = {
-    post_id?: string;
-    status?: string;
-    scheduled_at?: string | null;
-    published_at?: string | null;
-    platforms?: string[];
-    language?: string;
-};
-
 type Props = {
     postId: number;
     title: string;
     status: string;
     platforms: string[];
+    language?: string | null;
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
+    handles?: HandleDirectory;
 };
 
 function mapStudioStatus(status: string): string {
@@ -60,14 +61,30 @@ function groupWhen(group: PostsyncerGroup): string | null {
     return group.published_at ?? group.scheduled_at ?? null;
 }
 
+function parseWhen(value: string): Date | null {
+    const naive = value.match(
+        /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?$/,
+    );
+
+    if (naive) {
+        const date = new Date(`${naive[1]}T${naive[2]}:00+06:00`);
+
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function formatWhen(value: string | null | undefined): string | null {
     if (!value) {
         return null;
     }
 
-    const date = new Date(value);
+    const date = parseWhen(value);
 
-    if (Number.isNaN(date.getTime())) {
+    if (date === null) {
         return value;
     }
 
@@ -89,9 +106,9 @@ function earliestWhen(groups: PostsyncerGroup[]): string | null {
             continue;
         }
 
-        const date = new Date(raw);
+        const date = parseWhen(raw);
 
-        if (Number.isNaN(date.getTime())) {
+        if (date === null) {
             continue;
         }
 
@@ -126,11 +143,13 @@ export default function PostOverview({
     title,
     status,
     platforms,
+    language,
     publishUrl,
     postsyncerReady,
     publishState,
     needsConfirmAsk,
     postsyncer,
+    handles,
 }: Props) {
     const studioStatus = mapStudioStatus(status);
     const archived = studioStatus === 'archived';
@@ -145,6 +164,7 @@ export default function PostOverview({
     const [minWhen] = useState(() => datetimeLocalNowInDhaka());
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
+    const workspaceBuckets = bucketsFromGroups(groups);
     const publishBusy = ['queued', 'running'].includes(publishState);
     const showScheduleForm =
         !archived &&
@@ -183,12 +203,17 @@ export default function PostOverview({
                 <div className="pane-head">
                     <span className="k">Status</span>
                 </div>
-                {platforms.length > 0 && (
-                    <div className="doc-chips">
-                        <span className="chip">
-                            📡 <b>{platforms.join(', ')}</b>
-                        </span>
-                    </div>
+                {hasGroups ? (
+                    <WorkspacePlatformChips
+                        buckets={workspaceBuckets}
+                        handles={handles}
+                    />
+                ) : (
+                    <PlatformChipRow
+                        platforms={platforms}
+                        lang={language === 'en' ? 'en' : 'bn'}
+                        handles={handles}
+                    />
                 )}
                 <div className="statusbar">
                     <div className="stepper">
@@ -336,47 +361,22 @@ export default function PostOverview({
                         )}
                     </div>
 
-                    {hasGroups ? (
-                        <div className="schedule-log">
-                            <div className="schedule-log-h">
-                                Scheduled posts
-                            </div>
-                            <ul>
-                                {groups.map((group, index) => {
-                                    const when = formatWhen(groupWhen(group));
-
-                                    return (
-                                        <li
-                                            key={`${group.post_id ?? 'group'}-${index}`}
-                                        >
-                                            <span className="schedule-log-when">
-                                                {when
-                                                    ? `${when} ${DHAKA_TZ}`
-                                                    : 'No time yet'}
-                                            </span>
-                                            {group.platforms &&
-                                            group.platforms.length > 0
-                                                ? ` · ${group.platforms.join(', ')}`
-                                                : ''}
-                                            {group.post_id
-                                                ? ` · PostSyncer #${group.post_id}`
-                                                : ''}
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        </div>
-                    ) : studioStatus === 'scheduled' ? (
-                        <div className="schedule-log">
-                            <div className="schedule-log-h">
-                                Scheduled posts
-                            </div>
-                            <p className="schedule-log-empty">
-                                Marked scheduled, but Content Machine has no
-                                PostSyncer ids for this post yet.
-                            </p>
-                        </div>
-                    ) : null}
+                    <WorkspaceScheduleLog
+                        buckets={workspaceBuckets}
+                        formatWhen={formatWhen}
+                        timezone={DHAKA_TZ}
+                        handles={handles}
+                        heading={
+                            studioStatus === 'posted'
+                                ? 'Published posts'
+                                : 'Scheduled posts'
+                        }
+                        empty={
+                            studioStatus === 'scheduled' && !hasGroups
+                                ? 'Marked scheduled, but Content Machine has no PostSyncer ids for this post yet.'
+                                : undefined
+                        }
+                    />
                 </div>
             </section>
         </div>

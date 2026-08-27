@@ -195,6 +195,70 @@
     padding: 16px 20px 2px;
 }
 
+.studio-page .workspace-plats {
+    display: grid;
+    gap: 14px;
+    padding: 16px 20px 4px;
+}
+
+.studio-page .workspace-plat-h {
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+}
+
+.studio-page .workspace-plat-list,
+.studio-page .schedule-log-plats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.studio-page .plat-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px 5px 6px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--bg3);
+    font-size: 13px;
+    color: var(--ink);
+}
+
+.studio-page .plat-mark .platform-badge {
+    margin-right: 0;
+    flex-shrink: 0;
+}
+
+.studio-page .plat-mark-handle {
+    color: var(--ink-soft);
+    font-size: 12px;
+}
+
+.studio-page .schedule-log-ws + .schedule-log-ws {
+    margin-top: 14px;
+}
+
+.studio-page .schedule-log-status {
+    margin-left: 8px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+}
+
+.studio-page .schedule-log-plats {
+    margin-top: 0;
+}
+
+.studio-page .schedule-log-id {
+    font-size: 12px;
+    color: var(--ink-faint);
+}
+
 .studio-page .chip {
     font-size: 14px;
     color: var(--ink-soft);
@@ -504,11 +568,22 @@
 }
 
 .studio-page .schedule-log li {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
     font-size: 13.5px;
     line-height: 1.5;
     color: var(--ink-soft);
-    padding: 6px 0;
+    padding: 8px 0;
     border-bottom: 1px solid var(--line);
+}
+
+.studio-page .schedule-log-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
 }
 
 .studio-page .schedule-log li:last-child {
