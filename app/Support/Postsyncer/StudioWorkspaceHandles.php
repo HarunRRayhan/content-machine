@@ -9,6 +9,27 @@ namespace App\Support\Postsyncer;
  */
 class StudioWorkspaceHandles
 {
+    /** @var array<int, 'bn'|'en'> */
+    public const WORKSPACES = [
+        853 => 'en',
+        15211 => 'bn',
+    ];
+
+    public static function handleFor(string $platform, int|string|null $workspaceId = null): string
+    {
+        if ($workspaceId === null || $workspaceId === '') {
+            return '';
+        }
+
+        $lang = self::WORKSPACES[(int) $workspaceId] ?? null;
+
+        if ($lang === null) {
+            return '';
+        }
+
+        return self::handles()[$lang][$platform] ?? '';
+    }
+
     /**
      * @return array{bn: array<string, string>, en: array<string, string>}
      */

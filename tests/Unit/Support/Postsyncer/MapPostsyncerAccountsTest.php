@@ -12,14 +12,25 @@ class MapPostsyncerAccountsTest extends TestCase
         $presented = MapPostsyncerAccounts::present([
             ['id' => 1205, 'platform' => 'x', 'username' => 'harundotdev'],
             ['id' => 7017, 'platform' => 'facebook', 'handle' => '@HarunRRayhan'],
-            ['id' => 7363, 'platform' => 'facebook', 'name' => 'Harun Dev'],
+            ['id' => 7360, 'platform' => 'linkedin', 'username' => null, 'name' => 'Harunur Rashid'],
             ['id' => '', 'platform' => 'instagram'],
-        ]);
+        ], '853');
 
         $this->assertSame([
             ['id' => '1205', 'platform' => 'twitter', 'handle' => '@harundotdev'],
             ['id' => '7017', 'platform' => 'facebook', 'handle' => '@HarunRRayhan'],
-            ['id' => '7363', 'platform' => 'facebook', 'handle' => '@Harun Dev'],
+            ['id' => '7360', 'platform' => 'linkedin', 'handle' => '@harundotdev'],
+        ], $presented);
+    }
+
+    public function test_present_does_not_use_a_display_name_as_a_handle(): void
+    {
+        $presented = MapPostsyncerAccounts::present([
+            ['id' => 7360, 'platform' => 'linkedin', 'username' => null, 'name' => 'Harunur Rashid'],
+        ], '42761');
+
+        $this->assertSame([
+            ['id' => '7360', 'platform' => 'linkedin', 'handle' => ''],
         ], $presented);
     }
 

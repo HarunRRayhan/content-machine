@@ -100,6 +100,7 @@ class PostsyncerSettingsController extends Controller
             UpdatePostsyncerSettingsRequest::PLATFORMS,
             $accounts,
             $existing,
+            $workspaceId,
         );
 
         return response()->json([
