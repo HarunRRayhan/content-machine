@@ -107,11 +107,7 @@ function IndexWorkspaceChips({
                 const tip = names.join(', ');
 
                 return (
-                    <span
-                        key={workspace.key}
-                        className="ws-chip"
-                        tabIndex={0}
-                    >
+                    <span key={workspace.key} className="ws-chip" tabIndex={0}>
                         <span className="ws-chip-name">
                             {workspaceShortName(workspace.key)}
                         </span>
