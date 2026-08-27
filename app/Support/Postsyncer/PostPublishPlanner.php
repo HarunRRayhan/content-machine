@@ -363,6 +363,6 @@ class PostPublishPlanner
             return null;
         }
 
-        return CarbonImmutable::parse($when, $timezone);
+        return CarbonImmutable::parse($when, $timezone)->timezone($timezone);
     }
 }
