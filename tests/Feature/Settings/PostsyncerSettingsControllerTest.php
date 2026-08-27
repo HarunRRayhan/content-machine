@@ -106,21 +106,17 @@ class PostsyncerSettingsControllerTest extends TestCase
         ]);
 
         Http::fake([
-            'postsyncer.com/api/v1/accounts' => Http::response([
+            'postsyncer.com/api/v1/workspaces' => Http::response([
                 'data' => [
                     [
-                        'id' => 1,
-                        'workspace_id' => 15211,
-                        'workspace_name' => 'Bangla',
-                        'platform' => 'facebook',
-                        'username' => 'harun',
+                        'id' => 15211,
+                        'name' => 'Bangla',
+                        'slug' => 'bangla',
                     ],
                     [
-                        'id' => 2,
-                        'workspace_id' => 853,
-                        'workspace_name' => 'English',
-                        'platform' => 'twitter',
-                        'username' => 'harun',
+                        'id' => 853,
+                        'name' => 'English',
+                        'slug' => 'english',
                     ],
                 ],
             ], 200),
@@ -133,8 +129,8 @@ class PostsyncerSettingsControllerTest extends TestCase
                 ->where('apiKeyConfigured', true)
                 ->where('defaultLanguage', 'english')
                 ->where('availableWorkspaces', [
-                    ['id' => '15211', 'label' => 'Bangla'],
-                    ['id' => '853', 'label' => 'English'],
+                    ['id' => '15211', 'name' => 'Bangla'],
+                    ['id' => '853', 'name' => 'English'],
                 ])
                 ->where('workspacesLoadError', null));
     }

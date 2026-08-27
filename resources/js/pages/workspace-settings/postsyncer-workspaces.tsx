@@ -14,7 +14,7 @@ import {
     languageLabel,
     PostsyncerLanguageSection,
 } from '@/components/workspace-settings/postsyncer-language-section';
-import { PostsyncerPageMenu } from '@/components/workspace-settings/postsyncer-page-menu';
+import { PostsyncerTabs } from '@/components/workspace-settings/postsyncer-tabs';
 import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { home } from '@/routes/dashboard';
 import { index as settingsIndex } from '@/routes/settings';
@@ -139,13 +139,13 @@ export default function PostsyncerWorkspaceSettings({
             <Head title="PostSyncer workspaces" />
 
             <SettingsShell>
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-4">
                     <Heading
                         variant="small"
-                        title="Workspaces"
+                        title="PostSyncer"
                         description="Pick a default workspace, then add extras only if you post in more than one language."
                     />
-                    <PostsyncerPageMenu active="workspaces" />
+                    <PostsyncerTabs active="workspaces" />
                 </div>
 
                 <div className="max-w-3xl space-y-6">

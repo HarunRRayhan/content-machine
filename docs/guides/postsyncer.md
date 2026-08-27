@@ -12,12 +12,12 @@ disable its local PostSyncer endpoints (see personal-content
 
 ## Settings → PostSyncer
 
-Workspace owners configure PostSyncer from the Settings submenu:
-**API** (`/settings/postsyncer`) then **Workspaces**
-(`/settings/postsyncer/workspaces`). Pick a default language workspace
+Workspace owners configure PostSyncer from the Settings submenu. The
+PostSyncer page has two tabs: **General** (`/settings/postsyncer`) for
+the API key, then **Workspaces** (`/settings/postsyncer/workspaces`)
+for language workspaces and accounts. Pick a default language workspace
 (English by default) and add extra language workspaces only if you need
-them. The old `/dashboard/settings/postsyncer` URL redirects to the API
-page.
+them. The old `/dashboard/settings/postsyncer` URL redirects to General.
 
 | Field | Purpose |
 |---|---|
@@ -27,7 +27,7 @@ page.
 | **Publish enabled** | Cutover flag. When off, Schedule/Publish buttons stay hidden even if the API key is set. Turn on only after settings validate and you are ready to move off Script Studio. |
 | **Default language** | The workspace used for publishing. English if unset. |
 | **Extra language workspaces** | Optional. Add Bangla or English only if you post in that language. |
-| **Workspace id + handles** | PostSyncer workspace and per-platform account id / handle for each enabled language |
+| **Workspace** | PostSyncer workspace picker shows the name beside the id, then per-platform account id / handle for each enabled language |
 | **Per-platform account id + handle** | One row per platform in each language block |
 | **Post-type matrix** | Same rules as personal-content `web/post_types.json`: on / off / ask / unsupported per platform × format |
 | **Refresh accounts** | Calls PostSyncer `GET /accounts?workspace_id=…` for the selected language workspace and shows a diff before apply |
@@ -41,6 +41,7 @@ All authenticated calls use `Authorization: Bearer <api_key>`.
 
 | Operation | Host + path |
 |---|---|
+| List workspaces | `GET https://postsyncer.com/api/v1/workspaces` (id + name for the picker) |
 | List accounts | `GET https://postsyncer.com/api/v1/accounts` (filter client-side by `workspace_id`) |
 | Link-upload media | `POST https://postsyncer.com/api/v1/media/upload/url` with `{ "workspace_id", "urls": ["…"] }` |
 | Create / schedule post | `POST https://postsyncer.com/api/v1/posts` |
