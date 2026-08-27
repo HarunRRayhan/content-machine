@@ -43,8 +43,9 @@ class VideosController extends Controller
 
     /**
      * List the current workspace's videos (or video ideas on the Ideation
-     * tab). Videos are newest first. Ideas are highest score first, with
-     * null scores last. Filterable by status tab, language, and a
+     * tab). Videos are ordered by custom number (BV-67, BV-66, …), highest
+     * first, matching the API and git tracker. Ideas are highest score first,
+     * with null scores last. Filterable by status tab, language, and a
      * free-text query over title / human id.
      */
     public function index(Request $request): Response
@@ -86,7 +87,8 @@ class VideosController extends Controller
                             ->orWhere('slug', 'ilike', $like);
                     });
                 })
-                ->latest()
+                ->orderByDesc('number')
+                ->orderByDesc('id')
                 ->paginate(20)
                 ->withQueryString()
                 ->through(fn (Video $video) => $this->presentSummary($video));

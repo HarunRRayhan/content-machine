@@ -79,6 +79,42 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_index_orders_posts_by_number_desc_not_created_at(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Post::factory()->for($workspace)->create([
+            'human_id' => 'P-45',
+            'number' => 45,
+            'title' => 'Older import, higher number',
+            'status' => 'draft',
+            'created_at' => now()->subDays(2),
+        ]);
+        Post::factory()->for($workspace)->create([
+            'human_id' => 'P-47',
+            'number' => 47,
+            'title' => 'Newest import',
+            'status' => 'draft',
+            'created_at' => now(),
+        ]);
+        Post::factory()->for($workspace)->create([
+            'human_id' => 'P-42',
+            'number' => 42,
+            'title' => 'Oldest import, lower number',
+            'status' => 'draft',
+            'created_at' => now()->subDays(5),
+        ]);
+
+        $this->get(route('posts.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 3)
+                ->where('items.data.0.human_id', 'P-47')
+                ->where('items.data.1.human_id', 'P-45')
+                ->where('items.data.2.human_id', 'P-42')
+            );
+    }
+
     public function test_index_ideation_tab_lists_open_post_ideas(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();

@@ -119,6 +119,42 @@ class VideosControllerTest extends TestCase
             );
     }
 
+    public function test_index_orders_videos_by_number_desc_not_created_at(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-65',
+            'number' => 65,
+            'title' => 'Older import, higher number',
+            'status' => 'pending',
+            'created_at' => now()->subDays(2),
+        ]);
+        Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-67',
+            'number' => 67,
+            'title' => 'Newest import',
+            'status' => 'pending',
+            'created_at' => now(),
+        ]);
+        Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-62',
+            'number' => 62,
+            'title' => 'Oldest import, lower number',
+            'status' => 'pending',
+            'created_at' => now()->subDays(5),
+        ]);
+
+        $this->get(route('videos.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/index')
+                ->has('items.data', 3)
+                ->where('items.data.0.human_id', 'BV-67')
+                ->where('items.data.1.human_id', 'BV-65')
+                ->where('items.data.2.human_id', 'BV-62')
+            );
+    }
+
     public function test_index_ideation_tab_lists_open_video_ideas(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();

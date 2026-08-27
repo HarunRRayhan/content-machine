@@ -42,7 +42,8 @@ class PostsController extends Controller
 
     /**
      * List the current workspace's posts (or post ideas on the Ideation
-     * tab), newest first. Filterable by status tab, language, and a
+     * tab), ordered by custom number (P-56, P-55, …), highest first.
+     * Filterable by status tab, language, and a
      * free-text query over title / human id.
      */
     public function index(Request $request): Response
@@ -85,7 +86,8 @@ class PostsController extends Controller
                             ->orWhere('slug', 'ilike', $like);
                     });
                 })
-                ->latest()
+                ->orderByDesc('number')
+                ->orderByDesc('id')
                 ->paginate(20)
                 ->withQueryString()
                 ->through(fn (Post $post) => $this->presentSummary($post));
