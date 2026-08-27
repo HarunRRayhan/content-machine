@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PostsyncerPageMenu } from '@/components/workspace-settings/postsyncer-page-menu';
+import { PostsyncerTabs } from '@/components/workspace-settings/postsyncer-tabs';
 import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { home } from '@/routes/dashboard';
 import { index as settingsIndex } from '@/routes/settings';
@@ -30,16 +30,16 @@ export default function PostsyncerApiSettings({
 }: PageProps) {
     return (
         <>
-            <Head title="PostSyncer API" />
+            <Head title="PostSyncer" />
 
             <SettingsShell>
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-4">
                     <Heading
                         variant="small"
                         title="PostSyncer"
                         description="Connect the API first. Workspaces and social accounts come next."
                     />
-                    <PostsyncerPageMenu active="api" />
+                    <PostsyncerTabs active="general" />
                 </div>
 
                 <div className="max-w-3xl space-y-6">

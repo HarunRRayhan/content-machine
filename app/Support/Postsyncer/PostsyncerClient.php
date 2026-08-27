@@ -12,36 +12,41 @@ class PostsyncerClient
     ) {}
 
     /**
-     * Unique PostSyncer workspaces derived from GET /accounts.
+     * PostSyncer workspaces from GET /workspaces, including the display name.
      *
-     * @return list<array{id: string, label: string}>
+     * @return list<array{id: string, name: string}>
      */
     public function listWorkspaces(): array
     {
-        $accounts = $this->allAccounts();
+        $response = $this->request('get', '/workspaces');
+        $data = $this->decodeResponse($response);
+        $rows = $data['data'] ?? $data;
+
+        if (! is_array($rows)) {
+            return [];
+        }
+
         $workspaces = [];
 
-        foreach ($accounts as $account) {
-            $id = $account['workspace_id'] ?? null;
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $id = $row['id'] ?? null;
 
             if ($id === null || $id === '') {
                 continue;
             }
 
             $id = (string) $id;
-
-            if (array_key_exists($id, $workspaces)) {
-                continue;
-            }
-
-            $label = $this->workspaceLabel($account, $id);
-            $workspaces[$id] = [
+            $workspaces[] = [
                 'id' => $id,
-                'label' => $label,
+                'name' => $this->workspaceName($row, $id),
             ];
         }
 
-        return array_values($workspaces);
+        return $workspaces;
     }
 
     /**
@@ -81,18 +86,16 @@ class PostsyncerClient
     }
 
     /**
-     * @param  array<string, mixed>  $account
+     * @param  array<string, mixed>  $workspace
      */
-    private function workspaceLabel(array $account, string $fallbackId): string
+    private function workspaceName(array $workspace, string $fallbackId): string
     {
-        $nested = $account['workspace'] ?? null;
+        foreach (['name', 'slug'] as $key) {
+            $value = $workspace[$key] ?? null;
 
-        if (is_array($nested) && is_string($nested['name'] ?? null) && $nested['name'] !== '') {
-            return $nested['name'];
-        }
-
-        if (is_string($account['workspace_name'] ?? null) && $account['workspace_name'] !== '') {
-            return $account['workspace_name'];
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
         }
 
         return $fallbackId;

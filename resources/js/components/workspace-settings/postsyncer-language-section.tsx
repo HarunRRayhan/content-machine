@@ -16,8 +16,16 @@ export type LanguageConfig = {
 
 export type AvailableWorkspace = {
     id: string;
-    label: string;
+    name: string;
 };
+
+export function workspaceOptionLabel(workspace: AvailableWorkspace): string {
+    if (workspace.name !== '' && workspace.name !== workspace.id) {
+        return `${workspace.name} (${workspace.id})`;
+    }
+
+    return workspace.id;
+}
 
 function platformLabel(platform: string): string {
     return platform.charAt(0).toUpperCase() + platform.slice(1);
@@ -75,9 +83,7 @@ export function PostsyncerLanguageSection({
                     <option value="">Select a workspace</option>
                     {availableWorkspaces.map((workspace) => (
                         <option key={workspace.id} value={workspace.id}>
-                            {workspace.label === workspace.id
-                                ? workspace.id
-                                : `${workspace.label} (${workspace.id})`}
+                            {workspaceOptionLabel(workspace)}
                         </option>
                     ))}
                     {config.workspace_id &&

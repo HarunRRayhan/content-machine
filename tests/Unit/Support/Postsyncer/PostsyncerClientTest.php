@@ -73,31 +73,20 @@ class PostsyncerClientTest extends TestCase
             && $request['workspace_id'] === 15211);
     }
 
-    public function test_list_workspaces_returns_unique_workspace_ids_with_labels(): void
+    public function test_list_workspaces_returns_ids_with_names(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/accounts' => Http::response([
+            'postsyncer.com/api/v1/workspaces' => Http::response([
                 'data' => [
                     [
-                        'id' => 136,
-                        'workspace_id' => 15211,
-                        'workspace_name' => 'Bangla',
-                        'platform' => 'facebook',
-                        'username' => 'harun',
+                        'id' => 15211,
+                        'name' => 'Bangla',
+                        'slug' => 'bangla',
                     ],
                     [
-                        'id' => 137,
-                        'workspace_id' => 15211,
-                        'workspace_name' => 'Bangla',
-                        'platform' => 'instagram',
-                        'username' => 'harun',
-                    ],
-                    [
-                        'id' => 245,
-                        'workspace_id' => 853,
-                        'workspace' => ['id' => 853, 'name' => 'English'],
-                        'platform' => 'twitter',
-                        'username' => 'other',
+                        'id' => 853,
+                        'name' => 'English',
+                        'slug' => 'english',
                     ],
                 ],
             ], 200),
@@ -107,9 +96,29 @@ class PostsyncerClientTest extends TestCase
         $workspaces = $client->listWorkspaces();
 
         $this->assertSame([
-            ['id' => '15211', 'label' => 'Bangla'],
-            ['id' => '853', 'label' => 'English'],
+            ['id' => '15211', 'name' => 'Bangla'],
+            ['id' => '853', 'name' => 'English'],
         ], $workspaces);
+        Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/workspaces'
+            && $request->hasHeader('Authorization', 'Bearer test-api-key'));
+    }
+
+    public function test_list_workspaces_falls_back_to_slug_when_name_is_missing(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/workspaces' => Http::response([
+                [
+                    'id' => 853,
+                    'slug' => 'english-main',
+                ],
+            ], 200),
+        ]);
+
+        $client = $this->clientWithKey();
+
+        $this->assertSame([
+            ['id' => '853', 'name' => 'english-main'],
+        ], $client->listWorkspaces());
     }
 
     public function test_list_accounts_filters_by_workspace_id(): void
