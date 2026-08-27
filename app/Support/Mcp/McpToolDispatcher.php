@@ -4,6 +4,7 @@ namespace App\Support\Mcp;
 
 use App\Actions\Ideas\UpdateIdeaAction;
 use App\Actions\Posts\UpdatePostAction;
+use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
@@ -45,6 +46,7 @@ final class McpToolDispatcher
         private readonly UpdateIdeaAction $updateIdeaAction,
         private readonly UpdateVideoAction $updateVideoAction,
         private readonly UpdatePostAction $updatePostAction,
+        private readonly EnqueuePostPublishAction $enqueuePostPublishAction,
     ) {}
 
     /**
@@ -96,6 +98,7 @@ final class McpToolDispatcher
             'list_posts' => $this->listPosts($arguments),
             'get_post' => $this->presentPost($this->findPost($this->stringArg($arguments, 'human_id'))),
             'update_post' => $this->updatePost($arguments),
+            'publish_post' => $this->publishPost($arguments),
             default => throw new RuntimeException("Unknown tool: {$name}"),
         };
     }
@@ -341,6 +344,50 @@ final class McpToolDispatcher
         $this->assertAllowedStatus($payload, Post::STATUSES, 'post');
 
         $this->updatePostAction->handle($post, UpdatePostData::fromApiPayload($payload, $post));
+
+        return $this->presentPost($post->fresh(['attachments.mediaAsset']) ?? $post);
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function publishPost(array $arguments): array
+    {
+        $post = $this->findPost($this->stringArg($arguments, 'human_id'));
+        $workspace = Workspace::current();
+
+        if ($workspace === null) {
+            throw new RuntimeException('No current workspace.');
+        }
+
+        $options = [];
+        $when = $this->optionalString($arguments, 'when');
+
+        if ($when !== null) {
+            $options['when'] = $when;
+        }
+
+        if (array_key_exists('platforms', $arguments)) {
+            $platforms = $arguments['platforms'];
+
+            if ($platforms !== null && ! is_array($platforms)) {
+                throw new RuntimeException('platforms must be an array.');
+            }
+
+            if (is_array($platforms)) {
+                $options['platforms'] = array_values(array_map(
+                    fn (mixed $platform): string => is_string($platform) ? $platform : '',
+                    $platforms,
+                ));
+            }
+        }
+
+        if (array_key_exists('confirm_ask', $arguments)) {
+            $options['confirm_ask'] = (bool) $arguments['confirm_ask'];
+        }
+
+        $this->enqueuePostPublishAction->handle($post, $workspace, $options);
 
         return $this->presentPost($post->fresh(['attachments.mediaAsset']) ?? $post);
     }

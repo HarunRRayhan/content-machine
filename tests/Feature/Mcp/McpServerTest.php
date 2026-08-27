@@ -4,12 +4,15 @@ namespace Tests\Feature\Mcp;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
+use App\Jobs\PublishPostJob;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class McpServerTest extends TestCase
@@ -94,6 +97,7 @@ class McpServerTest extends TestCase
         $this->assertContains('list_posts', $listed);
         $this->assertContains('get_post', $listed);
         $this->assertContains('update_post', $listed);
+        $this->assertContains('publish_post', $listed);
     }
 
     public function test_capture_note_and_list_scratchpad_round_trip(): void
@@ -309,6 +313,46 @@ class McpServerTest extends TestCase
         ])->assertOk()->assertJsonMissingPath('result.isError');
 
         $this->assertSame('New post', Post::query()->where('human_id', 'BP-7')->value('title'));
+    }
+
+    public function test_publish_post_queues_the_job(): void
+    {
+        Queue::fake();
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'CM-TEST-4',
+            'number' => 4,
+            'publish_state' => 'idle',
+        ]);
+
+        $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 14,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'publish_post',
+                'arguments' => [
+                    'human_id' => 'CM-TEST-4',
+                    'when' => '2026-08-28T22:00:00+06:00',
+                    'platforms' => ['facebook'],
+                ],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError');
+
+        $this->assertSame('queued', $post->fresh()->publish_state);
+
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
+            return $job->post->is($post)
+                && $job->options['when'] === '2026-08-28T22:00:00+06:00'
+                && $job->options['platforms'] === ['facebook'];
+        });
     }
 
     public function test_missing_posts_write_is_a_tool_error_and_does_not_write(): void

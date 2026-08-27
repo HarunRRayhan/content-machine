@@ -5,10 +5,27 @@ Content Machine configures PostSyncer per workspace and schedules or publishes
 Instagram, TikTok, YouTube, and the other connected accounts; CM only
 orchestrates.
 
-After cutover, Script Studio on Tailscale is read-only for content and no longer
-owns publish. Set `CONTENT_MACHINE_PUBLISH=1` on the Script Studio server to
-disable its local PostSyncer endpoints (see personal-content
-`docs/postsyncer-setup.md`).
+After cutover, Script Studio schedules through Content Machine. CM owns the
+PostSyncer key and the publish job. Local `/api/posts/publish` should call
+`POST /api/v1/posts/{human_id}/publish` (or the MCP `publish_post` tool), not
+PostSyncer directly. Set `CONTENT_MACHINE_PUBLISH=1` on the Script Studio server
+once that proxy is live (see personal-content `docs/postsyncer-setup.md`).
+
+## Queue and worker (Railway)
+
+Publishing is already a queued job. Do not add Redis unless the database
+queue starts to hurt.
+
+| Piece | Where | Role |
+|---|---|---|
+| `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
+| `PublishPostJob` / `PublishVideoJob` | `cm-web` or API | `EnqueuePostPublishAction` inserts a row and sets `publish_state=queued`. |
+| `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
+| `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
+
+`POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
+buttons use the same enqueue path. Redis is optional later; it is not a
+cutover blocker.
 
 ## Settings → PostSyncer
 
@@ -128,12 +145,13 @@ Search and language filters apply on every tab except Ideation.
 1. Run `postsyncer:seed` (or fill Settings manually) and confirm **Refresh
    accounts** looks correct.
 2. Set **Publish enabled** on in CM Settings → PostSyncer.
-3. Schedule one draft **post** (attachments or Drive URLs) and confirm PostSyncer
-   ids on the show page.
+3. Schedule one draft **post** through `POST /api/v1/posts/{human_id}/publish`
+   with a future `when` (never omit `when` on a probe). Confirm PostSyncer ids
+   and `SCHEDULED`, then delete the PostSyncer post so it never goes live.
 4. Schedule one **video** with Video + Cover Drive URLs.
-5. Set `CONTENT_MACHINE_PUBLISH=1` on the Script Studio server and restart it.
-   Local `/api/posts/publish` and `/api/publish` return **410**; the UI links to
-   [cm.harun.dev](https://cm.harun.dev).
+5. Point Script Studio at the CM publish API and set
+   `CONTENT_MACHINE_PUBLISH=1` on the Script Studio server, then restart it.
+   Local scheduling must go to CM; CM talks to PostSyncer.
 
 Markdown `**PostSyncer:**` lines in personal-content post files remain an
 archive after cutover; CM records are the source of truth.

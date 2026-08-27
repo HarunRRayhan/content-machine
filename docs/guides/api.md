@@ -32,7 +32,7 @@ request reads as `401`). Abilities:
 | `videos:read` | list/show videos |
 | `videos:write` | create/update videos (incl. import with explicit human_id) |
 | `posts:read` | list/show posts |
-| `posts:write` | create/update posts, upload post images |
+| `posts:write` | create/update posts, upload post images, queue a PostSyncer publish |
 
 Missing ability → `403`. Bad or revoked token → `401`.
 
@@ -67,6 +67,7 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, … |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
 | POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
+| POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. The Railway `cm-worker` service runs the job. |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
 Captures made through the API are recorded with `source: api`, and every

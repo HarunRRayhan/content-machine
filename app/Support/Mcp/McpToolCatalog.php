@@ -7,7 +7,7 @@ use App\Models\Video;
 
 /**
  * The tools this workspace exposes over MCP: scratchpad capture/triage,
- * idea read/edit, and video/post list/get/update.
+ * idea read/edit, video/post list/get/update, and post publish.
  *
  * @phpstan-type McpTool array{name: string, description: string, inputSchema: array<string, mixed>, ability: string}
  */
@@ -174,6 +174,17 @@ final class McpToolCatalog
                     'captions' => ['type' => 'object', 'description' => 'Per-platform caption map.'],
                     'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'status' => ['type' => 'string', 'enum' => Post::STATUSES],
+                ], ['human_id']),
+            ],
+            [
+                'name' => 'publish_post',
+                'description' => 'Queue a post for PostSyncer. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately. Optional platforms list and confirm_ask for ask-gated photo platforms.',
+                'ability' => 'posts:write',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string', 'description' => 'The post id, e.g. P-50 or BP-7.'],
+                    'when' => ['type' => 'string', 'description' => 'ISO datetime to schedule. Omit only for an immediate publish.'],
+                    'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    'confirm_ask' => ['type' => 'boolean', 'description' => 'Required true when English Twitter/Threads/Bluesky photo posts are in the set.'],
                 ], ['human_id']),
             ],
         ];
