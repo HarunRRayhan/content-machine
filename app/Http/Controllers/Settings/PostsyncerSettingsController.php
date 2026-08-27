@@ -6,9 +6,11 @@ use App\Actions\Postsyncer\UpdatePostsyncerSettingsAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
 use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
+use App\Support\Postsyncer\MapPostsyncerAccounts;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Postsyncer\ScriptStudioPostTypes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -68,15 +70,16 @@ class PostsyncerSettingsController extends Controller
 
         $validated = $request->validate([
             'language' => ['required', Rule::in(PostsyncerConfig::LANGUAGES)],
+            'workspace_id' => ['nullable', 'string', 'max:100'],
         ]);
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
         $langConfig = $config->language($validated['language']);
-        $workspaceId = $langConfig['workspace_id'];
+        $workspaceId = $validated['workspace_id'] ?? $langConfig['workspace_id'];
 
         if (! is_string($workspaceId) || $workspaceId === '') {
             return response()->json([
-                'message' => 'Set a PostSyncer workspace id for this language first.',
+                'message' => 'Pick a PostSyncer workspace first.',
             ], 422);
         }
 
@@ -93,7 +96,11 @@ class PostsyncerSettingsController extends Controller
         }
 
         $existing = $langConfig['platforms'];
-        $suggested = $this->mergeAccountsByPlatform($existing, $accounts);
+        $suggested = MapPostsyncerAccounts::toPlatforms(
+            UpdatePostsyncerSettingsRequest::PLATFORMS,
+            $accounts,
+            $existing,
+        );
 
         return response()->json([
             'language' => $validated['language'],
@@ -118,6 +125,12 @@ class PostsyncerSettingsController extends Controller
             }
         }
 
+        $postTypes = $config->postTypes();
+
+        if (ScriptStudioPostTypes::isEmpty($postTypes)) {
+            $postTypes = ScriptStudioPostTypes::defaults();
+        }
+
         return Inertia::render($component, [
             'apiKeyConfigured' => $config->isConfigured(),
             'apiBase' => $config->apiBase(),
@@ -127,11 +140,14 @@ class PostsyncerSettingsController extends Controller
             'enabledLanguages' => $config->enabledLanguages(),
             'availableWorkspaces' => $availableWorkspaces,
             'workspacesLoadError' => $workspacesLoadError,
+            'postsyncerConnected' => $config->isConfigured()
+                && $workspacesLoadError === null
+                && $availableWorkspaces !== [],
             'languages' => [
                 'bangla' => $this->presentLanguage($config, 'bangla'),
                 'english' => $this->presentLanguage($config, 'english'),
             ],
-            'postTypes' => $config->postTypes(),
+            'postTypes' => $postTypes,
             'platforms' => UpdatePostsyncerSettingsRequest::PLATFORMS,
             'postTypeNames' => UpdatePostsyncerSettingsRequest::POST_TYPES,
             'postTypeStates' => UpdatePostsyncerSettingsRequest::POST_TYPE_STATES,
@@ -152,6 +168,9 @@ class PostsyncerSettingsController extends Controller
             $presented[$platform] = [
                 'account_id' => $entry['account_id'] ?? null,
                 'handle' => is_string($entry['handle'] ?? null) ? $entry['handle'] : '',
+                'enabled' => array_key_exists('enabled', $entry)
+                    ? MapPostsyncerAccounts::enabled($entry, false)
+                    : filled($entry['account_id'] ?? null),
             ];
         }
 
@@ -159,43 +178,5 @@ class PostsyncerSettingsController extends Controller
             'workspace_id' => $lang['workspace_id'],
             'platforms' => $presented,
         ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $existing
-     * @param  array<int, array<string, mixed>>  $accounts
-     * @return array<string, array{account_id: int|string|null, handle: string}>
-     */
-    private function mergeAccountsByPlatform(array $existing, array $accounts): array
-    {
-        $suggested = [];
-
-        foreach (UpdatePostsyncerSettingsRequest::PLATFORMS as $platform) {
-            $current = is_array($existing[$platform] ?? null) ? $existing[$platform] : [];
-            $suggested[$platform] = [
-                'account_id' => $current['account_id'] ?? null,
-                'handle' => is_string($current['handle'] ?? null) ? $current['handle'] : '',
-            ];
-        }
-
-        foreach ($accounts as $account) {
-            $platform = strtolower((string) ($account['platform'] ?? ''));
-
-            if ($platform === '' || ! array_key_exists($platform, $suggested)) {
-                continue;
-            }
-
-            $username = $account['username'] ?? null;
-            $handle = is_string($username) && $username !== ''
-                ? (str_starts_with($username, '@') ? $username : '@'.$username)
-                : $suggested[$platform]['handle'];
-
-            $suggested[$platform] = [
-                'account_id' => $account['id'] ?? $suggested[$platform]['account_id'],
-                'handle' => $handle,
-            ];
-        }
-
-        return $suggested;
     }
 }

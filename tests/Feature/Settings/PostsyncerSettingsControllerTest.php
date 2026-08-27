@@ -112,11 +112,25 @@ class PostsyncerSettingsControllerTest extends TestCase
                         'id' => 15211,
                         'name' => 'Bangla',
                         'slug' => 'bangla',
+                        'accounts' => [
+                            [
+                                'id' => 7017,
+                                'platform' => 'facebook',
+                                'username' => 'HarunRRayhan',
+                            ],
+                        ],
                     ],
                     [
                         'id' => 853,
                         'name' => 'English',
                         'slug' => 'english',
+                        'accounts' => [
+                            [
+                                'id' => 1205,
+                                'platform' => 'twitter',
+                                'username' => 'harundotdev',
+                            ],
+                        ],
                     ],
                 ],
             ], 200),
@@ -129,10 +143,26 @@ class PostsyncerSettingsControllerTest extends TestCase
                 ->where('apiKeyConfigured', true)
                 ->where('defaultLanguage', 'english')
                 ->where('availableWorkspaces', [
-                    ['id' => '15211', 'name' => 'Bangla'],
-                    ['id' => '853', 'name' => 'English'],
+                    [
+                        'id' => '15211',
+                        'name' => 'Bangla',
+                        'accounts' => [
+                            ['id' => '7017', 'platform' => 'facebook', 'handle' => '@HarunRRayhan'],
+                        ],
+                    ],
+                    [
+                        'id' => '853',
+                        'name' => 'English',
+                        'accounts' => [
+                            ['id' => '1205', 'platform' => 'twitter', 'handle' => '@harundotdev'],
+                        ],
+                    ],
                 ])
-                ->where('workspacesLoadError', null));
+                ->where('workspacesLoadError', null)
+                ->where('postsyncerConnected', true)
+                ->where('postTypes.platforms.facebook.text', 'on')
+                ->where('postTypes.overrides.english.twitter.photo', 'off')
+                ->where('postTypes.overrides.bangla.twitter.text', 'off'));
     }
 
     public function test_api_save_does_not_wipe_language_workspaces(): void
@@ -191,5 +221,113 @@ class PostsyncerSettingsControllerTest extends TestCase
         $this->assertSame(['english'], $config->enabledLanguages());
         $this->assertSame('853', $config->language('english')['workspace_id']);
         $this->assertNull($config->language('bangla')['workspace_id']);
+    }
+
+    public function test_workspaces_save_persists_enabled_platforms_and_script_studio_types(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+        ]);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'page' => 'workspaces',
+            'default_language' => 'english',
+            'enabled_languages' => ['english', 'bangla'],
+            'languages' => [
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'facebook' => ['account_id' => '1205', 'handle' => '@harundotdev', 'enabled' => '1'],
+                        'twitter' => ['account_id' => '99', 'handle' => '@harundotdev', 'enabled' => '0'],
+                    ],
+                ],
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['account_id' => '7017', 'handle' => '@HarunRRayhan', 'enabled' => '1'],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['text' => 'on', 'photo' => 'on'],
+                    'twitter' => ['text' => 'on', 'photo' => 'off'],
+                ],
+                'overrides' => [
+                    'english' => [
+                        'twitter' => ['photo' => 'off'],
+                    ],
+                    'bangla' => [
+                        'twitter' => ['text' => 'off'],
+                    ],
+                ],
+            ],
+        ])->assertRedirect(route('settings.postsyncer.workspaces'));
+
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $this->assertSame('853', $config->language('english')['workspace_id']);
+        $this->assertTrue($config->isPlatformEnabled('english', 'facebook'));
+        $this->assertFalse($config->isPlatformEnabled('english', 'twitter'));
+        $this->assertTrue($config->isPlatformEnabled('bangla', 'facebook'));
+        $this->assertSame('on', $config->postTypes()['platforms']['facebook']['text']);
+        $this->assertSame('off', $config->postTypes()['overrides']['english']['twitter']['photo']);
+    }
+
+    public function test_refresh_accounts_uses_the_selected_workspace_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'api_base' => 'https://postsyncer.com/api/v1',
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
+                'data' => [
+                    [
+                        'id' => 1205,
+                        'workspace_id' => 853,
+                        'platform' => 'twitter',
+                        'username' => 'harundotdev',
+                    ],
+                    [
+                        'id' => 7017,
+                        'workspace_id' => 15211,
+                        'platform' => 'facebook',
+                        'username' => 'HarunRRayhan',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $this->post(route('settings.postsyncer.refresh-accounts'), [
+            'language' => 'english',
+            'workspace_id' => '853',
+        ])
+            ->assertOk()
+            ->assertJsonPath('language', 'english')
+            ->assertJsonPath('suggested.twitter.account_id', 1205)
+            ->assertJsonPath('suggested.twitter.handle', '@harundotdev')
+            ->assertJsonPath('suggested.twitter.enabled', true)
+            ->assertJsonPath('suggested.facebook.enabled', false);
+    }
+
+    public function test_refresh_accounts_requires_a_workspace_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+        ]);
+
+        $this->post(route('settings.postsyncer.refresh-accounts'), [
+            'language' => 'english',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Pick a PostSyncer workspace first.');
     }
 }

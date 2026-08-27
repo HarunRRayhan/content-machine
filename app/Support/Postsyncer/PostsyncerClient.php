@@ -14,7 +14,7 @@ class PostsyncerClient
     /**
      * PostSyncer workspaces from GET /workspaces, including the display name.
      *
-     * @return list<array{id: string, name: string}>
+     * @return list<array{id: string, name: string, accounts: list<array{id: string, platform: string, handle: string}>}>
      */
     public function listWorkspaces(): array
     {
@@ -40,9 +40,11 @@ class PostsyncerClient
             }
 
             $id = (string) $id;
+            $accounts = is_array($row['accounts'] ?? null) ? $row['accounts'] : [];
             $workspaces[] = [
                 'id' => $id,
                 'name' => $this->workspaceName($row, $id),
+                'accounts' => MapPostsyncerAccounts::present($accounts),
             ];
         }
 
@@ -50,7 +52,7 @@ class PostsyncerClient
     }
 
     /**
-     * @return array<int, array<string, mixed>>
+     * @return list<array<string, mixed>>
      */
     public function listAccounts(int|string $workspaceId): array
     {

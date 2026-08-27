@@ -57,8 +57,10 @@ class UpdatePostsyncerSettingsRequest extends FormRequest
         foreach (self::PLATFORMS as $platform) {
             $platformRules["languages.bangla.platforms.{$platform}.account_id"] = ['nullable'];
             $platformRules["languages.bangla.platforms.{$platform}.handle"] = ['nullable', 'string', 'max:255'];
+            $platformRules["languages.bangla.platforms.{$platform}.enabled"] = ['sometimes', 'boolean'];
             $platformRules["languages.english.platforms.{$platform}.account_id"] = ['nullable'];
             $platformRules["languages.english.platforms.{$platform}.handle"] = ['nullable', 'string', 'max:255'];
+            $platformRules["languages.english.platforms.{$platform}.enabled"] = ['sometimes', 'boolean'];
         }
 
         $postTypeRules = [];
@@ -106,6 +108,16 @@ class UpdatePostsyncerSettingsRequest extends FormRequest
 
         if (array_key_exists('publish_enabled', $validated)) {
             $validated['publish_enabled'] = (bool) $validated['publish_enabled'];
+        }
+
+        foreach (['bangla', 'english'] as $language) {
+            foreach (self::PLATFORMS as $platform) {
+                $enabled = $validated['languages'][$language]['platforms'][$platform]['enabled'] ?? null;
+
+                if ($enabled !== null) {
+                    $validated['languages'][$language]['platforms'][$platform]['enabled'] = (bool) $enabled;
+                }
+            }
         }
 
         return $validated;

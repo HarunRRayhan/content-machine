@@ -119,6 +119,44 @@ class PostPublishPlannerTest extends TestCase
         $this->assertSame([], $group->mediaUrls);
     }
 
+    public function test_skips_platforms_that_are_explicitly_disabled(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'instagram' => ['account_id' => '2', 'enabled' => false],
+                    ],
+                ],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => $this->samplePostTypes(),
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook', 'instagram'],
+            'captions' => [
+                'main' => [
+                    'facebook' => ['caption' => 'FB caption'],
+                    'instagram' => ['caption' => 'IG caption'],
+                ],
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, [
+            'confirm_ask' => false,
+        ]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook'], $groups[0]->platforms);
+    }
+
     public function test_platforms_option_overrides_post_platforms(): void
     {
         $workspace = Workspace::factory()->create();

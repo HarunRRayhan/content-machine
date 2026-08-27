@@ -1,0 +1,68 @@
+{
+  "platforms": {
+    "facebook": {
+      "text": "on",
+      "photo": "on",
+      "carousel": "on",
+      "reel": "on"
+    },
+    "instagram": {
+      "photo": "on",
+      "carousel": "on",
+      "reel": "on"
+    },
+    "tiktok": {
+      "photo": "on",
+      "carousel": "on",
+      "reel": "on"
+    },
+    "youtube": {
+      "reel": "on"
+    },
+    "twitter": {
+      "text": "on",
+      "photo": "on",
+      "thread": "on"
+    },
+    "threads": {
+      "text": "on",
+      "photo": "on",
+      "thread": "on"
+    },
+    "bluesky": {
+      "text": "on",
+      "photo": "on",
+      "thread": "on"
+    },
+    "linkedin": {
+      "text": "on",
+      "photo": "on",
+      "carousel": "on"
+    }
+  },
+  "overrides": {
+    "english": {
+      "twitter": {
+        "photo": "off"
+      },
+      "threads": {
+        "photo": "ask"
+      },
+      "bluesky": {
+        "photo": "ask"
+      }
+    },
+    "bangla": {
+      "twitter": {
+        "text": "off",
+        "photo": "off",
+        "thread": "off"
+      },
+      "linkedin": {
+        "text": null,
+        "photo": null,
+        "carousel": null
+      }
+    }
+  }
+}

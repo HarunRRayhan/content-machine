@@ -82,11 +82,25 @@ class PostsyncerClientTest extends TestCase
                         'id' => 15211,
                         'name' => 'Bangla',
                         'slug' => 'bangla',
+                        'accounts' => [
+                            [
+                                'id' => 7017,
+                                'platform' => 'facebook',
+                                'username' => 'HarunRRayhan',
+                            ],
+                        ],
                     ],
                     [
                         'id' => 853,
                         'name' => 'English',
                         'slug' => 'english',
+                        'accounts' => [
+                            [
+                                'id' => 1205,
+                                'platform' => 'twitter',
+                                'username' => 'harundotdev',
+                            ],
+                        ],
                     ],
                 ],
             ], 200),
@@ -96,8 +110,20 @@ class PostsyncerClientTest extends TestCase
         $workspaces = $client->listWorkspaces();
 
         $this->assertSame([
-            ['id' => '15211', 'name' => 'Bangla'],
-            ['id' => '853', 'name' => 'English'],
+            [
+                'id' => '15211',
+                'name' => 'Bangla',
+                'accounts' => [
+                    ['id' => '7017', 'platform' => 'facebook', 'handle' => '@HarunRRayhan'],
+                ],
+            ],
+            [
+                'id' => '853',
+                'name' => 'English',
+                'accounts' => [
+                    ['id' => '1205', 'platform' => 'twitter', 'handle' => '@harundotdev'],
+                ],
+            ],
         ], $workspaces);
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/workspaces'
             && $request->hasHeader('Authorization', 'Bearer test-api-key'));
@@ -117,7 +143,7 @@ class PostsyncerClientTest extends TestCase
         $client = $this->clientWithKey();
 
         $this->assertSame([
-            ['id' => '853', 'name' => 'english-main'],
+            ['id' => '853', 'name' => 'english-main', 'accounts' => []],
         ], $client->listWorkspaces());
     }
 
