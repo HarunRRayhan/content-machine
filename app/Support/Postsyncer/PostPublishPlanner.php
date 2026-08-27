@@ -63,6 +63,10 @@ class PostPublishPlanner
             $langConfig = $config->language($language);
             $workspaceId = $langConfig['workspace_id'] ?? '';
 
+            if ($workspaceId === '') {
+                continue;
+            }
+
             $included = [];
             foreach ($selected as $platform) {
                 if (! array_key_exists($platform, $platformCaptions)) {

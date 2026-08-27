@@ -34,6 +34,8 @@ import { edit as telegramEdit } from '@/routes/dashboard/telegram';
 import { index as postsIndex } from '@/routes/posts';
 import { index as scratchpadIndex } from '@/routes/scratchpad';
 import { index as settingsIndex } from '@/routes/settings';
+import { edit as editGeneral } from '@/routes/settings/general';
+import { edit as editPostsyncer } from '@/routes/settings/postsyncer';
 import { index as videosIndex } from '@/routes/videos';
 import type { NavItem } from '@/types';
 
@@ -83,6 +85,17 @@ const mainNavItems: NavItem[] = [
         href: settingsIndex(),
         icon: Settings,
         matchPrefix: true,
+        children: [
+            {
+                title: 'General',
+                href: editGeneral(),
+            },
+            {
+                title: 'PostSyncer',
+                href: editPostsyncer(),
+                matchPrefix: true,
+            },
+        ],
     },
 ];
 

@@ -51,6 +51,10 @@ class VideoPublishPlanner
         $langConfig = $config->language($language);
         $workspaceId = $langConfig['workspace_id'] ?? '';
 
+        if ($workspaceId === '') {
+            throw new PostsyncerException("No PostSyncer workspace is configured for {$language}.");
+        }
+
         $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($video));
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
         $selected = $this->selectedPlatforms($video, $config, $options);

@@ -12,10 +12,12 @@ disable its local PostSyncer endpoints (see personal-content
 
 ## Settings → PostSyncer
 
-Workspace owners configure PostSyncer at **Settings → PostSyncer**
-(`/settings/postsyncer`). Setup is a gated process: Connecting, then
-Bangla workspace, then English workspace. The old
-`/dashboard/settings/postsyncer` URL redirects there.
+Workspace owners configure PostSyncer from the Settings submenu:
+**API** (`/settings/postsyncer`) then **Workspaces**
+(`/settings/postsyncer/workspaces`). Pick a default language workspace
+(English by default) and add extra language workspaces only if you need
+them. The old `/dashboard/settings/postsyncer` URL redirects to the API
+page.
 
 | Field | Purpose |
 |---|---|
@@ -23,13 +25,15 @@ Bangla workspace, then English workspace. The old
 | **API base** | Default `https://postsyncer.com/api/v1` |
 | **Upload base** | Default `https://upload.postsyncer.com/api/v1` (reserved for optional file upload fallback; v1 uses link upload on the API base) |
 | **Publish enabled** | Cutover flag. When off, Schedule/Publish buttons stay hidden even if the API key is set. Turn on only after settings validate and you are ready to move off Script Studio. |
-| **Bangla / English workspace id** | PostSyncer workspace for each language leg |
+| **Default language** | The workspace used for publishing. English if unset. |
+| **Extra language workspaces** | Optional. Add Bangla or English only if you post in that language. |
+| **Workspace id + handles** | PostSyncer workspace and per-platform account id / handle for each enabled language |
 | **Per-platform account id + handle** | One row per platform in each language block |
 | **Post-type matrix** | Same rules as personal-content `web/post_types.json`: on / off / ask / unsupported per platform × format |
 | **Refresh accounts** | Calls PostSyncer `GET /accounts?workspace_id=…` for the selected language workspace and shows a diff before apply |
 
-Schedule and Publish stay disabled until the API key is set, both language
-workspace ids are filled, and **Publish enabled** is on.
+Schedule and Publish stay disabled until the API key is set, the default
+language workspace id is filled, and **Publish enabled** is on.
 
 ## PostSyncer API hosts (confirmed)
 

@@ -15,6 +15,11 @@ class PostsyncerConfig
 
     private const DEFAULT_UPLOAD_BASE = 'https://upload.postsyncer.com/api/v1';
 
+    /** @var list<string> */
+    public const LANGUAGES = ['english', 'bangla'];
+
+    public const DEFAULT_LANGUAGE = 'english';
+
     /**
      * @param  array<string, mixed>  $data
      */
@@ -92,6 +97,61 @@ class PostsyncerConfig
         return (bool) ($this->data['publish_enabled'] ?? false);
     }
 
+    public function defaultLanguage(): string
+    {
+        $language = $this->data['default_language'] ?? null;
+
+        return is_string($language) && in_array($language, self::LANGUAGES, true)
+            ? $language
+            : self::DEFAULT_LANGUAGE;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function enabledLanguages(): array
+    {
+        $enabled = $this->data['enabled_languages'] ?? null;
+        $languages = [];
+
+        if (is_array($enabled)) {
+            foreach ($enabled as $language) {
+                if (is_string($language) && in_array($language, self::LANGUAGES, true)) {
+                    $languages[] = $language;
+                }
+            }
+        }
+
+        if ($languages === []) {
+            foreach (self::LANGUAGES as $language) {
+                if ($this->language($language)['workspace_id'] !== null) {
+                    $languages[] = $language;
+                }
+            }
+        }
+
+        $default = $this->defaultLanguage();
+
+        if (! in_array($default, $languages, true)) {
+            array_unshift($languages, $default);
+        }
+
+        return array_values(array_unique($languages));
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function extraLanguages(): array
+    {
+        $default = $this->defaultLanguage();
+
+        return array_values(array_filter(
+            $this->enabledLanguages(),
+            fn (string $language): bool => $language !== $default,
+        ));
+    }
+
     public function isConfigured(): bool
     {
         $apiKey = $this->apiKey();
@@ -105,13 +165,7 @@ class PostsyncerConfig
             return false;
         }
 
-        foreach (['bangla', 'english'] as $lang) {
-            if ($this->language($lang)['workspace_id'] === null) {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->language($this->defaultLanguage())['workspace_id'] !== null;
     }
 
     /**

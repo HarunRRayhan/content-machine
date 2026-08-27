@@ -70,6 +70,28 @@ class PostsyncerConfigTest extends TestCase
         $this->assertSame('853', $config->language('english')['workspace_id']);
     }
 
+    public function test_ready_for_publish_only_needs_the_default_workspace(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'secret-key',
+            'publish_enabled' => true,
+            'default_language' => 'english',
+            'enabled_languages' => ['english'],
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+        $workspace->refresh();
+
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $this->assertTrue($config->isReadyForPublish());
+        $this->assertSame('english', $config->defaultLanguage());
+        $this->assertSame(['english'], $config->enabledLanguages());
+        $this->assertSame([], $config->extraLanguages());
+    }
+
     public function test_defaults_and_accessors(): void
     {
         $workspace = Workspace::factory()->create(['settings' => []]);

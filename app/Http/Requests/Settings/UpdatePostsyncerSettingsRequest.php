@@ -4,6 +4,7 @@ namespace App\Http\Requests\Settings;
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -79,11 +80,14 @@ class UpdatePostsyncerSettingsRequest extends FormRequest
         }
 
         return array_merge([
-            'step' => ['nullable', Rule::in(['connecting', 'bangla', 'english'])],
+            'page' => ['nullable', Rule::in(['api', 'workspaces'])],
             'api_key' => ['nullable', 'string', 'max:500'],
             'api_base' => ['nullable', 'string', 'max:500'],
             'upload_base' => ['nullable', 'string', 'max:500'],
             'publish_enabled' => ['boolean'],
+            'default_language' => ['nullable', Rule::in(PostsyncerConfig::LANGUAGES)],
+            'enabled_languages' => ['nullable', 'array'],
+            'enabled_languages.*' => ['string', Rule::in(PostsyncerConfig::LANGUAGES)],
             'languages.bangla.workspace_id' => ['nullable', 'string', 'max:100'],
             'languages.english.workspace_id' => ['nullable', 'string', 'max:100'],
         ], $platformRules, $postTypeRules);
