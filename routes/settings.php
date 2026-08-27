@@ -13,9 +13,12 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
 
         Route::get('general', [GeneralSettingsController::class, 'edit'])->name('general.edit');
 
-        Route::get('postsyncer/{step?}', [PostsyncerSettingsController::class, 'edit'])
-            ->whereIn('step', PostsyncerSettingsController::STEPS)
-            ->name('postsyncer.edit');
+        Route::get('postsyncer', [PostsyncerSettingsController::class, 'edit'])->name('postsyncer.edit');
+        Route::get('postsyncer/workspaces', [PostsyncerSettingsController::class, 'workspaces'])->name('postsyncer.workspaces');
         Route::put('postsyncer', [PostsyncerSettingsController::class, 'update'])->name('postsyncer.update');
         Route::post('postsyncer/refresh-accounts', [PostsyncerSettingsController::class, 'refreshAccounts'])->name('postsyncer.refresh-accounts');
+
+        Route::permanentRedirect('postsyncer/connecting', '/settings/postsyncer');
+        Route::permanentRedirect('postsyncer/bangla', '/settings/postsyncer/workspaces');
+        Route::permanentRedirect('postsyncer/english', '/settings/postsyncer/workspaces');
     });

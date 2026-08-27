@@ -20,56 +20,23 @@ class PostsyncerSettingsController extends Controller
 {
     use AuthorizesWorkspaceSettings;
 
-    /** @var list<string> */
-    public const STEPS = ['connecting', 'bangla', 'english'];
+    public function edit(Request $request): Response
+    {
+        return $this->page($request, 'workspace-settings/postsyncer-api');
+    }
 
-    public function edit(Request $request, ?string $step = null): Response|RedirectResponse
+    public function workspaces(Request $request): Response|RedirectResponse
     {
         $workspace = $this->currentWorkspace();
         $this->authorizeWorkspaceAdmin($request, $workspace);
 
-        $step ??= 'connecting';
-
-        abort_unless(in_array($step, self::STEPS, true), 404);
-
         $config = PostsyncerConfig::fromWorkspace($workspace);
-        $availableWorkspaces = [];
-        $workspacesLoadError = null;
 
-        if ($config->isConfigured()) {
-            try {
-                $availableWorkspaces = (new PostsyncerClient($config))->listWorkspaces();
-            } catch (PostsyncerException $e) {
-                $workspacesLoadError = $e->getMessage();
-            }
+        if (! $config->isConfigured()) {
+            return redirect()->route('settings.postsyncer.edit');
         }
 
-        $steps = $this->presentSteps($config);
-
-        if (! $steps[$step]['unlocked']) {
-            return redirect()->route('settings.postsyncer.edit', [
-                'step' => $this->firstLockedFallback($steps, $step),
-            ]);
-        }
-
-        return Inertia::render('workspace-settings/postsyncer', [
-            'step' => $step,
-            'steps' => $steps,
-            'apiKeyConfigured' => $config->isConfigured(),
-            'apiBase' => $config->apiBase(),
-            'uploadBase' => $config->uploadBase(),
-            'publishEnabled' => $config->publishEnabled(),
-            'availableWorkspaces' => $availableWorkspaces,
-            'workspacesLoadError' => $workspacesLoadError,
-            'languages' => [
-                'bangla' => $this->presentLanguage($config, 'bangla'),
-                'english' => $this->presentLanguage($config, 'english'),
-            ],
-            'postTypes' => $config->postTypes(),
-            'platforms' => UpdatePostsyncerSettingsRequest::PLATFORMS,
-            'postTypeNames' => UpdatePostsyncerSettingsRequest::POST_TYPES,
-            'postTypeStates' => UpdatePostsyncerSettingsRequest::POST_TYPE_STATES,
-        ]);
+        return $this->page($request, 'workspace-settings/postsyncer-workspaces');
     }
 
     public function update(
@@ -79,18 +46,19 @@ class PostsyncerSettingsController extends Controller
         $workspace = $this->currentWorkspace();
 
         $payload = $request->validated();
-        unset($payload['step']);
+        unset($payload['page']);
 
         $updatePostsyncerSettingsAction->handle($workspace, $payload);
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('PostSyncer settings saved.')]);
 
-        $step = $request->input('step', 'connecting');
-        $step = is_string($step) && in_array($step, self::STEPS, true)
-            ? $step
-            : 'connecting';
+        $page = $request->input('page', 'api');
 
-        return to_route('settings.postsyncer.edit', ['step' => $step]);
+        if ($page === 'workspaces') {
+            return to_route('settings.postsyncer.workspaces');
+        }
+
+        return to_route('settings.postsyncer.edit');
     }
 
     public function refreshAccounts(Request $request): JsonResponse
@@ -99,7 +67,7 @@ class PostsyncerSettingsController extends Controller
         $this->authorizeWorkspaceAdmin($request, $workspace);
 
         $validated = $request->validate([
-            'language' => ['required', Rule::in(['bangla', 'english'])],
+            'language' => ['required', Rule::in(PostsyncerConfig::LANGUAGES)],
         ]);
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
@@ -133,48 +101,41 @@ class PostsyncerSettingsController extends Controller
         ]);
     }
 
-    /**
-     * @return array{connecting: array{unlocked: bool, done: bool}, bangla: array{unlocked: bool, done: bool}, english: array{unlocked: bool, done: bool}}
-     */
-    private function presentSteps(PostsyncerConfig $config): array
+    private function page(Request $request, string $component): Response
     {
-        $banglaReady = $config->language('bangla')['workspace_id'] !== null;
-        $englishReady = $config->language('english')['workspace_id'] !== null;
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
-        return [
-            'connecting' => [
-                'unlocked' => true,
-                'done' => $config->isConfigured(),
-            ],
-            'bangla' => [
-                'unlocked' => $config->isConfigured(),
-                'done' => $banglaReady,
-            ],
-            'english' => [
-                'unlocked' => $banglaReady,
-                'done' => $englishReady,
-            ],
-        ];
-    }
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+        $availableWorkspaces = [];
+        $workspacesLoadError = null;
 
-    /**
-     * @param  array<string, array{unlocked: bool, done: bool}>  $steps
-     */
-    private function firstLockedFallback(array $steps, string $requested): string
-    {
-        $fallback = 'connecting';
-
-        foreach (self::STEPS as $step) {
-            if ($steps[$step]['unlocked']) {
-                $fallback = $step;
-            }
-
-            if ($step === $requested) {
-                break;
+        if ($config->isConfigured()) {
+            try {
+                $availableWorkspaces = (new PostsyncerClient($config))->listWorkspaces();
+            } catch (PostsyncerException $e) {
+                $workspacesLoadError = $e->getMessage();
             }
         }
 
-        return $fallback;
+        return Inertia::render($component, [
+            'apiKeyConfigured' => $config->isConfigured(),
+            'apiBase' => $config->apiBase(),
+            'uploadBase' => $config->uploadBase(),
+            'publishEnabled' => $config->publishEnabled(),
+            'defaultLanguage' => $config->defaultLanguage(),
+            'enabledLanguages' => $config->enabledLanguages(),
+            'availableWorkspaces' => $availableWorkspaces,
+            'workspacesLoadError' => $workspacesLoadError,
+            'languages' => [
+                'bangla' => $this->presentLanguage($config, 'bangla'),
+                'english' => $this->presentLanguage($config, 'english'),
+            ],
+            'postTypes' => $config->postTypes(),
+            'platforms' => UpdatePostsyncerSettingsRequest::PLATFORMS,
+            'postTypeNames' => UpdatePostsyncerSettingsRequest::POST_TYPES,
+            'postTypeStates' => UpdatePostsyncerSettingsRequest::POST_TYPE_STATES,
+        ]);
     }
 
     /**
