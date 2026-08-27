@@ -223,10 +223,29 @@ class PostsController extends Controller
             'publish_state' => $post->publish_state,
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
+            'groups' => $this->presentGroups($post),
             'has_captions' => ! empty($post->captions),
             'has_body' => filled($post->body),
             'created_at' => $post->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function presentGroups(Post $post): array
+    {
+        $postsyncer = $post->postsyncer;
+        $groups = is_array($postsyncer) ? ($postsyncer['groups'] ?? null) : null;
+
+        if (! is_array($groups)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $groups,
+            fn (mixed $group): bool => is_array($group),
+        ));
     }
 
     /**

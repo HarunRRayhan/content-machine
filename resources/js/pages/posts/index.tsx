@@ -1,9 +1,14 @@
 import { Head, Link, router } from '@inertiajs/react';
+import {
+    previewLang,
+    workspaceShortName,
+    workspacesForIndex,
+} from '@/components/studio/workspace-schedule';
+import type { PostsyncerGroup } from '@/components/studio/workspace-schedule';
 import { postShowUrl } from '@/lib/content-urls';
 import {
-    PLATFORM_META,
+    platformLabel,
     POST_STATUS_LABELS,
-    normalizePlatformKey,
     studioPostStatus,
 } from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
@@ -29,6 +34,7 @@ type PostRow = {
     publish_state: string;
     language: string | null;
     platforms: string[];
+    groups?: PostsyncerGroup[];
     has_captions: boolean;
     has_body: boolean;
     created_at: string | null;
@@ -73,6 +79,52 @@ const TAB_LABELS: Record<string, string> = {
 
 function paginationLabel(label: string): string {
     return label.replace('&laquo;', '«').replace('&raquo;', '»');
+}
+
+function IndexWorkspaceChips({
+    groups,
+    language,
+    platforms,
+}: {
+    groups: PostsyncerGroup[];
+    language: string | null;
+    platforms: string[];
+}) {
+    const workspaces = workspacesForIndex(groups, language, platforms);
+
+    if (workspaces.length === 0) {
+        return '—';
+    }
+
+    return (
+        <div className="ws-chips">
+            {workspaces.map((workspace) => {
+                const names = workspace.platforms
+                    .map((platform) =>
+                        platformLabel(platform, previewLang(workspace.key)),
+                    )
+                    .filter((name) => name !== '');
+                const tip = names.join(', ');
+
+                return (
+                    <span
+                        key={workspace.key}
+                        className="ws-chip"
+                        tabIndex={0}
+                    >
+                        <span className="ws-chip-name">
+                            {workspaceShortName(workspace.key)}
+                        </span>
+                        {tip !== '' ? (
+                            <span className="ws-chip-tip" role="tooltip">
+                                {tip}
+                            </span>
+                        ) : null}
+                    </span>
+                );
+            })}
+        </div>
+    );
 }
 
 function tabQuery(filters: Filters, status: string): Record<string, string> {
@@ -193,7 +245,7 @@ export default function PostsIndex({
                                     <th>ID</th>
                                     <th>Title</th>
                                     <th>
-                                        {isIdeation ? 'Score' : 'Platforms'}
+                                        {isIdeation ? 'Score' : 'Workspaces'}
                                     </th>
                                     <th>{isIdeation ? 'Trend' : 'Status'}</th>
                                     <th />
@@ -260,31 +312,11 @@ export default function PostsIndex({
                                                 {row.title}
                                             </td>
                                             <td className="c-plat">
-                                                {row.platforms.map(
-                                                    (platform) => {
-                                                        const key =
-                                                            normalizePlatformKey(
-                                                                platform,
-                                                            );
-                                                        const meta = key
-                                                            ? PLATFORM_META[key]
-                                                            : null;
-
-                                                        return meta ? (
-                                                            <span
-                                                                key={platform}
-                                                                className="platform-badge"
-                                                                style={{
-                                                                    background:
-                                                                        meta.color,
-                                                                }}
-                                                                title={platform}
-                                                            >
-                                                                {meta.badge}
-                                                            </span>
-                                                        ) : null;
-                                                    },
-                                                )}
+                                                <IndexWorkspaceChips
+                                                    groups={row.groups ?? []}
+                                                    language={row.language}
+                                                    platforms={row.platforms}
+                                                />
                                             </td>
                                             <td className="c-status">
                                                 <span

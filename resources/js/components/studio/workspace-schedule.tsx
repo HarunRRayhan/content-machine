@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { LANG_META } from '@/lib/lang-meta';
 import type { LangCode } from '@/lib/lang-meta';
 import {
@@ -20,15 +21,15 @@ export type PostsyncerGroup = {
     lang?: string;
 };
 
-type WorkspaceKey = LangCode | 'unk';
+export type WorkspaceKey = LangCode | 'unk';
 
-type WorkspaceBucket = {
+export type WorkspaceBucket = {
     key: WorkspaceKey;
     groups: PostsyncerGroup[];
     platforms: string[];
 };
 
-const WORKSPACE_ORDER: WorkspaceKey[] = ['bn', 'en', 'unk'];
+const WORKSPACE_ORDER: WorkspaceKey[] = ['en', 'bn', 'unk'];
 
 export function groupLanguage(group: PostsyncerGroup): WorkspaceKey {
     const raw = (group.lang ?? group.language ?? '').trim().toLowerCase();
@@ -91,7 +92,7 @@ function uniquePlatforms(groups: PostsyncerGroup[]): string[] {
     return out;
 }
 
-function workspaceTitle(key: WorkspaceKey): string {
+export function workspaceTitle(key: WorkspaceKey): string {
     if (key === 'unk') {
         return 'Unlabeled workspace';
     }
@@ -101,8 +102,54 @@ function workspaceTitle(key: WorkspaceKey): string {
     return `${meta.flag} ${meta.label} workspace`;
 }
 
-function previewLang(key: WorkspaceKey): LangCode {
+export function workspaceShortName(key: WorkspaceKey): string {
+    if (key === 'unk') {
+        return 'Workspace';
+    }
+
+    const meta = LANG_META[key];
+
+    return `${meta.flag} ${meta.label}`;
+}
+
+export function previewLang(key: WorkspaceKey): LangCode {
     return key === 'en' ? 'en' : 'bn';
+}
+
+export function defaultWorkspaceTab(buckets: WorkspaceBucket[]): WorkspaceKey {
+    const english = buckets.find((bucket) => bucket.key === 'en');
+
+    if (english) {
+        return 'en';
+    }
+
+    return buckets[0]?.key ?? 'en';
+}
+
+export function workspacesForIndex(
+    groups: PostsyncerGroup[],
+    language: string | null | undefined,
+    platforms: string[],
+): WorkspaceBucket[] {
+    const fromGroups = bucketsFromGroups(groups).filter(
+        (bucket) => bucket.key !== 'unk' || bucket.platforms.length > 0,
+    );
+
+    if (fromGroups.length > 0) {
+        return fromGroups;
+    }
+
+    if (platforms.length === 0 && !language) {
+        return [];
+    }
+
+    return [
+        {
+            key: language === 'en' ? 'en' : 'bn',
+            groups: [],
+            platforms,
+        },
+    ];
 }
 
 function handleFor(
@@ -219,6 +266,68 @@ export function WorkspacePlatformChips({
     );
 }
 
+function ScheduleGroupList({
+    bucket,
+    formatWhen,
+    timezone,
+    handles,
+}: {
+    bucket: WorkspaceBucket;
+    formatWhen: (value: string | null | undefined) => string | null;
+    timezone: string;
+    handles?: HandleDirectory;
+}) {
+    if (bucket.groups.length === 0) {
+        return (
+            <p className="schedule-log-empty">
+                Nothing scheduled or published in this workspace yet.
+            </p>
+        );
+    }
+
+    return (
+        <ul>
+            {bucket.groups.map((group, index) => {
+                const when = formatWhen(
+                    group.published_at ?? group.scheduled_at ?? null,
+                );
+                const id = group.post_id;
+
+                return (
+                    <li key={`${String(id ?? 'group')}-${index}`}>
+                        <div className="schedule-log-meta">
+                            <span className="schedule-log-when">
+                                {when ? `${when} ${timezone}` : 'No time yet'}
+                            </span>
+                            {group.status ? (
+                                <span className="schedule-log-status">
+                                    {group.status}
+                                </span>
+                            ) : null}
+                            {id !== undefined && id !== '' ? (
+                                <span className="schedule-log-id">
+                                    #{String(id)}
+                                </span>
+                            ) : null}
+                        </div>
+                        <span className="schedule-log-plats">
+                            {(group.platforms ?? []).map((platform) => (
+                                <PlatformMark
+                                    key={platform}
+                                    platform={platform}
+                                    lang={previewLang(bucket.key)}
+                                    handles={handles}
+                                    showHandle={false}
+                                />
+                            ))}
+                        </span>
+                    </li>
+                );
+            })}
+        </ul>
+    );
+}
+
 export function WorkspaceScheduleLog({
     buckets,
     formatWhen,
@@ -234,7 +343,31 @@ export function WorkspaceScheduleLog({
     handles?: HandleDirectory;
     heading?: string;
 }) {
-    if (buckets.length === 0) {
+    const unlabeled = buckets.find((bucket) => bucket.key === 'unk');
+    const visibleTabs: WorkspaceBucket[] =
+        buckets.length === 0
+            ? []
+            : [
+                  buckets.find((bucket) => bucket.key === 'en') ?? {
+                      key: 'en',
+                      groups: [],
+                      platforms: [],
+                  },
+                  buckets.find((bucket) => bucket.key === 'bn') ?? {
+                      key: 'bn',
+                      groups: [],
+                      platforms: [],
+                  },
+              ];
+    const [active, setActive] = useState<WorkspaceKey>(() =>
+        defaultWorkspaceTab(
+            visibleTabs.filter((bucket) => bucket.groups.length > 0),
+        ),
+    );
+    const activeBucket =
+        visibleTabs.find((bucket) => bucket.key === active) ?? visibleTabs[0];
+
+    if (visibleTabs.length === 0) {
         if (!empty) {
             return null;
         }
@@ -250,60 +383,49 @@ export function WorkspaceScheduleLog({
     return (
         <div className="schedule-log">
             <div className="schedule-log-h">{heading}</div>
-            {buckets.map((bucket) => (
-                <div key={bucket.key} className="schedule-log-ws">
-                    <div className="workspace-plat-h">
-                        {workspaceTitle(bucket.key)}
-                    </div>
-                    <ul>
-                        {bucket.groups.map((group, index) => {
-                            const when = formatWhen(
-                                group.published_at ??
-                                    group.scheduled_at ??
-                                    null,
-                            );
-                            const id = group.post_id;
-
-                            return (
-                                <li key={`${String(id ?? 'group')}-${index}`}>
-                                    <div className="schedule-log-meta">
-                                        <span className="schedule-log-when">
-                                            {when
-                                                ? `${when} ${timezone}`
-                                                : 'No time yet'}
-                                        </span>
-                                        {group.status ? (
-                                            <span className="schedule-log-status">
-                                                {group.status}
-                                            </span>
-                                        ) : null}
-                                        {id !== undefined && id !== '' ? (
-                                            <span className="schedule-log-id">
-                                                #{String(id)}
-                                            </span>
-                                        ) : null}
-                                    </div>
-                                    <span className="schedule-log-plats">
-                                        {(group.platforms ?? []).map(
-                                            (platform) => (
-                                                <PlatformMark
-                                                    key={platform}
-                                                    platform={platform}
-                                                    lang={previewLang(
-                                                        bucket.key,
-                                                    )}
-                                                    handles={handles}
-                                                    showHandle={false}
-                                                />
-                                            ),
-                                        )}
-                                    </span>
-                                </li>
-                            );
-                        })}
-                    </ul>
+            {visibleTabs.length > 1 ? (
+                <div className="cap-langbar schedule-ws-tabs" role="tablist">
+                    {visibleTabs.map((bucket) => (
+                        <button
+                            key={bucket.key}
+                            type="button"
+                            role="tab"
+                            aria-selected={bucket.key === activeBucket?.key}
+                            className={
+                                bucket.key === 'bn' ? 'is-bn' : undefined
+                            }
+                            onClick={() => setActive(bucket.key)}
+                        >
+                            {workspaceTitle(bucket.key)}
+                        </button>
+                    ))}
                 </div>
-            ))}
+            ) : (
+                <div className="workspace-plat-h">
+                    {workspaceTitle(visibleTabs[0].key)}
+                </div>
+            )}
+            {activeBucket ? (
+                <ScheduleGroupList
+                    bucket={activeBucket}
+                    formatWhen={formatWhen}
+                    timezone={timezone}
+                    handles={handles}
+                />
+            ) : null}
+            {unlabeled && unlabeled.groups.length > 0 ? (
+                <div className="schedule-log-ws">
+                    <div className="workspace-plat-h">
+                        {workspaceTitle('unk')}
+                    </div>
+                    <ScheduleGroupList
+                        bucket={unlabeled}
+                        formatWhen={formatWhen}
+                        timezone={timezone}
+                        handles={handles}
+                    />
+                </div>
+            ) : null}
         </div>
     );
 }
