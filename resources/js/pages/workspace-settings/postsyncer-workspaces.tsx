@@ -9,6 +9,7 @@ import type {
     AvailableWorkspace,
     LanguageConfig,
     PlatformEntry,
+    PostTypesConfig,
 } from '@/components/workspace-settings/postsyncer-language-section';
 import {
     languageLabel,
@@ -26,11 +27,6 @@ import {
 
 const ALL_LANGUAGES = ['english', 'bangla'] as const;
 
-type PostTypesConfig = {
-    platforms?: Record<string, Record<string, string | null>>;
-    overrides?: Record<string, Record<string, Record<string, string | null>>>;
-};
-
 type PageProps = {
     defaultLanguage: string;
     enabledLanguages: string[];
@@ -46,10 +42,6 @@ type PageProps = {
     postTypeNames: string[];
     postTypeStates: string[];
 };
-
-function platformLabel(platform: string): string {
-    return platform.charAt(0).toUpperCase() + platform.slice(1);
-}
 
 function withEnabled(
     platformsByName: Record<string, PlatformEntry>,
@@ -76,7 +68,6 @@ export default function PostsyncerWorkspaceSettings({
     postTypes,
     platforms,
     postTypeNames,
-    postTypeStates,
 }: PageProps) {
     const [selectedDefault, setSelectedDefault] = useState(defaultLanguage);
     const [extras, setExtras] = useState(
@@ -128,7 +119,14 @@ export default function PostsyncerWorkspaceSettings({
 
         if (workspaceId !== '') {
             void refreshAccounts(language, workspaceId);
+
+            return;
         }
+
+        setPlatformsByLanguage((current) => ({
+            ...current,
+            [language]: withEnabled({}),
+        }));
     }
 
     function changePlatform(
@@ -217,7 +215,7 @@ export default function PostsyncerWorkspaceSettings({
                     <Heading
                         variant="small"
                         title="PostSyncer"
-                        description="Pick a workspace for each language. Accounts load from PostSyncer; enable the ones you want."
+                        description="Pick a workspace. We pull the handles from there, then you choose which ones stay on."
                     />
                     <PostsyncerTabs active="workspaces" />
                 </div>
@@ -337,6 +335,8 @@ export default function PostsyncerWorkspaceSettings({
                                         availableWorkspaces={
                                             availableWorkspaces
                                         }
+                                        postTypes={postTypes}
+                                        postTypeNames={postTypeNames}
                                         onWorkspaceChange={applyWorkspace}
                                         onPlatformChange={changePlatform}
                                         onRefresh={refreshAccounts}
@@ -377,6 +377,8 @@ export default function PostsyncerWorkspaceSettings({
                                             availableWorkspaces={
                                                 availableWorkspaces
                                             }
+                                            postTypes={postTypes}
+                                            postTypeNames={postTypeNames}
                                             onWorkspaceChange={applyWorkspace}
                                             onPlatformChange={changePlatform}
                                             onRefresh={refreshAccounts}
@@ -387,31 +389,28 @@ export default function PostsyncerWorkspaceSettings({
                                     </div>
                                 ))}
 
-                                {unused.length > 0 && (
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        {unused.map((language) => (
-                                            <Button
-                                                key={language}
-                                                type="button"
-                                                variant="outline"
-                                                onClick={() =>
-                                                    addExtra(language)
-                                                }
-                                            >
-                                                Add {languageLabel(language)}{' '}
-                                                workspace
-                                            </Button>
-                                        ))}
-                                    </div>
-                                )}
+                                {unused.length > 0 &&
+                                    (workspaceIds[selectedDefault] ?? '') !==
+                                        '' && (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {unused.map((language) => (
+                                                <Button
+                                                    key={language}
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                        addExtra(language)
+                                                    }
+                                                >
+                                                    Add{' '}
+                                                    {languageLabel(language)}{' '}
+                                                    workspace
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    )}
 
-                                <div className="space-y-4 rounded-lg border p-4">
-                                    <Heading
-                                        variant="small"
-                                        title="Post-type matrix"
-                                        description="Copied from Script Studio. Language overrides stay in place when you save."
-                                    />
-
+                                <div className="hidden">
                                     {Object.entries(
                                         postTypes.overrides ?? {},
                                     ).flatMap(([language, byPlatform]) =>
@@ -429,93 +428,30 @@ export default function PostsyncerWorkspaceSettings({
                                                 ),
                                         ),
                                     )}
-
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                            <thead>
-                                                <tr className="border-b text-left">
-                                                    <th className="py-2 pr-4 font-medium">
-                                                        Platform
-                                                    </th>
-                                                    {postTypeNames.map(
-                                                        (type) => (
-                                                            <th
-                                                                key={type}
-                                                                className="py-2 pr-4 font-medium capitalize"
-                                                            >
-                                                                {type}
-                                                            </th>
-                                                        ),
-                                                    )}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {platforms.map((platform) => (
-                                                    <tr
-                                                        key={platform}
-                                                        className="border-b last:border-0"
-                                                    >
-                                                        <td className="py-2 pr-4">
-                                                            {platformLabel(
-                                                                platform,
-                                                            )}
-                                                        </td>
-                                                        {postTypeNames.map(
-                                                            (type) => (
-                                                                <td
-                                                                    key={type}
-                                                                    className="py-2 pr-4"
-                                                                >
-                                                                    <select
-                                                                        name={`post_types[platforms][${platform}][${type}]`}
-                                                                        defaultValue={
-                                                                            postTypes
-                                                                                .platforms?.[
-                                                                                platform
-                                                                            ]?.[
-                                                                                type
-                                                                            ] ??
-                                                                            ''
-                                                                        }
-                                                                        className="h-9 w-full min-w-24 rounded-md border border-input bg-transparent px-2 text-sm"
-                                                                    >
-                                                                        <option value="">
-                                                                            unset
-                                                                        </option>
-                                                                        {postTypeStates.map(
-                                                                            (
-                                                                                state,
-                                                                            ) => (
-                                                                                <option
-                                                                                    key={
-                                                                                        state
-                                                                                    }
-                                                                                    value={
-                                                                                        state
-                                                                                    }
-                                                                                >
-                                                                                    {
-                                                                                        state
-                                                                                    }
-                                                                                </option>
-                                                                            ),
-                                                                        )}
-                                                                    </select>
-                                                                </td>
-                                                            ),
-                                                        )}
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                    {platforms.flatMap((platform) =>
+                                        postTypeNames.map((type) => (
+                                            <input
+                                                key={`${platform}-${type}`}
+                                                type="hidden"
+                                                name={`post_types[platforms][${platform}][${type}]`}
+                                                value={
+                                                    postTypes.platforms?.[
+                                                        platform
+                                                    ]?.[type] ?? ''
+                                                }
+                                            />
+                                        )),
+                                    )}
                                 </div>
 
                                 <InputError message={errors.default_language} />
 
-                                <Button disabled={processing} type="submit">
-                                    Save
-                                </Button>
+                                {(workspaceIds[selectedDefault] ?? '') !==
+                                    '' && (
+                                    <Button disabled={processing} type="submit">
+                                        Save
+                                    </Button>
+                                )}
                             </>
                         )}
                     </Form>
