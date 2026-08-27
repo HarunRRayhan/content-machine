@@ -4,13 +4,16 @@ namespace Tests\Feature\Api;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
+use App\Jobs\PublishPostJob;
 use App\Models\Attachment;
 use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -194,5 +197,89 @@ class PostsApiTest extends TestCase
         $this->acting()->get("/api/v1/posts/P-50/media/{$asset->id}")
             ->assertOk()
             ->assertHeader('Content-Type', $asset->mime);
+    }
+
+    public function test_publish_dispatches_job_and_returns_queued_state(): void
+    {
+        Queue::fake();
+        $this->configurePostsyncer();
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'CM-TEST-1',
+            'number' => 1,
+            'title' => 'Queue probe',
+            'status' => 'draft',
+        ])->assertCreated();
+
+        $this->acting()->postJson('/api/v1/posts/CM-TEST-1/publish', [
+            'when' => '2026-08-28T22:00:00+06:00',
+            'platforms' => ['facebook'],
+            'confirm_ask' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.human_id', 'CM-TEST-1')
+            ->assertJsonPath('data.publish_state', 'queued')
+            ->assertJsonPath('data.publish_error', null);
+
+        $post = Post::query()->where('human_id', 'CM-TEST-1')->sole();
+
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
+            return $job->post->is($post)
+                && $job->options['when'] === '2026-08-28T22:00:00+06:00'
+                && $job->options['platforms'] === ['facebook']
+                && $job->options['confirm_ask'] === true;
+        });
+    }
+
+    public function test_publish_rejects_when_postsyncer_is_not_ready(): void
+    {
+        Queue::fake();
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'CM-TEST-2',
+            'number' => 2,
+            'title' => 'Not ready',
+        ])->assertCreated();
+
+        $this->acting()->postJson('/api/v1/posts/CM-TEST-2/publish', [
+            'when' => '2026-08-28T22:00:00+06:00',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish');
+
+        Queue::assertNothingPushed();
+        $this->assertSame('idle', Post::query()->where('human_id', 'CM-TEST-2')->value('publish_state'));
+    }
+
+    public function test_publish_rejects_when_already_queued(): void
+    {
+        Queue::fake();
+        $this->configurePostsyncer();
+
+        Post::factory()->for($this->workspace)->create([
+            'human_id' => 'CM-TEST-3',
+            'number' => 3,
+            'publish_state' => 'queued',
+        ]);
+
+        $this->acting()->postJson('/api/v1/posts/CM-TEST-3/publish', [
+            'when' => '2026-08-28T22:00:00+06:00',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish');
+
+        Queue::assertNothingPushed();
+    }
+
+    private function configurePostsyncer(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
     }
 }

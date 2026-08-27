@@ -6,6 +6,7 @@ use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
+use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\UpdatePostData;
@@ -136,6 +137,30 @@ class PostsApiController extends Controller
         return (new PostResource($fresh))
             ->response()
             ->setStatusCode($created ? 201 : 200);
+    }
+
+    public function publish(Request $request, string $humanId, EnqueuePostPublishAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'when' => ['nullable', 'string', 'max:64'],
+            'platforms' => ['nullable', 'array'],
+            'platforms.*' => ['string', 'max:64'],
+            'confirm_ask' => ['nullable', 'boolean'],
+        ]);
+
+        $options = array_filter([
+            'when' => $payload['when'] ?? null,
+            'platforms' => $payload['platforms'] ?? null,
+            'confirm_ask' => array_key_exists('confirm_ask', $payload)
+                ? (bool) $payload['confirm_ask']
+                : null,
+        ], fn ($value) => $value !== null);
+
+        $post = $action->handle($post, $this->currentWorkspace(), $options);
+
+        return new PostResource($post->load(['attachments.mediaAsset']));
     }
 
     /**

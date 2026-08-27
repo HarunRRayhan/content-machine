@@ -31,6 +31,8 @@ class PostResource extends JsonResource
             'captions' => $this->captions,
             'platforms' => $this->platforms,
             'status' => $this->status,
+            'publish_state' => $this->publish_state,
+            'publish_error' => $this->publish_error,
             'postsyncer' => $this->postsyncer,
             'idea_id' => $this->idea_id,
             'attachments' => $this->relationLoaded('attachments')
