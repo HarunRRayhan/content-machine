@@ -147,6 +147,17 @@ final class McpToolCatalog
                 ], ['human_id']),
             ],
             [
+                'name' => 'publish_video',
+                'description' => 'Queue a video for PostSyncer. The video needs a Video Drive URL first. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately.',
+                'ability' => 'videos:write',
+                'inputSchema' => self::schema([
+                    'human_id' => ['type' => 'string', 'description' => 'The video id, e.g. BV-50 or V-12.'],
+                    'when' => ['type' => 'string', 'description' => 'ISO datetime to schedule. Omit only for an immediate publish.'],
+                    'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    'confirm_ask' => ['type' => 'boolean'],
+                ], ['human_id']),
+            ],
+            [
                 'name' => 'list_posts',
                 'description' => 'List posts, newest first (by number). Optionally filter by status or language. Limit 50.',
                 'ability' => 'posts:read',

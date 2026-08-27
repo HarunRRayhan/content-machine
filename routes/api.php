@@ -103,6 +103,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:videos:read')
         ->name('videos.show');
 
+    Route::post('videos/{human_id}/publish', [VideosApiController::class, 'publish'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.publish');
+
     Route::get('posts', [PostsApiController::class, 'index'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.index');

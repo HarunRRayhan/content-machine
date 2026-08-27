@@ -4,10 +4,13 @@ namespace Tests\Feature\Api;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
+use App\Jobs\PublishVideoJob;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class VideosApiTest extends TestCase
@@ -157,5 +160,60 @@ class VideosApiTest extends TestCase
         ]);
 
         $this->acting()->getJson('/api/v1/videos/BV-1')->assertNotFound();
+    }
+
+    public function test_publish_dispatches_job_and_returns_queued_state(): void
+    {
+        Queue::fake();
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-90',
+            'number' => 90,
+            'publish_state' => 'idle',
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-90/publish', [
+            'when' => '2026-08-29T21:30:00+06:00',
+            'platforms' => ['facebook'],
+            'confirm_ask' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.human_id', 'BV-90')
+            ->assertJsonPath('data.publish_state', 'queued')
+            ->assertJsonPath('data.publish_error', null);
+
+        $video = Video::query()->where('human_id', 'BV-90')->sole();
+
+        Queue::assertPushed(PublishVideoJob::class, function (PublishVideoJob $job) use ($video) {
+            return $job->video->is($video)
+                && $job->options['when'] === '2026-08-29T21:30:00+06:00'
+                && $job->options['platforms'] === ['facebook']
+                && $job->options['confirm_ask'] === true;
+        });
+    }
+
+    public function test_publish_rejects_when_postsyncer_is_not_ready(): void
+    {
+        Queue::fake();
+
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-91',
+            'number' => 91,
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-91/publish', [
+            'when' => '2026-08-29T21:30:00+06:00',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish');
+
+        Queue::assertNothingPushed();
     }
 }

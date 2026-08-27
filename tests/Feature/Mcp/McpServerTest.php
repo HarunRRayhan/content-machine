@@ -94,6 +94,7 @@ class McpServerTest extends TestCase
         $this->assertContains('list_videos', $listed);
         $this->assertContains('get_video', $listed);
         $this->assertContains('update_video', $listed);
+        $this->assertContains('publish_video', $listed);
         $this->assertContains('list_posts', $listed);
         $this->assertContains('get_post', $listed);
         $this->assertContains('update_post', $listed);

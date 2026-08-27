@@ -5,6 +5,7 @@ namespace App\Support\Mcp;
 use App\Actions\Ideas\UpdateIdeaAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
+use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
@@ -47,6 +48,7 @@ final class McpToolDispatcher
         private readonly UpdateVideoAction $updateVideoAction,
         private readonly UpdatePostAction $updatePostAction,
         private readonly EnqueuePostPublishAction $enqueuePostPublishAction,
+        private readonly EnqueueVideoPublishAction $enqueueVideoPublishAction,
     ) {}
 
     /**
@@ -95,6 +97,7 @@ final class McpToolDispatcher
             'list_videos' => $this->listVideos($arguments),
             'get_video' => $this->presentVideo($this->findVideo($this->stringArg($arguments, 'human_id'))),
             'update_video' => $this->updateVideo($arguments),
+            'publish_video' => $this->publishVideo($arguments),
             'list_posts' => $this->listPosts($arguments),
             'get_post' => $this->presentPost($this->findPost($this->stringArg($arguments, 'human_id'))),
             'update_post' => $this->updatePost($arguments),
@@ -278,6 +281,50 @@ final class McpToolDispatcher
         $this->assertAllowedStatus($payload, Video::STATUSES, 'video');
 
         $this->updateVideoAction->handle($video, UpdateVideoData::fromApiPayload($payload, $video));
+
+        return $this->presentVideo($video->fresh() ?? $video);
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function publishVideo(array $arguments): array
+    {
+        $video = $this->findVideo($this->stringArg($arguments, 'human_id'));
+        $workspace = Workspace::current();
+
+        if ($workspace === null) {
+            throw new RuntimeException('No current workspace.');
+        }
+
+        $options = [];
+        $when = $this->optionalString($arguments, 'when');
+
+        if ($when !== null) {
+            $options['when'] = $when;
+        }
+
+        if (array_key_exists('platforms', $arguments)) {
+            $platforms = $arguments['platforms'];
+
+            if ($platforms !== null && ! is_array($platforms)) {
+                throw new RuntimeException('platforms must be an array.');
+            }
+
+            if (is_array($platforms)) {
+                $options['platforms'] = array_values(array_map(
+                    fn (mixed $platform): string => is_string($platform) ? $platform : '',
+                    $platforms,
+                ));
+            }
+        }
+
+        if (array_key_exists('confirm_ask', $arguments)) {
+            $options['confirm_ask'] = (bool) $arguments['confirm_ask'];
+        }
+
+        $this->enqueueVideoPublishAction->handle($video, $workspace, $options);
 
         return $this->presentVideo($video->fresh() ?? $video);
     }

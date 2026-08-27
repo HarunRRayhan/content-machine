@@ -2,37 +2,20 @@
 
 namespace App\Http\Controllers\Videos;
 
+use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Videos\PublishVideoRequest;
-use App\Jobs\PublishVideoJob;
 use App\Models\Video;
 use App\Models\Workspace;
-use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
 class PublishVideoController extends Controller
 {
-    public function __invoke(PublishVideoRequest $request, Video $video): RedirectResponse
+    public function __invoke(PublishVideoRequest $request, Video $video, EnqueueVideoPublishAction $action): RedirectResponse
     {
         $workspace = $this->currentWorkspace($request);
-
-        abort_if($video->workspace_id !== $workspace->id, 404);
-
-        $config = PostsyncerConfig::fromWorkspace($workspace);
-
-        if (! $config->isReadyForPublish()) {
-            return back()->withErrors([
-                'publish' => __('PostSyncer is not configured for publishing.'),
-            ]);
-        }
-
-        if (in_array($video->publish_state, ['queued', 'running'], true)) {
-            return back()->withErrors([
-                'publish' => __('A publish is already in progress.'),
-            ]);
-        }
 
         $options = array_filter([
             'when' => $request->filled('when') ? $request->input('when') : null,
@@ -40,12 +23,7 @@ class PublishVideoController extends Controller
             'confirm_ask' => $request->has('confirm_ask') ? $request->boolean('confirm_ask') : null,
         ], fn ($value) => $value !== null);
 
-        $video->forceFill([
-            'publish_state' => 'queued',
-            'publish_error' => null,
-        ])->save();
-
-        PublishVideoJob::dispatch($video, $options);
+        $action->handle($video, $workspace, $options);
 
         Inertia::flash('toast', [
             'type' => 'success',
