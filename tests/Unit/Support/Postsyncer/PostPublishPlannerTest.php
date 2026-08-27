@@ -220,7 +220,7 @@ class PostPublishPlannerTest extends TestCase
         $this->assertSame('2026-08-26 09:12:00', $group->when?->format('Y-m-d H:i:s'));
     }
 
-    public function test_when_with_offset_keeps_that_offset(): void
+    public function test_when_with_offset_converts_to_workspace_timezone(): void
     {
         $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
         $config = $this->configFor($workspace);
@@ -236,7 +236,7 @@ class PostPublishPlannerTest extends TestCase
             'confirm_ask' => false,
         ])[0];
 
-        $this->assertSame('+06:00', $group->when?->timezoneName);
+        $this->assertSame('Asia/Dhaka', $group->when?->timezoneName);
         $this->assertSame('2026-08-26 09:12:00', $group->when?->format('Y-m-d H:i:s'));
     }
 

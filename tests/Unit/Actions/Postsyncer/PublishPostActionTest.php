@@ -137,7 +137,8 @@ class PublishPostActionTest extends TestCase
 
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts'
             && $request['schedule_type'] === 'schedule'
-            && $request['schedule_for']['date'] === '2026-08-26');
+            && $request['schedule_for']['date'] === '2026-08-26'
+            && $request['schedule_for']['timezone'] === 'Asia/Dhaka');
     }
 
     public function test_failure_leaves_pipeline_status_and_sets_publish_error(): void
