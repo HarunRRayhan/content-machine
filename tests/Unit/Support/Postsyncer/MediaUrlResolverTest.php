@@ -55,7 +55,7 @@ class MediaUrlResolverTest extends TestCase
 
     public function test_for_post_prefers_attachment_storage_urls_over_drive_urls(): void
     {
-        Storage::fake('local');
+        Storage::fake('scratchpad');
 
         $workspace = Workspace::factory()->create();
         $post = Post::factory()->for($workspace)->create([
@@ -63,10 +63,11 @@ class MediaUrlResolverTest extends TestCase
         ]);
 
         $media = MediaAsset::factory()->for($workspace)->create([
-            'disk' => 'local',
+            'disk' => 'scratchpad',
             'path' => 'posts/cover.jpg',
+            'original_filename' => 'cover.jpg',
         ]);
-        Storage::disk('local')->put('posts/cover.jpg', 'bytes');
+        Storage::disk('scratchpad')->put('posts/cover.jpg', 'bytes');
 
         Attachment::factory()->for($post, 'attachable')->for($media)->create([
             'position' => 0,
@@ -75,36 +76,60 @@ class MediaUrlResolverTest extends TestCase
         $urls = $this->resolver->forPost($post->fresh());
 
         $this->assertCount(1, $urls);
-        $this->assertSame(Storage::disk('local')->url('posts/cover.jpg'), $urls[0]);
+        $this->assertStringContainsString('publish-media/posts/', $urls[0]);
+        $this->assertStringContainsString('signature=', $urls[0]);
     }
 
     public function test_for_post_returns_attachment_urls_in_position_order(): void
     {
-        Storage::fake('local');
+        Storage::fake('scratchpad');
 
         $workspace = Workspace::factory()->create();
         $post = Post::factory()->for($workspace)->create();
 
         $first = MediaAsset::factory()->for($workspace)->create([
-            'disk' => 'local',
+            'disk' => 'scratchpad',
             'path' => 'posts/first.jpg',
+            'original_filename' => 'first.jpg',
         ]);
         $second = MediaAsset::factory()->for($workspace)->create([
-            'disk' => 'local',
+            'disk' => 'scratchpad',
             'path' => 'posts/second.jpg',
+            'original_filename' => 'second.jpg',
         ]);
-        Storage::disk('local')->put('posts/first.jpg', 'one');
-        Storage::disk('local')->put('posts/second.jpg', 'two');
+        Storage::disk('scratchpad')->put('posts/first.jpg', 'one');
+        Storage::disk('scratchpad')->put('posts/second.jpg', 'two');
 
         Attachment::factory()->for($post, 'attachable')->for($second)->create(['position' => 1]);
         Attachment::factory()->for($post, 'attachable')->for($first)->create(['position' => 0]);
 
         $urls = $this->resolver->forPost($post->fresh());
 
-        $this->assertSame([
-            Storage::disk('local')->url('posts/first.jpg'),
-            Storage::disk('local')->url('posts/second.jpg'),
-        ], $urls);
+        $this->assertCount(2, $urls);
+        $this->assertStringContainsString('/publish-media/posts/', $urls[0]);
+        $this->assertStringContainsString('/publish-media/posts/', $urls[1]);
+    }
+
+    public function test_resolve_named_images_maps_attachment_filenames(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => 'posts/cover.png',
+            'original_filename' => 'P49-cover.png',
+        ]);
+        Storage::disk('scratchpad')->put('posts/cover.png', 'bytes');
+
+        Attachment::factory()->for($post, 'attachable')->for($media)->create(['position' => 0]);
+
+        $urls = $this->resolver->resolveNamedImages($post->fresh(), ['P49-cover.png']);
+
+        $this->assertCount(1, $urls);
+        $this->assertStringContainsString('publish-media/posts/', $urls[0]);
     }
 
     public function test_for_post_skips_attachments_without_resolvable_urls(): void
@@ -122,7 +147,10 @@ class MediaUrlResolverTest extends TestCase
             'position' => 0,
         ]);
 
-        $this->assertSame([], $this->resolver->forPost($post->fresh()));
+        $this->assertSame(
+            ['https://drive.usercontent.google.com/download?id=fallback&export=download&confirm=t'],
+            $this->resolver->forPost($post->fresh()),
+        );
     }
 
     public function test_for_video_returns_drive_urls(): void

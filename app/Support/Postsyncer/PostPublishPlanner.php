@@ -4,7 +4,6 @@ namespace App\Support\Postsyncer;
 
 use App\Models\Post;
 use App\Support\Content\NormalizeCaptions;
-use App\Support\GoogleDrive\GoogleDriveLink;
 use Carbon\CarbonImmutable;
 
 /**
@@ -34,7 +33,7 @@ class PostPublishPlanner
                     continue;
                 }
 
-                $mediaUrls = $this->resolveMediaUrls($platformCaptions[$platform], $defaultMediaUrls);
+                $mediaUrls = $this->resolveMediaUrls($post, $platformCaptions[$platform], $defaultMediaUrls);
                 $postType = $mediaUrls !== [] ? 'photo' : 'text';
                 $state = $this->platformState($config, $platform, $postType, $language);
 
@@ -78,7 +77,7 @@ class PostPublishPlanner
                     continue;
                 }
 
-                $mediaUrls = $this->resolveMediaUrls($platformCaptions[$platform], $defaultMediaUrls);
+                $mediaUrls = $this->resolveMediaUrls($post, $platformCaptions[$platform], $defaultMediaUrls);
                 $postType = $mediaUrls !== [] ? 'photo' : 'text';
                 $state = $this->platformState($config, $platform, $postType, $language);
 
@@ -101,7 +100,7 @@ class PostPublishPlanner
 
             $groups = array_merge(
                 $groups,
-                $this->splitLanguageGroups($language, $workspaceId, $included, $defaultMediaUrls, $when),
+                $this->splitLanguageGroups($post, $language, $workspaceId, $included, $defaultMediaUrls, $when),
             );
         }
 
@@ -114,6 +113,7 @@ class PostPublishPlanner
      * @return list<PublishGroup>
      */
     private function splitLanguageGroups(
+        Post $post,
         string $language,
         int|string $workspaceId,
         array $platformCaptions,
@@ -136,7 +136,7 @@ class PostPublishPlanner
                 language: $language,
                 workspaceId: $workspaceId,
                 platforms: ['twitter'],
-                mediaUrls: $this->resolveMediaUrls($twitter, $defaultMediaUrls),
+                mediaUrls: $this->resolveMediaUrls($post, $twitter, $defaultMediaUrls),
                 captions: ['twitter' => $twitter['caption']],
                 when: $when,
                 publishNow: $when === null,
@@ -146,7 +146,7 @@ class PostPublishPlanner
 
         $buckets = [];
         foreach ($remaining as $platform => $data) {
-            $mediaUrls = $this->resolveMediaUrls($data, $defaultMediaUrls);
+            $mediaUrls = $this->resolveMediaUrls($post, $data, $defaultMediaUrls);
             $key = implode("\0", $mediaUrls).'|'.$data['first_comment'];
             $buckets[$key]['mediaUrls'] = $mediaUrls;
             $buckets[$key]['platforms'][$platform] = $data['caption'];
@@ -175,13 +175,10 @@ class PostPublishPlanner
      * @param  list<string>  $defaultMediaUrls
      * @return list<string>
      */
-    private function resolveMediaUrls(array $platformData, array $defaultMediaUrls): array
+    private function resolveMediaUrls(Post $post, array $platformData, array $defaultMediaUrls): array
     {
         if (array_key_exists('images', $platformData)) {
-            return array_map(
-                fn (string $url): string => GoogleDriveLink::toFetchUrl($url),
-                $platformData['images'],
-            );
+            return $this->mediaUrlResolver->resolveNamedImages($post, $platformData['images']);
         }
 
         return $defaultMediaUrls;
