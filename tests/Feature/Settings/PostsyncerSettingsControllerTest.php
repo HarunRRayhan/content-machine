@@ -39,7 +39,7 @@ class PostsyncerSettingsControllerTest extends TestCase
         $this->actingAsWorkspaceOwner();
 
         $this->get(route('settings.index'))
-            ->assertRedirect('/settings/postsyncer');
+            ->assertRedirect('/settings/general');
     }
 
     public function test_legacy_dashboard_url_redirects_to_settings(): void
@@ -64,7 +64,7 @@ class PostsyncerSettingsControllerTest extends TestCase
             ],
             'post_types' => ['platforms' => [], 'overrides' => []],
         ])
-            ->assertRedirect(route('settings.postsyncer.edit'));
+            ->assertRedirect(route('settings.postsyncer.edit', ['step' => 'connecting']));
 
         $this->assertTrue(PostsyncerConfig::fromWorkspace($workspace->fresh())->publishEnabled());
     }
@@ -77,6 +77,7 @@ class PostsyncerSettingsControllerTest extends TestCase
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('workspace-settings/postsyncer')
+                ->where('step', 'connecting')
                 ->where('apiKeyConfigured', false)
                 ->where('availableWorkspaces', [])
                 ->where('workspacesLoadError', null));
@@ -122,5 +123,56 @@ class PostsyncerSettingsControllerTest extends TestCase
                     ['id' => '853', 'label' => 'English'],
                 ])
                 ->where('workspacesLoadError', null));
+    }
+
+    public function test_bangla_step_redirects_until_api_key_is_configured(): void
+    {
+        $this->actingAsWorkspaceOwner();
+
+        $this->get(route('settings.postsyncer.edit', ['step' => 'bangla']))
+            ->assertRedirect(route('settings.postsyncer.edit', ['step' => 'connecting']));
+    }
+
+    public function test_english_step_redirects_until_bangla_workspace_is_set(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'api_base' => 'https://postsyncer.com/api/v1',
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response(['data' => []], 200),
+        ]);
+
+        $this->get(route('settings.postsyncer.edit', ['step' => 'english']))
+            ->assertRedirect(route('settings.postsyncer.edit', ['step' => 'bangla']));
+    }
+
+    public function test_connecting_save_does_not_wipe_language_workspaces(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'step' => 'connecting',
+            'publish_enabled' => true,
+            'api_base' => 'https://postsyncer.com/api/v1',
+            'upload_base' => 'https://upload.postsyncer.com/api/v1',
+        ])->assertRedirect(route('settings.postsyncer.edit', ['step' => 'connecting']));
+
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $this->assertTrue($config->publishEnabled());
+        $this->assertSame('15211', $config->language('bangla')['workspace_id']);
+        $this->assertSame('853', $config->language('english')['workspace_id']);
     }
 }
