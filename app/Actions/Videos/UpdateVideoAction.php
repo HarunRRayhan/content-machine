@@ -22,6 +22,10 @@ class UpdateVideoAction
             $attributes['cover_drive_url'] = $data->coverDriveUrl;
         }
 
+        if ($data->hasPostsyncer) {
+            $attributes['postsyncer'] = $data->postsyncer;
+        }
+
         if ($data->status !== null) {
             $attributes['status'] = $data->status;
         }

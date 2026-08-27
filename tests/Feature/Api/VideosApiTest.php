@@ -156,6 +156,32 @@ class VideosApiTest extends TestCase
         ]);
     }
 
+    public function test_update_can_record_postsyncer_groups(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-12',
+            'number' => 12,
+            'title' => 'Scheduled reel',
+            'status' => 'recorded',
+        ]);
+
+        $this->acting()->patchJson('/api/v1/videos/BV-12', [
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '132195',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-08-27 17:45',
+                    'platforms' => ['facebook', 'instagram', 'tiktok', 'youtube'],
+                    'language' => 'bangla',
+                ]],
+            ],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'scheduled')
+            ->assertJsonPath('data.postsyncer.groups.0.post_id', '132195');
+    }
+
     public function test_patch_rejects_a_private_drive_url(): void
     {
         $this->fakePrivateDriveLinks();

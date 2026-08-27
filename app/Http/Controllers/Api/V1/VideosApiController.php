@@ -87,6 +87,8 @@ class VideosApiController extends Controller
             'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
+            'postsyncer' => ['sometimes', 'nullable', 'array'],
+            'postsyncer.groups' => ['sometimes', 'array'],
         ]);
 
         $action->handle($video, UpdateVideoData::fromApiPayload($payload, $video));
