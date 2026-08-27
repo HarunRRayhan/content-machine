@@ -86,6 +86,7 @@ first.
 - `routes/web.php` — public routes only (landing page, invite-accept flow)
 - `routes/dashboard.php` — everything behind `auth`+`verified`+`SetCurrentWorkspace`, prefixed
   `/dashboard`
+- `routes/settings.php` — workspace Settings (PostSyncer first), first-class at `/settings`
 - `docs/adr/` — architecture decisions and why
 - `.secrets/<service>.env` — operational/infra credentials (Railway tokens, etc.), gitignored,
   separate from the app's own `.env`. See `.secrets/README.md`. Never put an infra token in the

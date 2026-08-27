@@ -36,7 +36,7 @@ class PostsyncerSettingsController extends Controller
             }
         }
 
-        return Inertia::render('settings/postsyncer', [
+        return Inertia::render('workspace-settings/postsyncer', [
             'apiKeyConfigured' => $config->isConfigured(),
             'apiBase' => $config->apiBase(),
             'uploadBase' => $config->uploadBase(),
@@ -64,7 +64,7 @@ class PostsyncerSettingsController extends Controller
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('PostSyncer settings saved.')]);
 
-        return to_route('dashboard.postsyncer.edit');
+        return to_route('settings.postsyncer.edit');
     }
 
     public function refreshAccounts(Request $request): JsonResponse
