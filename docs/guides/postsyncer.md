@@ -13,8 +13,9 @@ disable its local PostSyncer endpoints (see personal-content
 ## Settings → PostSyncer
 
 Workspace owners configure PostSyncer at **Settings → PostSyncer**
-(`/settings/postsyncer`). The old `/dashboard/settings/postsyncer` URL
-redirects there.
+(`/settings/postsyncer`). Setup is a gated process: Connecting, then
+Bangla workspace, then English workspace. The old
+`/dashboard/settings/postsyncer` URL redirects there.
 
 | Field | Purpose |
 |---|---|

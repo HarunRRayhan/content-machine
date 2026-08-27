@@ -4,9 +4,8 @@ namespace App\Http\Controllers\Settings;
 
 use App\Actions\Postsyncer\UpdatePostsyncerSettingsAction;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
 use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
-use App\Models\User;
-use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
@@ -19,10 +18,19 @@ use Inertia\Response;
 
 class PostsyncerSettingsController extends Controller
 {
-    public function edit(Request $request): Response
+    use AuthorizesWorkspaceSettings;
+
+    /** @var list<string> */
+    public const STEPS = ['connecting', 'bangla', 'english'];
+
+    public function edit(Request $request, ?string $step = null): Response|RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
         $this->authorizeWorkspaceAdmin($request, $workspace);
+
+        $step ??= 'connecting';
+
+        abort_unless(in_array($step, self::STEPS, true), 404);
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
         $availableWorkspaces = [];
@@ -36,7 +44,17 @@ class PostsyncerSettingsController extends Controller
             }
         }
 
+        $steps = $this->presentSteps($config);
+
+        if (! $steps[$step]['unlocked']) {
+            return redirect()->route('settings.postsyncer.edit', [
+                'step' => $this->firstLockedFallback($steps, $step),
+            ]);
+        }
+
         return Inertia::render('workspace-settings/postsyncer', [
+            'step' => $step,
+            'steps' => $steps,
             'apiKeyConfigured' => $config->isConfigured(),
             'apiBase' => $config->apiBase(),
             'uploadBase' => $config->uploadBase(),
@@ -58,18 +76,26 @@ class PostsyncerSettingsController extends Controller
         UpdatePostsyncerSettingsRequest $request,
         UpdatePostsyncerSettingsAction $updatePostsyncerSettingsAction,
     ): RedirectResponse {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
 
-        $updatePostsyncerSettingsAction->handle($workspace, $request->validated());
+        $payload = $request->validated();
+        unset($payload['step']);
+
+        $updatePostsyncerSettingsAction->handle($workspace, $payload);
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('PostSyncer settings saved.')]);
 
-        return to_route('settings.postsyncer.edit');
+        $step = $request->input('step', 'connecting');
+        $step = is_string($step) && in_array($step, self::STEPS, true)
+            ? $step
+            : 'connecting';
+
+        return to_route('settings.postsyncer.edit', ['step' => $step]);
     }
 
     public function refreshAccounts(Request $request): JsonResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
         $this->authorizeWorkspaceAdmin($request, $workspace);
 
         $validated = $request->validate([
@@ -107,24 +133,48 @@ class PostsyncerSettingsController extends Controller
         ]);
     }
 
-    private function currentWorkspace(Request $request): Workspace
+    /**
+     * @return array{connecting: array{unlocked: bool, done: bool}, bangla: array{unlocked: bool, done: bool}, english: array{unlocked: bool, done: bool}}
+     */
+    private function presentSteps(PostsyncerConfig $config): array
     {
-        $workspace = Workspace::current();
+        $banglaReady = $config->language('bangla')['workspace_id'] !== null;
+        $englishReady = $config->language('english')['workspace_id'] !== null;
 
-        abort_if($workspace === null, 404, 'No current workspace.');
-
-        return $workspace;
+        return [
+            'connecting' => [
+                'unlocked' => true,
+                'done' => $config->isConfigured(),
+            ],
+            'bangla' => [
+                'unlocked' => $config->isConfigured(),
+                'done' => $banglaReady,
+            ],
+            'english' => [
+                'unlocked' => $banglaReady,
+                'done' => $englishReady,
+            ],
+        ];
     }
 
-    private function authorizeWorkspaceAdmin(Request $request, Workspace $workspace): void
+    /**
+     * @param  array<string, array{unlocked: bool, done: bool}>  $steps
+     */
+    private function firstLockedFallback(array $steps, string $requested): string
     {
-        $user = $request->user();
+        $fallback = 'connecting';
 
-        abort_unless($user instanceof User, 403);
+        foreach (self::STEPS as $step) {
+            if ($steps[$step]['unlocked']) {
+                $fallback = $step;
+            }
 
-        $member = $workspace->team->members()->whereKey($user->id)->first();
+            if ($step === $requested) {
+                break;
+            }
+        }
 
-        abort_unless(in_array($member?->pivot->role, ['owner', 'admin'], true), 403);
+        return $fallback;
     }
 
     /**

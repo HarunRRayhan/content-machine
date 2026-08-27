@@ -1,4 +1,4 @@
-import { Form, Head } from '@inertiajs/react';
+import { Form, Head, Link } from '@inertiajs/react';
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import PostsyncerSettingsController from '@/actions/App/Http/Controllers/Settings/PostsyncerSettingsController';
@@ -8,7 +8,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { SettingsTabs } from '@/components/workspace-settings/settings-tabs';
+import { PostsyncerSteps } from '@/components/workspace-settings/postsyncer-steps';
+import type {
+    PostsyncerStepId,
+    PostsyncerStepState,
+} from '@/components/workspace-settings/postsyncer-steps';
+import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { home } from '@/routes/dashboard';
 import { index as settingsIndex } from '@/routes/settings';
 import { edit as editPostsyncer } from '@/routes/settings/postsyncer';
@@ -34,6 +39,8 @@ type AvailableWorkspace = {
 };
 
 type PageProps = {
+    step: PostsyncerStepId;
+    steps: Record<PostsyncerStepId, PostsyncerStepState>;
     apiKeyConfigured: boolean;
     apiBase: string;
     uploadBase: string;
@@ -56,7 +63,6 @@ function platformLabel(platform: string): string {
 
 function LanguageSection({
     language,
-    label,
     config,
     platforms,
     availableWorkspaces,
@@ -64,7 +70,6 @@ function LanguageSection({
     refreshing,
 }: {
     language: 'bangla' | 'english';
-    label: string;
     config: LanguageConfig;
     platforms: string[];
     availableWorkspaces: AvailableWorkspace[];
@@ -72,9 +77,13 @@ function LanguageSection({
     refreshing: boolean;
 }) {
     return (
-        <div className="space-y-4 rounded-lg border p-4">
+        <div className="space-y-4">
             <div className="flex items-center justify-between gap-4">
-                <Heading variant="small" title={label} />
+                <Heading
+                    variant="small"
+                    title="PostSyncer workspace"
+                    description="Pick the workspace, then refresh accounts and check the handles."
+                />
                 <Button
                     type="button"
                     variant="outline"
@@ -90,9 +99,7 @@ function LanguageSection({
             </div>
 
             <div className="grid gap-2">
-                <Label htmlFor={`${language}-workspace-id`}>
-                    PostSyncer workspace
-                </Label>
+                <Label htmlFor={`${language}-workspace-id`}>Workspace</Label>
                 <select
                     id={`${language}-workspace-id`}
                     name={`languages[${language}][workspace_id]`}
@@ -168,6 +175,8 @@ function LanguageSection({
 }
 
 export default function PostsyncerSettings({
+    step,
+    steps,
     apiKeyConfigured,
     apiBase,
     uploadBase,
@@ -238,24 +247,20 @@ export default function PostsyncerSettings({
         english: { ...languages.english, platforms: englishPlatforms },
     };
 
+    const nextStep =
+        step === 'connecting' && steps.bangla.unlocked
+            ? 'bangla'
+            : step === 'bangla' && steps.english.unlocked
+              ? 'english'
+              : null;
+
     return (
         <>
             <Head title="Settings" />
 
-            <div className="studio-page flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
-                <Heading
-                    title="Settings"
-                    description="Workspace settings for Content Machine."
-                />
-
-                <SettingsTabs active="postsyncer" />
-
+            <SettingsShell active="postsyncer">
                 <div className="max-w-3xl space-y-6">
-                    <Heading
-                        variant="small"
-                        title="PostSyncer"
-                        description="Connect PostSyncer for scheduling and publishing posts and videos."
-                    />
+                    <PostsyncerSteps active={step} steps={steps} />
 
                     <div className="flex items-center gap-2">
                         <Badge
@@ -267,215 +272,283 @@ export default function PostsyncerSettings({
                         </Badge>
                     </div>
 
-                    <Form
-                        {...PostsyncerSettingsController.update.form()}
-                        options={{ preserveScroll: true }}
-                        className="space-y-8"
-                    >
-                        {({ processing, errors }) => (
-                            <>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="api_key">API key</Label>
-                                    <Input
-                                        id="api_key"
-                                        name="api_key"
-                                        type="password"
-                                        autoComplete="off"
-                                        placeholder={
-                                            apiKeyConfigured
-                                                ? 'Leave blank to keep the current key'
-                                                : 'Paste your PostSyncer API key'
-                                        }
-                                    />
-                                    <InputError message={errors.api_key} />
-                                </div>
-
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="api_base">
-                                            API base URL
-                                        </Label>
-                                        <Input
-                                            id="api_base"
-                                            name="api_base"
-                                            defaultValue={apiBase}
-                                        />
-                                        <InputError message={errors.api_base} />
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="upload_base">
-                                            Upload base URL
-                                        </Label>
-                                        <Input
-                                            id="upload_base"
-                                            name="upload_base"
-                                            defaultValue={uploadBase}
-                                        />
-                                        <InputError
-                                            message={errors.upload_base}
-                                        />
-                                    </div>
-                                </div>
-
-                                <label className="flex items-center gap-2 text-sm">
+                    {step === 'connecting' && (
+                        <Form
+                            {...PostsyncerSettingsController.update.form()}
+                            options={{ preserveScroll: true }}
+                            className="space-y-8"
+                        >
+                            {({ processing, errors }) => (
+                                <>
                                     <input
-                                        type="checkbox"
-                                        name="publish_enabled"
-                                        value="1"
-                                        defaultChecked={publishEnabled}
-                                        className="size-4 rounded border-input"
+                                        type="hidden"
+                                        name="step"
+                                        value="connecting"
                                     />
-                                    Enable publishing from Content Machine
-                                </label>
-                                <InputError message={errors.publish_enabled} />
 
-                                {!apiKeyConfigured && (
-                                    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                                        Save an API key first. PostSyncer
-                                        workspaces load automatically after the
-                                        key is saved.
-                                    </p>
-                                )}
-
-                                {apiKeyConfigured && workspacesLoadError && (
-                                    <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-                                        Could not load workspaces:{' '}
-                                        {workspacesLoadError}
-                                    </p>
-                                )}
-
-                                {apiKeyConfigured && (
-                                    <>
-                                        <LanguageSection
-                                            key={`bangla-${JSON.stringify(banglaPlatforms)}`}
-                                            language="bangla"
-                                            label="Bangla"
-                                            config={languagesForForm.bangla}
-                                            platforms={platforms}
-                                            availableWorkspaces={
-                                                availableWorkspaces
-                                            }
-                                            onRefresh={refreshAccounts}
-                                            refreshing={
-                                                refreshingLanguage === 'bangla'
-                                            }
-                                        />
-
-                                        <LanguageSection
-                                            key={`english-${JSON.stringify(englishPlatforms)}`}
-                                            language="english"
-                                            label="English"
-                                            config={languagesForForm.english}
-                                            platforms={platforms}
-                                            availableWorkspaces={
-                                                availableWorkspaces
-                                            }
-                                            onRefresh={refreshAccounts}
-                                            refreshing={
-                                                refreshingLanguage === 'english'
-                                            }
-                                        />
-                                    </>
-                                )}
-
-                                <div className="space-y-4 rounded-lg border p-4">
                                     <Heading
                                         variant="small"
-                                        title="Post-type matrix"
-                                        description="Platform support by content type. Overrides apply per language."
+                                        title="Connecting"
+                                        description="Paste the PostSyncer API key first. Workspaces unlock after that."
                                     />
 
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
-                                            <thead>
-                                                <tr className="border-b text-left">
-                                                    <th className="py-2 pr-4 font-medium">
-                                                        Platform
-                                                    </th>
-                                                    {postTypeNames.map(
-                                                        (type) => (
-                                                            <th
-                                                                key={type}
-                                                                className="py-2 pr-4 font-medium capitalize"
-                                                            >
-                                                                {type}
-                                                            </th>
-                                                        ),
-                                                    )}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {platforms.map((platform) => (
-                                                    <tr
-                                                        key={platform}
-                                                        className="border-b last:border-0"
-                                                    >
-                                                        <td className="py-2 pr-4">
-                                                            {platformLabel(
-                                                                platform,
-                                                            )}
-                                                        </td>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="api_key">API key</Label>
+                                        <Input
+                                            id="api_key"
+                                            name="api_key"
+                                            type="password"
+                                            autoComplete="off"
+                                            placeholder={
+                                                apiKeyConfigured
+                                                    ? 'Leave blank to keep the current key'
+                                                    : 'Paste your PostSyncer API key'
+                                            }
+                                        />
+                                        <InputError message={errors.api_key} />
+                                    </div>
+
+                                    <div className="grid gap-4 sm:grid-cols-2">
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="api_base">
+                                                API base URL
+                                            </Label>
+                                            <Input
+                                                id="api_base"
+                                                name="api_base"
+                                                defaultValue={apiBase}
+                                            />
+                                            <InputError
+                                                message={errors.api_base}
+                                            />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label htmlFor="upload_base">
+                                                Upload base URL
+                                            </Label>
+                                            <Input
+                                                id="upload_base"
+                                                name="upload_base"
+                                                defaultValue={uploadBase}
+                                            />
+                                            <InputError
+                                                message={errors.upload_base}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <label className="flex items-center gap-2 text-sm">
+                                        <input
+                                            type="checkbox"
+                                            name="publish_enabled"
+                                            value="1"
+                                            defaultChecked={publishEnabled}
+                                            className="size-4 rounded border-input"
+                                        />
+                                        Enable publishing from Content Machine
+                                    </label>
+                                    <InputError
+                                        message={errors.publish_enabled}
+                                    />
+
+                                    <div className="space-y-4 rounded-lg border p-4">
+                                        <Heading
+                                            variant="small"
+                                            title="Post-type matrix"
+                                            description="Platform support by content type."
+                                        />
+
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm">
+                                                <thead>
+                                                    <tr className="border-b text-left">
+                                                        <th className="py-2 pr-4 font-medium">
+                                                            Platform
+                                                        </th>
                                                         {postTypeNames.map(
                                                             (type) => (
-                                                                <td
+                                                                <th
                                                                     key={type}
-                                                                    className="py-2 pr-4"
+                                                                    className="py-2 pr-4 font-medium capitalize"
                                                                 >
-                                                                    <select
-                                                                        name={`post_types[platforms][${platform}][${type}]`}
-                                                                        defaultValue={
-                                                                            postTypes
-                                                                                .platforms?.[
-                                                                                platform
-                                                                            ]?.[
-                                                                                type
-                                                                            ] ??
-                                                                            ''
-                                                                        }
-                                                                        className="h-9 w-full min-w-24 rounded-md border border-input bg-transparent px-2 text-sm"
-                                                                    >
-                                                                        <option value="">
-                                                                            —
-                                                                        </option>
-                                                                        {postTypeStates.map(
-                                                                            (
-                                                                                state,
-                                                                            ) => (
-                                                                                <option
-                                                                                    key={
-                                                                                        state
-                                                                                    }
-                                                                                    value={
-                                                                                        state
-                                                                                    }
-                                                                                >
-                                                                                    {
-                                                                                        state
-                                                                                    }
-                                                                                </option>
-                                                                            ),
-                                                                        )}
-                                                                    </select>
-                                                                </td>
+                                                                    {type}
+                                                                </th>
                                                             ),
                                                         )}
                                                     </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                                </thead>
+                                                <tbody>
+                                                    {platforms.map(
+                                                        (platform) => (
+                                                            <tr
+                                                                key={platform}
+                                                                className="border-b last:border-0"
+                                                            >
+                                                                <td className="py-2 pr-4">
+                                                                    {platformLabel(
+                                                                        platform,
+                                                                    )}
+                                                                </td>
+                                                                {postTypeNames.map(
+                                                                    (type) => (
+                                                                        <td
+                                                                            key={
+                                                                                type
+                                                                            }
+                                                                            className="py-2 pr-4"
+                                                                        >
+                                                                            <select
+                                                                                name={`post_types[platforms][${platform}][${type}]`}
+                                                                                defaultValue={
+                                                                                    postTypes
+                                                                                        .platforms?.[
+                                                                                        platform
+                                                                                    ]?.[
+                                                                                        type
+                                                                                    ] ??
+                                                                                    ''
+                                                                                }
+                                                                                className="h-9 w-full min-w-24 rounded-md border border-input bg-transparent px-2 text-sm"
+                                                                            >
+                                                                                <option value="">
+                                                                                    —
+                                                                                </option>
+                                                                                {postTypeStates.map(
+                                                                                    (
+                                                                                        state,
+                                                                                    ) => (
+                                                                                        <option
+                                                                                            key={
+                                                                                                state
+                                                                                            }
+                                                                                            value={
+                                                                                                state
+                                                                                            }
+                                                                                        >
+                                                                                            {
+                                                                                                state
+                                                                                            }
+                                                                                        </option>
+                                                                                    ),
+                                                                                )}
+                                                                            </select>
+                                                                        </td>
+                                                                    ),
+                                                                )}
+                                                            </tr>
+                                                        ),
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div className="flex items-center gap-4">
-                                    <Button disabled={processing} type="submit">
-                                        Save
-                                    </Button>
-                                </div>
-                            </>
-                        )}
-                    </Form>
+                                    <div className="flex flex-wrap items-center gap-4">
+                                        <Button
+                                            disabled={processing}
+                                            type="submit"
+                                        >
+                                            Save
+                                        </Button>
+                                        {nextStep !== null && (
+                                            <Link
+                                                href={editPostsyncer.url(
+                                                    nextStep,
+                                                )}
+                                                className="text-sm underline"
+                                            >
+                                                Continue to{' '}
+                                                {nextStep === 'bangla'
+                                                    ? 'Bangla'
+                                                    : 'English'}
+                                            </Link>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </Form>
+                    )}
+
+                    {(step === 'bangla' || step === 'english') && (
+                        <Form
+                            {...PostsyncerSettingsController.update.form()}
+                            options={{ preserveScroll: true }}
+                            className="space-y-8"
+                        >
+                            {({ processing, errors }) => (
+                                <>
+                                    <input
+                                        type="hidden"
+                                        name="step"
+                                        value={step}
+                                    />
+
+                                    {!apiKeyConfigured && (
+                                        <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                                            Save an API key on Connecting first.
+                                        </p>
+                                    )}
+
+                                    {apiKeyConfigured &&
+                                        workspacesLoadError && (
+                                            <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+                                                Could not load workspaces:{' '}
+                                                {workspacesLoadError}
+                                            </p>
+                                        )}
+
+                                    {apiKeyConfigured && (
+                                        <LanguageSection
+                                            key={`${step}-${JSON.stringify(
+                                                step === 'bangla'
+                                                    ? banglaPlatforms
+                                                    : englishPlatforms,
+                                            )}`}
+                                            language={step}
+                                            config={languagesForForm[step]}
+                                            platforms={platforms}
+                                            availableWorkspaces={
+                                                availableWorkspaces
+                                            }
+                                            onRefresh={refreshAccounts}
+                                            refreshing={
+                                                refreshingLanguage === step
+                                            }
+                                        />
+                                    )}
+
+                                    <InputError
+                                        message={
+                                            errors[
+                                                `languages.${step}.workspace_id`
+                                            ]
+                                        }
+                                    />
+
+                                    <div className="flex flex-wrap items-center gap-4">
+                                        <Button
+                                            disabled={processing}
+                                            type="submit"
+                                        >
+                                            Save
+                                        </Button>
+                                        {nextStep !== null && (
+                                            <Link
+                                                href={editPostsyncer.url(
+                                                    nextStep,
+                                                )}
+                                                className="text-sm underline"
+                                            >
+                                                Continue to English
+                                            </Link>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </Form>
+                    )}
                 </div>
-            </div>
+            </SettingsShell>
         </>
     );
 }

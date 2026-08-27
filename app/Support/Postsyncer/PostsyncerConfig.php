@@ -134,11 +134,51 @@ class PostsyncerConfig
                 continue;
             }
 
+            if ($key === 'languages' && is_array($value)) {
+                $postsyncer['languages'] = self::mergeLanguages(
+                    is_array($postsyncer['languages'] ?? null) ? $postsyncer['languages'] : [],
+                    $value,
+                );
+
+                continue;
+            }
+
             $postsyncer[$key] = $value;
         }
 
         $settings['postsyncer'] = $postsyncer;
         $workspace->settings = $settings;
         $workspace->save();
+    }
+
+    /**
+     * @param  array<string, mixed>  $existing
+     * @param  array<string, mixed>  $incoming
+     * @return array<string, mixed>
+     */
+    private static function mergeLanguages(array $existing, array $incoming): array
+    {
+        $merged = $existing;
+
+        foreach ($incoming as $lang => $langConfig) {
+            if (! is_array($langConfig)) {
+                continue;
+            }
+
+            $current = is_array($merged[$lang] ?? null) ? $merged[$lang] : [];
+
+            if (array_key_exists('workspace_id', $langConfig)) {
+                $current['workspace_id'] = $langConfig['workspace_id'];
+            }
+
+            if (array_key_exists('platforms', $langConfig) && is_array($langConfig['platforms'])) {
+                $currentPlatforms = is_array($current['platforms'] ?? null) ? $current['platforms'] : [];
+                $current['platforms'] = array_replace($currentPlatforms, $langConfig['platforms']);
+            }
+
+            $merged[$lang] = $current;
+        }
+
+        return $merged;
     }
 }

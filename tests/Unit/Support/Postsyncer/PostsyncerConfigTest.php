@@ -46,6 +46,30 @@ class PostsyncerConfigTest extends TestCase
         $this->assertTrue(PostsyncerConfig::fromWorkspace($workspace)->publishEnabled());
     }
 
+    public function test_write_merges_one_language_without_wiping_the_other(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+        $workspace->refresh();
+
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '999', 'platforms' => []],
+            ],
+        ]);
+        $workspace->refresh();
+
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $this->assertSame('999', $config->language('bangla')['workspace_id']);
+        $this->assertSame('853', $config->language('english')['workspace_id']);
+    }
+
     public function test_defaults_and_accessors(): void
     {
         $workspace = Workspace::factory()->create(['settings' => []]);

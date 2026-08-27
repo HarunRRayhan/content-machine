@@ -79,6 +79,7 @@ class UpdatePostsyncerSettingsRequest extends FormRequest
         }
 
         return array_merge([
+            'step' => ['nullable', Rule::in(['connecting', 'bangla', 'english'])],
             'api_key' => ['nullable', 'string', 'max:500'],
             'api_base' => ['nullable', 'string', 'max:500'],
             'upload_base' => ['nullable', 'string', 'max:500'],

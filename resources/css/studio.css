@@ -271,6 +271,11 @@
     font-weight: 600;
 }
 
+.studio-page .stepper a.step {
+    text-decoration: none;
+    color: inherit;
+}
+
 .studio-page .conn {
     flex: 1;
     height: 2px;
