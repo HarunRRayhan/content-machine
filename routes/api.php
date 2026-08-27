@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\IdeasApiController;
+use App\Http\Controllers\Api\V1\MediaUrlsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
@@ -86,6 +87,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('ideas/{human_id}', [IdeasApiController::class, 'show'])
         ->middleware('auth.workspace-token:ideas:read')
         ->name('ideas.show');
+
+    Route::post('media-urls/check', [MediaUrlsApiController::class, 'check'])
+        ->middleware('auth.workspace-token')
+        ->name('media-urls.check');
 
     Route::get('videos', [VideosApiController::class, 'index'])
         ->middleware('auth.workspace-token:videos:read')

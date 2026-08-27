@@ -26,6 +26,64 @@ const PIPELINE = [
 
 const DHAKA_TZ = 'Asia/Dhaka';
 
+type DriveCheck = {
+    status: 'idle' | 'checking' | 'ok' | 'bad';
+    message: string;
+};
+
+const IDLE_CHECK: DriveCheck = { status: 'idle', message: '' };
+
+function csrfToken(): string {
+    return (
+        document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content') ?? ''
+    );
+}
+
+async function checkDriveUrl(url: string): Promise<DriveCheck> {
+    const trimmed = url.trim();
+
+    if (trimmed === '') {
+        return IDLE_CHECK;
+    }
+
+    const response = await fetch('/media-urls/check', {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrfToken(),
+        },
+        body: JSON.stringify({ url: trimmed }),
+    });
+
+    const payload = (await response.json()) as {
+        accessible?: boolean;
+        message?: string;
+        errors?: { url?: string[] };
+    };
+
+    if (!response.ok) {
+        return {
+            status: 'bad',
+            message:
+                payload.errors?.url?.[0] ??
+                payload.message ??
+                'Could not check this link.',
+        };
+    }
+
+    return {
+        status: payload.accessible ? 'ok' : 'bad',
+        message:
+            payload.message ??
+            (payload.accessible
+                ? 'Anyone with the link can fetch this file.'
+                : 'This Google Drive file is not public.'),
+    };
+}
+
 const MANUAL_STATUSES = new Set(['pending', 'ready', 'recorded', 'archived']);
 
 type Props = {
@@ -179,6 +237,8 @@ export default function VideoOverview({
     const [busy, setBusy] = useState(false);
     const [confirmAskChecked, setConfirmAskChecked] = useState(false);
     const [minWhen] = useState(() => datetimeLocalNowInDhaka());
+    const [videoCheck, setVideoCheck] = useState<DriveCheck>(IDLE_CHECK);
+    const [coverCheck, setCoverCheck] = useState<DriveCheck>(IDLE_CHECK);
 
     const studioStatus = useMemo(() => {
         if (status === 'draft' || status === 'dropped') {
@@ -336,6 +396,11 @@ export default function VideoOverview({
                                     value={title}
                                 />
                                 <div className="drive-urls-h">Drive URLs</div>
+                                <p className="drive-urls-hint">
+                                    Paste a live Google Drive file link. Share
+                                    it as Anyone with the link so PostSyncer can
+                                    fetch it.
+                                </p>
                                 <div className="drive-urls-row">
                                     <label className="schedule-it-label">
                                         Video Drive URL
@@ -345,7 +410,32 @@ export default function VideoOverview({
                                             defaultValue={videoDriveUrl ?? ''}
                                             placeholder="https://drive.google.com/file/d/..."
                                             maxLength={2048}
+                                            onBlur={(event) => {
+                                                const value =
+                                                    event.target.value.trim();
+
+                                                if (value === '') {
+                                                    setVideoCheck(IDLE_CHECK);
+
+                                                    return;
+                                                }
+
+                                                setVideoCheck({
+                                                    status: 'checking',
+                                                    message: 'Checking…',
+                                                });
+                                                void checkDriveUrl(value).then(
+                                                    setVideoCheck,
+                                                );
+                                            }}
                                         />
+                                        {videoCheck.status !== 'idle' && (
+                                            <span
+                                                className={`drive-url-status is-${videoCheck.status}`}
+                                            >
+                                                {videoCheck.message}
+                                            </span>
+                                        )}
                                     </label>
                                     <label className="schedule-it-label">
                                         Cover Drive URL
@@ -355,7 +445,32 @@ export default function VideoOverview({
                                             defaultValue={coverDriveUrl ?? ''}
                                             placeholder="https://drive.google.com/file/d/..."
                                             maxLength={2048}
+                                            onBlur={(event) => {
+                                                const value =
+                                                    event.target.value.trim();
+
+                                                if (value === '') {
+                                                    setCoverCheck(IDLE_CHECK);
+
+                                                    return;
+                                                }
+
+                                                setCoverCheck({
+                                                    status: 'checking',
+                                                    message: 'Checking…',
+                                                });
+                                                void checkDriveUrl(value).then(
+                                                    setCoverCheck,
+                                                );
+                                            }}
                                         />
+                                        {coverCheck.status !== 'idle' && (
+                                            <span
+                                                className={`drive-url-status is-${coverCheck.status}`}
+                                            >
+                                                {coverCheck.message}
+                                            </span>
+                                        )}
                                     </label>
                                     <button
                                         type="submit"

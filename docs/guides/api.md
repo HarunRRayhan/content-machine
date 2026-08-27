@@ -60,12 +60,13 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/videos` | videos:read | filters: `status`, `language` |
 | GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` |
 | POST | `/api/v1/videos` | videos:write | create; pass `human_id`+`number` for idempotent import |
-| PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … |
+| PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … Drive URLs must be public Google Drive file links. |
+| POST | `/api/v1/media-urls/check` | any token | probe a Drive URL: `{ url }` → `{ accessible, message, file_id, share_url, fetch_url }` |
 | POST | `/api/v1/videos/{human_id}/publish` | videos:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). The video needs a Video Drive URL. Always send `when` to schedule. |
 | GET | `/api/v1/posts` | posts:read | filters: `status`, `language` |
 | GET | `/api/v1/posts/{human_id}` | posts:read | |
 | POST | `/api/v1/posts` | posts:write | create / idempotent import |
-| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, … |
+| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, image_drive_urls, … |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
 | POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
 | POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. The Railway `cm-worker` service runs the job. |

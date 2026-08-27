@@ -4,6 +4,7 @@ namespace App\Support\Postsyncer;
 
 use App\Models\Post;
 use App\Models\Video;
+use App\Support\GoogleDrive\GoogleDriveLink;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 
@@ -20,7 +21,10 @@ class MediaUrlResolver
             return $this->urlsFromAttachments($post);
         }
 
-        return array_values($post->image_drive_urls ?? []);
+        return array_map(
+            fn (string $url): string => GoogleDriveLink::toFetchUrl($url),
+            array_values($post->image_drive_urls ?? []),
+        );
     }
 
     /**
@@ -32,9 +36,11 @@ class MediaUrlResolver
             throw new InvalidArgumentException('Video is missing video_drive_url.');
         }
 
+        $cover = $video->cover_drive_url;
+
         return [
-            'video' => $video->video_drive_url,
-            'cover' => $video->cover_drive_url,
+            'video' => GoogleDriveLink::toFetchUrl($video->video_drive_url),
+            'cover' => is_string($cover) && $cover !== '' ? GoogleDriveLink::toFetchUrl($cover) : null,
         ];
     }
 

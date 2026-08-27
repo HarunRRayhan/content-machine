@@ -18,6 +18,7 @@ use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Rules\AccessibleDriveUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -67,6 +68,8 @@ class PostsApiController extends Controller
             'body' => ['nullable', 'string'],
             'captions' => ['nullable', 'array'],
             'platforms' => ['nullable', 'array'],
+            'image_drive_urls' => ['nullable', 'array'],
+            'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['nullable', 'string', Rule::in(Post::STATUSES)],
             'idea_id' => ['nullable', 'integer'],
         ]);
@@ -89,6 +92,8 @@ class PostsApiController extends Controller
             'body' => ['sometimes', 'nullable', 'string'],
             'captions' => ['sometimes', 'nullable', 'array'],
             'platforms' => ['sometimes', 'nullable', 'array'],
+            'image_drive_urls' => ['sometimes', 'nullable', 'array'],
+            'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
             'postsyncer' => ['sometimes', 'nullable', 'array'],
             'postsyncer.groups' => ['sometimes', 'array'],

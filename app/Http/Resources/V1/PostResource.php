@@ -30,6 +30,7 @@ class PostResource extends JsonResource
             'body' => $this->body,
             'captions' => $this->captions,
             'platforms' => $this->platforms,
+            'image_drive_urls' => $this->image_drive_urls,
             'status' => $this->status,
             'publish_state' => $this->publish_state,
             'publish_error' => $this->publish_error,

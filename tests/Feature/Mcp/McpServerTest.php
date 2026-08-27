@@ -94,6 +94,7 @@ class McpServerTest extends TestCase
         $this->assertContains('list_videos', $listed);
         $this->assertContains('get_video', $listed);
         $this->assertContains('update_video', $listed);
+        $this->assertContains('check_drive_url', $listed);
         $this->assertContains('publish_video', $listed);
         $this->assertContains('list_posts', $listed);
         $this->assertContains('get_post', $listed);
@@ -223,6 +224,56 @@ class McpServerTest extends TestCase
         ])->assertOk()->assertJsonMissingPath('result.isError');
 
         $this->assertSame('New title', Video::query()->where('human_id', 'V-12')->value('title'));
+    }
+
+    public function test_update_video_accepts_drive_urls(): void
+    {
+        $this->fakeAccessibleDriveLinks();
+
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-60',
+            'number' => 60,
+            'title' => 'Recorded cut',
+            'status' => 'recorded',
+        ]);
+
+        $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 81,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'update_video',
+                'arguments' => [
+                    'human_id' => 'BV-60',
+                    'video_drive_url' => 'https://drive.google.com/file/d/publicFile/view',
+                ],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError');
+
+        $this->assertSame(
+            'https://drive.google.com/file/d/publicFile/view',
+            Video::query()->where('human_id', 'BV-60')->value('video_drive_url'),
+        );
+    }
+
+    public function test_check_drive_url_reports_a_private_file(): void
+    {
+        $this->fakePrivateDriveLinks();
+
+        $text = $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 82,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'check_drive_url',
+                'arguments' => [
+                    'url' => 'https://drive.google.com/file/d/privateFile/view',
+                ],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError')->json('result.content.0.text');
+
+        $this->assertIsString($text);
+        $this->assertStringContainsString('"accessible":false', $text);
     }
 
     public function test_missing_videos_write_is_a_tool_error_and_does_not_write(): void

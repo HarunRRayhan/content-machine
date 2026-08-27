@@ -47,7 +47,7 @@ final readonly class UpdatePostData
     /**
      * @return array<int, string>|null
      */
-    private static function parseDriveUrls(mixed $raw): ?array
+    public static function parseDriveUrls(mixed $raw): ?array
     {
         if ($raw === null || $raw === '') {
             return null;
@@ -85,10 +85,14 @@ final readonly class UpdatePostData
             captions: array_key_exists('captions', $payload) ? (is_array($payload['captions']) ? $payload['captions'] : null) : $current->captions,
             platforms: array_key_exists('platforms', $payload) ? (is_array($payload['platforms']) ? $payload['platforms'] : null) : $current->platforms,
             status: array_key_exists('status', $payload) ? (string) $payload['status'] : $current->status,
+            imageDriveUrls: array_key_exists('image_drive_urls', $payload)
+                ? self::parseDriveUrls($payload['image_drive_urls'])
+                : null,
             postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
                 ? $payload['postsyncer']
                 : null,
             replaceExtended: true,
+            hasImageDriveUrls: array_key_exists('image_drive_urls', $payload),
             hasPostsyncer: array_key_exists('postsyncer', $payload),
         );
     }

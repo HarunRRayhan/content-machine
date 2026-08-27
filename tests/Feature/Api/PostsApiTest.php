@@ -90,6 +90,24 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.postsyncer.groups.0.post_id', '132531');
     }
 
+    public function test_patch_accepts_image_drive_urls(): void
+    {
+        $this->fakeAccessibleDriveLinks();
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-52',
+            'number' => 52,
+            'title' => 'Photo post',
+            'status' => 'draft',
+        ])->assertCreated();
+
+        $this->acting()->patchJson('/api/v1/posts/P-52', [
+            'image_drive_urls' => ['https://drive.google.com/file/d/photoOne/view'],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.image_drive_urls.0', 'https://drive.google.com/file/d/photoOne/view');
+    }
+
     public function test_index_lists_posts(): void
     {
         Post::factory()->for($this->workspace)->create(['human_id' => 'P-1', 'number' => 1]);

@@ -134,7 +134,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_video',
-                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, status.',
+                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, status, video_drive_url, cover_drive_url. Drive URLs must be publicly fetchable (Anyone with the link).',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -144,7 +144,17 @@ final class McpToolCatalog
                     'body' => ['type' => 'string'],
                     'script_markdown' => ['type' => 'string'],
                     'status' => ['type' => 'string', 'enum' => Video::STATUSES],
+                    'video_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the edited video.'],
+                    'cover_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the cover image.'],
                 ], ['human_id']),
+            ],
+            [
+                'name' => 'check_drive_url',
+                'description' => 'Check whether a pasted Google Drive file link is publicly fetchable. Returns accessible, message, file_id, share_url, fetch_url. Use before update_video / update_post.',
+                'ability' => 'videos:write',
+                'inputSchema' => self::schema([
+                    'url' => ['type' => 'string', 'description' => 'A Google Drive file share link.'],
+                ], ['url']),
             ],
             [
                 'name' => 'publish_video',
@@ -176,7 +186,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_post',
-                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status.',
+                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status, image_drive_urls. Drive URLs must be publicly fetchable.',
                 'ability' => 'posts:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -185,6 +195,7 @@ final class McpToolCatalog
                     'captions' => ['type' => 'object', 'description' => 'Per-platform caption map.'],
                     'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'status' => ['type' => 'string', 'enum' => Post::STATUSES],
+                    'image_drive_urls' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Public Google Drive file links for post images.'],
                 ], ['human_id']),
             ],
             [
