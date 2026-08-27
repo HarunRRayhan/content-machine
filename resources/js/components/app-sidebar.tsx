@@ -6,6 +6,7 @@ import {
     FolderGit2,
     KeyRound,
     KeySquare,
+    LayoutDashboard,
     NotebookPen,
     Send,
     Settings,
@@ -40,6 +41,11 @@ import { index as videosIndex } from '@/routes/videos';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
+    {
+        title: 'Dashboard',
+        href: home(),
+        icon: LayoutDashboard,
+    },
     {
         title: 'Scratch Pad',
         href: scratchpadIndex(),
