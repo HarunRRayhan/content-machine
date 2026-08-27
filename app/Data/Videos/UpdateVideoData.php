@@ -15,6 +15,7 @@ final readonly class UpdateVideoData
     /**
      * @param  array<string, mixed>|null  $captions
      * @param  array<string, mixed>|null  $deckManifest
+     * @param  array<string, mixed>|null  $postsyncer
      */
     public function __construct(
         public string $title,
@@ -27,9 +28,11 @@ final readonly class UpdateVideoData
         public ?string $videoDriveUrl = null,
         public ?string $coverDriveUrl = null,
         public ?string $status = null,
+        public ?array $postsyncer = null,
         public bool $replaceExtended = false,
         public bool $hasVideoDriveUrl = false,
         public bool $hasCoverDriveUrl = false,
+        public bool $hasPostsyncer = false,
     ) {}
 
     public static function fromRequest(UpdateVideoRequest $request): self
@@ -62,9 +65,13 @@ final readonly class UpdateVideoData
             videoDriveUrl: array_key_exists('video_drive_url', $payload) ? ($payload['video_drive_url'] !== null ? (string) $payload['video_drive_url'] : null) : null,
             coverDriveUrl: array_key_exists('cover_drive_url', $payload) ? ($payload['cover_drive_url'] !== null ? (string) $payload['cover_drive_url'] : null) : null,
             status: array_key_exists('status', $payload) ? (string) $payload['status'] : $current->status,
+            postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
+                ? $payload['postsyncer']
+                : null,
             replaceExtended: true,
             hasVideoDriveUrl: array_key_exists('video_drive_url', $payload),
             hasCoverDriveUrl: array_key_exists('cover_drive_url', $payload),
+            hasPostsyncer: array_key_exists('postsyncer', $payload),
         );
     }
 }
