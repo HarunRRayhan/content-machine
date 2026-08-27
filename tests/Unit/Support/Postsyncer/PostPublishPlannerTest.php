@@ -90,7 +90,7 @@ class PostPublishPlannerTest extends TestCase
         $this->assertSame('bangla', $group->language);
         $this->assertSame('15211', $group->workspaceId);
         $this->assertSame(['facebook', 'instagram'], $group->platforms);
-        $this->assertSame(['https://drive.google.com/file/d/abc/view'], $group->mediaUrls);
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t'], $group->mediaUrls);
         $this->assertSame([
             'facebook' => 'FB caption',
             'instagram' => 'IG caption',
@@ -421,8 +421,8 @@ class PostPublishPlannerTest extends TestCase
 
         $this->assertCount(2, $groups);
         $mediaSets = array_map(fn (PublishGroup $g) => $g->mediaUrls, $groups);
-        $this->assertContains(['https://drive.google.com/file/d/a/view'], $mediaSets);
-        $this->assertContains(['https://drive.google.com/file/d/b/view'], $mediaSets);
+        $this->assertContains(['https://drive.usercontent.google.com/download?id=a&export=download&confirm=t'], $mediaSets);
+        $this->assertContains(['https://drive.usercontent.google.com/download?id=b&export=download&confirm=t'], $mediaSets);
     }
 
     public function test_p48_fixture_uses_per_language_covers(): void
@@ -445,7 +445,7 @@ class PostPublishPlannerTest extends TestCase
         $bangla = collect($groups)->first(fn (PublishGroup $g) => $g->language === 'bangla');
         $english = collect($groups)->first(fn (PublishGroup $g) => $g->language === 'english');
 
-        $this->assertSame(['https://drive.google.com/file/d/p48-bn-cover/view'], $bangla->mediaUrls);
-        $this->assertSame(['https://drive.google.com/file/d/p48-en-cover/view'], $english->mediaUrls);
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=p48-bn-cover&export=download&confirm=t'], $bangla->mediaUrls);
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=p48-en-cover&export=download&confirm=t'], $english->mediaUrls);
     }
 }

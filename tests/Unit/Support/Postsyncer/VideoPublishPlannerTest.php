@@ -94,8 +94,8 @@ class VideoPublishPlannerTest extends TestCase
         $this->assertSame('15211', $group->workspaceId);
         $this->assertSame(['facebook', 'instagram', 'tiktok'], $group->platforms);
         $this->assertSame([
-            'https://drive.google.com/file/d/video/view',
-            'https://drive.google.com/file/d/cover/view',
+            'https://drive.usercontent.google.com/download?id=video&export=download&confirm=t',
+            'https://drive.usercontent.google.com/download?id=cover&export=download&confirm=t',
         ], $group->mediaUrls);
         $this->assertSame([
             'facebook' => 'FB reel caption',
@@ -128,7 +128,7 @@ class VideoPublishPlannerTest extends TestCase
         $this->assertSame('853', $group->workspaceId);
         $this->assertSame(['facebook'], $group->platforms);
         $this->assertSame(['facebook' => 'Hello reel'], $group->captions);
-        $this->assertSame(['https://drive.google.com/file/d/video/view'], $group->mediaUrls);
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=video&export=download&confirm=t'], $group->mediaUrls);
     }
 
     public function test_platforms_option_filters_selected_platforms(): void
@@ -363,6 +363,6 @@ class VideoPublishPlannerTest extends TestCase
             'confirm_ask' => false,
         ])[0];
 
-        $this->assertSame(['https://drive.google.com/file/d/video/view'], $group->mediaUrls);
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=video&export=download&confirm=t'], $group->mediaUrls);
     }
 }

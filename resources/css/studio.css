@@ -540,6 +540,25 @@
     color: var(--ink-faint);
 }
 
+.studio-page .drive-url-status {
+    font-family: var(--font-cue);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    line-height: 1.35;
+}
+
+.studio-page .drive-url-status.is-checking {
+    color: var(--ink-faint);
+}
+
+.studio-page .drive-url-status.is-ok {
+    color: var(--good);
+}
+
+.studio-page .drive-url-status.is-bad {
+    color: var(--bad);
+}
+
 .studio-page .drive-urls-error {
     margin: 0;
     font-size: 13px;

@@ -5,6 +5,7 @@ namespace Tests;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
 use Laravel\Fortify\Features;
 
 abstract class TestCase extends BaseTestCase
@@ -22,6 +23,26 @@ abstract class TestCase extends BaseTestCase
      * only place a plain Request::create() instance would otherwise pick
      * one up).
      */
+    protected function fakeAccessibleDriveLinks(): void
+    {
+        Http::fake([
+            'drive.usercontent.google.com/*' => Http::response('bytes', 200, [
+                'Content-Type' => 'video/mp4',
+            ]),
+        ]);
+    }
+
+    protected function fakePrivateDriveLinks(): void
+    {
+        Http::fake([
+            'drive.usercontent.google.com/*' => Http::response(
+                'You need access. Request access from the owner.',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+        ]);
+    }
+
     protected function requestAs(?Authenticatable $user, string $uri = '/'): Request
     {
         return Request::create($uri)->setUserResolver(fn () => $user);

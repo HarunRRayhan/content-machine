@@ -4,6 +4,7 @@ namespace App\Support\Postsyncer;
 
 use App\Models\Post;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\GoogleDrive\GoogleDriveLink;
 use Carbon\CarbonImmutable;
 
 /**
@@ -177,7 +178,10 @@ class PostPublishPlanner
     private function resolveMediaUrls(array $platformData, array $defaultMediaUrls): array
     {
         if (array_key_exists('images', $platformData)) {
-            return $platformData['images'];
+            return array_map(
+                fn (string $url): string => GoogleDriveLink::toFetchUrl($url),
+                $platformData['images'],
+            );
         }
 
         return $defaultMediaUrls;

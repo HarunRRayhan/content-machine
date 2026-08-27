@@ -30,6 +30,7 @@ use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\CurrentApiToken;
+use App\Support\GoogleDrive\GoogleDriveLinkChecker;
 use RuntimeException;
 
 /**
@@ -97,6 +98,7 @@ final class McpToolDispatcher
             'list_videos' => $this->listVideos($arguments),
             'get_video' => $this->presentVideo($this->findVideo($this->stringArg($arguments, 'human_id'))),
             'update_video' => $this->updateVideo($arguments),
+            'check_drive_url' => $this->checkDriveUrl($arguments),
             'publish_video' => $this->publishVideo($arguments),
             'list_posts' => $this->listPosts($arguments),
             'get_post' => $this->presentPost($this->findPost($this->stringArg($arguments, 'human_id'))),
@@ -272,13 +274,24 @@ final class McpToolDispatcher
     private function updateVideo(array $arguments): array
     {
         $video = $this->findVideo($this->stringArg($arguments, 'human_id'));
-        $payload = $this->optionalPayload($arguments, ['title', 'language', 'slug', 'body', 'script_markdown', 'status']);
+        $payload = $this->optionalPayload($arguments, [
+            'title',
+            'language',
+            'slug',
+            'body',
+            'script_markdown',
+            'status',
+            'video_drive_url',
+            'cover_drive_url',
+        ]);
 
         if ($payload === []) {
-            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, status.');
+            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, status, video_drive_url, cover_drive_url.');
         }
 
         $this->assertAllowedStatus($payload, Video::STATUSES, 'video');
+        $this->assertAccessibleDriveUrl($payload['video_drive_url'] ?? null, 'video_drive_url');
+        $this->assertAccessibleDriveUrl($payload['cover_drive_url'] ?? null, 'cover_drive_url');
 
         $this->updateVideoAction->handle($video, UpdateVideoData::fromApiPayload($payload, $video));
 
@@ -384,8 +397,22 @@ final class McpToolDispatcher
             $payload['platforms'] = $platforms;
         }
 
+        if (array_key_exists('image_drive_urls', $arguments)) {
+            $urls = $arguments['image_drive_urls'];
+
+            if ($urls !== null && ! is_array($urls)) {
+                throw new RuntimeException('image_drive_urls must be an array.');
+            }
+
+            $payload['image_drive_urls'] = $urls;
+
+            foreach (is_array($urls) ? $urls : [] as $url) {
+                $this->assertAccessibleDriveUrl($url, 'image_drive_urls');
+            }
+        }
+
         if ($payload === []) {
-            throw new RuntimeException('Send at least one of title, body, captions, platforms, status.');
+            throw new RuntimeException('Send at least one of title, body, captions, platforms, status, image_drive_urls.');
         }
 
         $this->assertAllowedStatus($payload, Post::STATUSES, 'post');
@@ -555,6 +582,30 @@ final class McpToolDispatcher
         }
 
         return $payload;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function checkDriveUrl(array $arguments): array
+    {
+        return app(GoogleDriveLinkChecker::class)
+            ->check($this->stringArg($arguments, 'url'))
+            ->toArray();
+    }
+
+    private function assertAccessibleDriveUrl(mixed $url, string $field): void
+    {
+        if (! is_string($url) || trim($url) === '') {
+            return;
+        }
+
+        $result = app(GoogleDriveLinkChecker::class)->check($url);
+
+        if (! $result->ok) {
+            throw new RuntimeException("{$field}: {$result->message}");
+        }
     }
 
     /**

@@ -113,10 +113,17 @@ disable. On success the pipeline status moves to **Scheduled** (future time) or
 
 On the video show page, before scheduling:
 
-- **Video Drive URL** (`video_drive_url`) — required. A share link PostSyncer can
-  fetch (link-upload).
-- **Cover Drive URL** (`cover_drive_url`) — optional. Used as
-  `content[0].cover_image` for YouTube / Instagram / Facebook.
+- **Video Drive URL** (`video_drive_url`) — required. A live Google Drive file
+  share link. CM checks that Anyone with the link can fetch it, then sends
+  PostSyncer the download form (`drive.usercontent.google.com/download?id=…`).
+  A folder link or a private file is rejected.
+- **Cover Drive URL** (`cover_drive_url`) — optional. Same public-file rule.
+  Used as `content[0].cover_image` for YouTube / Instagram / Facebook.
+
+Paste in the video overview, or push from local via
+`PATCH /api/v1/videos/{human_id}` / MCP `update_video`.
+`POST /api/v1/media-urls/check` and MCP `check_drive_url` probe a link
+without saving it.
 
 ### Posts
 

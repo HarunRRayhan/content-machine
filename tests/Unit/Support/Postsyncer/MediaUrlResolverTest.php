@@ -37,8 +37,8 @@ class MediaUrlResolverTest extends TestCase
 
         $this->assertSame(
             [
-                'https://drive.google.com/file/d/abc/view',
-                'https://drive.google.com/file/d/def/view',
+                'https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t',
+                'https://drive.usercontent.google.com/download?id=def&export=download&confirm=t',
             ],
             $this->resolver->forPost($post),
         );
@@ -133,8 +133,8 @@ class MediaUrlResolverTest extends TestCase
         ]);
 
         $this->assertSame([
-            'video' => 'https://drive.google.com/file/d/video/view',
-            'cover' => 'https://drive.google.com/file/d/cover/view',
+            'video' => 'https://drive.usercontent.google.com/download?id=video&export=download&confirm=t',
+            'cover' => 'https://drive.usercontent.google.com/download?id=cover&export=download&confirm=t',
         ], $this->resolver->forVideo($video));
     }
 
@@ -146,7 +146,7 @@ class MediaUrlResolverTest extends TestCase
         ]);
 
         $this->assertSame([
-            'video' => 'https://drive.google.com/file/d/video/view',
+            'video' => 'https://drive.usercontent.google.com/download?id=video&export=download&confirm=t',
             'cover' => null,
         ], $this->resolver->forVideo($video));
     }

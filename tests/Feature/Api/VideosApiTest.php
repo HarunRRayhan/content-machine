@@ -108,6 +108,8 @@ class VideosApiTest extends TestCase
 
     public function test_store_accepts_drive_urls(): void
     {
+        $this->fakeAccessibleDriveLinks();
+
         $this->acting()->postJson('/api/v1/videos', [
             'human_id' => 'BV-54',
             'number' => 54,
@@ -129,6 +131,8 @@ class VideosApiTest extends TestCase
 
     public function test_patch_accepts_drive_urls(): void
     {
+        $this->fakeAccessibleDriveLinks();
+
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-11',
             'number' => 11,
@@ -150,6 +154,36 @@ class VideosApiTest extends TestCase
             'video_drive_url' => 'https://drive.google.com/file/d/new-video/view',
             'cover_drive_url' => 'https://drive.google.com/file/d/new-cover/view',
         ]);
+    }
+
+    public function test_patch_rejects_a_private_drive_url(): void
+    {
+        $this->fakePrivateDriveLinks();
+
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-11',
+            'number' => 11,
+            'title' => 'Recorded cut',
+            'status' => 'recorded',
+        ]);
+
+        $this->acting()->patchJson('/api/v1/videos/BV-11', [
+            'video_drive_url' => 'https://drive.google.com/file/d/privateFile/view',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('video_drive_url');
+    }
+
+    public function test_media_url_check_reports_accessibility(): void
+    {
+        $this->fakeAccessibleDriveLinks();
+
+        $this->acting()->postJson('/api/v1/media-urls/check', [
+            'url' => 'https://drive.google.com/file/d/publicFile/view',
+        ])
+            ->assertOk()
+            ->assertJsonPath('accessible', true)
+            ->assertJsonPath('file_id', 'publicFile');
     }
 
     public function test_show_of_another_workspaces_video_is_not_found(): void

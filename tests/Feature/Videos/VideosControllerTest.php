@@ -355,6 +355,35 @@ class VideosControllerTest extends TestCase
         ]);
     }
 
+    public function test_update_rejects_a_private_drive_url(): void
+    {
+        $this->fakePrivateDriveLinks();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $video = Video::factory()->for($workspace)->create(['title' => 'Recorded']);
+
+        $this->from(route('videos.show', $video))
+            ->patch(route('videos.update', $video), [
+                'title' => 'Recorded',
+                'video_drive_url' => 'https://drive.google.com/file/d/privateFile/view',
+            ])
+            ->assertRedirect(route('videos.show', $video))
+            ->assertSessionHasErrors('video_drive_url');
+    }
+
+    public function test_media_url_check_is_available_on_the_dashboard(): void
+    {
+        $this->fakeAccessibleDriveLinks();
+        $this->actingAsWorkspaceMember();
+
+        $this->postJson(route('media-urls.check'), [
+            'url' => 'https://drive.google.com/file/d/publicFile/view',
+        ])
+            ->assertOk()
+            ->assertJsonPath('accessible', true)
+            ->assertJsonPath('file_id', 'publicFile');
+    }
+
     public function test_update_404s_for_a_video_in_a_different_workspace()
     {
         $this->actingAsWorkspaceMember();

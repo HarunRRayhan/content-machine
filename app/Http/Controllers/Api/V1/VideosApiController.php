@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\V1\VideoResource;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Rules\AccessibleDriveUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -58,8 +59,8 @@ class VideosApiController extends Controller
             'script_markdown' => ['nullable', 'string'],
             'captions' => ['nullable', 'array'],
             'deck_manifest' => ['nullable', 'array'],
-            'video_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
-            'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048'],
+            'video_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
+            'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['nullable', 'string', Rule::in(Video::STATUSES)],
             'idea_id' => ['nullable', 'integer'],
         ]);
@@ -83,8 +84,8 @@ class VideosApiController extends Controller
             'script_markdown' => ['sometimes', 'nullable', 'string'],
             'captions' => ['sometimes', 'nullable', 'array'],
             'deck_manifest' => ['sometimes', 'nullable', 'array'],
-            'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048'],
-            'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048'],
+            'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
+            'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
         ]);
 

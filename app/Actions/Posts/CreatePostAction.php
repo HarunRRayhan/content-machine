@@ -58,6 +58,7 @@ class CreatePostAction
                 'body' => $attributes['body'] ?? null,
                 'captions' => $attributes['captions'] ?? null,
                 'platforms' => $attributes['platforms'] ?? null,
+                'image_drive_urls' => $attributes['image_drive_urls'] ?? null,
                 'status' => $status,
                 'created_by_user_id' => Auth::id(),
             ]);
