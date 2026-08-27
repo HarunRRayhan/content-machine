@@ -168,6 +168,17 @@ class PostsyncerConfig
         return $this->language($this->defaultLanguage())['workspace_id'] !== null;
     }
 
+    public function isPlatformEnabled(string $language, string $platform): bool
+    {
+        $entry = $this->language($language)['platforms'][$platform] ?? [];
+
+        if (! is_array($entry) || ! array_key_exists('enabled', $entry)) {
+            return true;
+        }
+
+        return MapPostsyncerAccounts::enabled($entry, true);
+    }
+
     /**
      * @param  array<string, mixed>  $input
      */

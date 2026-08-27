@@ -73,6 +73,10 @@ class PostPublishPlanner
                     continue;
                 }
 
+                if (! $config->isPlatformEnabled($language, $platform)) {
+                    continue;
+                }
+
                 $mediaUrls = $this->resolveMediaUrls($platformCaptions[$platform], $defaultMediaUrls);
                 $postType = $mediaUrls !== [] ? 'photo' : 'text';
                 $state = $this->platformState($config, $platform, $postType, $language);

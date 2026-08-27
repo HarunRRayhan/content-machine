@@ -12,6 +12,7 @@ import type {
 } from '@/components/workspace-settings/postsyncer-language-section';
 import {
     languageLabel,
+    platformsFromAccounts,
     PostsyncerLanguageSection,
 } from '@/components/workspace-settings/postsyncer-language-section';
 import { PostsyncerTabs } from '@/components/workspace-settings/postsyncer-tabs';
@@ -26,8 +27,8 @@ import {
 const ALL_LANGUAGES = ['english', 'bangla'] as const;
 
 type PostTypesConfig = {
-    platforms?: Record<string, Record<string, string>>;
-    overrides?: Record<string, Record<string, Record<string, string>>>;
+    platforms?: Record<string, Record<string, string | null>>;
+    overrides?: Record<string, Record<string, Record<string, string | null>>>;
 };
 
 type PageProps = {
@@ -35,6 +36,7 @@ type PageProps = {
     enabledLanguages: string[];
     availableWorkspaces: AvailableWorkspace[];
     workspacesLoadError: string | null;
+    postsyncerConnected: boolean;
     languages: {
         bangla: LanguageConfig;
         english: LanguageConfig;
@@ -49,11 +51,27 @@ function platformLabel(platform: string): string {
     return platform.charAt(0).toUpperCase() + platform.slice(1);
 }
 
+function withEnabled(
+    platformsByName: Record<string, PlatformEntry>,
+): Record<string, PlatformEntry> {
+    return Object.fromEntries(
+        Object.entries(platformsByName).map(([platform, entry]) => [
+            platform,
+            {
+                account_id: entry.account_id,
+                handle: entry.handle,
+                enabled: entry.enabled ?? Boolean(entry.account_id),
+            },
+        ]),
+    );
+}
+
 export default function PostsyncerWorkspaceSettings({
     defaultLanguage,
     enabledLanguages,
     availableWorkspaces,
     workspacesLoadError,
+    postsyncerConnected,
     languages,
     postTypes,
     platforms,
@@ -64,11 +82,15 @@ export default function PostsyncerWorkspaceSettings({
     const [extras, setExtras] = useState(
         enabledLanguages.filter((language) => language !== defaultLanguage),
     );
+    const [workspaceIds, setWorkspaceIds] = useState<Record<string, string>>({
+        bangla: languages.bangla.workspace_id ?? '',
+        english: languages.english.workspace_id ?? '',
+    });
     const [platformsByLanguage, setPlatformsByLanguage] = useState<
         Record<string, Record<string, PlatformEntry>>
     >({
-        bangla: languages.bangla.platforms,
-        english: languages.english.platforms,
+        bangla: withEnabled(languages.bangla.platforms),
+        english: withEnabled(languages.english.platforms),
     });
     const [refreshingLanguage, setRefreshingLanguage] = useState<string | null>(
         null,
@@ -82,7 +104,55 @@ export default function PostsyncerWorkspaceSettings({
         (language) => !enabled.includes(language),
     );
 
-    async function refreshAccounts(language: string) {
+    function applyWorkspace(language: string, workspaceId: string) {
+        setWorkspaceIds((current) => ({
+            ...current,
+            [language]: workspaceId,
+        }));
+
+        const workspace = availableWorkspaces.find(
+            (item) => item.id === workspaceId,
+        );
+
+        if (workspace && workspace.accounts.length > 0) {
+            setPlatformsByLanguage((current) => ({
+                ...current,
+                [language]: platformsFromAccounts(
+                    platforms,
+                    workspace.accounts,
+                ),
+            }));
+
+            return;
+        }
+
+        if (workspaceId !== '') {
+            void refreshAccounts(language, workspaceId);
+        }
+    }
+
+    function changePlatform(
+        language: string,
+        platform: string,
+        patch: Partial<PlatformEntry>,
+    ) {
+        setPlatformsByLanguage((current) => ({
+            ...current,
+            [language]: {
+                ...current[language],
+                [platform]: {
+                    ...(current[language]?.[platform] ?? {
+                        account_id: '',
+                        handle: '',
+                        enabled: false,
+                    }),
+                    ...patch,
+                },
+            },
+        }));
+    }
+
+    async function refreshAccounts(language: string, workspaceId: string) {
         setRefreshingLanguage(language);
 
         try {
@@ -98,7 +168,10 @@ export default function PostsyncerWorkspaceSettings({
                                 .querySelector('meta[name="csrf-token"]')
                                 ?.getAttribute('content') ?? '',
                     },
-                    body: JSON.stringify({ language }),
+                    body: JSON.stringify({
+                        language,
+                        workspace_id: workspaceId,
+                    }),
                 },
             );
 
@@ -116,7 +189,7 @@ export default function PostsyncerWorkspaceSettings({
             if (payload.suggested) {
                 setPlatformsByLanguage((current) => ({
                     ...current,
-                    [language]: payload.suggested ?? {},
+                    [language]: withEnabled(payload.suggested ?? {}),
                 }));
             }
         } finally {
@@ -132,6 +205,7 @@ export default function PostsyncerWorkspaceSettings({
 
     function removeExtra(language: string) {
         setExtras((current) => current.filter((item) => item !== language));
+        setWorkspaceIds((current) => ({ ...current, [language]: '' }));
     }
 
     return (
@@ -143,15 +217,27 @@ export default function PostsyncerWorkspaceSettings({
                     <Heading
                         variant="small"
                         title="PostSyncer"
-                        description="Pick a default workspace, then add extras only if you post in more than one language."
+                        description="Pick a workspace for each language. Accounts load from PostSyncer; enable the ones you want."
                     />
                     <PostsyncerTabs active="workspaces" />
                 </div>
 
                 <div className="max-w-3xl space-y-6">
-                    {workspacesLoadError && (
+                    {workspacesLoadError ? (
                         <p className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-                            Could not load workspaces: {workspacesLoadError}
+                            PostSyncer is not connected: {workspacesLoadError}
+                        </p>
+                    ) : postsyncerConnected ? (
+                        <p className="rounded-lg border border-emerald-600/30 bg-emerald-500/10 p-4 text-sm text-emerald-900 dark:text-emerald-200">
+                            PostSyncer is connected.{' '}
+                            {availableWorkspaces.length} workspace
+                            {availableWorkspaces.length === 1 ? '' : 's'}{' '}
+                            loaded.
+                        </p>
+                    ) : (
+                        <p className="rounded-lg border border-amber-600/30 bg-amber-500/10 p-4 text-sm">
+                            API key is saved, but no PostSyncer workspaces came
+                            back. Check the key on General.
                         </p>
                     )}
 
@@ -193,7 +279,7 @@ export default function PostsyncerWorkspaceSettings({
 
                                 <div className="grid gap-2">
                                     <Label htmlFor="default-language">
-                                        Default workspace
+                                        Default language
                                     </Label>
                                     <select
                                         id="default-language"
@@ -238,23 +324,21 @@ export default function PostsyncerWorkspaceSettings({
 
                                 <div className="space-y-4 rounded-lg border p-4">
                                     <PostsyncerLanguageSection
-                                        key={`default-${selectedDefault}-${JSON.stringify(platformsByLanguage[selectedDefault])}`}
                                         language={selectedDefault}
-                                        config={{
-                                            workspace_id:
-                                                languages[
-                                                    selectedDefault as
-                                                        'bangla' | 'english'
-                                                ].workspace_id,
-                                            platforms:
-                                                platformsByLanguage[
-                                                    selectedDefault
-                                                ] ?? {},
-                                        }}
+                                        workspaceId={
+                                            workspaceIds[selectedDefault] ?? ''
+                                        }
+                                        platformsByName={
+                                            platformsByLanguage[
+                                                selectedDefault
+                                            ] ?? {}
+                                        }
                                         platforms={platforms}
                                         availableWorkspaces={
                                             availableWorkspaces
                                         }
+                                        onWorkspaceChange={applyWorkspace}
+                                        onPlatformChange={changePlatform}
                                         onRefresh={refreshAccounts}
                                         refreshing={
                                             refreshingLanguage ===
@@ -281,23 +365,20 @@ export default function PostsyncerWorkspaceSettings({
                                             </Button>
                                         </div>
                                         <PostsyncerLanguageSection
-                                            key={`extra-${language}-${JSON.stringify(platformsByLanguage[language])}`}
                                             language={language}
-                                            config={{
-                                                workspace_id:
-                                                    languages[
-                                                        language as
-                                                            'bangla' | 'english'
-                                                    ].workspace_id,
-                                                platforms:
-                                                    platformsByLanguage[
-                                                        language
-                                                    ] ?? {},
-                                            }}
+                                            workspaceId={
+                                                workspaceIds[language] ?? ''
+                                            }
+                                            platformsByName={
+                                                platformsByLanguage[language] ??
+                                                {}
+                                            }
                                             platforms={platforms}
                                             availableWorkspaces={
                                                 availableWorkspaces
                                             }
+                                            onWorkspaceChange={applyWorkspace}
+                                            onPlatformChange={changePlatform}
                                             onRefresh={refreshAccounts}
                                             refreshing={
                                                 refreshingLanguage === language
@@ -328,8 +409,26 @@ export default function PostsyncerWorkspaceSettings({
                                     <Heading
                                         variant="small"
                                         title="Post-type matrix"
-                                        description="Platform support by content type."
+                                        description="Copied from Script Studio. Language overrides stay in place when you save."
                                     />
+
+                                    {Object.entries(
+                                        postTypes.overrides ?? {},
+                                    ).flatMap(([language, byPlatform]) =>
+                                        Object.entries(byPlatform).flatMap(
+                                            ([platform, byType]) =>
+                                                Object.entries(byType).map(
+                                                    ([type, state]) => (
+                                                        <input
+                                                            key={`${language}-${platform}-${type}`}
+                                                            type="hidden"
+                                                            name={`post_types[overrides][${language}][${platform}][${type}]`}
+                                                            value={state ?? ''}
+                                                        />
+                                                    ),
+                                                ),
+                                        ),
+                                    )}
 
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm">

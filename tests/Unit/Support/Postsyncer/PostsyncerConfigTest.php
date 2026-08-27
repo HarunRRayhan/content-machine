@@ -104,5 +104,29 @@ class PostsyncerConfigTest extends TestCase
         $this->assertFalse($config->isConfigured());
         $this->assertSame(['workspace_id' => null, 'platforms' => []], $config->language('bangla'));
         $this->assertSame([], $config->postTypes());
+        $this->assertTrue($config->isPlatformEnabled('english', 'facebook'));
+    }
+
+    public function test_platform_is_off_only_when_explicitly_disabled(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'facebook' => ['account_id' => '1', 'enabled' => false],
+                        'instagram' => ['account_id' => '2', 'enabled' => true],
+                    ],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $this->assertFalse($config->isPlatformEnabled('english', 'facebook'));
+        $this->assertTrue($config->isPlatformEnabled('english', 'instagram'));
+        $this->assertTrue($config->isPlatformEnabled('english', 'twitter'));
     }
 }

@@ -72,6 +72,10 @@ class VideoPublishPlanner
                 continue;
             }
 
+            if (! $config->isPlatformEnabled($language, $platform)) {
+                continue;
+            }
+
             $state = $this->platformState($config, $platform, 'reel', $language);
 
             if ($state === null || $state === 'off') {
