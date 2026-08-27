@@ -148,6 +148,41 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_index_exposes_postsyncer_groups_for_workspace_chips(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $groups = [
+            [
+                'post_id' => 132739,
+                'status' => 'SCHEDULED',
+                'platforms' => ['facebook'],
+                'lang' => 'bangla',
+            ],
+            [
+                'post_id' => 132743,
+                'status' => 'SCHEDULED',
+                'platforms' => ['twitter'],
+                'lang' => 'english',
+            ],
+        ];
+
+        Post::factory()->for($workspace)->create([
+            'title' => 'Scheduled bilingual',
+            'status' => 'scheduled',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'twitter'],
+            'postsyncer' => ['groups' => $groups],
+        ]);
+
+        $this->get(route('posts.index', ['status' => 'scheduled']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.groups', $groups)
+            );
+    }
+
     public function test_show_renders_a_post_in_the_current_workspace()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
