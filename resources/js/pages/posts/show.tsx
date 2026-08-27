@@ -127,11 +127,13 @@ export default function PostShow({ post }: PageProps) {
                         title={post.title}
                         status={post.status}
                         platforms={post.platforms}
+                        language={post.language}
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
+                        handles={post.handles}
                     />
                 )}
 
