@@ -1,4 +1,12 @@
-import { useState } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useState,
+    type CSSProperties,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { LANG_META } from '@/lib/lang-meta';
 import type { LangCode } from '@/lib/lang-meta';
 import {
@@ -170,30 +178,153 @@ export function workspacesForIndex(
 function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
     const lang = previewLang(workspace.key);
     const hasPlatforms = workspace.platforms.length > 0;
+    const anchorRef = useRef<HTMLSpanElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const closeTimerRef = useRef<number | null>(null);
+    const [open, setOpen] = useState(false);
+    const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+
+    const clearCloseTimer = () => {
+        if (closeTimerRef.current !== null) {
+            window.clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+        }
+    };
+
+    const scheduleClose = () => {
+        clearCloseTimer();
+        closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+    };
+
+    const openMenu = () => {
+        clearCloseTimer();
+        setOpen(true);
+    };
+
+    const updatePosition = useCallback(() => {
+        const anchor = anchorRef.current;
+        const menu = menuRef.current;
+
+        if (!anchor || !menu) {
+            return;
+        }
+
+        const rect = anchor.getBoundingClientRect();
+        const menuHeight = menu.offsetHeight;
+        const menuWidth = menu.offsetWidth;
+        const gap = 6;
+        const padding = 8;
+
+        let top = rect.bottom + gap;
+
+        if (top + menuHeight > window.innerHeight - padding) {
+            top = Math.max(padding, rect.top - menuHeight - gap);
+        }
+
+        let left = rect.left;
+
+        if (left + menuWidth > window.innerWidth - padding) {
+            left = window.innerWidth - menuWidth - padding;
+        }
+
+        left = Math.max(padding, left);
+
+        setMenuStyle({
+            position: 'fixed',
+            top,
+            left,
+            zIndex: 1000,
+        });
+    }, []);
+
+    useLayoutEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        updatePosition();
+    }, [open, updatePosition, workspace.platforms]);
+
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        const onScrollOrResize = () => updatePosition();
+
+        window.addEventListener('scroll', onScrollOrResize, true);
+        window.addEventListener('resize', onScrollOrResize);
+
+        return () => {
+            window.removeEventListener('scroll', onScrollOrResize, true);
+            window.removeEventListener('resize', onScrollOrResize);
+        };
+    }, [open, updatePosition]);
+
+    useEffect(() => () => clearCloseTimer(), []);
+
+    const portalRoot =
+        typeof document !== 'undefined'
+            ? (document.querySelector('.studio-page') ?? document.body)
+            : null;
+
+    const menu =
+        hasPlatforms && open && portalRoot
+            ? createPortal(
+                  <div
+                      ref={menuRef}
+                      className="ws-chip-menu ws-chip-menu--portal"
+                      role="menu"
+                      style={menuStyle}
+                      onMouseEnter={openMenu}
+                      onMouseLeave={scheduleClose}
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                  >
+                      {workspace.platforms.map((platform) => (
+                          <PlatformMark
+                              key={platform}
+                              platform={platform}
+                              lang={lang}
+                              showHandle={false}
+                          />
+                      ))}
+                  </div>,
+                  portalRoot,
+              )
+            : null;
 
     return (
-        <span
-            className={`ws-chip${hasPlatforms ? ' ws-chip--menu' : ''}`}
-            tabIndex={hasPlatforms ? 0 : undefined}
-            onClick={(event) => event.stopPropagation()}
-            onMouseDown={(event) => event.stopPropagation()}
-        >
-            <span className="ws-chip-name">
-                {workspaceShortName(workspace.key)}
+        <>
+            <span
+                ref={anchorRef}
+                className={`ws-chip${hasPlatforms ? ' ws-chip--menu' : ''}`}
+                tabIndex={hasPlatforms ? 0 : undefined}
+                onMouseEnter={openMenu}
+                onMouseLeave={scheduleClose}
+                onFocus={openMenu}
+                onBlur={(event) => {
+                    const next = event.relatedTarget as Node | null;
+
+                    if (
+                        next &&
+                        (anchorRef.current?.contains(next) ||
+                            menuRef.current?.contains(next))
+                    ) {
+                        return;
+                    }
+
+                    scheduleClose();
+                }}
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+            >
+                <span className="ws-chip-name">
+                    {workspaceShortName(workspace.key)}
+                </span>
             </span>
-            {hasPlatforms ? (
-                <div className="ws-chip-menu" role="menu">
-                    {workspace.platforms.map((platform) => (
-                        <PlatformMark
-                            key={platform}
-                            platform={platform}
-                            lang={lang}
-                            showHandle={false}
-                        />
-                    ))}
-                </div>
-            ) : null}
-        </span>
+            {menu}
+        </>
     );
 }
 
