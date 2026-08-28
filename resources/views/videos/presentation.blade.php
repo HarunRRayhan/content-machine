@@ -73,6 +73,8 @@
         #presShell.is-fullscreen .pres-notes{max-width:640px; font-size:1.15em; color:#1c1e20}
         #presShell.is-fullscreen .pres-cue{background:#f6f7f8; border-color:rgba(28,30,32,.2); color:#1c1e20}
         #presShell.is-fullscreen .pres-fs-btn{background:#f6f7f8; color:#1c1e20; border-color:rgba(28,30,32,.2)}
+        .pres-vidno{font-family:var(--font-cue); font-size:15px; font-weight:800; color:var(--cm-fg);
+            text-align:center; margin:0 0 2px; letter-spacing:.02em}
         .pres-stepno{font-family:monospace; font-size:12px; color:var(--cm-muted-fg); text-align:center; margin:0 0 8px}
         .pres-dots{display:flex; justify-content:center; gap:7px; margin:0 0 12px}
         .pres-dot{width:7px; height:7px; border-radius:50%; background:var(--cm-border)}
@@ -100,6 +102,7 @@
         </div>
         <div class="pres-gap"></div>
         <div class="pres-notes" id="presNotes">
+            <div class="pres-vidno" id="presVidNo">{{ $video->human_id }}</div>
             <div class="pres-stepno" id="presStepNo"></div>
             <div class="pres-dots" id="presDots"></div>
             <div class="pres-cue" id="presCue"></div>
