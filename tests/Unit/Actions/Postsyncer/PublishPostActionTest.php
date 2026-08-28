@@ -174,6 +174,42 @@ class PublishPostActionTest extends TestCase
         $this->assertNull($post->postsyncer);
     }
 
+    public function test_empty_media_upload_response_fails_instead_of_publishing_text(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => [
+                'main' => [
+                    'facebook' => ['caption' => 'FB caption'],
+                ],
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('no media ids', (string) $post->publish_error);
+        $this->assertSame('ready', $post->status);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
+    }
+
     public function test_sets_running_before_api_calls(): void
     {
         Http::fake([
