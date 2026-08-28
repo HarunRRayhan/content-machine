@@ -21,6 +21,7 @@ queue starts to hurt.
 | `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
 | `PublishPostJob` / `PublishVideoJob` | `cm-web` or API | `EnqueuePostPublishAction` inserts a row and sets `publish_state=queued`. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
+| `cm-web` scratchpad worker | same web container (`SCRATCHPAD_QUEUE_WORKER=1`) | `queue:work --queue=scratchpad` for Telegram photo/voice capture and voice transcription. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. |
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
