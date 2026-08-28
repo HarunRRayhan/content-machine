@@ -60,7 +60,7 @@ class PostWorkspaceBucketsTest extends TestCase
         $buckets = (new PostWorkspaceBuckets)->forPost($post);
 
         $this->assertSame([
-            ['key' => 'en', 'platforms' => ['instagram']],
+            ['key' => 'en', 'groups' => [], 'platforms' => ['instagram']],
         ], $buckets);
     }
 }
