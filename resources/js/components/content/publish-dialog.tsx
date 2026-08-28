@@ -35,19 +35,24 @@ function publishStatusLabel(
     if (publishState === 'queued') {
         return 'Queuing on PostSyncer…';
     }
+
     if (publishState === 'running') {
         return 'Sending to PostSyncer…';
     }
+
     if (publishState === 'failed') {
         return 'PostSyncer job failed';
     }
+
     if (publishState === 'succeeded') {
         if (lifecycle === 'scheduled') {
             return 'Scheduled on PostSyncer. Not published yet.';
         }
+
         if (lifecycle === 'posted') {
             return 'Published on PostSyncer.';
         }
+
         return 'PostSyncer job succeeded.';
     }
 

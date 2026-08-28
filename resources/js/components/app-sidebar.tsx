@@ -30,9 +30,9 @@ import {
 } from '@/components/ui/sidebar';
 import { index as calendarIndex } from '@/routes/calendar';
 import { home } from '@/routes/dashboard';
-import { index as mediaIndex, images as mediaImages, videos as mediaVideos, gifs as mediaGifs } from '@/routes/media';
 import { index as teamIndex } from '@/routes/dashboard/team';
 import { index as apiTokensIndex } from '@/routes/dashboard/team/api-tokens';
+import { index as mediaIndex, images as mediaImages, videos as mediaVideos, gifs as mediaGifs } from '@/routes/media';
 import { index as postsIndex } from '@/routes/posts';
 import { index as scratchpadIndex } from '@/routes/scratchpad';
 import { index as settingsIndex } from '@/routes/settings';
