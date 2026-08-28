@@ -140,15 +140,15 @@ final class PostWorkspaceBuckets
 
         if ($language === 'both') {
             return [
-                ['key' => 'bn', 'platforms' => $platforms],
-                ['key' => 'en', 'platforms' => $platforms],
+                ['key' => 'bn', 'groups' => [], 'platforms' => $platforms],
+                ['key' => 'en', 'groups' => [], 'platforms' => $platforms],
             ];
         }
 
         $key = $language === 'en' || $language === 'english' ? 'en' : 'bn';
 
         return [
-            ['key' => $key, 'platforms' => $platforms],
+            ['key' => $key, 'groups' => [], 'platforms' => $platforms],
         ];
     }
 
@@ -167,6 +167,7 @@ final class PostWorkspaceBuckets
 
             $buckets[] = [
                 'key' => $key,
+                'groups' => [],
                 'platforms' => $byKey[$key],
             ];
         }

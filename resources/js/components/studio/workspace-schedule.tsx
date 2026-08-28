@@ -126,6 +126,14 @@ export function defaultWorkspaceTab(buckets: WorkspaceBucket[]): WorkspaceKey {
     return buckets[0]?.key ?? 'en';
 }
 
+/** Draft posts expose workspace chips without PostSyncer groups yet. */
+function withGroups(bucket: WorkspaceBucket): WorkspaceBucket {
+    return {
+        ...bucket,
+        groups: bucket.groups ?? [],
+    };
+}
+
 export function workspacesForIndex(
     groups: PostsyncerGroup[],
     language: string | null | undefined,
@@ -343,7 +351,9 @@ function ScheduleGroupList({
     timezone: string;
     handles?: HandleDirectory;
 }) {
-    if (bucket.groups.length === 0) {
+    const groups = bucket.groups ?? [];
+
+    if (groups.length === 0) {
         return (
             <p className="schedule-log-empty">
                 Nothing scheduled or published in this workspace yet.
@@ -353,7 +363,7 @@ function ScheduleGroupList({
 
     return (
         <ul>
-            {bucket.groups.map((group, index) => {
+            {groups.map((group, index) => {
                 const when = formatWhen(
                     group.published_at ?? group.scheduled_at ?? null,
                 );
@@ -409,17 +419,18 @@ export function WorkspaceScheduleLog({
     handles?: HandleDirectory;
     heading?: string;
 }) {
-    const unlabeled = buckets.find((bucket) => bucket.key === 'unk');
+    const normalized = buckets.map(withGroups);
+    const unlabeled = normalized.find((bucket) => bucket.key === 'unk');
     const visibleTabs: WorkspaceBucket[] =
-        buckets.length === 0
+        normalized.length === 0
             ? []
             : [
-                  buckets.find((bucket) => bucket.key === 'en') ?? {
+                  normalized.find((bucket) => bucket.key === 'en') ?? {
                       key: 'en',
                       groups: [],
                       platforms: [],
                   },
-                  buckets.find((bucket) => bucket.key === 'bn') ?? {
+                  normalized.find((bucket) => bucket.key === 'bn') ?? {
                       key: 'bn',
                       groups: [],
                       platforms: [],
@@ -427,7 +438,7 @@ export function WorkspaceScheduleLog({
               ];
     const [active, setActive] = useState<WorkspaceKey>(() =>
         defaultWorkspaceTab(
-            visibleTabs.filter((bucket) => bucket.groups.length > 0),
+            visibleTabs.filter((bucket) => (bucket.groups ?? []).length > 0),
         ),
     );
     const activeBucket =
@@ -479,7 +490,7 @@ export function WorkspaceScheduleLog({
                     handles={handles}
                 />
             ) : null}
-            {unlabeled && unlabeled.groups.length > 0 ? (
+            {unlabeled && (unlabeled.groups ?? []).length > 0 ? (
                 <div className="schedule-log-ws">
                     <div className="workspace-plat-h">
                         {workspaceTitle('unk')}
