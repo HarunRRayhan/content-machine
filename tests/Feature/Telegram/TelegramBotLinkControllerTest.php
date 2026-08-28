@@ -32,8 +32,8 @@ class TelegramBotLinkControllerTest extends TestCase
         [$user, $workspace] = $this->actingAsWorkspaceMember();
         TelegramBotConfig::factory()->for($workspace)->connected()->create();
 
-        $this->post(route('dashboard.telegram.link-code'))
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.link-code'))
+            ->assertRedirect(route('settings.telegram.edit'));
 
         $code = TelegramLinkCode::where('user_id', $user->id)->sole();
         $this->assertTrue($code->isUsable());
@@ -43,7 +43,7 @@ class TelegramBotLinkControllerTest extends TestCase
     {
         $this->actingAsWorkspaceMember();
 
-        $this->post(route('dashboard.telegram.link-code'))->assertNotFound();
+        $this->post(route('settings.telegram.link-code'))->assertNotFound();
     }
 
     public function test_test_sends_a_message_to_the_users_linked_chat()
@@ -54,8 +54,8 @@ class TelegramBotLinkControllerTest extends TestCase
 
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
 
-        $this->post(route('dashboard.telegram.test'))
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.test'))
+            ->assertRedirect(route('settings.telegram.edit'));
 
         Http::assertSent(fn ($request) => str_contains($request->url(), '/sendMessage') && (int) $request['chat_id'] === 42);
     }
@@ -65,7 +65,7 @@ class TelegramBotLinkControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         TelegramBotConfig::factory()->for($workspace)->connected()->create();
 
-        $this->post(route('dashboard.telegram.test'))
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.test'))
+            ->assertRedirect(route('settings.telegram.edit'));
     }
 }

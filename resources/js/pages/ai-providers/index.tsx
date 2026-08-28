@@ -5,6 +5,7 @@ import AiProviderCredentialModelsController from '@/actions/App/Http/Controllers
 import AiProviderCredentialsController from '@/actions/App/Http/Controllers/AiProviders/AiProviderCredentialsController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
+import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,7 +27,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { home } from '@/routes/dashboard';
-import { index, reorder } from '@/routes/dashboard/ai-providers';
+import { index as settingsIndex } from '@/routes/settings';
+import { index, reorder } from '@/routes/settings/ai-providers';
 
 type DiscoveredModel = {
     id: string;
@@ -439,8 +441,9 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
         <>
             <Head title="AI Models" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
+            <SettingsShell>
                 <Heading
+                    variant="small"
                     title="AI Models"
                     description="Add API keys under Providers, then pick which of their models actually get tried, and in what order, under Models. A default task tries default models first, then vision models as a further fallback; a vision task only ever uses vision models."
                 />
@@ -751,7 +754,7 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
                         ))}
                     </TabsContent>
                 </Tabs>
-            </div>
+            </SettingsShell>
         </>
     );
 }
@@ -759,6 +762,7 @@ export default function AiProvidersIndex({ credentials, models }: PageProps) {
 AiProvidersIndex.layout = {
     breadcrumbs: [
         { title: 'Dashboard', href: home() },
+        { title: 'Settings', href: settingsIndex() },
         { title: 'AI Models', href: index() },
     ],
 };

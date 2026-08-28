@@ -36,7 +36,7 @@ class AiProviderCredentialModelsController extends Controller
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Model(s) added.')]);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function destroy(Request $request, AiProviderCredentialModel $aiProviderCredentialModel, RemoveAiProviderCredentialModelAction $removeAiProviderCredentialModelAction): RedirectResponse
@@ -60,7 +60,7 @@ class AiProviderCredentialModelsController extends Controller
 
         $removeAiProviderCredentialModelAction->handle($aiProviderCredentialModel);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function reorder(ReorderAiProviderCredentialModelsRequest $request, ReorderAiProviderCredentialModelsAction $reorderAiProviderCredentialModelsAction): RedirectResponse
@@ -73,7 +73,7 @@ class AiProviderCredentialModelsController extends Controller
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
         }
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     private function currentWorkspace(Request $request): Workspace

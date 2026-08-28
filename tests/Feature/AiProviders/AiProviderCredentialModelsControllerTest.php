@@ -35,12 +35,12 @@ class AiProviderCredentialModelsControllerTest extends TestCase
             ],
         ]);
 
-        $response = $this->post(route('dashboard.ai-provider-models.store', $credential), [
+        $response = $this->post(route('settings.ai-provider-models.store', $credential), [
             'models' => ['gpt-4o'],
             'purpose' => 'default',
         ]);
 
-        $response->assertRedirect(route('dashboard.ai-providers.index'));
+        $response->assertRedirect(route('settings.ai-providers.index'));
 
         $entry = $credential->models()->sole();
         $this->assertSame('gpt-4o', $entry->model);
@@ -55,7 +55,7 @@ class AiProviderCredentialModelsControllerTest extends TestCase
             'discovered_models' => [['id' => 'gpt-4o', 'label' => 'gpt-4o']],
         ]);
 
-        $this->post(route('dashboard.ai-provider-models.store', $credential), [
+        $this->post(route('settings.ai-provider-models.store', $credential), [
             'models' => ['gpt-4o'],
             'purpose' => 'default',
         ])->assertNotFound();
@@ -67,8 +67,8 @@ class AiProviderCredentialModelsControllerTest extends TestCase
         $credential = AiProviderCredential::factory()->for($workspace)->create();
         $entry = AiProviderCredentialModel::factory()->for($credential, 'credential')->create();
 
-        $this->delete(route('dashboard.ai-provider-models.destroy', $entry))
-            ->assertRedirect(route('dashboard.ai-providers.index'));
+        $this->delete(route('settings.ai-provider-models.destroy', $entry))
+            ->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertDatabaseMissing('ai_provider_credential_models', ['id' => $entry->id]);
     }
@@ -80,7 +80,7 @@ class AiProviderCredentialModelsControllerTest extends TestCase
         $otherCredential = AiProviderCredential::factory()->for($other)->create();
         $entry = AiProviderCredentialModel::factory()->for($otherCredential, 'credential')->create();
 
-        $this->delete(route('dashboard.ai-provider-models.destroy', $entry))
+        $this->delete(route('settings.ai-provider-models.destroy', $entry))
             ->assertNotFound();
     }
 
@@ -91,10 +91,10 @@ class AiProviderCredentialModelsControllerTest extends TestCase
         $first = AiProviderCredentialModel::factory()->for($credential, 'credential')->create(['priority' => 0]);
         $second = AiProviderCredentialModel::factory()->for($credential, 'credential')->create(['priority' => 1]);
 
-        $this->post(route('dashboard.ai-provider-models.reorder'), [
+        $this->post(route('settings.ai-provider-models.reorder'), [
             'purpose' => 'default',
             'ordered_ids' => [$second->id, $first->id],
-        ])->assertRedirect(route('dashboard.ai-providers.index'));
+        ])->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertSame(0, $second->fresh()->priority);
         $this->assertSame(1, $first->fresh()->priority);
@@ -110,10 +110,10 @@ class AiProviderCredentialModelsControllerTest extends TestCase
         $otherCredential = AiProviderCredential::factory()->for($other)->create();
         $notMine = AiProviderCredentialModel::factory()->for($otherCredential, 'credential')->create();
 
-        $this->post(route('dashboard.ai-provider-models.reorder'), [
+        $this->post(route('settings.ai-provider-models.reorder'), [
             'purpose' => 'default',
             'ordered_ids' => [$notMine->id, $mine->id],
-        ])->assertRedirect(route('dashboard.ai-providers.index'));
+        ])->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertSame(0, $mine->fresh()->priority);
     }
