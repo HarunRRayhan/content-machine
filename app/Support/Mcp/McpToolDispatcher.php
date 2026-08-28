@@ -144,9 +144,9 @@ final class McpToolDispatcher
 
         $presenter = new PresentMediaAsset;
 
-        return $builder->get()
+        return array_values($builder->get()
             ->map(fn (MediaAsset $asset) => $presenter->summary($asset))
-            ->all();
+            ->all());
     }
 
     /**

@@ -1,13 +1,11 @@
 import { Head, Link, router } from '@inertiajs/react';
-import {
-    IndexWorkspaceChips,
+import { IndexWorkspaceChips } from '@/components/studio/workspace-schedule';
+import type {
+    PostsyncerGroup,
+    WorkspaceBucket,
 } from '@/components/studio/workspace-schedule';
-import type { PostsyncerGroup, WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { postShowUrl } from '@/lib/content-urls';
-import {
-    POST_STATUS_LABELS,
-    studioPostStatus,
-} from '@/lib/platform-meta';
+import { POST_STATUS_LABELS, studioPostStatus } from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index } from '@/routes/posts';

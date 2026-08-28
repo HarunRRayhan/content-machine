@@ -26,4 +26,11 @@ class PublishPostJobTest extends TestCase
 
         (new PublishPostJob($post, $options))->handle($action);
     }
+
+    public function test_job_is_queued_on_scratchpad_so_worker_can_read_uploads(): void
+    {
+        $job = new PublishPostJob(Post::factory()->create(), []);
+
+        $this->assertSame('scratchpad', $job->queue);
+    }
 }

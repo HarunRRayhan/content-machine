@@ -72,4 +72,3 @@ function replaceTabQuery(tab: string, fallback: string): void {
         `${url.pathname}${url.search}${url.hash}`,
     );
 }
-

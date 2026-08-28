@@ -118,7 +118,11 @@ function NavItemWithChildren({ item }: { item: NavItem }) {
                         <DropdownMenuLabel>{item.title}</DropdownMenuLabel>
                         {children.map((child) => (
                             <DropdownMenuItem key={child.title} asChild>
-                                <Link href={child.href} prefetch className="flex items-center gap-2">
+                                <Link
+                                    href={child.href}
+                                    prefetch
+                                    className="flex items-center gap-2"
+                                >
                                     {child.icon && (
                                         <child.icon className="size-4 shrink-0" />
                                     )}

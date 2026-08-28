@@ -143,7 +143,7 @@ final class PresentMediaAsset
 
         $paNeedle = "PA('{$assetKey}')";
 
-        return Video::query()
+        return array_values(Video::query()
             ->where('workspace_id', $asset->workspace_id)
             ->whereNotNull('deck_manifest')
             ->where(function ($query) use ($paNeedle, $assetKey) {
@@ -158,7 +158,7 @@ final class PresentMediaAsset
                 'type' => 'video',
                 'role' => 'presentation deck',
             ])
-            ->all();
+            ->all());
     }
 
     /**
