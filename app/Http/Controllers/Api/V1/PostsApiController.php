@@ -19,6 +19,8 @@ use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Rules\AccessibleDriveUrl;
+use App\Support\Api\IncludeFields;
+use App\Support\Content\PresenceFlags;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -38,12 +40,36 @@ class PostsApiController extends Controller
 
         $status = $request->string('status')->toString() ?: null;
         $language = $request->string('language')->toString() ?: null;
+        $include = IncludeFields::fromRequest($request);
 
-        $posts = Post::query()
-            ->when($status !== null, fn ($query) => $query->where('status', $status))
-            ->when($language !== null, fn ($query) => $query->where('language', $language))
+        $query = Post::query()
+            ->when($status !== null, fn ($builder) => $builder->where('status', $status))
+            ->when($language !== null, fn ($builder) => $builder->where('language', $language))
             ->orderByDesc('number')
-            ->orderByDesc('id')
+            ->orderByDesc('id');
+
+        if ($include->isSlim()) {
+            PresenceFlags::selectPostSummary($query, [
+                'id',
+                'workspace_id',
+                'idea_id',
+                'number',
+                'human_id',
+                'title',
+                'language',
+                'slug',
+                'platforms',
+                'image_drive_urls',
+                'postsyncer',
+                'publish_state',
+                'publish_error',
+                'status',
+                'created_at',
+                'updated_at',
+            ]);
+        }
+
+        $posts = $query
             ->cursorPaginate(50)
             ->withQueryString();
 

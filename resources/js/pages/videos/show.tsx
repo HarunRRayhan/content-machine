@@ -39,7 +39,6 @@ type VideoDetail = {
         legal: string[];
     };
     captions: CaptionGroup[];
-    deck_manifest: Record<string, unknown> | null;
     has_deck: boolean;
     images: Array<{
         filename: string;

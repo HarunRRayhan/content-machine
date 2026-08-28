@@ -53,6 +53,64 @@ class VideosApiTest extends TestCase
             ->assertJsonPath('data.0.human_id', 'V-2');
     }
 
+    public function test_index_omits_heavy_fields_by_default(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-63',
+            'number' => 63,
+            'title' => 'Heavy deck',
+            'script_markdown' => str_repeat('line\n', 40),
+            'captions' => ['facebook' => 'long caption'],
+            'deck_manifest' => [
+                'engine' => 'reveal',
+                'js' => str_repeat('x', 5000),
+                'css' => 'body{}',
+            ],
+        ]);
+
+        $this->acting()->getJson('/api/v1/videos')
+            ->assertOk()
+            ->assertJsonPath('data.0.human_id', 'BV-63')
+            ->assertJsonPath('data.0.has_script', true)
+            ->assertJsonPath('data.0.has_captions', true)
+            ->assertJsonPath('data.0.has_deck', true)
+            ->assertJsonMissingPath('data.0.script_markdown')
+            ->assertJsonMissingPath('data.0.captions')
+            ->assertJsonMissingPath('data.0.deck_manifest');
+    }
+
+    public function test_index_include_full_returns_heavy_fields(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-64',
+            'number' => 64,
+            'script_markdown' => '# spoken',
+            'captions' => ['tiktok' => 'cap'],
+            'deck_manifest' => ['engine' => 'reveal', 'js' => '1'],
+        ]);
+
+        $this->acting()->getJson('/api/v1/videos?include=full')
+            ->assertOk()
+            ->assertJsonPath('data.0.script_markdown', '# spoken')
+            ->assertJsonPath('data.0.captions.tiktok', 'cap')
+            ->assertJsonPath('data.0.deck_manifest.engine', 'reveal');
+    }
+
+    public function test_show_still_returns_full_video_payload(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-65',
+            'number' => 65,
+            'script_markdown' => '# show',
+            'deck_manifest' => ['engine' => 'reveal', 'js' => 'deck'],
+        ]);
+
+        $this->acting()->getJson('/api/v1/videos/BV-65')
+            ->assertOk()
+            ->assertJsonPath('data.script_markdown', '# show')
+            ->assertJsonPath('data.deck_manifest.js', 'deck');
+    }
+
     public function test_store_imports_a_video_with_explicit_human_id(): void
     {
         $this->acting()->postJson('/api/v1/videos', [

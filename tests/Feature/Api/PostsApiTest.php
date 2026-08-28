@@ -65,6 +65,39 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.status', 'archived');
     }
 
+    public function test_index_omits_heavy_fields_by_default(): void
+    {
+        Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-57',
+            'number' => 57,
+            'body' => str_repeat('paragraph ', 80),
+            'captions' => ['facebook' => str_repeat('caption ', 40)],
+        ]);
+
+        $this->acting()->getJson('/api/v1/posts')
+            ->assertOk()
+            ->assertJsonPath('data.0.human_id', 'P-57')
+            ->assertJsonPath('data.0.has_body', true)
+            ->assertJsonPath('data.0.has_captions', true)
+            ->assertJsonMissingPath('data.0.body')
+            ->assertJsonMissingPath('data.0.captions');
+    }
+
+    public function test_index_include_full_returns_heavy_fields(): void
+    {
+        Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-58',
+            'number' => 58,
+            'body' => 'full body',
+            'captions' => ['instagram' => 'full cap'],
+        ]);
+
+        $this->acting()->getJson('/api/v1/posts?include=full')
+            ->assertOk()
+            ->assertJsonPath('data.0.body', 'full body')
+            ->assertJsonPath('data.0.captions.instagram', 'full cap');
+    }
+
     public function test_update_can_record_postsyncer_groups(): void
     {
         $this->acting()->postJson('/api/v1/posts', [
