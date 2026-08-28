@@ -123,21 +123,28 @@ class PostPublishPlanner
         $remaining = $platformCaptions;
         $groups = [];
 
-        if (isset($remaining['twitter']) && $remaining['twitter']['thread'] !== []) {
-            $twitter = $remaining['twitter'];
-            unset($remaining['twitter']);
+        // Twitter and Threads each get their own connected-thread PostSyncer call when
+        // the caption block has Tweet N segments. Media is distributed one image per
+        // tweet at publish time. Bluesky stays out: its API has no thread surface.
+        foreach (['twitter', 'threads'] as $threadPlatform) {
+            if (! isset($remaining[$threadPlatform]) || $remaining[$threadPlatform]['thread'] === []) {
+                continue;
+            }
+
+            $threaded = $remaining[$threadPlatform];
+            unset($remaining[$threadPlatform]);
 
             $threadTweets = array_values(array_filter(
-                [$twitter['caption'], ...$twitter['thread']],
+                [$threaded['caption'], ...$threaded['thread']],
                 fn (string $segment): bool => trim($segment) !== '',
             ));
 
             $groups[] = new PublishGroup(
                 language: $language,
                 workspaceId: $workspaceId,
-                platforms: ['twitter'],
-                mediaUrls: $this->resolveMediaUrls($post, $twitter, $defaultMediaUrls),
-                captions: ['twitter' => $twitter['caption']],
+                platforms: [$threadPlatform],
+                mediaUrls: $this->resolveMediaUrls($post, $threaded, $defaultMediaUrls),
+                captions: [$threadPlatform => $threaded['caption']],
                 when: $when,
                 publishNow: $when === null,
                 threadTweets: $threadTweets,
