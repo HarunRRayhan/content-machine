@@ -117,6 +117,10 @@ class MediaUrlResolver
         $urls = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
+            if ($attachment->role === 'document') {
+                continue;
+            }
+
             $media = $attachment->mediaAsset;
             if ($media === null || ! $this->attachmentIsReadable($media)) {
                 continue;
@@ -137,6 +141,10 @@ class MediaUrlResolver
         $map = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
+            if ($attachment->role === 'document') {
+                continue;
+            }
+
             $media = $attachment->mediaAsset;
             if ($media === null || ! $this->attachmentIsReadable($media)) {
                 continue;

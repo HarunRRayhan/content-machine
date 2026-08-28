@@ -759,4 +759,30 @@ class PostPublishPlannerTest extends TestCase
         $this->assertNotContains('linkedin', $carousel->platforms);
         $this->assertSame(['linkedin' => 'LI'], $linkedin->captions);
     }
+
+    public function test_omitted_images_key_still_inherits_default_media(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/cover/view'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB inherits cover',
+                        // no images key
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook'], $groups[0]->platforms);
+        $this->assertNotSame([], $groups[0]->mediaUrls);
+    }
 }

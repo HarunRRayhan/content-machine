@@ -311,7 +311,7 @@ class PostsController extends Controller
         $captionImageNames = [];
         foreach ($captions as $group) {
             foreach ($group['platforms'] as $platform) {
-                foreach ($platform['images'] as $name) {
+                foreach ($platform['images'] ?? [] as $name) {
                     $captionImageNames[$name] = true;
                 }
             }
@@ -375,9 +375,9 @@ class PostsController extends Controller
      * empty list on one platform (Twitter `**Images:** none`) is left
      * empty when any other platform already named files.
      *
-     * @param  list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>  $captions
+     * @param  list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}>  $captions
      * @param  list<array<string, mixed>>  $images
-     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>
+     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}>
      */
     private function captionsWithInheritedImages(array $captions, array $images): array
     {
@@ -395,7 +395,7 @@ class PostsController extends Controller
 
         foreach ($captions as $group) {
             foreach ($group['platforms'] as $platform) {
-                if ($platform['images'] !== []) {
+                if (($platform['images'] ?? []) !== []) {
                     return $captions;
                 }
             }
@@ -403,6 +403,11 @@ class PostsController extends Controller
 
         return array_map(function (array $group) use ($filenames): array {
             $group['platforms'] = array_map(function (array $platform) use ($filenames): array {
+                // Explicit **Images:** none stays empty; omitted images inherit attachments.
+                if (array_key_exists('images', $platform) && $platform['images'] === []) {
+                    return $platform;
+                }
+
                 $platform['images'] = $filenames;
 
                 return $platform;
