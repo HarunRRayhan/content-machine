@@ -1798,7 +1798,8 @@
 }
 
 .studio-page .ws-chip--menu:hover,
-.studio-page .ws-chip--menu:focus-visible {
+.studio-page .ws-chip--menu:focus-visible,
+.studio-page .ws-chip--menu[aria-expanded='true'] {
     border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
     background: var(--bg2);
 }

@@ -180,25 +180,17 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
     const hasPlatforms = workspace.platforms.length > 0;
     const anchorRef = useRef<HTMLSpanElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
-    const closeTimerRef = useRef<number | null>(null);
     const [open, setOpen] = useState(false);
     const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
 
-    const clearCloseTimer = () => {
-        if (closeTimerRef.current !== null) {
-            window.clearTimeout(closeTimerRef.current);
-            closeTimerRef.current = null;
+    const closeMenu = useCallback(() => setOpen(false), []);
+
+    const toggleMenu = () => {
+        if (!hasPlatforms) {
+            return;
         }
-    };
 
-    const scheduleClose = () => {
-        clearCloseTimer();
-        closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
-    };
-
-    const openMenu = () => {
-        clearCloseTimer();
-        setOpen(true);
+        setOpen((current) => !current);
     };
 
     const updatePosition = useCallback(() => {
@@ -261,7 +253,39 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
         };
     }, [open, updatePosition]);
 
-    useEffect(() => () => clearCloseTimer(), []);
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        const onPointerDown = (event: PointerEvent) => {
+            const target = event.target as Node | null;
+
+            if (
+                target &&
+                (anchorRef.current?.contains(target) ||
+                    menuRef.current?.contains(target))
+            ) {
+                return;
+            }
+
+            closeMenu();
+        };
+
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                closeMenu();
+            }
+        };
+
+        document.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [open, closeMenu]);
 
     const portalRoot =
         typeof document !== 'undefined'
@@ -276,8 +300,6 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
                       className="ws-chip-menu ws-chip-menu--portal"
                       role="menu"
                       style={menuStyle}
-                      onMouseEnter={openMenu}
-                      onMouseLeave={scheduleClose}
                       onClick={(event) => event.stopPropagation()}
                       onMouseDown={(event) => event.stopPropagation()}
                   >
@@ -299,24 +321,25 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
             <span
                 ref={anchorRef}
                 className={`ws-chip${hasPlatforms ? ' ws-chip--menu' : ''}`}
+                role={hasPlatforms ? 'button' : undefined}
                 tabIndex={hasPlatforms ? 0 : undefined}
-                onMouseEnter={openMenu}
-                onMouseLeave={scheduleClose}
-                onFocus={openMenu}
-                onBlur={(event) => {
-                    const next = event.relatedTarget as Node | null;
-
-                    if (
-                        next &&
-                        (anchorRef.current?.contains(next) ||
-                            menuRef.current?.contains(next))
-                    ) {
+                aria-expanded={hasPlatforms ? open : undefined}
+                aria-haspopup={hasPlatforms ? 'menu' : undefined}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    toggleMenu();
+                }}
+                onKeyDown={(event) => {
+                    if (!hasPlatforms) {
                         return;
                     }
 
-                    scheduleClose();
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleMenu();
+                    }
                 }}
-                onClick={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <span className="ws-chip-name">
