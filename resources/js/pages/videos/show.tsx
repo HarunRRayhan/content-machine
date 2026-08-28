@@ -123,6 +123,7 @@ export default function VideoShow({ video }: PageProps) {
                 <PublishStatusBanner
                     publishState={video.publish_state}
                     publishError={video.publish_error}
+                    contentStatus={video.status}
                 />
 
                 <div className="tabbar" role="tablist">
