@@ -29,10 +29,14 @@ final readonly class UpdateVideoData
         public ?string $coverDriveUrl = null,
         public ?string $status = null,
         public ?array $postsyncer = null,
+        public ?string $publishState = null,
+        public ?string $publishError = null,
         public bool $replaceExtended = false,
         public bool $hasVideoDriveUrl = false,
         public bool $hasCoverDriveUrl = false,
         public bool $hasPostsyncer = false,
+        public bool $hasPublishState = false,
+        public bool $hasPublishError = false,
     ) {}
 
     public static function fromRequest(UpdateVideoRequest $request): self
@@ -68,10 +72,18 @@ final readonly class UpdateVideoData
             postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
                 ? $payload['postsyncer']
                 : null,
+            publishState: array_key_exists('publish_state', $payload)
+                ? ($payload['publish_state'] !== null ? (string) $payload['publish_state'] : null)
+                : null,
+            publishError: array_key_exists('publish_error', $payload)
+                ? ($payload['publish_error'] !== null ? (string) $payload['publish_error'] : null)
+                : null,
             replaceExtended: true,
             hasVideoDriveUrl: array_key_exists('video_drive_url', $payload),
             hasCoverDriveUrl: array_key_exists('cover_drive_url', $payload),
             hasPostsyncer: array_key_exists('postsyncer', $payload),
+            hasPublishState: array_key_exists('publish_state', $payload),
+            hasPublishError: array_key_exists('publish_error', $payload),
         );
     }
 }
