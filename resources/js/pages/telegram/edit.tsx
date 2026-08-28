@@ -1,4 +1,4 @@
-import { Form, Head, router } from '@inertiajs/react';
+import { Form, Head, Link, router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import TelegramBotConfigController from '@/actions/App/Http/Controllers/Telegram/TelegramBotConfigController';
 import TelegramBotLinkController from '@/actions/App/Http/Controllers/Telegram/TelegramBotLinkController';
@@ -8,8 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { home } from '@/routes/dashboard';
-import { edit } from '@/routes/dashboard/telegram';
+import { index as settingsIndex } from '@/routes/settings';
+import { index as aiProvidersIndex } from '@/routes/settings/ai-providers';
+import { edit } from '@/routes/settings/telegram';
 
 type LinkInfo = {
     telegramUsername: string | null;
@@ -63,8 +66,9 @@ export default function TelegramEdit({
         <>
             <Head title="Telegram" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
+            <SettingsShell>
                 <Heading
+                    variant="small"
                     title="Telegram"
                     description="Disabled until a bot token is added. Message @BotFather on Telegram to create a bot and get one."
                 />
@@ -244,8 +248,14 @@ export default function TelegramEdit({
 
                         {!hasAiProvider && (
                             <p className="text-sm text-muted-foreground">
-                                No AI provider is configured yet. Add one under
-                                AI Models before turning this on.
+                                No AI provider is configured yet. Add one under{' '}
+                                <Link
+                                    href={aiProvidersIndex()}
+                                    className="underline underline-offset-4"
+                                >
+                                    Settings → AI Models
+                                </Link>{' '}
+                                before turning this on.
                             </p>
                         )}
 
@@ -264,7 +274,7 @@ export default function TelegramEdit({
                         </Form>
                     </div>
                 )}
-            </div>
+            </SettingsShell>
         </>
     );
 }
@@ -272,6 +282,7 @@ export default function TelegramEdit({
 TelegramEdit.layout = {
     breadcrumbs: [
         { title: 'Dashboard', href: home() },
+        { title: 'Settings', href: settingsIndex() },
         { title: 'Telegram', href: edit() },
     ],
 };

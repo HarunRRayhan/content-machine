@@ -63,12 +63,12 @@ class TelegramBotConfigController extends Controller
         } catch (RuntimeException $e) {
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
 
-            return to_route('dashboard.telegram.edit');
+            return to_route('settings.telegram.edit');
         }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Telegram bot connected.')]);
 
-        return to_route('dashboard.telegram.edit');
+        return to_route('settings.telegram.edit');
     }
 
     public function toggleAiChat(Request $request, ToggleTelegramAiChatAction $toggleTelegramAiChatAction): RedirectResponse
@@ -83,10 +83,10 @@ class TelegramBotConfigController extends Controller
         } catch (RuntimeException $e) {
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
 
-            return to_route('dashboard.telegram.edit');
+            return to_route('settings.telegram.edit');
         }
 
-        return to_route('dashboard.telegram.edit');
+        return to_route('settings.telegram.edit');
     }
 
     public function destroy(Request $request, DisconnectTelegramBotAction $disconnectTelegramBotAction): RedirectResponse
@@ -100,7 +100,7 @@ class TelegramBotConfigController extends Controller
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Telegram bot disconnected.')]);
 
-        return to_route('dashboard.telegram.edit');
+        return to_route('settings.telegram.edit');
     }
 
     private function config(Workspace $workspace): ?TelegramBotConfig

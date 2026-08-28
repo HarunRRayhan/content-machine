@@ -4,11 +4,9 @@ import {
     CalendarDays,
     Clapperboard,
     FolderGit2,
-    KeyRound,
     KeySquare,
     LayoutDashboard,
     NotebookPen,
-    Send,
     Settings,
     SquarePen,
     Users,
@@ -28,15 +26,15 @@ import {
 } from '@/components/ui/sidebar';
 import { index as calendarIndex } from '@/routes/calendar';
 import { home } from '@/routes/dashboard';
-import { index as aiProvidersIndex } from '@/routes/dashboard/ai-providers';
 import { index as teamIndex } from '@/routes/dashboard/team';
 import { index as apiTokensIndex } from '@/routes/dashboard/team/api-tokens';
-import { edit as telegramEdit } from '@/routes/dashboard/telegram';
 import { index as postsIndex } from '@/routes/posts';
 import { index as scratchpadIndex } from '@/routes/scratchpad';
 import { index as settingsIndex } from '@/routes/settings';
+import { index as aiProvidersIndex } from '@/routes/settings/ai-providers';
 import { edit as editGeneral } from '@/routes/settings/general';
 import { edit as editPostsyncer } from '@/routes/settings/postsyncer';
+import { edit as telegramEdit } from '@/routes/settings/telegram';
 import { index as videosIndex } from '@/routes/videos';
 import type { NavItem } from '@/types';
 
@@ -67,11 +65,6 @@ const mainNavItems: NavItem[] = [
         icon: CalendarDays,
     },
     {
-        title: 'AI Models',
-        href: aiProvidersIndex(),
-        icon: KeyRound,
-    },
-    {
         title: 'Team',
         href: teamIndex(),
         icon: Users,
@@ -80,11 +73,6 @@ const mainNavItems: NavItem[] = [
         title: 'API access',
         href: apiTokensIndex(),
         icon: KeySquare,
-    },
-    {
-        title: 'Telegram',
-        href: telegramEdit(),
-        icon: Send,
     },
     {
         title: 'Settings',
@@ -100,6 +88,14 @@ const mainNavItems: NavItem[] = [
                 title: 'PostSyncer',
                 href: editPostsyncer(),
                 matchPrefix: true,
+            },
+            {
+                title: 'AI Models',
+                href: aiProvidersIndex(),
+            },
+            {
+                title: 'Telegram',
+                href: telegramEdit(),
             },
         ],
     },

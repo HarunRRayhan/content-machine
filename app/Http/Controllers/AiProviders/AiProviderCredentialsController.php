@@ -69,7 +69,7 @@ class AiProviderCredentialsController extends Controller
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Provider added.')]);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function update(UpdateAiProviderCredentialRequest $request, AiProviderCredential $aiProviderCredential, UpdateAiProviderCredentialAction $updateAiProviderCredentialAction): RedirectResponse
@@ -82,7 +82,7 @@ class AiProviderCredentialsController extends Controller
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Provider updated.')]);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function destroy(Request $request, AiProviderCredential $aiProviderCredential, DeleteAiProviderCredentialAction $deleteAiProviderCredentialAction): RedirectResponse
@@ -95,7 +95,7 @@ class AiProviderCredentialsController extends Controller
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Provider removed.')]);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function toggle(Request $request, AiProviderCredential $aiProviderCredential, ToggleAiProviderCredentialAction $toggleAiProviderCredentialAction): RedirectResponse
@@ -106,7 +106,7 @@ class AiProviderCredentialsController extends Controller
 
         $toggleAiProviderCredentialAction->handle($aiProviderCredential);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function reorder(ReorderAiProviderCredentialsRequest $request, ReorderAiProviderCredentialsAction $reorderAiProviderCredentialsAction): RedirectResponse
@@ -118,10 +118,10 @@ class AiProviderCredentialsController extends Controller
         } catch (RuntimeException $e) {
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
 
-            return to_route('dashboard.ai-providers.index');
+            return to_route('settings.ai-providers.index');
         }
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     public function verify(Request $request, AiProviderCredential $aiProviderCredential, VerifyAiProviderCredentialAction $verifyAiProviderCredentialAction): RedirectResponse
@@ -137,7 +137,7 @@ class AiProviderCredentialsController extends Controller
             'message' => $result->successful ? __('Key verified.') : $result->error,
         ]);
 
-        return to_route('dashboard.ai-providers.index');
+        return to_route('settings.ai-providers.index');
     }
 
     private function currentWorkspace(Request $request): Workspace

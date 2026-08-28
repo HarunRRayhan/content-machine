@@ -30,14 +30,22 @@ class TelegramBotConfigControllerTest extends TestCase
 
     public function test_guests_cannot_view_the_page()
     {
-        $this->get(route('dashboard.telegram.edit'))->assertRedirect(route('login'));
+        $this->get(route('settings.telegram.edit'))->assertRedirect(route('login'));
+    }
+
+    public function test_legacy_dashboard_url_redirects_to_settings(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->get('/dashboard/telegram')
+            ->assertRedirect('/settings/telegram');
     }
 
     public function test_a_workspace_with_no_config_shows_disconnected()
     {
         $this->actingAsWorkspaceMember();
 
-        $this->get(route('dashboard.telegram.edit'))
+        $this->get(route('settings.telegram.edit'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('telegram/edit')
                 ->where('connected', false)
@@ -50,7 +58,7 @@ class TelegramBotConfigControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         TelegramBotConfig::factory()->for($workspace)->connected()->create(['bot_username' => 'harun_capture_bot']);
 
-        $this->get(route('dashboard.telegram.edit'))
+        $this->get(route('settings.telegram.edit'))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('connected', true)
                 ->where('botUsername', 'harun_capture_bot')
@@ -62,7 +70,7 @@ class TelegramBotConfigControllerTest extends TestCase
         [$user, $workspace] = $this->actingAsWorkspaceMember();
         $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
 
-        $this->get(route('dashboard.telegram.edit'))
+        $this->get(route('settings.telegram.edit'))
             ->assertInertia(fn (Assert $page) => $page->where('myLink', null));
 
         TelegramBotLink::factory()->create([
@@ -71,7 +79,7 @@ class TelegramBotConfigControllerTest extends TestCase
             'telegram_username' => 'harun',
         ]);
 
-        $this->get(route('dashboard.telegram.edit'))
+        $this->get(route('settings.telegram.edit'))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('myLink.telegramUsername', 'harun')
                 ->where('linkedMembers.0.name', $user->name)
@@ -83,7 +91,7 @@ class TelegramBotConfigControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         TelegramBotConfig::factory()->for($workspace)->connected()->create();
 
-        $this->get(route('dashboard.telegram.edit'))
+        $this->get(route('settings.telegram.edit'))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('aiChatEnabled', false)
                 ->where('hasAiProvider', false)
@@ -91,7 +99,7 @@ class TelegramBotConfigControllerTest extends TestCase
 
         AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
-        $this->get(route('dashboard.telegram.edit'))
+        $this->get(route('settings.telegram.edit'))
             ->assertInertia(fn (Assert $page) => $page->where('hasAiProvider', true));
     }
 
@@ -101,12 +109,12 @@ class TelegramBotConfigControllerTest extends TestCase
         $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
         AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
 
-        $this->post(route('dashboard.telegram.ai-chat.toggle'))
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.ai-chat.toggle'))
+            ->assertRedirect(route('settings.telegram.edit'));
 
         $this->assertTrue($config->fresh()->ai_chat_enabled);
 
-        $this->post(route('dashboard.telegram.ai-chat.toggle'));
+        $this->post(route('settings.telegram.ai-chat.toggle'));
 
         $this->assertFalse($config->fresh()->ai_chat_enabled);
     }
@@ -116,8 +124,8 @@ class TelegramBotConfigControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
 
-        $this->post(route('dashboard.telegram.ai-chat.toggle'))
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.ai-chat.toggle'))
+            ->assertRedirect(route('settings.telegram.edit'));
 
         $this->assertFalse($config->fresh()->ai_chat_enabled);
     }
@@ -126,7 +134,7 @@ class TelegramBotConfigControllerTest extends TestCase
     {
         $this->actingAsWorkspaceMember();
 
-        $this->post(route('dashboard.telegram.ai-chat.toggle'))->assertNotFound();
+        $this->post(route('settings.telegram.ai-chat.toggle'))->assertNotFound();
     }
 
     public function test_update_connects_with_a_valid_token()
@@ -138,8 +146,8 @@ class TelegramBotConfigControllerTest extends TestCase
             'result' => ['username' => 'harun_capture_bot'],
         ])]);
 
-        $this->post(route('dashboard.telegram.update'), ['bot_token' => '123456:test-token'])
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.update'), ['bot_token' => '123456:test-token'])
+            ->assertRedirect(route('settings.telegram.edit'));
 
         $config = TelegramBotConfig::where('workspace_id', $workspace->id)->sole();
         $this->assertTrue($config->isConnected());
@@ -157,8 +165,8 @@ class TelegramBotConfigControllerTest extends TestCase
 
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => false, 'description' => 'Unauthorized'], 401)]);
 
-        $this->post(route('dashboard.telegram.update'), ['bot_token' => 'bad-token'])
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->post(route('settings.telegram.update'), ['bot_token' => 'bad-token'])
+            ->assertRedirect(route('settings.telegram.edit'));
 
         $this->assertSame(0, TelegramBotConfig::where('workspace_id', $workspace->id)->count());
     }
@@ -170,8 +178,8 @@ class TelegramBotConfigControllerTest extends TestCase
 
         Http::fake(['api.telegram.org/*' => Http::response(['ok' => true])]);
 
-        $this->delete(route('dashboard.telegram.destroy'))
-            ->assertRedirect(route('dashboard.telegram.edit'));
+        $this->delete(route('settings.telegram.destroy'))
+            ->assertRedirect(route('settings.telegram.edit'));
 
         $this->assertFalse($config->fresh()->isConnected());
     }

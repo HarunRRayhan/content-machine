@@ -1,15 +1,11 @@
 <?php
 
-use App\Http\Controllers\AiProviders\AiProviderCredentialModelsController;
-use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\ApiTokens\WorkspaceApiTokensController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Ideas\IdeasController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Controllers\TeamController;
-use App\Http\Controllers\Telegram\TelegramBotConfigController;
-use App\Http\Controllers\Telegram\TelegramBotLinkController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Auth\Middleware\RequirePassword;
 use Illuminate\Support\Facades\Route;
@@ -52,26 +48,10 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::permanentRedirect('scratchpad/media/{mediaAsset}', '/scratchpad/media/{mediaAsset}');
         Route::permanentRedirect('scratchpad/{entry}', '/scratchpad/{entry}');
 
-        Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');
-        Route::post('ai-providers', [AiProviderCredentialsController::class, 'store'])->name('ai-providers.store');
-        // Registered before the {aiProviderCredential} routes below so
-        // "reorder" is never captured as a route-model-binding id.
-        Route::post('ai-providers/reorder', [AiProviderCredentialsController::class, 'reorder'])->name('ai-providers.reorder');
-        Route::patch('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'update'])->name('ai-providers.update');
-        Route::delete('ai-providers/{aiProviderCredential}', [AiProviderCredentialsController::class, 'destroy'])->name('ai-providers.destroy');
-        Route::post('ai-providers/{aiProviderCredential}/toggle', [AiProviderCredentialsController::class, 'toggle'])->name('ai-providers.toggle');
-        Route::post('ai-providers/{aiProviderCredential}/verify', [AiProviderCredentialsController::class, 'verify'])->name('ai-providers.verify');
-
-        Route::post('ai-provider-models/reorder', [AiProviderCredentialModelsController::class, 'reorder'])->name('ai-provider-models.reorder');
-        Route::post('ai-providers/{aiProviderCredential}/models', [AiProviderCredentialModelsController::class, 'store'])->name('ai-provider-models.store');
-        Route::delete('ai-provider-models/{aiProviderCredentialModel}', [AiProviderCredentialModelsController::class, 'destroy'])->name('ai-provider-models.destroy');
-
-        Route::get('telegram', [TelegramBotConfigController::class, 'edit'])->name('telegram.edit');
-        Route::post('telegram', [TelegramBotConfigController::class, 'update'])->name('telegram.update');
-        Route::delete('telegram', [TelegramBotConfigController::class, 'destroy'])->name('telegram.destroy');
-        Route::post('telegram/ai-chat/toggle', [TelegramBotConfigController::class, 'toggleAiChat'])->name('telegram.ai-chat.toggle');
-        Route::post('telegram/link-code', [TelegramBotLinkController::class, 'store'])->name('telegram.link-code');
-        Route::post('telegram/test', [TelegramBotLinkController::class, 'test'])->name('telegram.test');
+        // AI Models and Telegram live under /settings now. Keep the old
+        // dashboard bookmarks working the same way PostSyncer does.
+        Route::permanentRedirect('ai-providers', '/settings/ai-providers');
+        Route::permanentRedirect('telegram', '/settings/telegram');
 
         Route::redirect('settings', '/dashboard/settings/profile');
 

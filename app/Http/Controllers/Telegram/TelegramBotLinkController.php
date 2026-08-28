@@ -32,7 +32,7 @@ class TelegramBotLinkController extends Controller
             'expiresAt' => $linkCode->expires_at->toIso8601String(),
         ]);
 
-        return to_route('dashboard.telegram.edit');
+        return to_route('settings.telegram.edit');
     }
 
     public function test(Request $request, SendTelegramTestMessageAction $sendTelegramTestMessageAction): RedirectResponse
@@ -44,12 +44,12 @@ class TelegramBotLinkController extends Controller
         } catch (RuntimeException $e) {
             Inertia::flash('toast', ['type' => 'error', 'message' => $e->getMessage()]);
 
-            return to_route('dashboard.telegram.edit');
+            return to_route('settings.telegram.edit');
         }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Test message sent, check Telegram.')]);
 
-        return to_route('dashboard.telegram.edit');
+        return to_route('settings.telegram.edit');
     }
 
     private function currentUser(Request $request): User

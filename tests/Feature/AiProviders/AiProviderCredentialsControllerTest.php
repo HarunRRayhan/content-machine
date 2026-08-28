@@ -28,7 +28,15 @@ class AiProviderCredentialsControllerTest extends TestCase
 
     public function test_guests_cannot_view_the_index()
     {
-        $this->get(route('dashboard.ai-providers.index'))->assertRedirect(route('login'));
+        $this->get(route('settings.ai-providers.index'))->assertRedirect(route('login'));
+    }
+
+    public function test_legacy_dashboard_url_redirects_to_settings(): void
+    {
+        $this->actingAsWorkspaceMember();
+
+        $this->get('/dashboard/ai-providers')
+            ->assertRedirect('/settings/ai-providers');
     }
 
     public function test_index_only_lists_the_current_workspaces_credentials_in_priority_order()
@@ -41,7 +49,7 @@ class AiProviderCredentialsControllerTest extends TestCase
         AiProviderCredential::factory()->for($workspace)->create(['label' => 'Second', 'priority' => 1]);
         AiProviderCredential::factory()->for($workspace)->create(['label' => 'First', 'priority' => 0]);
 
-        $this->get(route('dashboard.ai-providers.index'))
+        $this->get(route('settings.ai-providers.index'))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('ai-providers/index')
                 ->has('credentials', 2)
@@ -55,7 +63,7 @@ class AiProviderCredentialsControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         AiProviderCredential::factory()->for($workspace)->create();
 
-        $response = $this->get(route('dashboard.ai-providers.index'));
+        $response = $this->get(route('settings.ai-providers.index'));
 
         $response->assertDontSee('sk-ant-', false);
     }
@@ -69,14 +77,14 @@ class AiProviderCredentialsControllerTest extends TestCase
             ['id' => 'gpt-4o', 'object' => 'model', 'created' => 1715367049],
         ]], 200)]);
 
-        $response = $this->post(route('dashboard.ai-providers.store'), [
+        $response = $this->post(route('settings.ai-providers.store'), [
             'label' => 'Fallback',
             'provider' => 'openai',
             'base_url' => 'https://openrouter.ai/api',
             'api_key' => 'sk-test-123',
         ]);
 
-        $response->assertRedirect(route('dashboard.ai-providers.index'));
+        $response->assertRedirect(route('settings.ai-providers.index'));
 
         $stored = AiProviderCredential::where('label', 'Fallback')->sole();
         $this->assertSame($workspace->id, $stored->workspace_id);
@@ -94,7 +102,7 @@ class AiProviderCredentialsControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $this->post(route('dashboard.ai-providers.store'), [
+        $this->post(route('settings.ai-providers.store'), [
             'label' => 'Bad',
             'provider' => 'made-up',
             'api_key' => 'x',
@@ -112,12 +120,12 @@ class AiProviderCredentialsControllerTest extends TestCase
             'verified_at' => now(),
         ]);
 
-        $response = $this->patch(route('dashboard.ai-providers.update', $credential), [
+        $response = $this->patch(route('settings.ai-providers.update', $credential), [
             'label' => 'New label',
             'base_url' => null,
         ]);
 
-        $response->assertRedirect(route('dashboard.ai-providers.index'));
+        $response->assertRedirect(route('settings.ai-providers.index'));
 
         $credential->refresh();
         $this->assertSame('New label', $credential->label);
@@ -133,7 +141,7 @@ class AiProviderCredentialsControllerTest extends TestCase
             'verified_at' => now(),
         ]);
 
-        $this->patch(route('dashboard.ai-providers.update', $credential), [
+        $this->patch(route('settings.ai-providers.update', $credential), [
             'label' => $credential->label,
             'api_key' => 'sk-rotated',
         ]);
@@ -149,7 +157,7 @@ class AiProviderCredentialsControllerTest extends TestCase
         $other = Workspace::factory()->create();
         $credential = AiProviderCredential::factory()->for($other)->create();
 
-        $this->patch(route('dashboard.ai-providers.update', $credential), [
+        $this->patch(route('settings.ai-providers.update', $credential), [
             'label' => 'Hijacked',
         ])->assertNotFound();
     }
@@ -159,8 +167,8 @@ class AiProviderCredentialsControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $credential = AiProviderCredential::factory()->for($workspace)->create();
 
-        $this->delete(route('dashboard.ai-providers.destroy', $credential))
-            ->assertRedirect(route('dashboard.ai-providers.index'));
+        $this->delete(route('settings.ai-providers.destroy', $credential))
+            ->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertDatabaseMissing('ai_provider_credentials', ['id' => $credential->id]);
     }
@@ -170,7 +178,7 @@ class AiProviderCredentialsControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
         $credential = AiProviderCredential::factory()->for($workspace)->create(['enabled' => true]);
 
-        $this->post(route('dashboard.ai-providers.toggle', $credential));
+        $this->post(route('settings.ai-providers.toggle', $credential));
 
         $this->assertFalse($credential->fresh()->enabled);
     }
@@ -181,9 +189,9 @@ class AiProviderCredentialsControllerTest extends TestCase
         $first = AiProviderCredential::factory()->for($workspace)->create(['priority' => 0]);
         $second = AiProviderCredential::factory()->for($workspace)->create(['priority' => 1]);
 
-        $this->post(route('dashboard.ai-providers.reorder'), [
+        $this->post(route('settings.ai-providers.reorder'), [
             'ordered_ids' => [$second->id, $first->id],
-        ])->assertRedirect(route('dashboard.ai-providers.index'));
+        ])->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertSame(0, $second->fresh()->priority);
         $this->assertSame(1, $first->fresh()->priority);
@@ -196,9 +204,9 @@ class AiProviderCredentialsControllerTest extends TestCase
         $other = Workspace::factory()->create();
         $notMine = AiProviderCredential::factory()->for($other)->create();
 
-        $this->post(route('dashboard.ai-providers.reorder'), [
+        $this->post(route('settings.ai-providers.reorder'), [
             'ordered_ids' => [$notMine->id, $mine->id],
-        ])->assertRedirect(route('dashboard.ai-providers.index'));
+        ])->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertSame(0, $mine->fresh()->priority);
     }
@@ -210,8 +218,8 @@ class AiProviderCredentialsControllerTest extends TestCase
 
         Http::fake(['api.anthropic.com/*' => Http::response(['data' => []], 200)]);
 
-        $this->post(route('dashboard.ai-providers.verify', $credential))
-            ->assertRedirect(route('dashboard.ai-providers.index'));
+        $this->post(route('settings.ai-providers.verify', $credential))
+            ->assertRedirect(route('settings.ai-providers.index'));
 
         $this->assertNotNull($credential->fresh()->verified_at);
     }
@@ -223,7 +231,7 @@ class AiProviderCredentialsControllerTest extends TestCase
 
         Http::fake(['api.anthropic.com/*' => Http::response(['error' => ['message' => 'invalid key']], 401)]);
 
-        $this->post(route('dashboard.ai-providers.verify', $credential));
+        $this->post(route('settings.ai-providers.verify', $credential));
 
         $this->assertNull($credential->fresh()->verified_at);
     }
