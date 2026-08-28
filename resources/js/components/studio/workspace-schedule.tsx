@@ -202,10 +202,21 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
         }
 
         const rect = anchor.getBoundingClientRect();
-        const menuHeight = menu.offsetHeight;
-        const menuWidth = menu.offsetWidth;
         const gap = 6;
         const padding = 8;
+
+        // Force shrink-to-content width before measuring. Without this, the
+        // first layout can stretch to the studio page width and the clamp
+        // below parks the menu on the far left of the table.
+        menu.style.position = 'fixed';
+        menu.style.top = '0px';
+        menu.style.left = '0px';
+        menu.style.width = 'max-content';
+        menu.style.maxWidth = 'min(280px, calc(100vw - 16px))';
+        menu.style.visibility = 'hidden';
+
+        const menuHeight = menu.offsetHeight;
+        const menuWidth = menu.offsetWidth;
 
         let top = rect.bottom + gap;
 
@@ -213,19 +224,28 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
             top = Math.max(padding, rect.top - menuHeight - gap);
         }
 
-        let left = rect.left;
+        // Prefer right-align under the chip (workspaces sit on the right).
+        let left = rect.right - menuWidth;
 
-        if (left + menuWidth > window.innerWidth - padding) {
-            left = window.innerWidth - menuWidth - padding;
+        if (left < padding) {
+            left = padding;
         }
 
-        left = Math.max(padding, left);
+        if (left + menuWidth > window.innerWidth - padding) {
+            left = Math.max(padding, window.innerWidth - menuWidth - padding);
+        }
+
+        menu.style.visibility = '';
+        menu.style.width = '';
+        menu.style.maxWidth = '';
 
         setMenuStyle({
             position: 'fixed',
             top,
             left,
             zIndex: 1000,
+            width: 'max-content',
+            maxWidth: 'min(280px, calc(100vw - 16px))',
         });
     }, []);
 
@@ -287,13 +307,8 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
         };
     }, [open, closeMenu]);
 
-    const portalRoot =
-        typeof document !== 'undefined'
-            ? (document.querySelector('.studio-page') ?? document.body)
-            : null;
-
     const menu =
-        hasPlatforms && open && portalRoot
+        hasPlatforms && open && typeof document !== 'undefined'
             ? createPortal(
                   <div
                       ref={menuRef}
@@ -312,7 +327,7 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
                           />
                       ))}
                   </div>,
-                  portalRoot,
+                  document.body,
               )
             : null;
 
