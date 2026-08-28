@@ -19,15 +19,49 @@ type PublishDialogProps = {
     disabledReason?: string | null;
     publishState: string;
     publishError?: string | null;
+    /** Lifecycle status: draft | scheduled | posted | … Used to word the banner. */
+    contentStatus?: string | null;
     publishUrl: string;
     entityLabel: string;
     needsConfirmAsk?: boolean;
 };
 
+function publishStatusLabel(
+    publishState: string,
+    contentStatus?: string | null,
+): string {
+    const lifecycle = (contentStatus || '').toLowerCase();
+
+    if (publishState === 'queued') {
+        return 'Queuing on PostSyncer…';
+    }
+    if (publishState === 'running') {
+        return 'Sending to PostSyncer…';
+    }
+    if (publishState === 'failed') {
+        return 'PostSyncer job failed';
+    }
+    if (publishState === 'succeeded') {
+        if (lifecycle === 'scheduled') {
+            return 'Scheduled on PostSyncer. Not published yet.';
+        }
+        if (lifecycle === 'posted') {
+            return 'Published on PostSyncer.';
+        }
+        return 'PostSyncer job succeeded.';
+    }
+
+    return `PostSyncer job: ${publishState}`;
+}
+
 export function PublishStatusBanner({
     publishState,
     publishError,
-}: Pick<PublishDialogProps, 'publishState' | 'publishError'>) {
+    contentStatus,
+}: Pick<
+    PublishDialogProps,
+    'publishState' | 'publishError' | 'contentStatus'
+>) {
     if (publishState === 'idle' && !publishError) {
         return null;
     }
@@ -40,7 +74,9 @@ export function PublishStatusBanner({
                     : 'rounded-lg border bg-muted/30 p-4 text-sm'
             }
         >
-            <p className="font-medium">Publish status: {publishState}</p>
+            <p className="font-medium">
+                {publishStatusLabel(publishState, contentStatus)}
+            </p>
             {publishError && (
                 <p className="mt-1 text-muted-foreground">{publishError}</p>
             )}
@@ -53,6 +89,7 @@ export default function PublishDialog({
     disabledReason,
     publishState,
     publishError,
+    contentStatus,
     publishUrl,
     entityLabel,
     needsConfirmAsk = false,
@@ -83,6 +120,7 @@ export default function PublishDialog({
             <PublishStatusBanner
                 publishState={publishState}
                 publishError={publishError}
+                contentStatus={contentStatus}
             />
 
             {!disabledReason && !publishBusy && (

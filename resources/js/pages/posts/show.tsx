@@ -101,6 +101,7 @@ export default function PostShow({ post }: PageProps) {
                 <PublishStatusBanner
                     publishState={post.publish_state}
                     publishError={post.publish_error}
+                    contentStatus={post.status}
                 />
 
                 <div className="tabbar" role="tablist">
