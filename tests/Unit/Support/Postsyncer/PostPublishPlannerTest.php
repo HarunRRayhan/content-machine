@@ -393,6 +393,63 @@ class PostPublishPlannerTest extends TestCase
         $this->assertNotNull($threadsGroup);
         $this->assertNotContains('twitter', $threadsGroup->platforms);
         $this->assertSame(['threads' => 'Threads caption'], $threadsGroup->captions);
+        $this->assertNull($threadsGroup->threadTweets);
+    }
+
+    public function test_threads_with_tweet_segments_gets_own_thread_group(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['twitter', 'threads'],
+            'captions' => [
+                'English' => [
+                    'twitter' => [
+                        'caption' => 'Tweet one',
+                        'thread' => ['Tweet two'],
+                        'images' => [
+                            'https://drive.google.com/file/d/tw1/view',
+                            'https://drive.google.com/file/d/tw2/view',
+                        ],
+                    ],
+                    'threads' => [
+                        'caption' => 'Threads one',
+                        'thread' => ['Threads two', 'Threads three'],
+                        'images' => [
+                            'https://drive.google.com/file/d/th1/view',
+                            'https://drive.google.com/file/d/th2/view',
+                            'https://drive.google.com/file/d/th3/view',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $twitterGroup = collect($groups)->first(
+            fn (PublishGroup $g) => $g->platforms === ['twitter'],
+        );
+        $threadsGroup = collect($groups)->first(
+            fn (PublishGroup $g) => $g->platforms === ['threads'],
+        );
+
+        $this->assertNotNull($twitterGroup);
+        $this->assertSame(['Tweet one', 'Tweet two'], $twitterGroup->threadTweets);
+        $this->assertSame([
+            'https://drive.google.com/file/d/tw1/view',
+            'https://drive.google.com/file/d/tw2/view',
+        ], $twitterGroup->mediaUrls);
+
+        $this->assertNotNull($threadsGroup);
+        $this->assertSame(['Threads one', 'Threads two', 'Threads three'], $threadsGroup->threadTweets);
+        $this->assertSame([
+            'https://drive.google.com/file/d/th1/view',
+            'https://drive.google.com/file/d/th2/view',
+            'https://drive.google.com/file/d/th3/view',
+        ], $threadsGroup->mediaUrls);
     }
 
     public function test_different_image_sets_split_into_separate_groups(): void
