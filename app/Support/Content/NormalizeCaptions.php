@@ -10,7 +10,7 @@ final class NormalizeCaptions
 {
     /**
      * @param  array<mixed>|null  $captions
-     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}>
+     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}>
      */
     public static function forDashboard(?array $captions): array
     {
@@ -70,7 +70,7 @@ final class NormalizeCaptions
 
     /**
      * @param  array<mixed>  $group
-     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}
+     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}
      */
     private static function normalizeGroup(array $group): array
     {
@@ -115,27 +115,35 @@ final class NormalizeCaptions
 
     /**
      * @param  array<mixed>  $fields
-     * @return array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}
+     * @return array{name: string, title: string, caption: string, first_comment: string, thread: list<mixed>, images?: list<string>}
      */
     private static function normalizePlatform(string $name, array $fields): array
     {
-        $images = $fields['images'] ?? [];
-        if (! is_array($images)) {
-            $images = [];
-        }
-
         $thread = $fields['thread'] ?? [];
         if (! is_array($thread)) {
             $thread = [];
         }
 
-        return [
+        $result = [
             'name' => $name,
             'title' => (string) ($fields['title'] ?? ''),
             'caption' => (string) ($fields['caption'] ?? ''),
             'first_comment' => (string) ($fields['first_comment'] ?? ''),
-            'images' => array_values(array_map('strval', $images)),
             'thread' => array_values($thread),
         ];
+
+        // Only set images when the source caption actually had the key. Inventing
+        // images: [] for omitted keys made publish treat every platform as
+        // text-only (P-59 follow-up / PR #145 regression). Explicit [] means
+        // **Images:** none and must stay.
+        if (array_key_exists('images', $fields)) {
+            $images = $fields['images'];
+            if (! is_array($images)) {
+                $images = [];
+            }
+            $result['images'] = array_values(array_map('strval', $images));
+        }
+
+        return $result;
     }
 }

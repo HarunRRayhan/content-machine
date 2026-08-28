@@ -425,7 +425,7 @@ class PostsControllerTest extends TestCase
                 'main' => [
                     'facebook' => [
                         'caption' => 'Hello',
-                        'images' => [],
+                        // omitted images → inherit attached cover for preview
                     ],
                 ],
             ],
