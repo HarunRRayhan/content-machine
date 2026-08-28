@@ -60,7 +60,7 @@ export default function ApiTokens({
         <>
             <Head title="API access" />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
+            <div className="flex min-h-full flex-1 flex-col gap-6 rounded-xl p-4">
                 <div className="flex items-start justify-between gap-4">
                     <Heading
                         title="API access"

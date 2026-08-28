@@ -147,7 +147,7 @@ export default function VideosIndex({
         <>
             <Head title="Videos" />
 
-            <div className="studio-page studio-home flex h-full flex-1 flex-col">
+            <div className="studio-page studio-home flex min-h-full flex-1 flex-col">
                 <div className="home-head">
                     <h2 className="home-h">All videos</h2>
                 </div>

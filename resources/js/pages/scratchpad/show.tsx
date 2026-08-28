@@ -95,7 +95,7 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
         <>
             <Head title={entry.title ?? 'Scratch Pad entry'} />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
+            <div className="flex min-h-full flex-1 flex-col gap-6 rounded-xl p-4">
                 <Link
                     href={index()}
                     className="text-sm text-muted-foreground hover:underline"

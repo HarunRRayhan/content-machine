@@ -96,7 +96,7 @@ export default function MediaIndex({ tab, tabLabel, items }: PageProps) {
         <>
             <Head title={`Media · ${tabLabel}`} />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
+            <div className="flex min-h-full flex-1 flex-col gap-6 rounded-xl p-4">
                 <Link
                     href={home()}
                     className="text-sm text-muted-foreground hover:underline"

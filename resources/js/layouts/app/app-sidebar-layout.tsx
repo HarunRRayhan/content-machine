@@ -11,7 +11,8 @@ export default function AppSidebarLayout({
     return (
         <AppShell variant="sidebar">
             <AppSidebar />
-            <AppContent variant="sidebar" className="overflow-x-hidden">
+            {/* overflow-x-clip: overflow-x-hidden would force overflow-y:auto and a nested scrollbar */}
+            <AppContent variant="sidebar" className="overflow-x-clip">
                 <AppSidebarHeader breadcrumbs={breadcrumbs} />
                 {children}
             </AppContent>

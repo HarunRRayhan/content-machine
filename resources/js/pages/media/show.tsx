@@ -87,7 +87,7 @@ export default function MediaShow({ asset }: PageProps) {
         <>
             <Head title={asset.title} />
 
-            <div className="flex h-full flex-1 flex-col gap-6 rounded-xl p-4">
+            <div className="flex min-h-full flex-1 flex-col gap-6 rounded-xl p-4">
                 <Link
                     href={backHref(asset)}
                     className="text-sm text-muted-foreground hover:underline"

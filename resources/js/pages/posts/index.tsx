@@ -126,7 +126,7 @@ export default function PostsIndex({
         <>
             <Head title="Posts" />
 
-            <div className="studio-page flex h-full flex-1 flex-col gap-2 p-4">
+            <div className="studio-page flex min-h-full flex-1 flex-col gap-2 p-4">
                 <h2 className="home-h">All posts</h2>
 
                 <div className="tabbar statustabs" role="tablist">
