@@ -1,0 +1,4 @@
+<!-- a wide flat U from the right end back to the left end: "the end feeds the start".
+     preserveAspectRatio="none" lets it stretch to any lane; pair it with
+     vector-effect:non-scaling-stroke (consumer CSS) to keep the line weight even. -->
+<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="M99 0 C99 58 99 92 50 92 C1 92 1 58 1 0"/></svg>

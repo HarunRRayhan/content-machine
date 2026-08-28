@@ -1,0 +1,3 @@
+<!-- receipt: a bill slip with a torn zigzag bottom edge and two amount lines.
+     Currency-free on purpose so it reads as "a bill" in any locale. -->
+<svg viewBox="0 0 24 24"><path d="M5.5 21V3h13v18l-2.2-1.7-2.2 1.7-2.1-1.7-2.2 1.7-2.1-1.7z"/><path d="M9 8h6M9 12h6"/></svg>

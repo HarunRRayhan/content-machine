@@ -1,0 +1,5 @@
+<!-- qr: three finder squares and a scatter of modules. The finders are drawn as an outer square
+     plus a solid pl-fill core (the real thing's ring-and-block), and the loose modules are solid
+     too, so the glyph still reads as a code and not as a window at 20px. The bottom-right corner
+     is deliberately the busy one, the way a real code's data region is. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="6.5" height="6.5" rx="1.2"/><rect class="pl-fill" x="5.2" y="5.2" width="2.1" height="2.1" rx=".4"/><rect x="14.5" y="3" width="6.5" height="6.5" rx="1.2"/><rect class="pl-fill" x="16.7" y="5.2" width="2.1" height="2.1" rx=".4"/><rect x="3" y="14.5" width="6.5" height="6.5" rx="1.2"/><rect class="pl-fill" x="5.2" y="16.7" width="2.1" height="2.1" rx=".4"/><rect class="pl-fill" x="13.6" y="13.6" width="3" height="3" rx=".5"/><rect class="pl-fill" x="18.4" y="13.6" width="2.4" height="2.4" rx=".5"/><rect class="pl-fill" x="13.6" y="18.4" width="2.4" height="2.4" rx=".5"/><rect class="pl-fill" x="18" y="18" width="3" height="3" rx=".5"/></svg>

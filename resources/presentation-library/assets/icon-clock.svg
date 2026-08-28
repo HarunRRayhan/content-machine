@@ -1,0 +1,3 @@
+<!-- clock: a dial with the hands at ~10 past 2. "when did this happen", timestamps, elapsed
+     time. Hands stop short of the rim so the dial still reads round at icon size. -->
+<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.6V12l3.6 2.4"/></svg>

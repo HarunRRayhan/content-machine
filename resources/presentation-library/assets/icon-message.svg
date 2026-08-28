@@ -1,0 +1,3 @@
+<!-- message: a chat/reply bubble with two text lines and a tail on the bottom left.
+     Drawn as one closed path so the tail joins the body cleanly at any stroke width. -->
+<svg viewBox="0 0 24 24"><path d="M20.5 4.5H3.5v11.5h4v4.5l5-4.5h8z"/><path d="M7.5 8.7h9M7.5 12.2h6"/></svg>

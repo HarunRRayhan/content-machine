@@ -10,6 +10,10 @@ class DeleteLibraryMediaAction
 {
     public function handle(MediaAsset $asset): void
     {
+        if (($asset->meta['source'] ?? null) === 'presentation_library') {
+            throw new RuntimeException('Presentation library assets cannot be deleted.');
+        }
+
         if ($asset->attachments()->exists()) {
             throw new RuntimeException('This file is still attached elsewhere and cannot be deleted.');
         }

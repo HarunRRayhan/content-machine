@@ -35,6 +35,8 @@ type MediaDetail = {
     original_filename: string | null;
     source: MediaSource | null;
     usage_count: number;
+    presentation_asset_key: string | null;
+    deletable: boolean;
     usages: MediaUsage[];
 };
 
@@ -79,7 +81,7 @@ function backLabel(asset: MediaDetail): string {
 }
 
 export default function MediaShow({ asset }: PageProps) {
-    const canDelete = asset.usage_count === 0;
+    const canDelete = asset.deletable;
 
     return (
         <>
@@ -111,6 +113,11 @@ export default function MediaShow({ asset }: PageProps) {
                     {asset.width && asset.height && (
                         <Badge variant="outline">
                             {asset.width}×{asset.height}
+                        </Badge>
+                    )}
+                    {asset.presentation_asset_key && (
+                        <Badge variant="outline">
+                            PA(&apos;{asset.presentation_asset_key}&apos;)
                         </Badge>
                     )}
                 </div>
@@ -224,8 +231,9 @@ export default function MediaShow({ asset }: PageProps) {
                     </Button>
                     {!canDelete && (
                         <p className="mt-2 text-sm text-muted-foreground">
-                            This file is still attached elsewhere and cannot be
-                            deleted yet.
+                            {asset.source?.type === 'presentation_library'
+                                ? 'Presentation library assets are shared deck icons and cannot be deleted.'
+                                : 'This file is still attached elsewhere and cannot be deleted yet.'}
                         </p>
                     )}
                 </div>

@@ -1,0 +1,4 @@
+<!-- download: an arrow dropping into an open tray. Deliberately the exact mirror of icon-upload
+     (same tray, same stem length, head flipped) so a deck can put the two side by side and the
+     only difference the viewer reads is the direction. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15.5v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 3.6v12.6"/><path d="M7 11.2 12 16.2l5-5"/></svg>

@@ -1,0 +1,4 @@
+<!-- stick-figure human, mid-stride, facing right. Same stroke language as the icons
+     (even weight, round caps, fill only on the head via .pl-fill) so characters and
+     icons read as one drawing system at phone scale. -->
+<svg viewBox="0 0 64 76" aria-hidden="true"><circle class="pl-fill" cx="40" cy="12" r="9"/><path d="M36 23 L28 45"/><path d="M33 30 L49 23"/><path d="M33 32 L19 39"/><path d="M28 45 L41 55 L39 70"/><path d="M28 45 L16 53 L20 68"/></svg>

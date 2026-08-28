@@ -1,0 +1,4 @@
+<!-- cross: not done, denied, missing. The direct counterpart to icon-check, drawn on the same
+     24 grid with the same 4/20 margins so a ✓/✗ pair sits at matching optical weight in a row.
+     Two independent strokes rather than one path, so round caps land on all four ends. -->
+<svg viewBox="0 0 24 24"><path d="M5.5 5.5 18.5 18.5"/><path d="M18.5 5.5 5.5 18.5"/></svg>

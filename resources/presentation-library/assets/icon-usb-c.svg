@@ -1,0 +1,4 @@
+<!-- usb-c: a connector plug seen head-on-ish — cable, strain relief, then the rounded
+     housing with the oval mouth inside it. The inner slot is what makes it read as USB-C
+     rather than a generic plug at phone scale, so keep it centred and wide. -->
+<svg viewBox="0 0 24 24"><path d="M12 2.5V8"/><rect x="9.5" y="8" width="5" height="3" rx="1"/><rect x="4.5" y="11" width="15" height="8.5" rx="4.25"/><rect x="8" y="14.25" width="8" height="2" rx="1"/></svg>

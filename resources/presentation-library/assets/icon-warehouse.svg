@@ -1,0 +1,5 @@
+<!-- warehouse: wide shed under a shallow pitched roof, with a roller door. The "one big central
+     depot everything is collected from" glyph, as opposed to icon-shop (the small local
+     storefront). The roof overhangs the walls on both sides, which is what separates it from
+     icon-bank (a pediment on columns) at 20px. -->
+<svg viewBox="0 0 24 24"><path d="M1.8 10.4 12 4l10.2 6.4"/><path d="M4 9.9v10.6h16V9.9"/><path d="M8.4 20.5v-6.8h7.2v6.8"/><path d="M8.4 17.1h7.2"/></svg>

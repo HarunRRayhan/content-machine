@@ -1,0 +1,5 @@
+<!-- shop: a small storefront, striped awning over a single door. The "the one round the corner"
+     glyph, deliberately drawn shorter and wider-awninged than icon-warehouse so a row of these
+     next to one warehouse reads as small-vs-big without any label. The two awning ticks are what
+     keep it from reading as a plain house at 20px. -->
+<svg viewBox="0 0 24 24"><path d="M2.4 9.6 4.3 4.8h15.4l1.9 4.8z"/><path d="M2.4 9.6h19.2"/><path d="M8.3 4.8 7.4 9.6M15.7 4.8l.9 4.8"/><path d="M4.2 9.6v10.6h15.6V9.6"/><path d="M9.8 20.2v-6.4h4.4v6.4"/></svg>

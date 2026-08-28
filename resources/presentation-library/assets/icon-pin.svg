@@ -1,0 +1,4 @@
+<!-- map pin: teardrop with a hole. "a place on a map", locations, where a user is sitting.
+     The hole is an outline rather than .pl-fill so the pin stays legible when a deck fills the
+     teardrop with a tint; at icon size the ring still reads as a dot. -->
+<svg viewBox="0 0 24 24"><path d="M12 21.5c4.2-4.4 6.6-7.7 6.6-10.7a6.6 6.6 0 1 0-13.2 0c0 3 2.4 6.3 6.6 10.7z"/><circle cx="12" cy="10.4" r="2.5"/></svg>

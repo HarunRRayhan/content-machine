@@ -1,0 +1,4 @@
+<!-- bookmark: save / keep for later. One closed path with a notched bottom edge, so it reads
+     as a bookmark rather than a flag at any stroke width. Sits on the 24 grid with 3.5/20.5
+     top and bottom margins, matching icon-receipt's optical height. -->
+<svg viewBox="0 0 24 24"><path d="M6 3.5h12v17l-6-4.7-6 4.7z"/></svg>

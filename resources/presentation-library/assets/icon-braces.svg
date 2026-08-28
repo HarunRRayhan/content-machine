@@ -1,0 +1,4 @@
+<!-- braces: the two curly brackets, i.e. "this is code / a stylesheet", where icon-terminal is
+     "a command being run" and icon-doc is "a written page". Each brace is one open path with the
+     mid-notch built into it, so the pair keeps an even stroke weight next to icon-doc in a row. -->
+<svg viewBox="0 0 24 24"><path d="M9.6 3.5H8.4A2.4 2.4 0 0 0 6 5.9v3.3c0 1-.8 1.8-1.8 1.8H3.6v2h.6c1 0 1.8.8 1.8 1.8v3.3a2.4 2.4 0 0 0 2.4 2.4h1.2"/><path d="M14.4 3.5h1.2A2.4 2.4 0 0 1 18 5.9v3.3c0 1 .8 1.8 1.8 1.8h.6v2h-.6c-1 0-1.8.8-1.8 1.8v3.3a2.4 2.4 0 0 1-2.4 2.4h-1.2"/></svg>
