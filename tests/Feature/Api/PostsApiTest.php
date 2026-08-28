@@ -90,6 +90,29 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.postsyncer.groups.0.post_id', '132531');
     }
 
+    public function test_update_can_clear_stale_publish_error(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-57',
+            'number' => 57,
+            'title' => 'Already live',
+            'status' => 'posted',
+        ])->assertCreated();
+
+        Post::query()->where('human_id', 'P-57')->update([
+            'publish_state' => 'failed',
+            'publish_error' => 'This post already has PostSyncer posts. Republish is not supported yet.',
+        ]);
+
+        $this->acting()->patchJson('/api/v1/posts/P-57', [
+            'publish_state' => 'succeeded',
+            'publish_error' => null,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'succeeded')
+            ->assertJsonPath('data.publish_error', null);
+    }
+
     public function test_patch_accepts_image_drive_urls(): void
     {
         $this->fakeAccessibleDriveLinks();

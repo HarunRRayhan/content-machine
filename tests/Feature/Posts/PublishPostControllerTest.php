@@ -182,4 +182,34 @@ class PublishPostControllerTest extends TestCase
 
         Queue::assertNothingPushed();
     }
+
+    public function test_publish_rejects_when_postsyncer_groups_already_exist(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'posted',
+            'publish_state' => 'succeeded',
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '133111',
+                    'status' => 'PUBLISHED',
+                    'platforms' => ['instagram'],
+                    'language' => 'english',
+                ]],
+            ],
+        ]);
+
+        $this->post(route('posts.publish', $post))
+            ->assertRedirect()
+            ->assertSessionHasErrors('publish');
+
+        Queue::assertNothingPushed();
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertNull($post->publish_error);
+    }
 }

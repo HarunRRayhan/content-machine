@@ -27,9 +27,13 @@ final readonly class UpdatePostData
         public ?array $imageDriveUrls = null,
         public ?string $status = null,
         public ?array $postsyncer = null,
+        public ?string $publishState = null,
+        public ?string $publishError = null,
         public bool $replaceExtended = false,
         public bool $hasImageDriveUrls = false,
         public bool $hasPostsyncer = false,
+        public bool $hasPublishState = false,
+        public bool $hasPublishError = false,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -91,9 +95,17 @@ final readonly class UpdatePostData
             postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
                 ? $payload['postsyncer']
                 : null,
+            publishState: array_key_exists('publish_state', $payload)
+                ? ($payload['publish_state'] !== null ? (string) $payload['publish_state'] : null)
+                : null,
+            publishError: array_key_exists('publish_error', $payload)
+                ? ($payload['publish_error'] !== null ? (string) $payload['publish_error'] : null)
+                : null,
             replaceExtended: true,
             hasImageDriveUrls: array_key_exists('image_drive_urls', $payload),
             hasPostsyncer: array_key_exists('postsyncer', $payload),
+            hasPublishState: array_key_exists('publish_state', $payload),
+            hasPublishError: array_key_exists('publish_error', $payload),
         );
     }
 }
