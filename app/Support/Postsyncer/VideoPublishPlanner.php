@@ -78,7 +78,11 @@ class VideoPublishPlanner
 
             $state = $this->platformState($config, $platform, 'reel', $language);
 
-            if ($state === null || $state === 'off') {
+            if ($state === null) {
+                continue;
+            }
+
+            if ($state === 'off' && ! $confirmAsk) {
                 continue;
             }
 
