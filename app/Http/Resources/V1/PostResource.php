@@ -22,9 +22,10 @@ class PostResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $include = $request->routeIs('api.v1.posts.index')
-            ? IncludeFields::fromRequest($request)
-            : IncludeFields::full();
+        $include = $request->attributes->get('api_include');
+        if (! $include instanceof IncludeFields) {
+            $include = IncludeFields::full();
+        }
 
         return [
             'id' => $this->id,

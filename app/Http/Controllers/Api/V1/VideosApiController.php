@@ -31,6 +31,7 @@ class VideosApiController extends Controller
         $status = $request->string('status')->toString() ?: null;
         $language = $request->string('language')->toString() ?: null;
         $include = IncludeFields::fromRequest($request);
+        $request->attributes->set('api_include', $include);
 
         $query = Video::query()
             ->when($status !== null, fn ($builder) => $builder->where('status', $status))
@@ -69,6 +70,8 @@ class VideosApiController extends Controller
 
     public function show(string $humanId): VideoResource
     {
+        request()->attributes->set('api_include', IncludeFields::full());
+
         return new VideoResource($this->resolveVideo($humanId));
     }
 

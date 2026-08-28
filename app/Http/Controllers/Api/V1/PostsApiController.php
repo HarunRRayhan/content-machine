@@ -41,6 +41,7 @@ class PostsApiController extends Controller
         $status = $request->string('status')->toString() ?: null;
         $language = $request->string('language')->toString() ?: null;
         $include = IncludeFields::fromRequest($request);
+        $request->attributes->set('api_include', $include);
 
         $query = Post::query()
             ->when($status !== null, fn ($builder) => $builder->where('status', $status))
@@ -78,6 +79,8 @@ class PostsApiController extends Controller
 
     public function show(string $humanId): PostResource
     {
+        request()->attributes->set('api_include', IncludeFields::full());
+
         return new PostResource($this->resolvePost($humanId)->load(['attachments.mediaAsset']));
     }
 
