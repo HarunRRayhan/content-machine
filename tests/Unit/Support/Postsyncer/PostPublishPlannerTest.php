@@ -399,7 +399,21 @@ class PostPublishPlannerTest extends TestCase
     public function test_threads_with_tweet_segments_gets_own_thread_group(): void
     {
         $workspace = Workspace::factory()->create();
-        $config = $this->configFor($workspace);
+        // Images make these photo posts; samplePostTypes keeps Twitter photo off.
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'twitter' => ['text' => 'on', 'photo' => 'on'],
+                    'threads' => ['text' => 'on', 'photo' => 'on'],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
 
         $post = Post::factory()->for($workspace)->create([
             'language' => 'en',
@@ -439,16 +453,16 @@ class PostPublishPlannerTest extends TestCase
         $this->assertNotNull($twitterGroup);
         $this->assertSame(['Tweet one', 'Tweet two'], $twitterGroup->threadTweets);
         $this->assertSame([
-            'https://drive.google.com/file/d/tw1/view',
-            'https://drive.google.com/file/d/tw2/view',
+            'https://drive.usercontent.google.com/download?id=tw1&export=download&confirm=t',
+            'https://drive.usercontent.google.com/download?id=tw2&export=download&confirm=t',
         ], $twitterGroup->mediaUrls);
 
         $this->assertNotNull($threadsGroup);
         $this->assertSame(['Threads one', 'Threads two', 'Threads three'], $threadsGroup->threadTweets);
         $this->assertSame([
-            'https://drive.google.com/file/d/th1/view',
-            'https://drive.google.com/file/d/th2/view',
-            'https://drive.google.com/file/d/th3/view',
+            'https://drive.usercontent.google.com/download?id=th1&export=download&confirm=t',
+            'https://drive.usercontent.google.com/download?id=th2&export=download&confirm=t',
+            'https://drive.usercontent.google.com/download?id=th3&export=download&confirm=t',
         ], $threadsGroup->mediaUrls);
     }
 
