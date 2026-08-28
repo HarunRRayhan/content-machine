@@ -1808,11 +1808,6 @@
 }
 
 .studio-page .ws-chip-menu {
-    display: none;
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 40;
     min-width: 168px;
     padding: 8px;
     border: 1px solid var(--line);
@@ -1824,14 +1819,14 @@
     gap: 6px;
 }
 
+.studio-page .ws-chip-menu--portal {
+    display: flex;
+    pointer-events: auto;
+}
+
 .studio-page .ws-chip-menu .plat-mark {
     width: 100%;
     box-sizing: border-box;
-}
-
-.studio-page .ws-chip--menu:hover .ws-chip-menu,
-.studio-page .ws-chip--menu:focus-within .ws-chip-menu {
-    display: flex;
 }
 
 .studio-page .schedule-ws-tabs {
