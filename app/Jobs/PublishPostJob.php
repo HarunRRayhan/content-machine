@@ -20,7 +20,13 @@ class PublishPostJob implements ShouldQueue
     public function __construct(
         public readonly Post $post,
         public readonly array $options = [],
-    ) {}
+    ) {
+        // Post covers live on the scratchpad uploads volume, mounted only on
+        // cm-web. cm-worker's default queue cannot see those files, so
+        // MediaUrlResolver skipped attachments and published text-only (P-57).
+        // Run on the scratchpad queue that cm-web consumes.
+        $this->onQueue('scratchpad');
+    }
 
     public function handle(PublishPostAction $action): void
     {

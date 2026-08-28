@@ -19,9 +19,10 @@ queue starts to hurt.
 | Piece | Where | Role |
 |---|---|---|
 | `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
-| `PublishPostJob` / `PublishVideoJob` | `cm-web` or API | `EnqueuePostPublishAction` inserts a row and sets `publish_state=queued`. |
+| `PublishPostJob` | `cm-web` scratchpad queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. |
+| `PublishVideoJob` | `cm-worker` default queue | Drive URLs only today; no scratchpad attachment dependency. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
-| `cm-web` scratchpad worker | same web container (`SCRATCHPAD_QUEUE_WORKER=1`) | `queue:work --queue=scratchpad` for Telegram photo/voice capture and voice transcription. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. |
+| `cm-web` scratchpad worker | same web container (`SCRATCHPAD_QUEUE_WORKER=1`) | `queue:work --queue=scratchpad` for Telegram photo/voice, voice transcription, **and post publishes**. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. |
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
@@ -69,6 +70,20 @@ All authenticated calls use `Authorization: Bearer <api_key>`.
 
 CM registers Google Drive or attachment URLs through the link-upload endpoint,
 then passes returned media ids into `POST /posts`.
+
+### First comments (Facebook / Instagram / LinkedIn / YouTube)
+
+When a caption group has a non-empty `first_comment`, `PublishPostAction` appends a
+second `content` item:
+
+```json
+{ "text": "…", "is_first_comment": true, "first_comment_delay": 1 }
+```
+
+The planner keeps those platforms in their own PostSyncer group so Threads /
+Twitter / Bluesky never receive the extra content item (PostSyncer may treat it
+as a thread). Named cover images that fail to resolve refuse the publish instead
+of falling through as text-only.
 
 ## Seed from personal-content
 

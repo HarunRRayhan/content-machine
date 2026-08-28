@@ -10,6 +10,14 @@ use Carbon\CarbonImmutable;
 final readonly class PublishGroup
 {
     /**
+     * Platforms that accept PostSyncer's `is_first_comment` content item.
+     * Threads/Twitter/Bluesky/TikTok must never share a group that carries one.
+     *
+     * @var list<string>
+     */
+    public const FIRST_COMMENT_PLATFORMS = ['facebook', 'instagram', 'linkedin', 'youtube'];
+
+    /**
      * @param  list<string>  $platforms
      * @param  list<string>  $mediaUrls
      * @param  array<string, string>  $captions
@@ -24,5 +32,11 @@ final readonly class PublishGroup
         public ?CarbonImmutable $when,
         public bool $publishNow,
         public ?array $threadTweets = null,
+        public ?string $firstComment = null,
     ) {}
+
+    public static function supportsFirstComment(string $platform): bool
+    {
+        return in_array($platform, self::FIRST_COMMENT_PLATFORMS, true);
+    }
 }

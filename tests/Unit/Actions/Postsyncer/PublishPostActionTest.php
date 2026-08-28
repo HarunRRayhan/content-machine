@@ -241,4 +241,115 @@ class PublishPostActionTest extends TestCase
 
         $this->assertTrue($seenRunning);
     }
+
+    public function test_facebook_first_comment_is_sent_as_second_content_item(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB caption',
+                        'first_comment' => 'SemiAnalysis numbers here',
+                    ],
+                ],
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+
+        Http::assertSent(function ($request) {
+            if ($request->url() !== 'https://postsyncer.com/api/v1/posts') {
+                return false;
+            }
+
+            $content = $request['content'] ?? [];
+
+            return count($content) === 2
+                && ($content[0]['text'] ?? null) === 'FB caption'
+                && ($content[0]['media'] ?? null) === [915]
+                && ($content[1]['text'] ?? null) === 'SemiAnalysis numbers here'
+                && ($content[1]['is_first_comment'] ?? null) === true
+                && ($content[1]['first_comment_delay'] ?? null) === 1;
+        });
+    }
+
+    public function test_threads_group_does_not_get_is_first_comment_content_item(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'threads' => ['account_id' => 200, 'handle' => '@harun'],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'threads' => ['text' => 'on', 'photo' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['threads'],
+            'captions' => [
+                'main' => [
+                    'threads' => [
+                        'caption' => 'Threads caption',
+                        'first_comment' => 'should not become a first comment',
+                    ],
+                ],
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        Http::assertSent(function ($request) {
+            if ($request->url() !== 'https://postsyncer.com/api/v1/posts') {
+                return false;
+            }
+
+            $content = $request['content'] ?? [];
+
+            return count($content) === 1
+                && ! isset($content[0]['is_first_comment']);
+        });
+    }
 }

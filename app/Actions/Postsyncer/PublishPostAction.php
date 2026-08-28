@@ -111,6 +111,17 @@ class PublishPostAction
                 'text' => $this->defaultCaption($group),
                 'media' => $mediaIds,
             ]];
+
+            // Facebook/Instagram/LinkedIn/YouTube: second content item becomes
+            // the delayed first comment. Never emit this on Threads/Twitter
+            // groups (P-57: CM published captions but never the comment).
+            if ($this->shouldAttachFirstComment($group)) {
+                $contentItems[] = [
+                    'text' => $group->firstComment,
+                    'is_first_comment' => true,
+                    'first_comment_delay' => 1,
+                ];
+            }
         }
 
         $body = [
@@ -195,6 +206,23 @@ class PublishPostAction
         $caption = reset($captions);
 
         return is_string($caption) ? $caption : '';
+    }
+
+    private function shouldAttachFirstComment(PublishGroup $group): bool
+    {
+        $comment = $group->firstComment;
+
+        if (! is_string($comment) || trim($comment) === '') {
+            return false;
+        }
+
+        foreach ($group->platforms as $platform) {
+            if (! PublishGroup::supportsFirstComment($platform)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function assertFirstPublish(Post $post): void
