@@ -100,4 +100,11 @@ as they apply):
 1. Open a PR. Do not ask whether to open one.
 2. Wait until CI is green.
 3. Self-review the PR diff.
-4. Squash-merge without asking. Railway deploys `main`.
+4. **Paste the PR URL in Harun's chat and wait for his go before squash-merge** when the
+   change touches PostSyncer publish, media resolution, queues, or anything that can put
+   wrong content live. Ordinary UI/docs nits can still follow the usual self-review + merge
+   once he has said that class of change is fine to ship without a gate. Railway deploys
+   `main`.
+
+Confirmed 2026-08-28: publish-path PR #137 should have waited for his review in chat before
+merge.
