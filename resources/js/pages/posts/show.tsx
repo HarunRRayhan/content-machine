@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostOverview from '@/components/studio/post-overview';
+import type { WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { useStudioTab } from '@/hooks/use-studio-tab';
 import type { LangCode } from '@/lib/lang-meta';
 import type { HandleDirectory } from '@/lib/post-caption-mock';
@@ -29,7 +30,7 @@ type PostDetail = {
         }>;
     }>;
     platforms: string[];
-    workspaces?: Array<{ key: string; platforms: string[] }>;
+    workspaces?: WorkspaceBucket[];
     images: Array<{
         filename: string;
         url: string;
