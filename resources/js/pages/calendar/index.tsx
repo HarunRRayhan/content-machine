@@ -165,7 +165,7 @@ export default function CalendarIndex({
         <>
             <Head title="Calendar" />
 
-            <div className="studio-page flex h-full flex-1 flex-col gap-3 p-4">
+            <div className="studio-page flex min-h-full flex-1 flex-col gap-3 p-4">
                 <div className="cal-head">
                     <h2 className="home-h">Calendar</h2>
                     <p className="cal-sub">

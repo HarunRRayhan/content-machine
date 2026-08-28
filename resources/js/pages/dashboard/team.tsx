@@ -35,7 +35,7 @@ export default function Team({ team, members, invitations }: PageProps) {
         <>
             <Head title="Team" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
+            <div className="flex min-h-full flex-1 flex-col gap-8 rounded-xl p-4">
                 <Heading
                     title={`${team.name} members`}
                     description="Everyone with access to this team, plus anyone still waiting on an invite."

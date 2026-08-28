@@ -102,7 +102,7 @@ export default function IdeaShow({ idea }: PageProps) {
         <>
             <Head title={idea.title} />
 
-            <div className="studio-page studio-home flex h-full flex-1 flex-col gap-4">
+            <div className="studio-page studio-home flex min-h-full flex-1 flex-col gap-4">
                 <div className="vhead">
                     <Link href={listHref} className="back">
                         ← Ideas

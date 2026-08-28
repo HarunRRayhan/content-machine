@@ -78,7 +78,7 @@ export default function IdeasIndex({ ideas, filters }: PageProps) {
         <>
             <Head title="Ideas" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4">
+            <div className="flex min-h-full flex-1 flex-col gap-8 rounded-xl p-4">
                 <Heading
                     title="Ideas"
                     description="Post and video ideas filed from the Scratch Pad, waiting to be promoted or dropped."

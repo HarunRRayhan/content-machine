@@ -68,7 +68,7 @@ export default function DashboardHome({
         <>
             <Head title="Dashboard" />
 
-            <div className="studio-page studio-home flex h-full flex-1 flex-col">
+            <div className="studio-page studio-home flex min-h-full flex-1 flex-col">
                 <div className="home-head">
                     <h2 className="home-h">Dashboard</h2>
                 </div>

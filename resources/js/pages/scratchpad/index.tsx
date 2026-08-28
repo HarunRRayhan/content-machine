@@ -136,7 +136,7 @@ export default function ScratchpadIndex({ entries }: PageProps) {
         <>
             <Head title="Scratch Pad" />
 
-            <div className="flex h-full flex-1 flex-col gap-8 rounded-xl p-4 pb-32">
+            <div className="flex min-h-full flex-1 flex-col gap-8 rounded-xl p-4 pb-32">
                 <Heading
                     title="Scratch Pad"
                     description="Capture an idea the instant it occurs to you. Sort it out later."

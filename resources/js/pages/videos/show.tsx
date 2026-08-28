@@ -101,7 +101,7 @@ export default function VideoShow({ video }: PageProps) {
         <>
             <Head title={video.title} />
 
-            <div className="studio-page flex h-full flex-1 flex-col gap-2 p-4">
+            <div className="studio-page flex min-h-full flex-1 flex-col gap-2 p-4">
                 <div className="vhead">
                     <Link href={index()} className="back">
                         ← All videos
