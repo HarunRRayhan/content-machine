@@ -1,11 +1,12 @@
 import { Head, Link } from '@inertiajs/react';
-import { useState } from 'react';
+import { useMemo } from 'react';
 import type { CaptionGroup } from '@/components/content/captions-panel';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PresentationEmbed from '@/components/studio/presentation-embed';
 import ScriptPanel from '@/components/studio/script-panel';
 import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
 import VideoOverview from '@/components/studio/video-overview';
+import { useStudioTab } from '@/hooks/use-studio-tab';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index } from '@/routes/videos';
@@ -76,21 +77,25 @@ export default function VideoShow({ video }: PageProps) {
         video.parsed.sources !== '' ||
         video.parsed.legal.length > 0;
 
-    const validTabs: TabKey[] = ['overview', 'script'];
+    const validTabs = useMemo<readonly TabKey[]>(() => {
+        const tabs: TabKey[] = ['overview', 'script'];
 
-    if (hasCaptions) {
-        validTabs.push('captions');
-    }
+        if (hasCaptions) {
+            tabs.push('captions');
+        }
 
-    if (hasFacts) {
-        validTabs.push('facts');
-    }
+        if (hasFacts) {
+            tabs.push('facts');
+        }
 
-    if (hasDeck) {
-        validTabs.push('presentation');
-    }
+        if (hasDeck) {
+            tabs.push('presentation');
+        }
 
-    const [tab, setTab] = useState<TabKey>('overview');
+        return tabs;
+    }, [hasCaptions, hasFacts, hasDeck]);
+
+    const [tab, setTab] = useStudioTab(validTabs, 'overview');
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
 
     return (

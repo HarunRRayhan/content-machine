@@ -1,8 +1,9 @@
 import { Head, Link } from '@inertiajs/react';
-import { useState } from 'react';
+import { useMemo } from 'react';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostOverview from '@/components/studio/post-overview';
+import { useStudioTab } from '@/hooks/use-studio-tab';
 import type { LangCode } from '@/lib/lang-meta';
 import type { HandleDirectory } from '@/lib/post-caption-mock';
 import { home } from '@/routes/dashboard';
@@ -56,10 +57,16 @@ type PageProps = {
 type TabKey = 'overview' | 'captions';
 
 export default function PostShow({ post }: PageProps) {
-    const [tab, setTab] = useState<TabKey>('overview');
     const hasCaptions = post.captions.some(
         (group) => group.platforms.length > 0,
     );
+    // Always allow ?tab=captions so a shared captions link still lands on that
+    // panel (empty state) even before captions are uploaded.
+    const validTabs = useMemo<readonly TabKey[]>(
+        () => ['overview', 'captions'] as const,
+        [],
+    );
+    const [tab, setTab] = useStudioTab(validTabs, 'overview');
     const hasEnglishCaptions = post.captions.some(
         (group) => group.lang === 'en',
     );
