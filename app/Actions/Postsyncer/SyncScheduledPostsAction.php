@@ -10,10 +10,15 @@ use App\Support\Postsyncer\PostsyncerException;
 
 /**
  * Live-check scheduled posts and videos against PostSyncer and mark them
- * posted once every stored group is actually PUBLISHED.
+ * posted once every stored group is terminal: PUBLISHED, or FAILED with at
+ * least one sibling PUBLISHED (English Instagram often reports FAILED while
+ * already live; waiting forever leaves the CM row stuck on Scheduled).
  */
 class SyncScheduledPostsAction
 {
+    /** @var list<string> */
+    private const TERMINAL_GROUP_STATUSES = ['PUBLISHED', 'FAILED'];
+
     /**
      * @return array{posts: int, videos: int}
      */
@@ -84,12 +89,13 @@ class SyncScheduledPostsAction
 
         $client = new PostsyncerClient($config);
         $updated = [];
-        $allPublished = true;
+        $allTerminal = true;
+        $anyPublished = false;
         $anyChecked = false;
 
         foreach ($groups as $group) {
             if (! is_array($group)) {
-                $allPublished = false;
+                $allTerminal = false;
 
                 continue;
             }
@@ -98,7 +104,7 @@ class SyncScheduledPostsAction
 
             if (! is_scalar($postId) || (string) $postId === '') {
                 $updated[] = $group;
-                $allPublished = false;
+                $allTerminal = false;
 
                 continue;
             }
@@ -107,7 +113,7 @@ class SyncScheduledPostsAction
                 $live = $client->getPost((string) $postId);
             } catch (PostsyncerException) {
                 $updated[] = $group;
-                $allPublished = false;
+                $allTerminal = false;
 
                 continue;
             }
@@ -126,21 +132,27 @@ class SyncScheduledPostsAction
             $updated[] = $group;
             $anyChecked = true;
 
-            if ($status !== 'PUBLISHED') {
-                $allPublished = false;
+            if ($status === 'PUBLISHED') {
+                $anyPublished = true;
+            }
+
+            if (! in_array($status, self::TERMINAL_GROUP_STATUSES, true)) {
+                $allTerminal = false;
             }
         }
+
+        $shouldMarkPosted = $anyChecked && $allTerminal && $anyPublished;
 
         $values = [
             'postsyncer' => array_merge($stored, ['groups' => $updated]),
         ];
 
-        if ($anyChecked && $allPublished) {
+        if ($shouldMarkPosted) {
             $values['status'] = 'posted';
         }
 
         $record->forceFill($values)->save();
 
-        return $anyChecked && $allPublished;
+        return $shouldMarkPosted;
     }
 }

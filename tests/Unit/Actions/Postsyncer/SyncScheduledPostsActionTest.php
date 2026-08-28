@@ -121,6 +121,85 @@ class SyncScheduledPostsActionTest extends TestCase
         $this->assertSame('SCHEDULED', $post->postsyncer['groups'][1]['status']);
     }
 
+    public function test_it_marks_a_post_posted_when_remaining_groups_only_failed(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [
+                    [
+                        'post_id' => '132730',
+                        'status' => 'SCHEDULED',
+                        'platforms' => ['facebook'],
+                        'language' => 'english',
+                    ],
+                    [
+                        'post_id' => '132731',
+                        'status' => 'SCHEDULED',
+                        'platforms' => ['instagram'],
+                        'language' => 'english',
+                    ],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/132730' => Http::response([
+                'id' => 132730,
+                'status' => 'PUBLISHED',
+            ], 200),
+            'postsyncer.com/api/v1/posts/132731' => Http::response([
+                'id' => 132731,
+                'status' => 'FAILED',
+            ], 200),
+        ]);
+
+        $marked = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(1, $marked['posts']);
+        $post->refresh();
+        $this->assertSame('posted', $post->status);
+        $this->assertSame('PUBLISHED', $post->postsyncer['groups'][0]['status']);
+        $this->assertSame('FAILED', $post->postsyncer['groups'][1]['status']);
+    }
+
+    public function test_it_leaves_a_post_scheduled_when_every_group_failed(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [
+                    [
+                        'post_id' => '132731',
+                        'status' => 'SCHEDULED',
+                        'platforms' => ['instagram'],
+                        'language' => 'english',
+                    ],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/132731' => Http::response([
+                'id' => 132731,
+                'status' => 'FAILED',
+            ], 200),
+        ]);
+
+        $marked = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(0, $marked['posts']);
+        $post->refresh();
+        $this->assertSame('scheduled', $post->status);
+        $this->assertSame('FAILED', $post->postsyncer['groups'][0]['status']);
+    }
+
     public function test_it_skips_a_group_when_the_live_lookup_fails(): void
     {
         $workspace = Workspace::factory()->create(['settings' => []]);
