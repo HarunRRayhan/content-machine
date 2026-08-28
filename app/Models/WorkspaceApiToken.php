@@ -45,6 +45,8 @@ class WorkspaceApiToken extends Model
         'videos:write',
         'posts:read',
         'posts:write',
+        'media:read',
+        'media:write',
     ];
 
     /**

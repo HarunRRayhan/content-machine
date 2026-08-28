@@ -18,6 +18,8 @@ use Illuminate\Support\Str;
  * @property int $id
  * @property int $workspace_id
  * @property string $public_id
+ * @property string|null $title
+ * @property string|null $description
  * @property string $kind
  * @property string $disk
  * @property string $path
@@ -46,6 +48,8 @@ class MediaAsset extends Model
     protected $fillable = [
         'workspace_id',
         'public_id',
+        'title',
+        'description',
         'kind',
         'disk',
         'path',

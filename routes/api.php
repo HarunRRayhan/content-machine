@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\IdeasApiController;
+use App\Http\Controllers\Api\V1\MediaApiController;
 use App\Http\Controllers\Api\V1\MediaUrlsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
@@ -143,4 +144,8 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('posts/{human_id}/media/{mediaAsset}', [PostsApiController::class, 'media'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.media');
+
+    Route::get('media', [MediaApiController::class, 'index'])
+        ->middleware('auth.workspace-token:media:read')
+        ->name('media.index');
 });
