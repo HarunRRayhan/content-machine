@@ -159,6 +159,65 @@ export function workspacesForIndex(
     ];
 }
 
+function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
+    const lang = previewLang(workspace.key);
+    const hasPlatforms = workspace.platforms.length > 0;
+
+    return (
+        <span
+            className={`ws-chip${hasPlatforms ? ' ws-chip--menu' : ''}`}
+            tabIndex={hasPlatforms ? 0 : undefined}
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+        >
+            <span className="ws-chip-name">
+                {workspaceShortName(workspace.key)}
+            </span>
+            {hasPlatforms ? (
+                <div className="ws-chip-menu" role="menu">
+                    {workspace.platforms.map((platform) => (
+                        <PlatformMark
+                            key={platform}
+                            platform={platform}
+                            lang={lang}
+                            showHandle={false}
+                        />
+                    ))}
+                </div>
+            ) : null}
+        </span>
+    );
+}
+
+export function IndexWorkspaceChips({
+    workspaces: presetWorkspaces,
+    groups,
+    language,
+    platforms,
+}: {
+    workspaces?: WorkspaceBucket[];
+    groups: PostsyncerGroup[];
+    language: string | null | undefined;
+    platforms: string[];
+}) {
+    const resolved =
+        presetWorkspaces && presetWorkspaces.length > 0
+            ? presetWorkspaces
+            : workspacesForIndex(groups, language, platforms);
+
+    if (resolved.length === 0) {
+        return <>—</>;
+    }
+
+    return (
+        <div className="ws-chips">
+            {resolved.map((workspace) => (
+                <WorkspaceIndexChip key={workspace.key} workspace={workspace} />
+            ))}
+        </div>
+    );
+}
+
 function handleFor(
     handles: HandleDirectory | undefined,
     lang: LangCode,

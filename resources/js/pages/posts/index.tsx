@@ -1,13 +1,10 @@
 import { Head, Link, router } from '@inertiajs/react';
 import {
-    previewLang,
-    workspaceShortName,
-    workspacesForIndex,
+    IndexWorkspaceChips,
 } from '@/components/studio/workspace-schedule';
 import type { PostsyncerGroup, WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { postShowUrl } from '@/lib/content-urls';
 import {
-    platformLabel,
     POST_STATUS_LABELS,
     studioPostStatus,
 } from '@/lib/platform-meta';
@@ -80,53 +77,6 @@ const TAB_LABELS: Record<string, string> = {
 
 function paginationLabel(label: string): string {
     return label.replace('&laquo;', '«').replace('&raquo;', '»');
-}
-
-function IndexWorkspaceChips({
-    workspaces: presetWorkspaces,
-    groups,
-    language,
-    platforms,
-}: {
-    workspaces?: WorkspaceBucket[];
-    groups: PostsyncerGroup[];
-    language: string | null;
-    platforms: string[];
-}) {
-    const resolved =
-        presetWorkspaces && presetWorkspaces.length > 0
-            ? presetWorkspaces
-            : workspacesForIndex(groups, language, platforms);
-
-    if (resolved.length === 0) {
-        return '—';
-    }
-
-    return (
-        <div className="ws-chips">
-            {resolved.map((workspace) => {
-                const names = workspace.platforms
-                    .map((platform) =>
-                        platformLabel(platform, previewLang(workspace.key)),
-                    )
-                    .filter((name) => name !== '');
-                const tip = names.join(', ');
-
-                return (
-                    <span key={workspace.key} className="ws-chip" tabIndex={0}>
-                        <span className="ws-chip-name">
-                            {workspaceShortName(workspace.key)}
-                        </span>
-                        {tip !== '' ? (
-                            <span className="ws-chip-tip" role="tooltip">
-                                {tip}
-                            </span>
-                        ) : null}
-                    </span>
-                );
-            })}
-        </div>
-    );
 }
 
 function tabQuery(filters: Filters, status: string): Record<string, string> {
