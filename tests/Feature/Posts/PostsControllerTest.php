@@ -216,6 +216,37 @@ class PostsControllerTest extends TestCase
                 ->component('posts/index')
                 ->has('items.data', 1)
                 ->where('items.data.0.groups', $groups)
+                ->where('items.data.0.workspaces', [
+                    ['key' => 'en', 'platforms' => ['twitter']],
+                    ['key' => 'bn', 'platforms' => ['facebook']],
+                ])
+            );
+    }
+
+    public function test_index_exposes_both_workspaces_from_captions_when_unscheduled(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $captions = json_decode(
+            file_get_contents(base_path('tests/Fixtures/postsyncer/p48_captions.json')),
+            true,
+        );
+
+        Post::factory()->for($workspace)->create([
+            'title' => 'Draft bilingual',
+            'status' => 'draft',
+            'language' => 'both',
+            'platforms' => ['facebook', 'twitter'],
+            'captions' => $captions,
+            'postsyncer' => null,
+        ]);
+
+        $this->get(route('posts.index', ['status' => 'draft']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.workspaces.0.key', 'en')
+                ->where('items.data.0.workspaces.1.key', 'bn')
             );
     }
 

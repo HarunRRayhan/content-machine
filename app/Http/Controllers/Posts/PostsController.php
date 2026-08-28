@@ -11,6 +11,7 @@ use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
+use App\Support\Content\PostWorkspaceBuckets;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -226,6 +227,7 @@ class PostsController extends Controller
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
             'groups' => $this->presentGroups($post),
+            'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),
             'has_captions' => ! empty($post->captions),
             'has_body' => filled($post->body),
             'created_at' => $post->created_at?->toIso8601String(),
@@ -317,6 +319,7 @@ class PostsController extends Controller
             'body' => $post->body,
             'captions' => $captions,
             'platforms' => $post->platforms ?? [],
+            'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),
             'images' => $images,
             'image_urls' => $imageUrls,
             'handles' => $handles,

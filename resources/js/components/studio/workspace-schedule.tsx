@@ -25,7 +25,7 @@ export type WorkspaceKey = LangCode | 'unk';
 
 export type WorkspaceBucket = {
     key: WorkspaceKey;
-    groups: PostsyncerGroup[];
+    groups?: PostsyncerGroup[];
     platforms: string[];
 };
 
@@ -137,6 +137,13 @@ export function workspacesForIndex(
 
     if (fromGroups.length > 0) {
         return fromGroups;
+    }
+
+    if (language === 'both' && platforms.length > 0) {
+        return [
+            { key: 'bn', groups: [], platforms },
+            { key: 'en', groups: [], platforms },
+        ];
     }
 
     if (platforms.length === 0 && !language) {
