@@ -6,7 +6,7 @@ import {
     WorkspaceScheduleLog,
     bucketsFromGroups,
 } from '@/components/studio/workspace-schedule';
-import type { PostsyncerGroup } from '@/components/studio/workspace-schedule';
+import type { PostsyncerGroup, WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { studioPostStatus } from '@/lib/platform-meta';
 import type { HandleDirectory } from '@/lib/studio-workspaces';
 
@@ -24,6 +24,7 @@ type Props = {
     status: string;
     platforms: string[];
     language?: string | null;
+    workspaces?: WorkspaceBucket[];
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
@@ -144,6 +145,7 @@ export default function PostOverview({
     status,
     platforms,
     language,
+    workspaces,
     publishUrl,
     postsyncerReady,
     publishState,
@@ -164,7 +166,10 @@ export default function PostOverview({
     const [minWhen] = useState(() => datetimeLocalNowInDhaka());
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
-    const workspaceBuckets = bucketsFromGroups(groups);
+    const workspaceBuckets = hasGroups
+        ? bucketsFromGroups(groups)
+        : (workspaces ?? []);
+    const hasWorkspaceBuckets = workspaceBuckets.length > 0;
     const publishBusy = ['queued', 'running'].includes(publishState);
     const showScheduleForm =
         !archived &&
@@ -203,7 +208,7 @@ export default function PostOverview({
                 <div className="pane-head">
                     <span className="k">Status</span>
                 </div>
-                {hasGroups ? (
+                {hasGroups || hasWorkspaceBuckets ? (
                     <WorkspacePlatformChips
                         buckets={workspaceBuckets}
                         handles={handles}

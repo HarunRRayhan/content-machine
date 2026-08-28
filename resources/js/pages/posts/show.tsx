@@ -28,6 +28,7 @@ type PostDetail = {
         }>;
     }>;
     platforms: string[];
+    workspaces?: Array<{ key: string; platforms: string[] }>;
     images: Array<{
         filename: string;
         url: string;
@@ -128,6 +129,7 @@ export default function PostShow({ post }: PageProps) {
                         status={post.status}
                         platforms={post.platforms}
                         language={post.language}
+                        workspaces={post.workspaces}
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}

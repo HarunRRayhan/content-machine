@@ -4,7 +4,7 @@ import {
     workspaceShortName,
     workspacesForIndex,
 } from '@/components/studio/workspace-schedule';
-import type { PostsyncerGroup } from '@/components/studio/workspace-schedule';
+import type { PostsyncerGroup, WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { postShowUrl } from '@/lib/content-urls';
 import {
     platformLabel,
@@ -35,6 +35,7 @@ type PostRow = {
     language: string | null;
     platforms: string[];
     groups?: PostsyncerGroup[];
+    workspaces?: WorkspaceBucket[];
     has_captions: boolean;
     has_body: boolean;
     created_at: string | null;
@@ -82,23 +83,28 @@ function paginationLabel(label: string): string {
 }
 
 function IndexWorkspaceChips({
+    workspaces: presetWorkspaces,
     groups,
     language,
     platforms,
 }: {
+    workspaces?: WorkspaceBucket[];
     groups: PostsyncerGroup[];
     language: string | null;
     platforms: string[];
 }) {
-    const workspaces = workspacesForIndex(groups, language, platforms);
+    const resolved =
+        presetWorkspaces && presetWorkspaces.length > 0
+            ? presetWorkspaces
+            : workspacesForIndex(groups, language, platforms);
 
-    if (workspaces.length === 0) {
+    if (resolved.length === 0) {
         return '—';
     }
 
     return (
         <div className="ws-chips">
-            {workspaces.map((workspace) => {
+            {resolved.map((workspace) => {
                 const names = workspace.platforms
                     .map((platform) =>
                         platformLabel(platform, previewLang(workspace.key)),
@@ -309,6 +315,7 @@ export default function PostsIndex({
                                             </td>
                                             <td className="c-plat">
                                                 <IndexWorkspaceChips
+                                                    workspaces={row.workspaces}
                                                     groups={row.groups ?? []}
                                                     language={row.language}
                                                     platforms={row.platforms}
