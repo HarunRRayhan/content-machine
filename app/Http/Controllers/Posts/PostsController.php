@@ -12,6 +12,7 @@ use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\PostWorkspaceBuckets;
+use App\Support\Content\PresenceFlags;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -53,15 +54,15 @@ class PostsController extends Controller
 
         $status = $request->string('status')->toString() ?: 'draft';
         $language = $request->string('language')->toString() ?: null;
-        $query = $request->string('q')->toString() ?: null;
+        $search = $request->string('q')->toString() ?: null;
 
         if ($status === 'ideation') {
             $items = Idea::query()
                 ->where('workspace_id', $workspace->id)
                 ->where('kind', 'post')
                 ->where('status', 'open')
-                ->when($query, function ($builder) use ($query) {
-                    $like = '%'.$query.'%';
+                ->when($search, function ($builder) use ($search) {
+                    $like = '%'.$search.'%';
                     $builder->where(function ($inner) use ($like) {
                         $inner->where('title', 'ilike', $like)
                             ->orWhere('human_id', 'ilike', $like)
@@ -73,14 +74,14 @@ class PostsController extends Controller
                 ->withQueryString()
                 ->through(fn (Idea $idea) => $this->presentIdeaSummary($idea));
         } else {
-            $items = Post::query()
+            $postsQuery = Post::query()
                 ->where('workspace_id', $workspace->id)
                 ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
                 ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
                 ->when(in_array($status, ['scheduled', 'posted', 'ready'], true), fn ($builder) => $builder->where('status', $status))
                 ->when($language, fn ($builder) => $builder->where('language', $language))
-                ->when($query, function ($builder) use ($query) {
-                    $like = '%'.$query.'%';
+                ->when($search, function ($builder) use ($search) {
+                    $like = '%'.$search.'%';
                     $builder->where(function ($inner) use ($like) {
                         $inner->where('title', 'ilike', $like)
                             ->orWhere('human_id', 'ilike', $like)
@@ -88,7 +89,25 @@ class PostsController extends Controller
                     });
                 })
                 ->orderByDesc('number')
-                ->orderByDesc('id')
+                ->orderByDesc('id');
+
+            PresenceFlags::selectPostSummary($postsQuery, [
+                'id',
+                'workspace_id',
+                'number',
+                'human_id',
+                'title',
+                'status',
+                'publish_state',
+                'language',
+                'platforms',
+                'postsyncer',
+                // Captions stay selected for draft workspace chips when groups are empty.
+                'captions',
+                'created_at',
+            ]);
+
+            $items = $postsQuery
                 ->paginate(20)
                 ->withQueryString()
                 ->through(fn (Post $post) => $this->presentSummary($post));
@@ -99,7 +118,7 @@ class PostsController extends Controller
             'filters' => [
                 'status' => $status,
                 'language' => $language,
-                'q' => $query,
+                'q' => $search,
             ],
             'counts' => $this->statusCounts($workspace),
             'tabs' => self::TAB_STATUSES,
@@ -228,8 +247,16 @@ class PostsController extends Controller
             'platforms' => $post->platforms ?? [],
             'groups' => $this->presentGroups($post),
             'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),
-            'has_captions' => ! empty($post->captions),
-            'has_body' => filled($post->body),
+            'has_captions' => PresenceFlags::bool(
+                $post,
+                'has_captions',
+                fn () => ! empty($post->captions),
+            ),
+            'has_body' => PresenceFlags::bool(
+                $post,
+                'has_body',
+                fn () => filled($post->body),
+            ),
             'created_at' => $post->created_at?->toIso8601String(),
         ];
     }

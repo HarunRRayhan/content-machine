@@ -12,6 +12,7 @@ use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\ParseVideoScript;
+use App\Support\Content\PresenceFlags;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Http\RedirectResponse;
@@ -54,15 +55,15 @@ class VideosController extends Controller
 
         $status = $request->string('status')->toString() ?: 'pending';
         $language = $request->string('language')->toString() ?: null;
-        $query = $request->string('q')->toString() ?: null;
+        $search = $request->string('q')->toString() ?: null;
 
         if ($status === 'ideation') {
             $items = Idea::query()
                 ->where('workspace_id', $workspace->id)
                 ->where('kind', 'video')
                 ->where('status', 'open')
-                ->when($query, function ($builder) use ($query) {
-                    $like = '%'.$query.'%';
+                ->when($search, function ($builder) use ($search) {
+                    $like = '%'.$search.'%';
                     $builder->where(function ($inner) use ($like) {
                         $inner->where('title', 'ilike', $like)
                             ->orWhere('human_id', 'ilike', $like)
@@ -75,12 +76,12 @@ class VideosController extends Controller
                 ->withQueryString()
                 ->through(fn (Idea $idea) => $this->presentIdeaSummary($idea));
         } else {
-            $items = Video::query()
+            $videosQuery = Video::query()
                 ->where('workspace_id', $workspace->id)
                 ->where('status', $status)
                 ->when($language, fn ($builder) => $builder->where('language', $language))
-                ->when($query, function ($builder) use ($query) {
-                    $like = '%'.$query.'%';
+                ->when($search, function ($builder) use ($search) {
+                    $like = '%'.$search.'%';
                     $builder->where(function ($inner) use ($like) {
                         $inner->where('title', 'ilike', $like)
                             ->orWhere('human_id', 'ilike', $like)
@@ -88,7 +89,21 @@ class VideosController extends Controller
                     });
                 })
                 ->orderByDesc('number')
-                ->orderByDesc('id')
+                ->orderByDesc('id');
+
+            PresenceFlags::selectVideoSummary($videosQuery, [
+                'id',
+                'workspace_id',
+                'number',
+                'human_id',
+                'title',
+                'status',
+                'publish_state',
+                'language',
+                'created_at',
+            ]);
+
+            $items = $videosQuery
                 ->paginate(20)
                 ->withQueryString()
                 ->through(fn (Video $video) => $this->presentSummary($video));
@@ -99,7 +114,7 @@ class VideosController extends Controller
             'filters' => [
                 'status' => $status,
                 'language' => $language,
-                'q' => $query,
+                'q' => $search,
             ],
             'counts' => $this->statusCounts($workspace),
             'tabs' => self::TAB_STATUSES,
@@ -225,9 +240,21 @@ class VideosController extends Controller
             'status' => $video->status,
             'publish_state' => $video->publish_state,
             'language' => $video->language,
-            'has_script' => filled($video->script_markdown),
-            'has_captions' => ! empty($video->captions),
-            'has_deck' => ! empty($video->deck_manifest),
+            'has_script' => PresenceFlags::bool(
+                $video,
+                'has_script',
+                fn () => filled($video->script_markdown),
+            ),
+            'has_captions' => PresenceFlags::bool(
+                $video,
+                'has_captions',
+                fn () => ! empty($video->captions),
+            ),
+            'has_deck' => PresenceFlags::bool(
+                $video,
+                'has_deck',
+                fn () => ! empty($video->deck_manifest),
+            ),
             'created_at' => $video->created_at?->toIso8601String(),
         ];
     }
@@ -255,7 +282,6 @@ class VideosController extends Controller
             'script_markdown' => $video->script_markdown,
             'parsed' => $parsed,
             'captions' => NormalizeCaptions::forDashboard($video->captions),
-            'deck_manifest' => $video->deck_manifest,
             'has_deck' => ! empty($video->deck_manifest),
             'images' => $this->presentImages($video),
             'video_drive_url' => $video->video_drive_url,

@@ -4,6 +4,8 @@ namespace App\Http\Resources\V1;
 
 use App\Models\Attachment;
 use App\Models\Post;
+use App\Support\Api\IncludeFields;
+use App\Support\Content\PresenceFlags;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -20,6 +22,10 @@ class PostResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $include = $request->routeIs('api.v1.posts.index')
+            ? IncludeFields::fromRequest($request)
+            : IncludeFields::full();
+
         return [
             'id' => $this->id,
             'human_id' => $this->human_id,
@@ -27,8 +33,24 @@ class PostResource extends JsonResource
             'title' => $this->title,
             'language' => $this->language,
             'slug' => $this->slug,
-            'body' => $this->body,
-            'captions' => $this->captions,
+            'body' => $this->when(
+                $include->wants('body'),
+                $this->body,
+            ),
+            'captions' => $this->when(
+                $include->wants('captions'),
+                $this->captions,
+            ),
+            'has_body' => PresenceFlags::bool(
+                $this->resource,
+                'has_body',
+                fn () => filled($this->body),
+            ),
+            'has_captions' => PresenceFlags::bool(
+                $this->resource,
+                'has_captions',
+                fn () => ! empty($this->captions),
+            ),
             'platforms' => $this->platforms,
             'image_drive_urls' => $this->image_drive_urls,
             'status' => $this->status,

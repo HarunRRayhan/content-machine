@@ -359,6 +359,7 @@ class VideosControllerTest extends TestCase
                 ->where('video.captions.0.platforms.0.name', 'tiktok')
                 ->where('video.captions.0.platforms.0.title', 'Hook title')
                 ->where('video.has_deck', false)
+                ->missing('video.deck_manifest')
             );
     }
 
