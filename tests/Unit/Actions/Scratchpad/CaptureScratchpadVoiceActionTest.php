@@ -90,7 +90,8 @@ class CaptureScratchpadVoiceActionTest extends TestCase
         $this->assertSame($mediaAsset->id, $transcription->media_asset_id);
         $this->assertSame('pending', $transcription->status);
 
-        Queue::assertPushed(TranscribeVoiceNoteJob::class, fn (TranscribeVoiceNoteJob $job) => $job->transcription->is($transcription));
+        Queue::assertPushed(TranscribeVoiceNoteJob::class, fn (TranscribeVoiceNoteJob $job) => $job->transcription->is($transcription)
+            && $job->queue === 'scratchpad');
     }
 
     public function test_a_duplicate_upload_reuses_the_existing_media_asset()

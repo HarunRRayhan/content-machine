@@ -63,7 +63,8 @@ class TelegramWebhookControllerTest extends TestCase
 
         $response->assertNoContent();
         Queue::assertPushed(ProcessTelegramUpdateJob::class, fn (ProcessTelegramUpdateJob $job) => $job->telegramBotConfigId === $config->id
-            && $job->update['update_id'] === 100);
+            && $job->update['update_id'] === 100
+            && $job->queue === 'scratchpad');
         $this->assertDatabaseHas('telegram_updates', [
             'telegram_bot_config_id' => $config->id,
             'update_id' => 100,

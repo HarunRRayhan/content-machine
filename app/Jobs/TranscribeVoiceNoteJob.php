@@ -16,7 +16,11 @@ class TranscribeVoiceNoteJob implements ShouldQueue
 
     public function __construct(
         public readonly Transcription $transcription,
-    ) {}
+    ) {
+        // Reads the audio bytes from the scratchpad uploads volume, which
+        // is mounted only on cm-web. Same constraint as ProcessTelegramUpdateJob.
+        $this->onQueue('scratchpad');
+    }
 
     public function handle(TranscribeVoiceNoteAction $action): void
     {
