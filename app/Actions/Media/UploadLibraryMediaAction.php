@@ -22,7 +22,7 @@ class UploadLibraryMediaAction
 
         $asset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, $kind);
 
-        $meta = is_array($asset->meta) ? $asset->meta : [];
+        $meta = $asset->meta;
         $meta['source'] = 'library';
 
         $asset->update([

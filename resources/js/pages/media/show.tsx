@@ -185,7 +185,9 @@ export default function MediaShow({ asset }: PageProps) {
                         <h2 className="text-sm font-medium">Used in</h2>
                         <ul className="space-y-1 text-sm">
                             {asset.usages.map((usage, index) => (
-                                <li key={`${usage.type}-${usage.label}-${index}`}>
+                                <li
+                                    key={`${usage.type}-${usage.label}-${index}`}
+                                >
                                     {usage.href ? (
                                         <Link
                                             href={usage.href}

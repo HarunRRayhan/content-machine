@@ -335,7 +335,7 @@ function WorkspaceIndexChip({ workspace }: { workspace: WorkspaceBucket }) {
         <>
             <span
                 ref={anchorRef}
-                className={`ws-chip${hasPlatforms ? ' ws-chip--menu' : ''}`}
+                className={`ws-chip${hasPlatforms ? 'ws-chip--menu' : ''}`}
                 role={hasPlatforms ? 'button' : undefined}
                 tabIndex={hasPlatforms ? 0 : undefined}
                 aria-expanded={hasPlatforms ? open : undefined}
