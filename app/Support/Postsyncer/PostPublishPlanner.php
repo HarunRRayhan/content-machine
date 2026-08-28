@@ -147,9 +147,20 @@ class PostPublishPlanner
         $buckets = [];
         foreach ($remaining as $platform => $data) {
             $mediaUrls = $this->resolveMediaUrls($post, $data, $defaultMediaUrls);
-            $key = implode("\0", $mediaUrls).'|'.$data['first_comment'];
+            // Only first-comment-capable platforms contribute FC text to the
+            // bucket key. That keeps Facebook/Instagram with a real first
+            // comment out of the same PostSyncer call as Threads/Bluesky,
+            // which would otherwise treat the extra content item as a thread.
+            $firstComment = PublishGroup::supportsFirstComment($platform)
+                && $data['first_comment'] !== ''
+                ? $data['first_comment']
+                : null;
+            $key = implode("\0", $mediaUrls).'|'.($firstComment ?? '');
             $buckets[$key]['mediaUrls'] = $mediaUrls;
             $buckets[$key]['platforms'][$platform] = $data['caption'];
+            if ($firstComment !== null) {
+                $buckets[$key]['firstComment'] = $firstComment;
+            }
         }
 
         foreach ($buckets as $bucket) {
@@ -164,6 +175,7 @@ class PostPublishPlanner
                 captions: $bucket['platforms'],
                 when: $when,
                 publishNow: $when === null,
+                firstComment: $bucket['firstComment'] ?? null,
             );
         }
 
@@ -178,7 +190,30 @@ class PostPublishPlanner
     private function resolveMediaUrls(Post $post, array $platformData, array $defaultMediaUrls): array
     {
         if (array_key_exists('images', $platformData)) {
-            return $this->mediaUrlResolver->resolveNamedImages($post, $platformData['images']);
+            $images = array_values(array_filter(
+                array_map(
+                    static fn (mixed $image): string => trim((string) $image),
+                    $platformData['images'],
+                ),
+                static fn (string $image): bool => $image !== '',
+            ));
+
+            if ($images === []) {
+                return [];
+            }
+
+            $urls = $this->mediaUrlResolver->resolveNamedImages($post, $images);
+
+            // Named covers that fail to resolve used to fall through as a
+            // text publish (P-57). Refuse so the queue surfaces the miss.
+            if (count($urls) !== count($images)) {
+                throw new PostsyncerException(
+                    'Could not resolve publish images: '.implode(', ', $images)
+                    .'. Refusing to publish without the named covers.'
+                );
+            }
+
+            return $urls;
         }
 
         return $defaultMediaUrls;

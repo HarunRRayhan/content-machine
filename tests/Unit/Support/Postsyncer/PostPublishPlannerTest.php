@@ -448,4 +448,113 @@ class PostPublishPlannerTest extends TestCase
         $this->assertSame(['https://drive.usercontent.google.com/download?id=p48-bn-cover&export=download&confirm=t'], $bangla->mediaUrls);
         $this->assertSame(['https://drive.usercontent.google.com/download?id=p48-en-cover&export=download&confirm=t'], $english->mediaUrls);
     }
+
+    public function test_first_comment_is_carried_on_facebook_instagram_groups(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook', 'instagram'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB',
+                        'first_comment' => 'Source numbers',
+                        'images' => ['https://drive.google.com/file/d/a/view'],
+                    ],
+                    'instagram' => [
+                        'caption' => 'IG',
+                        'first_comment' => 'Source numbers',
+                        'images' => ['https://drive.google.com/file/d/a/view'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook', 'instagram'], $groups[0]->platforms);
+        $this->assertSame('Source numbers', $groups[0]->firstComment);
+    }
+
+    public function test_facebook_with_first_comment_splits_from_threads(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100, 'handle' => '@harun'],
+                        'threads' => ['account_id' => 200, 'handle' => '@harun'],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['text' => 'on', 'photo' => 'on'],
+                    'threads' => ['text' => 'on', 'photo' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook', 'threads'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB',
+                        'first_comment' => 'Source numbers',
+                        'images' => ['https://drive.google.com/file/d/a/view'],
+                    ],
+                    'threads' => [
+                        'caption' => 'Threads',
+                        'first_comment' => 'Source numbers',
+                        'images' => ['https://drive.google.com/file/d/a/view'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+
+        $facebook = collect($groups)->first(fn (PublishGroup $g) => $g->platforms === ['facebook']);
+        $threads = collect($groups)->first(fn (PublishGroup $g) => $g->platforms === ['threads']);
+
+        $this->assertNotNull($facebook);
+        $this->assertSame('Source numbers', $facebook->firstComment);
+        $this->assertNotNull($threads);
+        $this->assertNull($threads->firstComment);
+    }
+
+    public function test_unresolvable_named_images_throw_instead_of_planning_text(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB',
+                        'images' => ['missing-cover.png'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('missing-cover.png');
+
+        $this->planner->plan($post, $config, ['confirm_ask' => false]);
+    }
 }
