@@ -217,8 +217,8 @@ class PostsControllerTest extends TestCase
                 ->has('items.data', 1)
                 ->where('items.data.0.groups', $groups)
                 ->where('items.data.0.workspaces', [
-                    ['key' => 'en', 'platforms' => ['twitter']],
-                    ['key' => 'bn', 'platforms' => ['facebook']],
+                    ['key' => 'en', 'groups' => [], 'platforms' => ['twitter']],
+                    ['key' => 'bn', 'groups' => [], 'platforms' => ['facebook']],
                 ])
             );
     }
