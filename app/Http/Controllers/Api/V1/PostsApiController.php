@@ -97,6 +97,8 @@ class PostsApiController extends Controller
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
             'postsyncer' => ['sometimes', 'nullable', 'array'],
             'postsyncer.groups' => ['sometimes', 'array'],
+            'publish_state' => ['sometimes', 'nullable', 'string', Rule::in(Post::PUBLISH_STATES)],
+            'publish_error' => ['sometimes', 'nullable', 'string', 'max:5000'],
         ]);
 
         $action->handle($post, UpdatePostData::fromApiPayload($payload, $post));

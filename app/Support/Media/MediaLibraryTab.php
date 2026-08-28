@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Models\MediaAsset;
 use Illuminate\Database\Eloquent\Builder;
 
 enum MediaLibraryTab: string
@@ -20,8 +21,8 @@ enum MediaLibraryTab: string
     }
 
     /**
-     * @param  Builder<\App\Models\MediaAsset>  $query
-     * @return Builder<\App\Models\MediaAsset>
+     * @param  Builder<MediaAsset>  $query
+     * @return Builder<MediaAsset>
      */
     public function applyTo(Builder $query): Builder
     {

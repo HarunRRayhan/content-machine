@@ -33,6 +33,12 @@ class EnqueuePostPublishAction
             ]);
         }
 
+        if ($this->alreadyPublishedOnPostsyncer($post)) {
+            throw ValidationException::withMessages([
+                'publish' => __('This post already has PostSyncer posts. Republish is not supported yet.'),
+            ]);
+        }
+
         $filtered = array_filter($options, fn ($value) => $value !== null);
 
         $post->forceFill([
@@ -43,5 +49,36 @@ class EnqueuePostPublishAction
         PublishPostJob::dispatch($post, $filtered);
 
         return $post->fresh() ?? $post;
+    }
+
+    private function alreadyPublishedOnPostsyncer(Post $post): bool
+    {
+        $groups = $post->postsyncer['groups'] ?? null;
+
+        if (! is_array($groups)) {
+            return false;
+        }
+
+        foreach ($groups as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $postId = $group['post_id'] ?? null;
+
+            if (is_int($postId) || is_float($postId)) {
+                if ($postId > 0) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (is_string($postId) && trim($postId) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
