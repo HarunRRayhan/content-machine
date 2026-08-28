@@ -1,0 +1,5 @@
+<!-- shield: a plain protective crest, drawn as one closed path with a flat shoulder line so the
+     silhouette still reads at 20px. Deliberately EMPTY inside: consumers overlay their own mark
+     (a check, a cross, an IP strip) or set it on a badge, the way icon-lock is a lock and not a
+     "secured" statement. For "a defense exists / does not exist" beats. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6 20.2 5.4v6.1c0 4.4-3.2 8.3-8.2 9.9-5-1.6-8.2-5.5-8.2-9.9V5.4z"/></svg>

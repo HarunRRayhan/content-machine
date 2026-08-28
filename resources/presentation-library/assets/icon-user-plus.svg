@@ -1,0 +1,4 @@
+<!-- user-plus: follow / subscribe / add a person. Head + shoulders drawn slightly left of
+     centre so the plus has its own quadrant and the two never collide; the shoulder arc stops
+     short on the right rather than tucking under the plus. -->
+<svg viewBox="0 0 24 24"><circle cx="9" cy="7.5" r="3.6"/><path d="M2.5 20.5c0-3.9 2.9-6.6 6.5-6.6 1.2 0 2.3.3 3.3.8"/><path d="M18 13.5v7M14.5 17h7"/></svg>

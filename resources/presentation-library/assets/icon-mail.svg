@@ -1,0 +1,5 @@
+<!-- mail: a sealed envelope, body plus flap. The counterpart to icon-message (a chat bubble):
+     this one is a piece of mail that gets SENT, so it is the glyph for transactional/notification
+     email, newsletters, an outbox. The flap is a separate open path so it keeps the icon set's
+     even stroke weight instead of doubling up on the body's top edge. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.6" y="5" width="18.8" height="14" rx="2.4"/><path d="M3.6 6.5 12 13.2 20.4 6.5"/></svg>

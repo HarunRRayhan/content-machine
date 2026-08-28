@@ -1,0 +1,5 @@
+<!-- bank: pediment over four columns on a plinth. The everyday-institution glyph for queue,
+     counter and money analogies (a branch you walk into), not a building in general. Columns
+     are evenly spaced with the outer pair inset from the roof edge, which is what keeps it
+     from reading as a fence at 20px. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9.2 12 3.5l9.5 5.7"/><path d="M4 9.2h16"/><path d="M6.2 12v6M10 12v6M14 12v6M17.8 12v6"/><path d="M3 20.5h18"/></svg>

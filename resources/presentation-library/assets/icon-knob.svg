@@ -1,0 +1,5 @@
+<!-- knob / dial: a control ring with a pointer, plus two range ticks radiating from it.
+     A static glyph, for label-scale use ("setting", "tuning", "a control"). A deck that
+     needs a knob whose pointer actually moves should draw its own rotating element (the
+     ticks must stay put while the pointer turns) and use this only at label scale. -->
+<svg viewBox="0 0 24 24"><circle cx="12" cy="13.2" r="6.8"/><path d="M12 13.2 16.1 9.1"/><path d="M4.6 7.6 6.2 9.2M19.4 7.6 17.8 9.2"/></svg>

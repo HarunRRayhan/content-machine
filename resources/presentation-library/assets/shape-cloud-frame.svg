@@ -1,0 +1,8 @@
+<!-- cloud FRAME: a cloud silhouette built to be a container, not a glyph. Unlike icon-cloud (a
+     24x24 puffy badge), the puffs are confined to the top ~30% of the viewBox and both side walls
+     run straight down to a flat base, so the lower two-thirds is a usable rectangular interior a
+     consumer can absolutely-position content into. preserveAspectRatio="none" lets it stretch to
+     any lane; pair it with vector-effect:non-scaling-stroke (consumer CSS) or the wide stretch
+     thins the horizontal strokes against the vertical ones. Safe interior is roughly
+     x 8%..93%, y 38%..95% of the rendered box. -->
+<svg viewBox="0 0 200 160" preserveAspectRatio="none" aria-hidden="true"><path d="M8 156 L8 52 C8 38 18 29 31 31 C33 14 53 5 71 12 C83 2 111 2 123 12 C143 4 165 13 167 31 C183 30 193 39 193 53 L193 156 Z"/></svg>

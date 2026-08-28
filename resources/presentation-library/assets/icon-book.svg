@@ -1,0 +1,4 @@
+<!-- book: a thick closed volume standing on its spine, cover on the right, page block visible
+     along the bottom. The inner rule near the spine is what makes it read as THICK (a bound
+     stack) rather than as a single sheet at phone scale; the two cover lines read as a title. -->
+<svg viewBox="0 0 24 24"><path d="M4 19.2A2.7 2.7 0 0 1 6.7 16.5H20"/><path d="M6.7 2.5H20v19H6.7A2.7 2.7 0 0 1 4 18.8V5.2a2.7 2.7 0 0 1 2.7-2.7z"/><path d="M11 7h5.5M11 10.5h3.5"/></svg>

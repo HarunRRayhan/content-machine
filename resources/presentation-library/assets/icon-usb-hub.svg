@@ -1,0 +1,6 @@
+<!-- usb-hub: one upstream cable into a housing with three mouths, three devices hanging off it.
+     Deliberately the "one in, many out" silhouette, where icon-usb-c is the single-connector
+     reading of the same family (same cable + strain relief + oval mouth vocabulary, so the two
+     sit together in a deck). Eleven shapes: meant to be drawn large (10cqh+); at UI-glyph size
+     the three device blocks below start to merge, use icon-usb-c there instead. -->
+<svg viewBox="0 0 24 24"><path d="M12 1.5V4.5"/><rect x="10" y="4.5" width="4" height="2" rx="1"/><rect x="2.5" y="6.5" width="19" height="6" rx="3"/><rect x="5.6" y="8.6" width="3.4" height="1.8" rx="0.9"/><rect x="10.3" y="8.6" width="3.4" height="1.8" rx="0.9"/><rect x="15" y="8.6" width="3.4" height="1.8" rx="0.9"/><path d="M7.3 12.5v3M12 12.5v3M16.7 12.5v3"/><rect x="5.3" y="15.5" width="4" height="5" rx="1.2"/><rect x="10" y="15.5" width="4" height="5" rx="1.2"/><rect x="14.7" y="15.5" width="4" height="5" rx="1.2"/></svg>

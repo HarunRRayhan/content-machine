@@ -1,0 +1,4 @@
+<!-- flame: heat, a burner, a hot/running process, "how much" of something is turned up.
+     Two closed paths (outer body + inner core) so a consumer can tint the core by
+     targeting the second path, or leave both as plain currentColor strokes. -->
+<svg viewBox="0 0 24 24"><path d="M12 2.5c1 3.2 3 4.4 4.4 6.4A7.6 7.6 0 0 1 18 13.4a6 6 0 0 1-12 0c0-2.4 1-4 2-5.4.3 1.4 1 2.3 1.9 2.8C9.4 8 10.2 5 12 2.5z"/><path d="M12 21.2c-1.5 0-2.7-1.1-2.7-2.6 0-1.7 1.5-2.5 2.7-4.4 1.2 1.9 2.7 2.7 2.7 4.4 0 1.5-1.2 2.6-2.7 2.6z"/></svg>

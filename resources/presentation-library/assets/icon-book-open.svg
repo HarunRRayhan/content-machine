@@ -1,0 +1,8 @@
+<!-- book, OPEN: two pages spreading from a centre spine, each with a page-block/cover band
+     under it so the volume reads as thick (the same "this is a bound stack, not a sheet"
+     trick icon-book uses on its closed cover). Sibling to icon-book, not a replacement:
+     closed = a book you own, open = a book being read right now.
+     Both page shapes are closed paths, so a consumer can fill them opaque (fill on the paths,
+     stroke stays currentColor) and let a figure's arm pass behind the book. The two short
+     rules per page read as text at phone scale and add nothing when filled. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6C9.4 3.9 5.6 3.1 2 3.3V17.6C5.6 17.4 9.4 18.2 12 20.3Z"/><path d="M12 6C14.6 3.9 18.4 3.1 22 3.3V17.6C18.4 17.4 14.6 18.2 12 20.3Z"/><path d="M2 17.6V19.9C5.6 19.7 9.4 20.5 12 22.6V20.3C9.4 18.2 5.6 17.4 2 17.6Z"/><path d="M22 17.6V19.9C18.4 19.7 14.6 20.5 12 22.6V20.3C14.6 18.2 18.4 17.4 22 17.6Z"/><path d="M5 8.2h4.4M5 11h3.4M14.6 8.2h4.4M14.6 11h3.4"/></svg>

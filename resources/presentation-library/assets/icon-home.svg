@@ -1,0 +1,7 @@
+<!-- home: a pitched-roof house with a chimney, for domestic analogies (a home network, home vs
+     office vs cafe). Deliberately distinct from its three neighbours at 20px: icon-shop is a
+     storefront with a striped awning, icon-warehouse a wide shed whose roof overhangs both walls,
+     icon-bank a pediment on columns. The chimney is what does the work here, since a bare
+     roof-over-walls silhouette is nearly the same shape as the warehouse. Its two verticals stop
+     exactly on the right roof slope, so it reads as sitting in the roof rather than floating. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.4 11.4 12 3.4l9.6 8"/><path d="M16.6 7.2V4.2h2.2v4.9"/><path d="M5 9.2v11.3h14V9.2"/><path d="M10 20.5v-6.3h4v6.3"/></svg>

@@ -1,0 +1,2 @@
+<!-- server rack: two units, each with a status dot and vent lines -->
+<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><circle class="pl-fill" cx="7" cy="7.5" r="1.1"/><circle class="pl-fill" cx="7" cy="16.5" r="1.1"/><path d="M12.5 7.5H17M12.5 16.5H17"/></svg>

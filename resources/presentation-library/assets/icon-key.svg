@@ -1,0 +1,4 @@
+<!-- key: a session / credential / secret. Bow on the left (ring plus a solid centre so it reads
+     as a key rather than a magnifier at 20px), shaft to the right with two teeth of unequal
+     length. Sits on the same 24 grid as icon-lock, which it is usually paired with. -->
+<svg viewBox="0 0 24 24"><circle cx="7.3" cy="12" r="4.6"/><circle class="pl-fill" cx="7.3" cy="12" r="1.3"/><path d="M11.9 12H21.5"/><path d="M17.6 12v3.6M20.8 12v2.6"/></svg>

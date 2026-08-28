@@ -1,0 +1,4 @@
+<!-- upload: an arrow rising out of an open tray. Stem and head are separate paths so the head
+     keeps its point at small sizes; the tray is open at the top (no lid stroke) so the arrow
+     visibly leaves it. Pairs with icon-doc / icon-image as "this file is going up". -->
+<svg viewBox="0 0 24 24"><path d="M4 15.5v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 16.2V3.6"/><path d="M7 8.6 12 3.6l5 5"/></svg>

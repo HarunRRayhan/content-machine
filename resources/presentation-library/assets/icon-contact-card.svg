@@ -1,0 +1,5 @@
+<!-- contact card: a landscape card with a person on the left and two detail lines on the right.
+     "one saved person"  icon-crowd is many people and char-human is a person themselves, this is
+     the RECORD of a person (a vCard, a Contacts entry). The head is pl-fill so the figure still
+     reads at 20px, where an outlined circle collapses into the shoulder arc. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.2" y="4.5" width="19.6" height="15" rx="2.4"/><circle class="pl-fill" cx="8.2" cy="10.2" r="2"/><path d="M5.1 15.6c.4-1.6 1.7-2.6 3.1-2.6s2.7 1 3.1 2.6"/><path d="M14.6 9.6h4.4M14.6 13.2h4.4"/></svg>

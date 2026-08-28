@@ -1,0 +1,3 @@
+<!-- laptop: lid plus a splayed base line. The two short diagonals are what give it depth;
+     without them the lid alone reads as a plain monitor. -->
+<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="11" rx="1.5"/><path d="M1.5 19h21"/><path d="M4 15.5 2.5 19M20 15.5 21.5 19"/></svg>

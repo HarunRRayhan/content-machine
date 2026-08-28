@@ -26,6 +26,7 @@ class DeployCommand extends Command
     {
         $this->ensureScratchpadUploadsDirectory();
         $this->call('migrate', ['--force' => true]);
+        $this->call('cm:sync-presentation-library');
         $this->call('cm:ensure-admin');
 
         return self::SUCCESS;

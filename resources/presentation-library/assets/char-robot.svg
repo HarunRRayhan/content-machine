@@ -1,0 +1,3 @@
+<!-- stick-figure robot, mid-stride, facing right: square head + antenna + two eye dots is
+     the whole difference a viewer needs from char-human at phone scale. -->
+<svg viewBox="0 0 64 76" aria-hidden="true"><path d="M34 4 V11"/><circle class="pl-fill" cx="34" cy="3.5" r="3"/><rect x="19" y="11" width="31" height="24" rx="8"/><circle class="pl-fill" cx="29" cy="23" r="3"/><circle class="pl-fill" cx="40" cy="23" r="3"/><path d="M34 35 L30 52"/><path d="M33 41 L48 37"/><path d="M33 43 L20 49"/><path d="M30 52 L43 60 L41 72"/><path d="M30 52 L19 60 L22 72"/></svg>

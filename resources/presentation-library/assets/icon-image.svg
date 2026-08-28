@@ -1,0 +1,4 @@
+<!-- image: a picture frame with a sun and a hill line. The generic "this is a photo / an image
+     file" glyph, distinct from icon-doc (a text page). The hill starts outside the left edge on
+     purpose so the frame still reads as a photo, not as a chart, at 20px. -->
+<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle class="pl-fill" cx="8.7" cy="9.6" r="1.6"/><path d="M3.4 17.2 9.6 11.6l3.7 3.3 2.9-2.5 4.4 3.9"/></svg>

@@ -1,0 +1,5 @@
+<!-- plug: a two-prong mains plug with its cable hanging below. The generic glyph for "a
+     connection" as a countable thing you open and close (a DB connection, a socket, a link),
+     which is different from icon-pipeline (a flow) and icon-usb-c (a specific port shape).
+     Prongs stop short of the top edge so the glyph still reads plugged-in-able at 20px. -->
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2.5v4M15 2.5v4"/><path d="M5.5 6.5h13V11a6.5 6.5 0 0 1-13 0z"/><path d="M12 17.5v4"/></svg>

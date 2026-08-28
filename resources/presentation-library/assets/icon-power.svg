@@ -1,0 +1,4 @@
+<!-- power: on / always-on / running. The standard IEC symbol, a ring broken at the top with a
+     vertical stem through the gap. The gap is wide (about 70 degrees) so the stem never touches
+     the arc at small sizes, where a closed ring would read as a clock. -->
+<svg viewBox="0 0 24 24"><path d="M12 3.2v8.4"/><path d="M7.6 6.5a7.3 7.3 0 1 0 8.8 0"/></svg>
