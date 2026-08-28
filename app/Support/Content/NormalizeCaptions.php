@@ -70,7 +70,7 @@ final class NormalizeCaptions
 
     /**
      * @param  array<mixed>  $group
-     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images: list<string>, thread: list<mixed>}>}
+     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}
      */
     private static function normalizeGroup(array $group): array
     {
