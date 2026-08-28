@@ -45,9 +45,22 @@ class PublishPostAction
             $anyScheduled = false;
 
             foreach ($groups as $group) {
-                $mediaIds = $group->mediaUrls !== []
-                    ? $client->uploadFromUrls($group->workspaceId, $group->mediaUrls)
-                    : [];
+                $mediaIds = [];
+
+                if ($group->mediaUrls !== []) {
+                    $mediaIds = $client->uploadFromUrls($group->workspaceId, $group->mediaUrls);
+
+                    // PostSyncer can return 200 with an empty media list when a
+                    // signed/Drive URL fails to fetch. Never continue as a
+                    // text post when the planner expected images (P-57).
+                    if ($mediaIds === []) {
+                        throw new PostsyncerException(
+                            'PostSyncer returned no media ids for '.implode(', ', $group->platforms)
+                            .' after uploading '.count($group->mediaUrls).' url(s).'
+                            .' Refusing to publish this group without images.'
+                        );
+                    }
+                }
 
                 $result = $client->createPost($this->buildPostBody($config, $group, $mediaIds));
                 $publishedGroups[] = $this->formatGroupResult($group, $result);
