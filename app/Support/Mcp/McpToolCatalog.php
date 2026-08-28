@@ -53,6 +53,15 @@ final class McpToolCatalog
                 ], ['url']),
             ],
             [
+                'name' => 'list_media',
+                'description' => 'List workspace media (images, videos, GIFs) for reuse. Filter by tab (images/videos/gifs) and search title, description, or filename with q.',
+                'ability' => 'media:read',
+                'inputSchema' => self::schema([
+                    'tab' => ['type' => 'string', 'enum' => ['images', 'videos', 'gifs']],
+                    'q' => ['type' => 'string', 'description' => 'Search title, description, or filename.'],
+                ]),
+            ],
+            [
                 'name' => 'update_scratchpad',
                 'description' => 'Edit an entry title, body, or language. Dropped entries refuse edits.',
                 'ability' => 'scratchpad:write',

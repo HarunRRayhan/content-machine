@@ -118,7 +118,10 @@ function NavItemWithChildren({ item }: { item: NavItem }) {
                         <DropdownMenuLabel>{item.title}</DropdownMenuLabel>
                         {children.map((child) => (
                             <DropdownMenuItem key={child.title} asChild>
-                                <Link href={child.href} prefetch>
+                                <Link href={child.href} prefetch className="flex items-center gap-2">
+                                    {child.icon && (
+                                        <child.icon className="size-4 shrink-0" />
+                                    )}
                                     {child.title}
                                 </Link>
                             </DropdownMenuItem>
@@ -159,6 +162,9 @@ function NavItemWithChildren({ item }: { item: NavItem }) {
                                         prefetch
                                         onClick={closeMobileSheet}
                                     >
+                                        {child.icon && (
+                                            <child.icon className="size-4 shrink-0" />
+                                        )}
                                         <span>{child.title}</span>
                                     </Link>
                                 </SidebarMenuSubButton>

@@ -90,6 +90,7 @@ class McpServerTest extends TestCase
         $this->assertIsArray($names);
         $listed = array_column($names, 'name');
         $this->assertContains('list_scratchpad', $listed);
+        $this->assertContains('list_media', $listed);
         $this->assertContains('update_idea', $listed);
         $this->assertContains('list_videos', $listed);
         $this->assertContains('get_video', $listed);

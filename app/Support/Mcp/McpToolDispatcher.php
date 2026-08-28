@@ -24,6 +24,7 @@ use App\Http\Resources\V1\PostResource;
 use App\Http\Resources\V1\ScratchpadEntryResource;
 use App\Http\Resources\V1\VideoResource;
 use App\Models\Idea;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
@@ -31,6 +32,8 @@ use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\CurrentApiToken;
 use App\Support\GoogleDrive\GoogleDriveLinkChecker;
+use App\Support\Media\MediaLibraryTab;
+use App\Support\Media\PresentMediaAsset;
 use RuntimeException;
 
 /**
@@ -89,6 +92,7 @@ final class McpToolDispatcher
                 $this->actor(),
                 CaptureScratchpadLinkData::fromApi($this->stringArg($arguments, 'url')),
             )),
+            'list_media' => $this->listMedia($arguments),
             'update_scratchpad' => $this->updateScratchpad($arguments),
             'delete_scratchpad' => $this->deleteScratchpad($arguments),
             'triage_scratchpad' => $this->triageScratchpad($arguments),
@@ -106,6 +110,43 @@ final class McpToolDispatcher
             'publish_post' => $this->publishPost($arguments),
             default => throw new RuntimeException("Unknown tool: {$name}"),
         };
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return list<array<string, mixed>>
+     */
+    private function listMedia(array $arguments): array
+    {
+        $tabValue = $this->optionalString($arguments, 'tab');
+        $tab = $tabValue !== null ? MediaLibraryTab::from($tabValue) : null;
+        $query = $this->optionalString($arguments, 'q');
+
+        $builder = MediaAsset::query()
+            ->where('workspace_id', Workspace::current()?->id)
+            ->whereNotIn('kind', ['audio', 'document'])
+            ->withCount('attachments')
+            ->orderByDesc('created_at')
+            ->limit(50);
+
+        if ($tab !== null) {
+            $tab->applyTo($builder);
+        }
+
+        if ($query !== null && $query !== '') {
+            $like = '%'.$query.'%';
+            $builder->where(function ($inner) use ($like) {
+                $inner->where('title', 'ilike', $like)
+                    ->orWhere('description', 'ilike', $like)
+                    ->orWhere('original_filename', 'ilike', $like);
+            });
+        }
+
+        $presenter = new PresentMediaAsset;
+
+        return $builder->get()
+            ->map(fn (MediaAsset $asset) => $presenter->summary($asset))
+            ->all();
     }
 
     /**
