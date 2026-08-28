@@ -5,7 +5,6 @@ import AiProviderCredentialModelsController from '@/actions/App/Http/Controllers
 import AiProviderCredentialsController from '@/actions/App/Http/Controllers/AiProviders/AiProviderCredentialsController';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
-import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,6 +25,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { home } from '@/routes/dashboard';
 import { index as settingsIndex } from '@/routes/settings';
 import { index, reorder } from '@/routes/settings/ai-providers';

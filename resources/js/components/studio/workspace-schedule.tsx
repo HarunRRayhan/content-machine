@@ -4,8 +4,8 @@ import {
     useLayoutEffect,
     useRef,
     useState,
-    type CSSProperties,
 } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { LANG_META } from '@/lib/lang-meta';
 import type { LangCode } from '@/lib/lang-meta';
