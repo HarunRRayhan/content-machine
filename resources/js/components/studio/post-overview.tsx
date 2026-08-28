@@ -6,7 +6,10 @@ import {
     WorkspaceScheduleLog,
     bucketsFromGroups,
 } from '@/components/studio/workspace-schedule';
-import type { PostsyncerGroup, WorkspaceBucket } from '@/components/studio/workspace-schedule';
+import type {
+    PostsyncerGroup,
+    WorkspaceBucket,
+} from '@/components/studio/workspace-schedule';
 import { studioPostStatus } from '@/lib/platform-meta';
 import type { HandleDirectory } from '@/lib/studio-workspaces';
 

@@ -97,11 +97,7 @@ final class PostWorkspaceBuckets
             );
 
             foreach ($group['platforms'] as $platform) {
-                if (! is_array($platform)) {
-                    continue;
-                }
-
-                $name = strtolower(trim((string) ($platform['name'] ?? '')));
+                $name = strtolower(trim($platform['name']));
 
                 if ($name === '' || $name === 'general') {
                     continue;
@@ -153,7 +149,7 @@ final class PostWorkspaceBuckets
     }
 
     /**
-     * @param  array{bn: list<string>, en: list<string>, unk: list<string>}  $byKey
+     * @param  array<string, list<string>>  $byKey
      * @return list<array{key: string, platforms: list<string>}>
      */
     private function orderedBuckets(array $byKey): array
@@ -161,7 +157,7 @@ final class PostWorkspaceBuckets
         $buckets = [];
 
         foreach (['en', 'bn', 'unk'] as $key) {
-            if ($byKey[$key] === []) {
+            if (($byKey[$key] ?? []) === []) {
                 continue;
             }
 
