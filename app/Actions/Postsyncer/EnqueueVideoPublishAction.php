@@ -33,6 +33,12 @@ class EnqueueVideoPublishAction
             ]);
         }
 
+        if ($this->alreadyPublishedOnPostsyncer($video)) {
+            throw ValidationException::withMessages([
+                'publish' => __('This video already has PostSyncer posts. Republish is not supported yet.'),
+            ]);
+        }
+
         $filtered = array_filter($options, fn ($value) => $value !== null);
 
         $video->forceFill([
@@ -43,5 +49,36 @@ class EnqueueVideoPublishAction
         PublishVideoJob::dispatch($video, $filtered);
 
         return $video->fresh() ?? $video;
+    }
+
+    private function alreadyPublishedOnPostsyncer(Video $video): bool
+    {
+        $groups = $video->postsyncer['groups'] ?? null;
+
+        if (! is_array($groups)) {
+            return false;
+        }
+
+        foreach ($groups as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $postId = $group['post_id'] ?? null;
+
+            if (is_int($postId) || is_float($postId)) {
+                if ($postId > 0) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (is_string($postId) && trim($postId) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

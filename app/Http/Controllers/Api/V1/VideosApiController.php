@@ -89,6 +89,8 @@ class VideosApiController extends Controller
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
             'postsyncer' => ['sometimes', 'nullable', 'array'],
             'postsyncer.groups' => ['sometimes', 'array'],
+            'publish_state' => ['sometimes', 'nullable', 'string', Rule::in(Video::PUBLISH_STATES)],
+            'publish_error' => ['sometimes', 'nullable', 'string', 'max:5000'],
         ]);
 
         $action->handle($video, UpdateVideoData::fromApiPayload($payload, $video));

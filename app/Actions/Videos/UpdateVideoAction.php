@@ -26,6 +26,14 @@ class UpdateVideoAction
             $attributes['postsyncer'] = $data->postsyncer;
         }
 
+        if ($data->hasPublishState) {
+            $attributes['publish_state'] = $data->publishState ?? 'idle';
+        }
+
+        if ($data->hasPublishError) {
+            $attributes['publish_error'] = $data->publishError;
+        }
+
         if ($data->status !== null) {
             $attributes['status'] = $data->status;
         }

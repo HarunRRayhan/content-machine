@@ -222,6 +222,26 @@ class VideosApiTest extends TestCase
         $this->acting()->getJson('/api/v1/videos/BV-1')->assertNotFound();
     }
 
+    public function test_update_can_clear_stale_publish_error(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-57',
+            'number' => 57,
+            'title' => 'Already live',
+            'status' => 'posted',
+            'publish_state' => 'failed',
+            'publish_error' => 'This video already has PostSyncer posts. Republish is not supported yet.',
+        ]);
+
+        $this->acting()->patchJson('/api/v1/videos/BV-57', [
+            'publish_state' => 'succeeded',
+            'publish_error' => null,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'succeeded')
+            ->assertJsonPath('data.publish_error', null);
+    }
+
     public function test_publish_dispatches_job_and_returns_queued_state(): void
     {
         Queue::fake();
@@ -275,5 +295,43 @@ class VideosApiTest extends TestCase
             ->assertJsonValidationErrors('publish');
 
         Queue::assertNothingPushed();
+    }
+
+    public function test_publish_rejects_when_postsyncer_groups_already_exist(): void
+    {
+        Queue::fake();
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-92',
+            'number' => 92,
+            'status' => 'posted',
+            'publish_state' => 'succeeded',
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '133111',
+                    'status' => 'PUBLISHED',
+                    'platforms' => ['instagram'],
+                    'language' => 'english',
+                ]],
+            ],
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-92/publish', [
+            'when' => '2026-08-29T21:30:00+06:00',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish');
+
+        Queue::assertNothingPushed();
+        $video = Video::query()->where('human_id', 'BV-92')->sole();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertNull($video->publish_error);
     }
 }
