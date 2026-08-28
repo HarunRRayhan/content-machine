@@ -70,6 +70,29 @@ class MediaUrlResolver
     }
 
     /**
+     * First attached post document (LinkedIn carousel PDF), if any.
+     */
+    public function linkedinDocumentUrl(Post $post): ?string
+    {
+        $post->loadMissing(['attachments.mediaAsset']);
+
+        foreach ($post->attachments->sortBy('position') as $attachment) {
+            if ($attachment->role !== 'document') {
+                continue;
+            }
+
+            $media = $attachment->mediaAsset;
+            if ($media === null || ! $this->attachmentIsReadable($media)) {
+                continue;
+            }
+
+            return $this->signedPostMediaUrl($post, $media);
+        }
+
+        return null;
+    }
+
+    /**
      * @return array{video: string, cover: ?string}
      */
     public function forVideo(Video $video): array

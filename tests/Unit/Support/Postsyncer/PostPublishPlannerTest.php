@@ -628,4 +628,135 @@ class PostPublishPlannerTest extends TestCase
 
         $this->planner->plan($post, $config, ['confirm_ask' => false]);
     }
+
+    public function test_empty_images_list_keeps_twitter_as_text_not_photo(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'twitter' => ['text' => 'on', 'photo' => 'off'],
+                    'facebook' => ['text' => 'on', 'photo' => 'on'],
+                ],
+                'overrides' => [
+                    'english' => [
+                        'twitter' => ['photo' => 'off'],
+                    ],
+                ],
+            ],
+        ]);
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['twitter', 'facebook'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/cover/view'],
+            'captions' => [
+                'English' => [
+                    'twitter' => [
+                        'caption' => 'Text only tweet',
+                        'images' => [],
+                    ],
+                    'facebook' => [
+                        'caption' => 'FB with cover',
+                        'images' => ['https://drive.google.com/file/d/cover/view'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+
+        $twitter = collect($groups)->first(fn (PublishGroup $g) => in_array('twitter', $g->platforms, true));
+        $this->assertNotNull($twitter);
+        $this->assertSame([], $twitter->mediaUrls);
+    }
+
+    public function test_confirm_ask_allows_matrix_off_platform(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'twitter' => ['text' => 'on', 'photo' => 'on', 'thread' => 'on'],
+                ],
+                'overrides' => [
+                    'bangla' => [
+                        'twitter' => ['text' => 'off', 'photo' => 'off', 'thread' => 'off'],
+                    ],
+                ],
+            ],
+        ]);
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['twitter'],
+            'captions' => [
+                'Bangla' => [
+                    'twitter' => [
+                        'caption' => 'Bangla tweet',
+                        'images' => [],
+                    ],
+                ],
+            ],
+        ]);
+
+        $without = $this->planner->plan($post, $config, ['confirm_ask' => false]);
+        $this->assertSame([], $without);
+
+        $with = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+        $twitter = collect($with)->first(fn (PublishGroup $g) => $g->platforms === ['twitter']);
+        $this->assertNotNull($twitter);
+        $this->assertSame(['twitter' => 'Bangla tweet'], $twitter->captions);
+    }
+
+    public function test_linkedin_is_split_from_instagram_tiktok_image_set(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'instagram' => ['photo' => 'on', 'carousel' => 'on'],
+                    'tiktok' => ['photo' => 'on', 'carousel' => 'on'],
+                    'linkedin' => ['text' => 'on', 'photo' => 'on', 'carousel' => 'on'],
+                ],
+            ],
+        ]);
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $slide = 'https://drive.google.com/file/d/slide1/view';
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['instagram', 'tiktok', 'linkedin'],
+            'captions' => [
+                'English' => [
+                    'instagram' => ['caption' => 'IG', 'images' => [$slide]],
+                    'tiktok' => ['caption' => 'TT', 'images' => [$slide]],
+                    'linkedin' => ['caption' => 'LI', 'images' => [$slide]],
+                ],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $linkedin = collect($groups)->first(fn (PublishGroup $g) => $g->platforms === ['linkedin']);
+        $carousel = collect($groups)->first(
+            fn (PublishGroup $g) => in_array('instagram', $g->platforms, true),
+        );
+
+        $this->assertNotNull($linkedin);
+        $this->assertNotNull($carousel);
+        $this->assertNotContains('linkedin', $carousel->platforms);
+        $this->assertSame(['linkedin' => 'LI'], $linkedin->captions);
+    }
 }

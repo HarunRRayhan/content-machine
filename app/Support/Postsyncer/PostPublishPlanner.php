@@ -81,7 +81,14 @@ class PostPublishPlanner
                 $postType = $mediaUrls !== [] ? 'photo' : 'text';
                 $state = $this->platformState($config, $platform, $postType, $language);
 
-                if ($state === null || $state === 'off') {
+                if ($state === null) {
+                    continue;
+                }
+
+                // Matrix "off" is opt-in: skip unless confirm_ask (explicit publish approval).
+                // P-59: Bangla Twitter stayed dropped even with confirm_ask=True because off
+                // used to share the hard-continue with unsupported/null.
+                if ($state === 'off' && ! $confirmAsk) {
                     continue;
                 }
 
@@ -122,6 +129,27 @@ class PostPublishPlanner
     ): array {
         $remaining = $platformCaptions;
         $groups = [];
+
+        // LinkedIn document carousel must never share a media set with Instagram/TikTok
+        // PNGs (P-59: CM bundled LinkedIn into the EN IG/TikTok group with seven images).
+        if (isset($remaining['linkedin'])) {
+            $linkedin = $remaining['linkedin'];
+            unset($remaining['linkedin']);
+
+            $groups[] = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: ['linkedin'],
+                mediaUrls: $this->resolveLinkedInMediaUrls($post, $linkedin, $defaultMediaUrls),
+                captions: ['linkedin' => $linkedin['caption']],
+                when: $when,
+                publishNow: $when === null,
+                firstComment: PublishGroup::supportsFirstComment('linkedin')
+                    && $linkedin['first_comment'] !== ''
+                    ? $linkedin['first_comment']
+                    : null,
+            );
+        }
 
         // Twitter and Threads each get their own connected-thread PostSyncer call when
         // the caption block has Tweet N segments. Media is distributed one image per
@@ -294,12 +322,31 @@ class PostPublishPlanner
         if (array_key_exists('images', $fields)) {
             $raw = $fields['images'];
             $images = is_array($raw) ? array_values(array_map('strval', $raw)) : [];
-            if ($images !== [] || ! $fromNormalizedCaptions) {
-                $normalized['images'] = $images;
-            }
+            // Always keep an explicit images key, including []. Dropping empty lists
+            // (fromNormalizedCaptions) made **Images:** none inherit every attachment,
+            // so English Twitter was classified as photo and skipped (P-59).
+            $normalized['images'] = $images;
         }
 
         return $normalized;
+    }
+
+    /**
+     * Prefer the attached LinkedIn carousel PDF (`role=document`); fall back to named
+     * images / defaults only when no document is attached.
+     *
+     * @param  array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}  $platformData
+     * @param  list<string>  $defaultMediaUrls
+     * @return list<string>
+     */
+    private function resolveLinkedInMediaUrls(Post $post, array $platformData, array $defaultMediaUrls): array
+    {
+        $documentUrl = $this->mediaUrlResolver->linkedinDocumentUrl($post);
+        if ($documentUrl !== null) {
+            return [$documentUrl];
+        }
+
+        return $this->resolveMediaUrls($post, $platformData, $defaultMediaUrls);
     }
 
     private function languageFromPart(?string $part): ?string
