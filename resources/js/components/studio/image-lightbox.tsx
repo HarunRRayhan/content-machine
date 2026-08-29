@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type LightboxImage = {
     name: string;
@@ -16,6 +16,7 @@ type SourceImage = {
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.25;
+const SWIPE_THRESHOLD_PX = 48;
 
 export function toLightboxImages(images: SourceImage[]): LightboxImage[] {
     const out: LightboxImage[] = [];
@@ -83,100 +84,38 @@ function LightboxBody({
 }) {
     const [zoom, setZoom] = useState(1);
     const [currentIndex, setCurrentIndex] = useState(() =>
-        Math.min(Math.max(startIndex, 0), images.length - 1),
+        clampIndex(startIndex, images.length),
     );
-    const scrollerRef = useRef<HTMLDivElement>(null);
-    const frameRefs = useRef<Array<HTMLElement | null>>([]);
-    const readyForObserverRef = useRef(false);
+    const pointerStartX = useRef<number | null>(null);
+    const multi = images.length > 1;
+    const image = images[currentIndex] ?? images[0];
 
-    useEffect(() => {
-        const index = Math.min(Math.max(startIndex, 0), images.length - 1);
-        const scroller = scrollerRef.current;
-        const frame = frameRefs.current[index];
-
-        readyForObserverRef.current = false;
-
-        // scrollIntoView inside a Radix Dialog portal often scrolls the wrong
-        // ancestor, so the first frame stays on screen and the intersection
-        // observer reports image 1 no matter which thumb was clicked.
-        // currentIndex is seeded from startIndex via useState + key={startIndex}.
-        window.requestAnimationFrame(() => {
-            if (scroller && frame) {
-                scroller.scrollTop = Math.max(
-                    0,
-                    frame.offsetTop - scroller.clientTop - 8,
-                );
-            }
-
-            window.requestAnimationFrame(() => {
-                readyForObserverRef.current = true;
-            });
-        });
-    }, [startIndex, images.length]);
-
-    useEffect(() => {
-        const frames = frameRefs.current.filter(
-            (node): node is HTMLElement => node !== null,
-        );
-
-        if (frames.length === 0) {
-            return;
-        }
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (!readyForObserverRef.current) {
-                    return;
-                }
-
-                const visible = entries
-                    .filter((entry) => entry.isIntersecting)
-                    .sort(
-                        (left, right) =>
-                            right.intersectionRatio - left.intersectionRatio,
-                    )[0];
-
-                if (!visible) {
-                    return;
-                }
-
-                const index = frames.indexOf(visible.target as HTMLElement);
-
-                if (index >= 0) {
-                    setCurrentIndex(index);
-                }
-            },
-            { root: scrollerRef.current, threshold: 0.55 },
-        );
-
-        for (const frame of frames) {
-            observer.observe(frame);
-        }
-
-        return () => observer.disconnect();
+    const goTo = useCallback((index: number) => {
+        setCurrentIndex(clampIndex(index, images.length));
+        setZoom(1);
     }, [images.length]);
 
-    useEffect(() => {
-        const node = scrollerRef.current;
-
-        if (node === null) {
+    const goPrev = useCallback(() => {
+        if (images.length <= 1) {
             return;
         }
 
-        const onWheel = (event: WheelEvent) => {
-            if (!event.ctrlKey && !event.metaKey) {
-                return;
-            }
+        setCurrentIndex((current) =>
+            current <= 0 ? images.length - 1 : current - 1,
+        );
+        setZoom(1);
+    }, [images.length]);
 
-            event.preventDefault();
-            const direction = event.deltaY < 0 ? 1 : -1;
-            setZoom((current) => clampZoom(current + direction * ZOOM_STEP));
-        };
+    const goNext = useCallback(() => {
+        if (images.length <= 1) {
+            return;
+        }
 
-        node.addEventListener('wheel', onWheel, { passive: false });
-
-        return () => node.removeEventListener('wheel', onWheel);
-    }, []);
+        setCurrentIndex((current) =>
+            current >= images.length - 1 ? 0 : current + 1,
+        );
+        setZoom(1);
+    }, [images.length]);
 
     useEffect(() => {
         const onKey = (event: KeyboardEvent) => {
@@ -189,12 +128,42 @@ function LightboxBody({
                 event.preventDefault();
                 setZoom((current) => clampZoom(current - ZOOM_STEP));
             }
+
+            if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                goPrev();
+            }
+
+            if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                goNext();
+            }
         };
 
         window.addEventListener('keydown', onKey);
 
         return () => window.removeEventListener('keydown', onKey);
+    }, [goPrev, goNext]);
+
+    useEffect(() => {
+        const onWheel = (event: WheelEvent) => {
+            if (!event.ctrlKey && !event.metaKey) {
+                return;
+            }
+
+            event.preventDefault();
+            const direction = event.deltaY < 0 ? 1 : -1;
+            setZoom((current) => clampZoom(current + direction * ZOOM_STEP));
+        };
+
+        window.addEventListener('wheel', onWheel, { passive: false });
+
+        return () => window.removeEventListener('wheel', onWheel);
     }, []);
+
+    if (!image) {
+        return null;
+    }
 
     return (
         <Dialog.Portal>
@@ -204,15 +173,15 @@ function LightboxBody({
                 aria-describedby={undefined}
             >
                 <Dialog.Title className="sr-only">
-                    {images.length > 1
-                        ? `${images.length} images`
-                        : (images[0]?.name ?? 'Image')}
+                    {multi
+                        ? `Image ${currentIndex + 1} of ${images.length}`
+                        : image.name}
                 </Dialog.Title>
                 <div className="image-lightbox-bar">
                     <p className="image-lightbox-count">
-                        {images.length > 1
+                        {multi
                             ? `${currentIndex + 1} / ${images.length}`
-                            : (images[0]?.name ?? 'Image')}
+                            : image.name}
                     </p>
                     <div className="image-lightbox-zoom">
                         <button
@@ -244,32 +213,92 @@ function LightboxBody({
                     </Dialog.Close>
                 </div>
                 <div
-                    ref={scrollerRef}
-                    className="image-lightbox-scroller"
+                    className="image-lightbox-stage"
                     style={{ ['--lb-zoom' as string]: String(zoom) }}
+                    onPointerDown={(event) => {
+                        if (event.pointerType === 'mouse' && event.button !== 0) {
+                            return;
+                        }
+
+                        pointerStartX.current = event.clientX;
+                    }}
+                    onPointerUp={(event) => {
+                        const start = pointerStartX.current;
+                        pointerStartX.current = null;
+
+                        if (start === null || !multi || zoom > 1) {
+                            return;
+                        }
+
+                        const delta = event.clientX - start;
+
+                        if (Math.abs(delta) < SWIPE_THRESHOLD_PX) {
+                            return;
+                        }
+
+                        if (delta < 0) {
+                            goNext();
+                        } else {
+                            goPrev();
+                        }
+                    }}
+                    onPointerCancel={() => {
+                        pointerStartX.current = null;
+                    }}
                 >
-                    {images.map((image, index) => (
-                        <figure
-                            key={`${image.url}-${index}`}
-                            ref={(node) => {
-                                frameRefs.current[index] = node;
-                            }}
-                            className="image-lightbox-frame"
+                    {multi ? (
+                        <button
+                            type="button"
+                            className="image-lightbox-nav image-lightbox-nav-prev"
+                            onClick={goPrev}
+                            aria-label="Previous image"
                         >
-                            <button
-                                type="button"
-                                className="image-lightbox-shot"
-                                data-zoomed={zoom > 1 ? 'true' : 'false'}
-                                onClick={() =>
-                                    setZoom((current) => (current > 1 ? 1 : 2))
-                                }
-                            >
-                                <img src={image.url} alt={image.name} />
-                            </button>
-                            <figcaption>{image.name}</figcaption>
-                        </figure>
-                    ))}
+                            ‹
+                        </button>
+                    ) : null}
+                    <figure className="image-lightbox-frame">
+                        <button
+                            type="button"
+                            className="image-lightbox-shot"
+                            data-zoomed={zoom > 1 ? 'true' : 'false'}
+                            onClick={() =>
+                                setZoom((current) => (current > 1 ? 1 : 2))
+                            }
+                        >
+                            <img src={image.url} alt={image.name} />
+                        </button>
+                        <figcaption>{image.name}</figcaption>
+                    </figure>
+                    {multi ? (
+                        <button
+                            type="button"
+                            className="image-lightbox-nav image-lightbox-nav-next"
+                            onClick={goNext}
+                            aria-label="Next image"
+                        >
+                            ›
+                        </button>
+                    ) : null}
                 </div>
+                {multi ? (
+                    <div className="image-lightbox-thumbs" role="tablist">
+                        {images.map((thumb, index) => (
+                            <button
+                                key={`${thumb.url}-${index}`}
+                                type="button"
+                                role="tab"
+                                aria-selected={index === currentIndex}
+                                className="image-lightbox-thumb"
+                                data-active={
+                                    index === currentIndex ? 'true' : 'false'
+                                }
+                                onClick={() => goTo(index)}
+                            >
+                                <img src={thumb.url} alt={thumb.name} />
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
             </Dialog.Content>
         </Dialog.Portal>
     );
@@ -277,4 +306,12 @@ function LightboxBody({
 
 function clampZoom(value: number): number {
     return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 4) / 4));
+}
+
+function clampIndex(index: number, length: number): number {
+    if (length <= 0) {
+        return 0;
+    }
+
+    return Math.min(Math.max(index, 0), length - 1);
 }
