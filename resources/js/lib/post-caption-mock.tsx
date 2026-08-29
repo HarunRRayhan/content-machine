@@ -206,7 +206,7 @@ function MockImages({
                             onClick={() =>
                                 setOpenIndex(
                                     viewable.findIndex(
-                                        (item) => item.name === image.name,
+                                        (item) => item.url === image.url,
                                     ),
                                 )
                             }

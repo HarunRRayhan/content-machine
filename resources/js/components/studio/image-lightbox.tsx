@@ -87,13 +87,30 @@ function LightboxBody({
     );
     const scrollerRef = useRef<HTMLDivElement>(null);
     const frameRefs = useRef<Array<HTMLElement | null>>([]);
+    const readyForObserverRef = useRef(false);
 
     useEffect(() => {
         const index = Math.min(Math.max(startIndex, 0), images.length - 1);
+        const scroller = scrollerRef.current;
         const frame = frameRefs.current[index];
 
+        readyForObserverRef.current = false;
+        setCurrentIndex(index);
+
+        // scrollIntoView inside a Radix Dialog portal often scrolls the wrong
+        // ancestor, so the first frame stays on screen and the intersection
+        // observer reports image 1 no matter which thumb was clicked.
         window.requestAnimationFrame(() => {
-            frame?.scrollIntoView({ block: 'start' });
+            if (scroller && frame) {
+                scroller.scrollTop = Math.max(
+                    0,
+                    frame.offsetTop - scroller.clientTop - 8,
+                );
+            }
+
+            window.requestAnimationFrame(() => {
+                readyForObserverRef.current = true;
+            });
         });
     }, [startIndex, images.length]);
 
@@ -108,6 +125,10 @@ function LightboxBody({
 
         const observer = new IntersectionObserver(
             (entries) => {
+                if (!readyForObserverRef.current) {
+                    return;
+                }
+
                 const visible = entries
                     .filter((entry) => entry.isIntersecting)
                     .sort(
