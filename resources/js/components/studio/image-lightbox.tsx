@@ -95,11 +95,11 @@ function LightboxBody({
         const frame = frameRefs.current[index];
 
         readyForObserverRef.current = false;
-        setCurrentIndex(index);
 
         // scrollIntoView inside a Radix Dialog portal often scrolls the wrong
         // ancestor, so the first frame stays on screen and the intersection
         // observer reports image 1 no matter which thumb was clicked.
+        // currentIndex is seeded from startIndex via useState + key={startIndex}.
         window.requestAnimationFrame(() => {
             if (scroller && frame) {
                 scroller.scrollTop = Math.max(
