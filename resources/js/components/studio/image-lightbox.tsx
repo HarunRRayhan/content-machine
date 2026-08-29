@@ -90,10 +90,13 @@ function LightboxBody({
     const multi = images.length > 1;
     const image = images[currentIndex] ?? images[0];
 
-    const goTo = useCallback((index: number) => {
-        setCurrentIndex(clampIndex(index, images.length));
-        setZoom(1);
-    }, [images.length]);
+    const goTo = useCallback(
+        (index: number) => {
+            setCurrentIndex(clampIndex(index, images.length));
+            setZoom(1);
+        },
+        [images.length],
+    );
 
     const goPrev = useCallback(() => {
         if (images.length <= 1) {
@@ -216,7 +219,10 @@ function LightboxBody({
                     className="image-lightbox-stage"
                     style={{ ['--lb-zoom' as string]: String(zoom) }}
                     onPointerDown={(event) => {
-                        if (event.pointerType === 'mouse' && event.button !== 0) {
+                        if (
+                            event.pointerType === 'mouse' &&
+                            event.button !== 0
+                        ) {
                             return;
                         }
 
