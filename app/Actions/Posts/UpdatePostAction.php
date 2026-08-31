@@ -30,6 +30,10 @@ class UpdatePostAction
             $attributes['publish_error'] = $data->publishError;
         }
 
+        if ($data->hasTemplate) {
+            $attributes['template'] = $data->template;
+        }
+
         if ($data->status !== null) {
             $attributes['status'] = $data->status;
         }
@@ -40,6 +44,9 @@ class UpdatePostAction
             $attributes['captions'] = $data->captions;
             $attributes['platforms'] = $data->platforms;
             $attributes['status'] = $data->status ?? $post->status;
+            if ($data->hasTemplate) {
+                $attributes['template'] = $data->template;
+            }
         }
 
         $post->forceFill($attributes)->save();

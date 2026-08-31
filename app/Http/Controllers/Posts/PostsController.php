@@ -13,6 +13,7 @@ use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\PostWorkspaceBuckets;
 use App\Support\Content\PresenceFlags;
+use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -354,6 +355,8 @@ class PostsController extends Controller
             'image_drive_urls' => $post->image_drive_urls ?? [],
             'language' => $post->language,
             'slug' => $post->slug,
+            'template' => $post->template,
+            'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
