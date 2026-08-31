@@ -10,6 +10,10 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
+/**
+ * Text, link, and command updates use the supervised default queue. Photo and
+ * voice updates stay on scratchpad because their media files live on cm-web.
+ */
 class ProcessTelegramUpdateJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -21,12 +25,17 @@ class ProcessTelegramUpdateJob implements ShouldQueue
         public readonly int $telegramBotConfigId,
         public readonly array $update,
     ) {
-        // Photo/voice captures write into the scratchpad uploads volume,
-        // which is mounted only on cm-web (Railway volumes are one-service).
-        // cm-worker's default queue has no volume, so a voice note saved
-        // there is invisible to the dashboard's media endpoint. Keep this
-        // job on the scratchpad queue that cm-web consumes.
-        $this->onQueue('scratchpad');
+        $this->onQueue('default');
+
+        $message = $update['message'] ?? null;
+
+        if (is_array($message) && (isset($message['photo']) || isset($message['voice']))) {
+            // Photo/voice captures write into the scratchpad uploads volume,
+            // which is mounted only on cm-web (Railway volumes are one-service).
+            // cm-worker's default queue has no volume, so media updates must
+            // stay on the scratchpad queue that cm-web consumes.
+            $this->onQueue('scratchpad');
+        }
     }
 
     public function handle(HandleTelegramUpdateAction $action): void
