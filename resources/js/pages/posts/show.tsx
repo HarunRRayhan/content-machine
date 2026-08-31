@@ -9,6 +9,7 @@ import type { LangCode } from '@/lib/lang-meta';
 import type { HandleDirectory } from '@/lib/post-caption-mock';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
+import { show as showTemplate } from '@/routes/media/templates';
 import { index } from '@/routes/posts';
 
 type PostDetail = {
@@ -40,6 +41,12 @@ type PostDetail = {
     handles?: HandleDirectory;
     language: string | null;
     slug: string | null;
+    template: string | null;
+    template_meta: {
+        letter: string;
+        name: string;
+        label: string;
+    } | null;
     status: string;
     publish_state: string;
     publish_error: string | null;
@@ -91,6 +98,19 @@ export default function PostShow({ post }: PageProps) {
                     <div className="vhead-t">
                         <span className="no">P-{post.number}</span>
                         <h2>{post.title}</h2>
+                        {post.template_meta && (
+                            <Link
+                                href={showTemplate.url(
+                                    post.template_meta.letter,
+                                )}
+                                className="mt-1 inline-flex w-fit items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+                            >
+                                {post.template_meta.label}
+                                <span className="ml-1 text-muted-foreground">
+                                    · {post.template_meta.name}
+                                </span>
+                            </Link>
+                        )}
                     </div>
                 </div>
 

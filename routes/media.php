@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Media\MediaLibraryController;
+use App\Http\Controllers\Media\PostDesignTemplatesController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Support\Facades\Route;
 
@@ -11,6 +12,10 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('media/images', [MediaLibraryController::class, 'images'])->name('media.images');
         Route::get('media/videos', [MediaLibraryController::class, 'videos'])->name('media.videos');
         Route::get('media/gifs', [MediaLibraryController::class, 'gifs'])->name('media.gifs');
+        Route::get('media/templates', [PostDesignTemplatesController::class, 'index'])->name('media.templates');
+        Route::get('media/templates/{letter}', [PostDesignTemplatesController::class, 'show'])
+            ->where('letter', '[A-Fa-f]')
+            ->name('media.templates.show');
 
         Route::post('media', [MediaLibraryController::class, 'store'])->name('media.store');
 

@@ -55,6 +55,9 @@ class CreatePostAction
                 'title' => (string) $attributes['title'],
                 'language' => $attributes['language'] ?? null,
                 'slug' => $attributes['slug'] ?? null,
+                'template' => isset($attributes['template'])
+                    ? (is_string($attributes['template']) ? strtoupper($attributes['template']) : null)
+                    : null,
                 'body' => $attributes['body'] ?? null,
                 'captions' => $attributes['captions'] ?? null,
                 'platforms' => $attributes['platforms'] ?? null,

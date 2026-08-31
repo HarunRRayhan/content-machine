@@ -25,6 +25,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string $title
  * @property string|null $language
  * @property string|null $slug
+ * @property string|null $template
  * @property string|null $body
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $platforms
@@ -70,6 +71,7 @@ class Post extends Model
         'title',
         'language',
         'slug',
+        'template',
         'body',
         'captions',
         'platforms',

@@ -164,6 +164,27 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.image_drive_urls.0', 'https://drive.google.com/file/d/photoOne/view');
     }
 
+    public function test_store_and_patch_accept_template_letter(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-63',
+            'number' => 63,
+            'title' => 'Database pairs',
+            'status' => 'draft',
+            'template' => 'd',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.template', 'D');
+
+        $this->acting()->patchJson('/api/v1/posts/P-63', [
+            'template' => 'E',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.template', 'E');
+
+        $this->assertSame('E', Post::query()->where('human_id', 'P-63')->value('template'));
+    }
+
     public function test_index_lists_posts(): void
     {
         Post::factory()->for($this->workspace)->create(['human_id' => 'P-1', 'number' => 1]);

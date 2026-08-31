@@ -10,6 +10,7 @@ import {
     Images,
     KeySquare,
     LayoutDashboard,
+    LayoutTemplate,
     NotebookPen,
     Settings,
     SquarePen,
@@ -37,6 +38,7 @@ import {
     images as mediaImages,
     videos as mediaVideos,
     gifs as mediaGifs,
+    templates as mediaTemplates,
 } from '@/routes/media';
 import { index as postsIndex } from '@/routes/posts';
 import { index as scratchpadIndex } from '@/routes/scratchpad';
@@ -94,6 +96,11 @@ const mainNavItems: NavItem[] = [
                 title: 'GIFs',
                 href: mediaGifs(),
                 icon: ImagePlay,
+            },
+            {
+                title: 'Templates',
+                href: mediaTemplates(),
+                icon: LayoutTemplate,
             },
         ],
     },

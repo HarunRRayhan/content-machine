@@ -4,6 +4,7 @@ namespace App\Data\Posts;
 
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
+use App\Support\Media\PostDesignTemplate;
 
 /**
  * Editable surface for a post. Drive URL columns are written only when
@@ -22,6 +23,7 @@ final readonly class UpdatePostData
         public ?string $body = null,
         public ?string $language = null,
         public ?string $slug = null,
+        public ?string $template = null,
         public ?array $captions = null,
         public ?array $platforms = null,
         public ?array $imageDriveUrls = null,
@@ -34,6 +36,7 @@ final readonly class UpdatePostData
         public bool $hasPostsyncer = false,
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
+        public bool $hasTemplate = false,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -76,6 +79,24 @@ final readonly class UpdatePostData
         return $urls === [] ? null : $urls;
     }
 
+    public static function normalizeTemplate(mixed $raw): ?string
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        if (! is_string($raw)) {
+            return null;
+        }
+
+        $letter = strtoupper(trim($raw));
+        if (! in_array($letter, PostDesignTemplate::LETTERS, true)) {
+            return null;
+        }
+
+        return $letter;
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -86,6 +107,9 @@ final readonly class UpdatePostData
             body: array_key_exists('body', $payload) ? ($payload['body'] !== null ? (string) $payload['body'] : null) : $current->body,
             language: array_key_exists('language', $payload) ? ($payload['language'] !== null ? (string) $payload['language'] : null) : $current->language,
             slug: array_key_exists('slug', $payload) ? ($payload['slug'] !== null ? (string) $payload['slug'] : null) : $current->slug,
+            template: array_key_exists('template', $payload)
+                ? self::normalizeTemplate($payload['template'])
+                : $current->template,
             captions: array_key_exists('captions', $payload) ? (is_array($payload['captions']) ? $payload['captions'] : null) : $current->captions,
             platforms: array_key_exists('platforms', $payload) ? (is_array($payload['platforms']) ? $payload['platforms'] : null) : $current->platforms,
             status: array_key_exists('status', $payload) ? (string) $payload['status'] : $current->status,
@@ -106,6 +130,7 @@ final readonly class UpdatePostData
             hasPostsyncer: array_key_exists('postsyncer', $payload),
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
+            hasTemplate: array_key_exists('template', $payload),
         );
     }
 }
