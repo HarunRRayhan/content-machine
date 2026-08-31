@@ -25,10 +25,10 @@ final readonly class PostDesignTemplate
      */
     public static function all(): array
     {
-        return array_values(array_map(
+        return array_map(
             static fn (string $letter) => self::from($letter),
             self::LETTERS,
-        ));
+        );
     }
 
     public static function from(string $letter): self
