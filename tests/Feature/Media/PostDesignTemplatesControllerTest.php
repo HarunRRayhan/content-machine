@@ -40,6 +40,8 @@ class PostDesignTemplatesControllerTest extends TestCase
                 ->has('templates', 6)
                 ->where('templates.0.letter', 'A')
                 ->where('templates.5.letter', 'F')
+                ->where('templates.0.preview_url', asset('images/templates/template-a-light-data-driven.png'))
+                ->where('templates.5.preview_url', asset('images/templates/template-f-product-showcase.png'))
             );
     }
 
@@ -69,6 +71,7 @@ class PostDesignTemplatesControllerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('media/templates/show')
                 ->where('template.letter', 'D')
+                ->where('template.preview_url', asset('images/templates/template-d-split-comparison.png'))
                 ->has('posts', 1)
                 ->where('posts.0.human_id', 'P-63')
             );
@@ -84,6 +87,11 @@ class PostDesignTemplatesControllerTest extends TestCase
     public function test_post_design_template_catalog_covers_every_letter(): void
     {
         $this->assertCount(6, PostDesignTemplate::all());
+
+        foreach (PostDesignTemplate::all() as $template) {
+            $this->assertFileExists(public_path("images/templates/{$template->slug}.png"));
+        }
+
         $this->assertSame('D', PostDesignTemplate::from('d')->letter);
         $this->assertNull(PostDesignTemplate::tryFrom(null));
     }

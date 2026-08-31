@@ -1,5 +1,6 @@
 import { Head, Link } from '@inertiajs/react';
 import Heading from '@/components/heading';
+import TemplatePreview from '@/components/media/template-preview';
 import { Badge } from '@/components/ui/badge';
 import { templates as templatesIndex } from '@/routes/media';
 import { show as showPost } from '@/routes/posts';
@@ -13,6 +14,7 @@ type TemplateDetail = {
     proven_on_human_id: string | null;
     proven_on_label: string | null;
     label: string;
+    preview_url: string;
 };
 
 type TemplatePost = {
@@ -52,61 +54,72 @@ export default function MediaTemplateShow({ template, posts }: PageProps) {
                     />
                 </div>
 
-                <div className="max-w-3xl space-y-3 rounded-xl border border-border p-5">
-                    <p className="text-sm leading-relaxed">
-                        {template.description}
-                    </p>
-                    <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                        <Badge variant="secondary">
-                            {template.visual_identity}
-                        </Badge>
-                        <span className="font-mono text-xs">
-                            {template.slug}
-                        </span>
-                    </div>
-                    {template.proven_on_human_id && (
-                        <p className="text-sm text-muted-foreground">
-                            Proven on {template.proven_on_human_id}
-                            {template.proven_on_label
-                                ? ` (${template.proven_on_label})`
-                                : ''}
-                        </p>
-                    )}
-                </div>
+                <div className="grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+                    <TemplatePreview
+                        src={template.preview_url}
+                        alt={`${template.label} preview`}
+                        letter={template.letter}
+                        className="aspect-square rounded-xl border border-border shadow-sm"
+                    />
 
-                <div>
-                    <h3 className="mb-3 text-sm font-semibold tracking-wide text-muted-foreground uppercase">
-                        Posts using this template ({posts.length})
-                    </h3>
-                    {posts.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                            No posts in this workspace are tagged with Template{' '}
-                            {template.letter} yet.
-                        </p>
-                    ) : (
-                        <ul className="divide-y divide-border rounded-xl border border-border">
-                            {posts.map((post) => (
-                                <li key={post.id}>
-                                    <Link
-                                        href={showPost.url(post.id)}
-                                        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 hover:bg-muted/40"
-                                    >
-                                        <div>
-                                            <span className="mr-2 font-mono text-sm text-muted-foreground">
-                                                {post.human_id}
-                                            </span>
-                                            <span className="font-medium">
-                                                {post.title}
-                                            </span>
-                                        </div>
-                                        <Badge variant="outline">
-                                            {post.status}
-                                        </Badge>
-                                    </Link>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
+                    <div className="space-y-6">
+                        <div className="space-y-3 rounded-xl border border-border p-5">
+                            <p className="text-sm leading-relaxed">
+                                {template.description}
+                            </p>
+                            <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                                <Badge variant="secondary">
+                                    {template.visual_identity}
+                                </Badge>
+                                <span className="font-mono text-xs">
+                                    {template.slug}
+                                </span>
+                            </div>
+                            {template.proven_on_human_id && (
+                                <p className="text-sm text-muted-foreground">
+                                    Proven on {template.proven_on_human_id}
+                                    {template.proven_on_label
+                                        ? ` (${template.proven_on_label})`
+                                        : ''}
+                                </p>
+                            )}
+                        </div>
+
+                        <div>
+                            <h3 className="mb-3 text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+                                Posts using this template ({posts.length})
+                            </h3>
+                            {posts.length === 0 ? (
+                                <p className="text-sm text-muted-foreground">
+                                    No posts in this workspace are tagged with
+                                    Template {template.letter} yet.
+                                </p>
+                            ) : (
+                                <ul className="divide-y divide-border rounded-xl border border-border">
+                                    {posts.map((post) => (
+                                        <li key={post.id}>
+                                            <Link
+                                                href={showPost.url(post.id)}
+                                                className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 hover:bg-muted/40"
+                                            >
+                                                <div>
+                                                    <span className="mr-2 font-mono text-sm text-muted-foreground">
+                                                        {post.human_id}
+                                                    </span>
+                                                    <span className="font-medium">
+                                                        {post.title}
+                                                    </span>
+                                                </div>
+                                                <Badge variant="outline">
+                                                    {post.status}
+                                                </Badge>
+                                            </Link>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
         </>
