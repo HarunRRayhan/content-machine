@@ -121,6 +121,7 @@ final readonly class PostDesignTemplate
             'proven_on_human_id' => $this->provenOnHumanId,
             'proven_on_label' => $this->provenOnLabel,
             'label' => "Template {$this->letter}",
+            'preview_url' => asset("images/templates/{$this->slug}.png"),
         ];
     }
 }
