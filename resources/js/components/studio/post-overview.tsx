@@ -1,6 +1,8 @@
-import { router } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
+import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import PublishDialog from '@/components/content/publish-dialog';
+import TemplatePreview from '@/components/media/template-preview';
 import {
     PlatformChipRow,
     WorkspacePlatformChips,
@@ -13,6 +15,7 @@ import type {
 } from '@/components/studio/workspace-schedule';
 import { studioPostStatus } from '@/lib/platform-meta';
 import type { HandleDirectory } from '@/lib/studio-workspaces';
+import { show as showTemplate } from '@/routes/media/templates';
 
 const POST_PIPELINE = [
     { key: 'draft', label: 'Draft' },
@@ -28,6 +31,13 @@ type Props = {
     status: string;
     platforms: string[];
     language?: string | null;
+    templateMeta: {
+        letter: string;
+        name: string;
+        label: string;
+        preview_url: string;
+        visual_identity: string;
+    } | null;
     workspaces?: WorkspaceBucket[];
     publishUrl: string;
     postsyncerReady: boolean;
@@ -133,6 +143,7 @@ export default function PostOverview({
     status,
     platforms,
     language,
+    templateMeta,
     workspaces,
     publishUrl,
     postsyncerReady,
@@ -314,6 +325,44 @@ export default function PostOverview({
                     />
                 </div>
             </section>
+            {templateMeta && (
+                <section className="pane">
+                    <div className="pane-head">
+                        <span className="k">Template</span>
+                    </div>
+                    <Link
+                        href={showTemplate.url(templateMeta.letter)}
+                        aria-label={`Open ${templateMeta.label} details`}
+                        className="group m-4 flex items-center overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg3)] text-left no-underline transition hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow)]"
+                    >
+                        <TemplatePreview
+                            src={templateMeta.preview_url}
+                            alt={`${templateMeta.label} preview`}
+                            letter={templateMeta.letter}
+                            className="size-20 shrink-0"
+                        />
+                        <span className="min-w-0 flex-1 px-3 py-2.5">
+                            <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-[var(--ink-faint)] uppercase">
+                                Template reference
+                                <ArrowUpRight className="size-3.5" />
+                            </span>
+                            <span className="mt-0.5 block truncate text-sm font-semibold text-[var(--ink)]">
+                                {templateMeta.label}
+                                <span className="font-normal text-[var(--ink-soft)]">
+                                    {' · '}
+                                    {templateMeta.name}
+                                </span>
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-[var(--ink-soft)]">
+                                <span className="font-medium text-[var(--ink)]">
+                                    Type:
+                                </span>{' '}
+                                {templateMeta.visual_identity}
+                            </span>
+                        </span>
+                    </Link>
+                </section>
+            )}
         </div>
     );
 }
