@@ -8,11 +8,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Idea;
 use App\Models\MediaAsset;
+use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\ParseVideoScript;
 use App\Support\Content\PresenceFlags;
+use App\Support\GoogleDrive\GoogleDriveConfig;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Http\RedirectResponse;
@@ -134,7 +136,7 @@ class VideosController extends Controller
         $video->load(['attachments.mediaAsset']);
 
         return Inertia::render('videos/show', [
-            'video' => $this->presentDetail($video),
+            'video' => $this->presentDetail($video, $request, $workspace),
         ]);
     }
 
@@ -262,16 +264,14 @@ class VideosController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function presentDetail(Video $video): array
+    private function presentDetail(Video $video, Request $request, Workspace $workspace): array
     {
         $parsed = ParseVideoScript::fromMarkdown(
             $video->script_markdown ?? '',
             $video->language ?? 'bn',
         );
-        $workspace = Workspace::current();
-        $postsyncerConfig = $workspace !== null
-            ? PostsyncerConfig::fromWorkspace($workspace)
-            : null;
+        $postsyncerConfig = PostsyncerConfig::fromWorkspace($workspace);
+        $googleDriveConfig = GoogleDriveConfig::fromWorkspace($workspace);
 
         return [
             'id' => $video->id,
@@ -286,19 +286,35 @@ class VideosController extends Controller
             'images' => $this->presentImages($video),
             'video_drive_url' => $video->video_drive_url,
             'cover_drive_url' => $video->cover_drive_url,
+            'google_drive_configured' => GoogleDriveConfig::clientConfigured(),
+            'google_drive_connected' => $googleDriveConfig->isConnected(),
+            'google_drive_folder_id' => $googleDriveConfig->folderId(),
+            'google_drive_can_browse' => $this->canManageGoogleDrive($request, $workspace),
             'language' => $video->language,
             'slug' => $video->slug,
             'status' => $video->status,
             'publish_state' => $video->publish_state,
             'publish_error' => $video->publish_error,
             'postsyncer' => $video->postsyncer,
-            'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
-            'needs_confirm_ask' => $postsyncerConfig !== null
-                && app(VideoPublishPlanner::class)->needsConfirmAsk($video, $postsyncerConfig),
+            'postsyncer_ready' => $postsyncerConfig->isReadyForPublish(),
+            'needs_confirm_ask' => app(VideoPublishPlanner::class)->needsConfirmAsk($video, $postsyncerConfig),
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),
         ];
+    }
+
+    private function canManageGoogleDrive(Request $request, Workspace $workspace): bool
+    {
+        $user = $request->user();
+
+        if (! $user instanceof User) {
+            return false;
+        }
+
+        $member = $workspace->team->members()->whereKey($user->id)->first();
+
+        return in_array($member?->pivot->role, ['owner', 'admin'], true);
     }
 
     /**

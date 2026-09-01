@@ -150,6 +150,28 @@ without saving it.
 Text-only posts schedule when the post-type matrix allows it for the selected
 platforms.
 
+## Connect Google Drive
+
+Content Machine can browse the Drive folder used for video exports. Open
+**Settings → Google Drive**, connect the workspace's Google account, and choose
+the folder. Video and cover fields then get a **Pick from Drive** button.
+
+The connection uses the Drive API to list files and add an `Anyone with the
+link` reader permission to a file when you pick it for publishing. That last
+step is required because PostSyncer downloads media without a Google login. It
+does not move or upload files.
+
+The deployment needs a Google OAuth web client with these variables:
+
+```dotenv
+GOOGLE_DRIVE_CLIENT_ID=
+GOOGLE_DRIVE_CLIENT_SECRET=
+GOOGLE_DRIVE_REDIRECT_URI=https://cm.example/settings/google-drive/callback
+```
+
+Register the exact redirect URI in Google Cloud Console. The OAuth consent
+screen must allow the Drive scope for the account you connect.
+
 ## Status tabs
 
 List pages mirror Script Studio's pipeline tabs with live counts.

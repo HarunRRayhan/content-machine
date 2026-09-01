@@ -42,6 +42,11 @@ class GoogleDriveLinkTest extends TestCase
     public function test_rejects_folders_and_non_drive_urls(): void
     {
         $this->assertTrue(GoogleDriveLink::isFolder('https://drive.google.com/drive/folders/abc123XYZ'));
+        $this->assertTrue(GoogleDriveLink::isFolder('https://drive.google.com/drive/u/0/folders/abc123XYZ'));
+        $this->assertSame(
+            'abc123XYZ',
+            GoogleDriveLink::folderId('https://drive.google.com/drive/u/0/folders/abc123XYZ?usp=sharing'),
+        );
         $this->assertNull(GoogleDriveLink::parse('https://drive.google.com/drive/folders/abc123XYZ'));
         $this->assertNull(GoogleDriveLink::parse('https://example.com/file.mp4'));
         $this->assertFalse(GoogleDriveLink::looksLikeDrive('https://example.com/file.mp4'));

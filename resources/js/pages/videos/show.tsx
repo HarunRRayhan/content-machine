@@ -47,6 +47,10 @@ type VideoDetail = {
     }>;
     video_drive_url: string | null;
     cover_drive_url: string | null;
+    google_drive_configured: boolean;
+    google_drive_connected: boolean;
+    google_drive_folder_id: string | null;
+    google_drive_can_browse: boolean;
     language: string | null;
     slug: string | null;
     status: string;
@@ -191,6 +195,10 @@ export default function VideoShow({ video }: PageProps) {
                         videoDriveUrl={video.video_drive_url}
                         images={video.images}
                         coverDriveUrl={video.cover_drive_url}
+                        googleDriveConfigured={video.google_drive_configured}
+                        googleDriveConnected={video.google_drive_connected}
+                        googleDriveFolderId={video.google_drive_folder_id}
+                        googleDriveCanBrowse={video.google_drive_can_browse}
                         publishUrl={`/videos/${video.id}/publish`}
                         postsyncerReady={video.postsyncer_ready}
                         publishState={video.publish_state}

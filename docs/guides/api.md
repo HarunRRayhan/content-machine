@@ -33,6 +33,8 @@ request reads as `401`). Abilities:
 | `videos:write` | create/update videos (incl. import with explicit human_id), queue a PostSyncer publish |
 | `posts:read` | list/show posts |
 | `posts:write` | create/update posts, upload post images, queue a PostSyncer publish |
+| `drive:read` | browse the connected workspace Google Drive |
+| `drive:write` | add an Anyone-with-the-link reader permission to a selected Drive file |
 
 Missing ability → `403`. Bad or revoked token → `401`.
 
@@ -62,6 +64,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/videos` | videos:write | create; pass `human_id`+`number` for idempotent import |
 | PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … Drive URLs must be public Google Drive file links. |
 | POST | `/api/v1/media-urls/check` | any token | probe a Drive URL: `{ url }` → `{ accessible, message, file_id, share_url, fetch_url }` |
+| GET | `/api/v1/google-drive/files` | `drive:read` | list the connected Drive folder; optional `folder_id` and `q` |
+| POST | `/api/v1/google-drive/files/{file_id}/make-public` | `drive:write` | add a public reader permission and return the share URL |
 | POST | `/api/v1/videos/{human_id}/publish` | videos:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). The video needs a Video Drive URL. Always send `when` to schedule. |
 | GET | `/api/v1/posts` | posts:read | filters: `status`, `language`. Default list is slim (no `body` / `captions`); pass `include=full` or `include=body,captions` to opt in. Always includes `has_body` / `has_captions`. |
 | GET | `/api/v1/posts/{human_id}` | posts:read | full record |

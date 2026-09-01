@@ -1,5 +1,7 @@
 import { Form, router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
+import GoogleDrivePicker from '@/components/google-drive-picker';
+import type { GoogleDriveFile } from '@/components/google-drive-picker';
 import ImageGallery from '@/components/studio/image-gallery';
 
 type TalkingPoint = {
@@ -101,6 +103,10 @@ type Props = {
     }>;
     videoDriveUrl: string | null;
     coverDriveUrl: string | null;
+    googleDriveConfigured: boolean;
+    googleDriveConnected: boolean;
+    googleDriveFolderId: string | null;
+    googleDriveCanBrowse: boolean;
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
@@ -225,6 +231,10 @@ export default function VideoOverview({
     images,
     videoDriveUrl,
     coverDriveUrl,
+    googleDriveConfigured,
+    googleDriveConnected,
+    googleDriveFolderId,
+    googleDriveCanBrowse,
     publishUrl,
     postsyncerReady,
     publishState,
@@ -239,6 +249,8 @@ export default function VideoOverview({
     const [minWhen] = useState(() => datetimeLocalNowInDhaka());
     const [videoCheck, setVideoCheck] = useState<DriveCheck>(IDLE_CHECK);
     const [coverCheck, setCoverCheck] = useState<DriveCheck>(IDLE_CHECK);
+    const [videoDriveValue, setVideoDriveValue] = useState(videoDriveUrl ?? '');
+    const [coverDriveValue, setCoverDriveValue] = useState(coverDriveUrl ?? '');
 
     const studioStatus = useMemo(() => {
         if (status === 'draft' || status === 'dropped') {
@@ -298,8 +310,8 @@ export default function VideoOverview({
             {
                 title,
                 status: nextStatus,
-                video_drive_url: videoDriveUrl ?? '',
-                cover_drive_url: coverDriveUrl ?? '',
+                video_drive_url: videoDriveValue,
+                cover_drive_url: coverDriveValue,
             },
             {
                 preserveScroll: true,
@@ -316,7 +328,7 @@ export default function VideoOverview({
         !archived &&
         studioStatus !== 'posted' &&
         (studioStatus === 'recorded' || fakeScheduled);
-    const hasVideoDriveUrl = Boolean(videoDriveUrl?.trim());
+    const hasVideoDriveUrl = Boolean(videoDriveValue.trim());
     const missingVideoDriveUrl =
         !hasVideoDriveUrl && studioStatus === 'recorded';
     const canSchedule =
@@ -397,9 +409,10 @@ export default function VideoOverview({
                                 />
                                 <div className="drive-urls-h">Drive URLs</div>
                                 <p className="drive-urls-hint">
-                                    Paste a live Google Drive file link. Share
-                                    it as Anyone with the link so PostSyncer can
-                                    fetch it.
+                                    Paste a live Google Drive file link, or pick
+                                    one from the connected Drive. Picked files
+                                    are made public so PostSyncer can fetch
+                                    them.
                                 </p>
                                 <div className="drive-urls-row">
                                     <label className="schedule-it-label">
@@ -407,7 +420,12 @@ export default function VideoOverview({
                                         <input
                                             name="video_drive_url"
                                             type="url"
-                                            defaultValue={videoDriveUrl ?? ''}
+                                            value={videoDriveValue}
+                                            onChange={(event) =>
+                                                setVideoDriveValue(
+                                                    event.target.value,
+                                                )
+                                            }
                                             placeholder="https://drive.google.com/file/d/..."
                                             maxLength={2048}
                                             onBlur={(event) => {
@@ -429,6 +447,38 @@ export default function VideoOverview({
                                                 );
                                             }}
                                         />
+                                        {googleDriveCanBrowse &&
+                                            googleDriveConfigured &&
+                                            googleDriveConnected && (
+                                                <GoogleDrivePicker
+                                                    kind="file"
+                                                    fileType="video"
+                                                    initialFolderId={
+                                                        googleDriveFolderId
+                                                    }
+                                                    onSelect={(
+                                                        file: GoogleDriveFile,
+                                                    ) => {
+                                                        setVideoDriveValue(
+                                                            file.share_url ??
+                                                                '',
+                                                        );
+                                                        setVideoCheck({
+                                                            status: 'ok',
+                                                            message:
+                                                                'Anyone with the link can fetch this file.',
+                                                        });
+                                                    }}
+                                                    trigger={
+                                                        <button
+                                                            type="button"
+                                                            className="drive-pick"
+                                                        >
+                                                            Pick from Drive
+                                                        </button>
+                                                    }
+                                                />
+                                            )}
                                         {videoCheck.status !== 'idle' && (
                                             <span
                                                 className={`drive-url-status is-${videoCheck.status}`}
@@ -442,7 +492,12 @@ export default function VideoOverview({
                                         <input
                                             name="cover_drive_url"
                                             type="url"
-                                            defaultValue={coverDriveUrl ?? ''}
+                                            value={coverDriveValue}
+                                            onChange={(event) =>
+                                                setCoverDriveValue(
+                                                    event.target.value,
+                                                )
+                                            }
                                             placeholder="https://drive.google.com/file/d/..."
                                             maxLength={2048}
                                             onBlur={(event) => {
@@ -464,6 +519,38 @@ export default function VideoOverview({
                                                 );
                                             }}
                                         />
+                                        {googleDriveCanBrowse &&
+                                            googleDriveConfigured &&
+                                            googleDriveConnected && (
+                                                <GoogleDrivePicker
+                                                    kind="file"
+                                                    fileType="image"
+                                                    initialFolderId={
+                                                        googleDriveFolderId
+                                                    }
+                                                    onSelect={(
+                                                        file: GoogleDriveFile,
+                                                    ) => {
+                                                        setCoverDriveValue(
+                                                            file.share_url ??
+                                                                '',
+                                                        );
+                                                        setCoverCheck({
+                                                            status: 'ok',
+                                                            message:
+                                                                'Anyone with the link can fetch this file.',
+                                                        });
+                                                    }}
+                                                    trigger={
+                                                        <button
+                                                            type="button"
+                                                            className="drive-pick"
+                                                        >
+                                                            Pick from Drive
+                                                        </button>
+                                                    }
+                                                />
+                                            )}
                                         {coverCheck.status !== 'idle' && (
                                             <span
                                                 className={`drive-url-status is-${coverCheck.status}`}

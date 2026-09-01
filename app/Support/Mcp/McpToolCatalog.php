@@ -7,7 +7,8 @@ use App\Models\Video;
 
 /**
  * The tools this workspace exposes over MCP: scratchpad capture/triage,
- * idea read/edit, video/post list/get/update, and post publish.
+ * idea read/edit, media browsing, video/post list/get/update, Drive browsing,
+ * and publishing.
  *
  * @phpstan-type McpTool array{name: string, description: string, inputSchema: array<string, mixed>, ability: string}
  */
@@ -166,8 +167,26 @@ final class McpToolCatalog
                 ], ['url']),
             ],
             [
+                'name' => 'list_drive_files',
+                'description' => 'List files in the connected workspace Google Drive folder. Use folder_id to browse into a returned folder and q to search.',
+                'ability' => 'drive:read',
+                'inputSchema' => self::schema([
+                    'folder_id' => ['type' => 'string'],
+                    'q' => ['type' => 'string', 'description' => 'Search names in the selected folder.'],
+                    'page_token' => ['type' => 'string'],
+                ]),
+            ],
+            [
+                'name' => 'make_drive_file_public',
+                'description' => 'Grant a connected Google Drive file an Anyone-with-the-link reader permission and return its share URL.',
+                'ability' => 'drive:write',
+                'inputSchema' => self::schema([
+                    'file_id' => ['type' => 'string', 'description' => 'The Drive file id returned by list_drive_files.'],
+                ], ['file_id']),
+            ],
+            [
                 'name' => 'publish_video',
-                'description' => 'Queue a video for PostSyncer. The video needs a Video Drive URL first. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately.',
+                'description' => 'Queue a video for PostSyncer. The video needs a Video Drive URL first. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately. After a schedule succeeds, verify the record and finish the Drive/tracker handoff.',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string', 'description' => 'The video id, e.g. BV-50 or V-12.'],

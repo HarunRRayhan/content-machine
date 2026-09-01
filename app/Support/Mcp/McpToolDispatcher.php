@@ -31,6 +31,7 @@ use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\CurrentApiToken;
+use App\Support\GoogleDrive\GoogleDriveClient;
 use App\Support\GoogleDrive\GoogleDriveLinkChecker;
 use App\Support\Media\MediaLibraryTab;
 use App\Support\Media\PresentMediaAsset;
@@ -103,6 +104,16 @@ final class McpToolDispatcher
             'get_video' => $this->presentVideo($this->findVideo($this->stringArg($arguments, 'human_id'))),
             'update_video' => $this->updateVideo($arguments),
             'check_drive_url' => $this->checkDriveUrl($arguments),
+            'list_drive_files' => (new GoogleDriveClient($workspace))->listFiles(
+                $this->optionalString($arguments, 'folder_id'),
+                $this->optionalString($arguments, 'q'),
+                $this->optionalString($arguments, 'page_token'),
+            ),
+            'make_drive_file_public' => [
+                'file' => (new GoogleDriveClient($workspace))->makePublic(
+                    $this->stringArg($arguments, 'file_id'),
+                ),
+            ],
             'publish_video' => $this->publishVideo($arguments),
             'list_posts' => $this->listPosts($arguments),
             'get_post' => $this->presentPost($this->findPost($this->stringArg($arguments, 'human_id'))),

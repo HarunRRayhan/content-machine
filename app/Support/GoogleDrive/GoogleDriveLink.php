@@ -28,7 +28,22 @@ final readonly class GoogleDriveLink
 
     public static function isFolder(string $url): bool
     {
-        return preg_match('#/drive/folders/'.self::FILE_ID.'#', $url) === 1;
+        return preg_match('#/drive/(?:u/\d+/)?folders/'.self::FILE_ID.'(?:[/?]|$)#', $url) === 1;
+    }
+
+    public static function folderId(string $url): ?string
+    {
+        $url = trim($url);
+
+        if ($url === '' || ! self::looksLikeDrive($url)) {
+            return null;
+        }
+
+        if (preg_match('#/drive/(?:u/\d+/)?folders/('.self::FILE_ID.')(?:[/?]|$)#', $url, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return null;
     }
 
     public static function parse(string $url): ?self

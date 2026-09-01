@@ -3,6 +3,7 @@
 use App\Http\Controllers\AiProviders\AiProviderCredentialModelsController;
 use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\Settings\GeneralSettingsController;
+use App\Http\Controllers\Settings\GoogleDriveController;
 use App\Http\Controllers\Settings\PostsyncerSettingsController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Controllers\Telegram\TelegramBotLinkController;
@@ -16,6 +17,14 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::redirect('/', '/settings/general')->name('index');
 
         Route::get('general', [GeneralSettingsController::class, 'edit'])->name('general.edit');
+
+        Route::get('google-drive', [GoogleDriveController::class, 'edit'])->name('google-drive.edit');
+        Route::get('google-drive/connect', [GoogleDriveController::class, 'connect'])->name('google-drive.connect');
+        Route::get('google-drive/callback', [GoogleDriveController::class, 'callback'])->name('google-drive.callback');
+        Route::delete('google-drive', [GoogleDriveController::class, 'disconnect'])->name('google-drive.disconnect');
+        Route::get('google-drive/files', [GoogleDriveController::class, 'files'])->name('google-drive.files');
+        Route::post('google-drive/folder', [GoogleDriveController::class, 'setFolder'])->name('google-drive.folder');
+        Route::post('google-drive/make-public', [GoogleDriveController::class, 'makePublic'])->name('google-drive.make-public');
 
         Route::get('postsyncer', [PostsyncerSettingsController::class, 'edit'])->name('postsyncer.edit');
         Route::get('postsyncer/workspaces', [PostsyncerSettingsController::class, 'workspaces'])->name('postsyncer.workspaces');

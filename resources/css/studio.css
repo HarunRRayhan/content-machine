@@ -545,6 +545,28 @@
     color: var(--ink-faint);
 }
 
+.studio-page .drive-pick {
+    width: fit-content;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 6px 9px;
+    color: var(--ink-soft);
+    background: var(--bg3);
+    font-family: var(--font-cue);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.studio-page .drive-pick:hover {
+    color: var(--ink);
+    border-color: var(--ink-soft);
+}
+
+.studio-page .drive-pick:focus-visible {
+    outline: 2px solid var(--ink-soft);
+    outline-offset: 2px;
+}
+
 .studio-page .drive-url-status {
     font-family: var(--font-cue);
     font-size: 11px;
