@@ -212,5 +212,4 @@ jobs:
             sleep 1
           done
 
-          docker exec cm-s6 /command/s6-rc -a list | grep -Fx scratchpad-queue
           docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue | grep -q '^up'
