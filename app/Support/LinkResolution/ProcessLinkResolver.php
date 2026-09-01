@@ -2,6 +2,9 @@
 
 namespace App\Support\LinkResolution;
 
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Throwable;
@@ -20,8 +23,26 @@ final class ProcessLinkResolver implements LinkResolverContract
 {
     private const USER_AGENT = 'Mozilla/5.0 (compatible; content-machine/1.0; +https://cm.harun.dev)';
 
+    private const MAX_REDIRECTS = 3;
+
+    private const MAX_PAGE_BYTES = 1024 * 1024;
+
+    private const MAX_TITLE_LENGTH = 255;
+
+    private const MAX_DESCRIPTION_LENGTH = 20000;
+
+    private const MAX_IMAGE_URL_LENGTH = 2048;
+
+    public function __construct(
+        private readonly ?PublicUrlGuard $urlGuard = null,
+    ) {}
+
     public function resolve(string $url): ResolvedLink
     {
+        if (! $this->guard()->isSafe($url)) {
+            return ResolvedLink::unresolved('link must use a public http(s) URL');
+        }
+
         $viaYtDlp = $this->resolveViaYtDlp($url);
 
         if ($viaYtDlp !== null) {
@@ -33,6 +54,10 @@ final class ProcessLinkResolver implements LinkResolverContract
 
     private function resolveViaYtDlp(string $url): ?ResolvedLink
     {
+        if (! $this->guard()->isAllowedForYtDlp($url)) {
+            return null;
+        }
+
         try {
             $result = Process::timeout(25)->run([
                 'yt-dlp',
@@ -62,27 +87,62 @@ final class ProcessLinkResolver implements LinkResolverContract
         return new ResolvedLink(
             kind: 'video',
             resolvedVia: 'yt-dlp metadata',
-            title: $this->stringOrNull($decoded['title'] ?? null),
-            description: $this->stringOrNull($decoded['description'] ?? null),
-            thumbnailUrl: $this->stringOrNull($decoded['thumbnail'] ?? null),
+            title: $this->stringOrNull($decoded['title'] ?? null, self::MAX_TITLE_LENGTH),
+            description: $this->stringOrNull($decoded['description'] ?? null, self::MAX_DESCRIPTION_LENGTH),
+            thumbnailUrl: $this->stringOrNull($decoded['thumbnail'] ?? null, self::MAX_IMAGE_URL_LENGTH),
         );
     }
 
     private function resolveViaPageMetadata(string $url): ResolvedLink
     {
-        try {
-            $response = Http::withUserAgent(self::USER_AGENT)
-                ->timeout(10)
-                ->get($url);
-        } catch (Throwable) {
-            return ResolvedLink::unresolved('metadata only (page fetch failed)');
+        $currentUrl = $url;
+
+        for ($redirect = 0; $redirect <= self::MAX_REDIRECTS; $redirect++) {
+            if (! $this->guard()->isSafe($currentUrl)) {
+                return ResolvedLink::unresolved('metadata only (redirected to an unsafe URL)');
+            }
+
+            try {
+                $response = Http::withUserAgent(self::USER_AGENT)
+                    ->timeout(10)
+                    ->withOptions([
+                        'allow_redirects' => false,
+                        'stream' => true,
+                    ])
+                    ->get($currentUrl);
+            } catch (Throwable) {
+                return ResolvedLink::unresolved('metadata only (page fetch failed)');
+            }
+
+            if (in_array($response->status(), [301, 302, 303, 307, 308], true)) {
+                /** @var mixed $location */
+                $location = $response->header('Location');
+
+                if (! is_string($location) || $location === '' || $redirect === self::MAX_REDIRECTS) {
+                    return ResolvedLink::unresolved('metadata only (page fetch failed)');
+                }
+
+                $currentUrl = $this->redirectUrl($currentUrl, $location);
+
+                if ($currentUrl === null) {
+                    return ResolvedLink::unresolved('metadata only (redirected to an unsafe URL)');
+                }
+
+                continue;
+            }
+
+            break;
         }
 
         if (! $response->successful() || ! str_contains($response->header('Content-Type'), 'html')) {
             return ResolvedLink::unresolved('metadata only (page fetch failed)');
         }
 
-        $html = $response->body();
+        $html = $this->readBodyWithinLimit($response, self::MAX_PAGE_BYTES);
+        if ($html === null) {
+            return ResolvedLink::unresolved('metadata only (page too large)');
+        }
+
         $title = $this->matchOpenGraphTag($html, 'og:title') ?? $this->matchTitleTag($html);
         $description = $this->matchOpenGraphTag($html, 'og:description');
         $image = $this->matchOpenGraphTag($html, 'og:image');
@@ -100,6 +160,22 @@ final class ProcessLinkResolver implements LinkResolverContract
             description: $description,
             thumbnailUrl: $image,
         );
+    }
+
+    private function redirectUrl(string $baseUrl, string $location): ?string
+    {
+        try {
+            $resolved = (string) UriResolver::resolve(new Uri($baseUrl), new Uri($location));
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $this->guard()->isSafe($resolved) ? $resolved : null;
+    }
+
+    private function guard(): PublicUrlGuard
+    {
+        return $this->urlGuard ?? new PublicUrlGuard;
     }
 
     /**
@@ -124,11 +200,11 @@ final class ProcessLinkResolver implements LinkResolverContract
         );
 
         if (preg_match($propertyFirst, $html, $matches) === 1) {
-            return $this->cleanText($matches[3]);
+            return $this->cleanText($matches[3], $this->metadataValueLimit($property));
         }
 
         if (preg_match($contentFirst, $html, $matches) === 1) {
-            return $this->cleanText($matches[2]);
+            return $this->cleanText($matches[2], $this->metadataValueLimit($property));
         }
 
         return null;
@@ -140,17 +216,21 @@ final class ProcessLinkResolver implements LinkResolverContract
             return null;
         }
 
-        return $this->cleanText($matches[1]);
+        return $this->cleanText($matches[1], self::MAX_TITLE_LENGTH);
     }
 
-    private function cleanText(string $value): ?string
+    private function cleanText(string $value, int $maxLength): ?string
     {
         $decoded = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5));
+
+        if (mb_strlen($decoded) > $maxLength) {
+            $decoded = mb_substr($decoded, 0, $maxLength);
+        }
 
         return $decoded === '' ? null : $decoded;
     }
 
-    private function stringOrNull(mixed $value): ?string
+    private function stringOrNull(mixed $value, int $maxLength): ?string
     {
         if (! is_string($value)) {
             return null;
@@ -158,6 +238,53 @@ final class ProcessLinkResolver implements LinkResolverContract
 
         $trimmed = trim($value);
 
+        if (mb_strlen($trimmed) > $maxLength) {
+            $trimmed = mb_substr($trimmed, 0, $maxLength);
+        }
+
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function metadataValueLimit(string $property): int
+    {
+        return match ($property) {
+            'og:title' => self::MAX_TITLE_LENGTH,
+            'og:image' => self::MAX_IMAGE_URL_LENGTH,
+            default => self::MAX_DESCRIPTION_LENGTH,
+        };
+    }
+
+    private function readBodyWithinLimit(Response $response, int $maxBytes): ?string
+    {
+        try {
+            $stream = $response->toPsrResponse()->getBody();
+            $size = $stream->getSize();
+
+            if ($size !== null && $size > $maxBytes) {
+                return null;
+            }
+
+            $contents = '';
+            $length = 0;
+
+            while (! $stream->eof()) {
+                $chunk = $stream->read(min(8192, $maxBytes - $length + 1));
+
+                if ($chunk === '') {
+                    break;
+                }
+
+                $length += strlen($chunk);
+                if ($length > $maxBytes) {
+                    return null;
+                }
+
+                $contents .= $chunk;
+            }
+
+            return $contents;
+        } catch (Throwable) {
+            return null;
+        }
     }
 }

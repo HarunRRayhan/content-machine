@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Posts;
 
+use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
@@ -679,5 +680,60 @@ class PostsControllerTest extends TestCase
                 ->where('post.status', 'scheduled')
                 ->where('post.postsyncer.groups.0.post_id', '132531')
             );
+    }
+
+    public function test_reconcile_route_verifies_and_checkpoints_an_uncertain_post(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        PostsyncerConfig::write($workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['text' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Reconcile this post'],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
+        ]);
+
+        try {
+            app(PublishPostAction::class)->handle($post, [
+                'when' => '2099-09-03T09:00:00+06:00',
+            ]);
+        } catch (\Throwable) {
+            // The route repairs the uncertain state left by this attempt.
+        }
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Reconcile this post', 'media' => []]],
+                'platforms' => [['platform' => 'facebook']],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2099-09-03T09:00:00+06:00',
+            ], 200),
+        ]);
+
+        $this->post(route('posts.reconcile', $post), ['postsyncer_id' => '99'])
+            ->assertRedirect(route('posts.show', $post));
+
+        $this->assertSame('99', $post->refresh()->publish_progress['completed_groups'][0]['post_id']);
     }
 }

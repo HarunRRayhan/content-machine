@@ -4,12 +4,15 @@ namespace Tests\Unit\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
 use App\Support\AiProviders\OpenAiTranscriptionClient;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class OpenAiTranscriptionClientTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_a_successful_transcription_hits_the_default_base_url_with_the_right_model()
     {
         Http::fake(['api.openai.com/*' => Http::response([

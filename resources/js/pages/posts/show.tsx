@@ -51,6 +51,14 @@ type PostDetail = {
     status: string;
     publish_state: string;
     publish_error: string | null;
+    publish_progress: {
+        state?: string;
+        current?: {
+            index?: number;
+            group_key?: string;
+            phase?: string;
+        } | null;
+    } | null;
     approval_state: string;
     timezone: string;
     postsyncer: Record<string, unknown> | null;
@@ -168,6 +176,8 @@ export default function PostShow({ post }: PageProps) {
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
+                        publishProgress={post.publish_progress}
+                        reconcileUrl={`/posts/${post.id}/reconcile`}
                         approvalState={post.approval_state}
                         timezone={post.timezone}
                         needsConfirmAsk={post.needs_confirm_ask}
@@ -184,6 +194,7 @@ export default function PostShow({ post }: PageProps) {
                             body={post.body}
                             groups={post.captions}
                             editable={editable}
+                            key={`${post.id}:${post.updated_at ?? ''}`}
                         />
                         {hasCaptions ? (
                             <PostCaptionsPanel

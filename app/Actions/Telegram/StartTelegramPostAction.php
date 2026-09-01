@@ -3,10 +3,15 @@
 namespace App\Actions\Telegram;
 
 use App\Jobs\GenerateTelegramPostJob;
+use App\Jobs\ResolveScratchpadLinkJob;
+use App\Jobs\TranscribeVoiceNoteJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\TelegramPostRequest;
+use App\Models\Transcription;
+use App\Support\Telegram\TelegramUpdateKey;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Starts a post request from a command, a pending /post prompt, or a media
@@ -37,40 +42,129 @@ class StartTelegramPostAction
 
         $instruction = $instruction !== null ? trim($instruction) : null;
 
-        if ($pendingRequest !== null) {
-            if ($pendingRequest->state !== TelegramPostRequest::AWAITING_INPUT
-                || $pendingRequest->telegram_bot_config_id !== $config->id
-                || $pendingRequest->telegram_user_id !== $telegramUserId
-                || $pendingRequest->telegram_chat_id !== $chatId
+        return DB::transaction(function () use (
+            $config,
+            $link,
+            $chatId,
+            $telegramUserId,
+            $update,
+            $instruction,
+            $pendingRequest,
+        ): TelegramPostRequest {
+            // Serialize one Telegram bot's post prompts. This prevents two
+            // concurrent bare /post commands from stranding prompts or
+            // capturing a second message before the first request is linked.
+            $lockedConfig = TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($link->telegram_bot_config_id !== $lockedConfig->id
+                || $link->telegram_user_id !== $telegramUserId
             ) {
-                throw new \RuntimeException('This Telegram post request is no longer awaiting input.');
+                throw new \RuntimeException('This Telegram account is not linked to this bot.');
             }
-        } else {
-            TelegramPostRequest::query()
-                ->forTelegram($config, $telegramUserId, $chatId)
-                ->where('state', TelegramPostRequest::AWAITING_INPUT)
-                ->update([
-                    'state' => TelegramPostRequest::CANCELLED,
-                    'cancelled_at' => now(),
-                ]);
-        }
 
-        $sourceUpdate = $instruction === null || $instruction === ''
-            ? $this->withoutBarePostCommand($update)
-            : $this->withInstruction($update, $instruction);
-        $entry = $this->captureTelegramMessageAction->handle($config, $sourceUpdate, false);
+            $telegramUpdateKey = TelegramUpdateKey::from($lockedConfig, $update);
+            if ($telegramUpdateKey !== null) {
+                $existingRequest = TelegramPostRequest::query()
+                    ->where('telegram_update_key', $telegramUpdateKey)
+                    ->lockForUpdate()
+                    ->first();
 
-        $request = $pendingRequest ?? TelegramPostRequest::create([
-            'workspace_id' => $config->workspace_id,
-            'telegram_bot_config_id' => $config->id,
-            'source_scratchpad_entry_id' => null,
-            'telegram_user_id' => $telegramUserId,
-            'telegram_chat_id' => $chatId,
-            'state' => TelegramPostRequest::AWAITING_INPUT,
-            'instruction' => null,
-        ]);
+                if ($existingRequest !== null) {
+                    if ($existingRequest->workspace_id !== $lockedConfig->workspace_id
+                        || $existingRequest->telegram_bot_config_id !== $lockedConfig->id
+                        || $existingRequest->telegram_user_id !== $telegramUserId
+                        || $existingRequest->telegram_chat_id !== $chatId
+                    ) {
+                        throw new \RuntimeException('This Telegram post request belongs to another conversation.');
+                    }
 
-        if ($entry !== null) {
+                    return $existingRequest;
+                }
+            }
+
+            $request = null;
+
+            if ($pendingRequest !== null) {
+                $request = TelegramPostRequest::query()
+                    ->whereKey($pendingRequest->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($request === null
+                    || $request->state !== TelegramPostRequest::AWAITING_INPUT
+                    || $request->workspace_id !== $lockedConfig->workspace_id
+                    || $request->telegram_bot_config_id !== $lockedConfig->id
+                    || $request->telegram_user_id !== $telegramUserId
+                    || $request->telegram_chat_id !== $chatId
+                ) {
+                    throw new \RuntimeException('This Telegram post request is no longer awaiting input.');
+                }
+            } else {
+                TelegramPostRequest::query()
+                    ->forTelegram($lockedConfig, $telegramUserId, $chatId)
+                    ->where('state', TelegramPostRequest::AWAITING_INPUT)
+                    ->update([
+                        'state' => TelegramPostRequest::CANCELLED,
+                        'cancelled_at' => now(),
+                    ]);
+            }
+
+            $sourceUpdate = $instruction === null || $instruction === ''
+                ? $this->withoutBarePostCommand($update)
+                : $this->withInstruction($update, $instruction);
+
+            // Enrichment is queued below, after the request points at the
+            // capture. A link/transcription worker can therefore never finish
+            // before it has a request to advance or fail.
+            $entry = $this->captureTelegramMessageAction->handle(
+                $lockedConfig,
+                $sourceUpdate,
+                false,
+                false,
+                $telegramUpdateKey,
+            );
+
+            // A bare /post prompt keeps the prompt update's key, while the
+            // follow-up source has its own key. On a replay after the request
+            // update committed, the pending lookup above no longer finds it;
+            // the captured source is still the durable idempotency bridge.
+            if ($request === null && $entry !== null) {
+                $existingRequest = TelegramPostRequest::query()
+                    ->where('source_scratchpad_entry_id', $entry->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($existingRequest !== null) {
+                    if ($existingRequest->workspace_id !== $lockedConfig->workspace_id
+                        || $existingRequest->telegram_bot_config_id !== $lockedConfig->id
+                        || $existingRequest->telegram_user_id !== $telegramUserId
+                        || $existingRequest->telegram_chat_id !== $chatId
+                    ) {
+                        throw new \RuntimeException('This Telegram post request belongs to another conversation.');
+                    }
+
+                    return $existingRequest;
+                }
+            }
+
+            $request ??= TelegramPostRequest::create([
+                'workspace_id' => $lockedConfig->workspace_id,
+                'telegram_bot_config_id' => $lockedConfig->id,
+                'source_scratchpad_entry_id' => null,
+                'telegram_user_id' => $telegramUserId,
+                'telegram_chat_id' => $chatId,
+                'telegram_update_key' => $telegramUpdateKey,
+                'state' => TelegramPostRequest::AWAITING_INPUT,
+                'instruction' => null,
+            ]);
+
+            if ($entry === null) {
+                return $request;
+            }
+
             $updated = TelegramPostRequest::query()
                 ->whereKey($request->id)
                 ->where('state', TelegramPostRequest::AWAITING_INPUT)
@@ -87,13 +181,10 @@ class StartTelegramPostAction
             }
 
             $request->refresh();
-        }
+            $this->queueSourceWork($entry, $request);
 
-        if ($entry !== null && $this->canGenerateNow($entry)) {
-            GenerateTelegramPostJob::dispatch($request->id);
-        }
-
-        return $request;
+            return $request;
+        });
     }
 
     /**
@@ -170,5 +261,30 @@ class StartTelegramPostAction
         }
 
         return true;
+    }
+
+    private function queueSourceWork(ScratchpadEntry $entry, TelegramPostRequest $request): void
+    {
+        if ($entry->kind === 'link') {
+            ResolveScratchpadLinkJob::dispatch($entry)->afterCommit();
+
+            return;
+        }
+
+        if ($entry->kind === 'voice') {
+            $transcription = $entry->transcriptions()->first();
+
+            if (! $transcription instanceof Transcription) {
+                throw new \RuntimeException('The audio transcription record is missing.');
+            }
+
+            TranscribeVoiceNoteJob::dispatch($transcription)->afterCommit();
+
+            return;
+        }
+
+        if ($this->canGenerateNow($entry)) {
+            GenerateTelegramPostJob::dispatch($request->id)->afterCommit();
+        }
     }
 }

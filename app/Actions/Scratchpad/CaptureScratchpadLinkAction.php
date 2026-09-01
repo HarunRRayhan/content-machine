@@ -7,6 +7,7 @@ use App\Jobs\ResolveScratchpadLinkJob;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Captures a forwarded URL into the Scratch Pad immediately, then queues
@@ -20,23 +21,33 @@ use App\Models\Workspace;
  */
 class CaptureScratchpadLinkAction
 {
-    public function handle(Workspace $workspace, ?User $capturedBy, CaptureScratchpadLinkData $data): ScratchpadEntry
-    {
-        $entry = ScratchpadEntry::create([
-            'workspace_id' => $workspace->id,
-            'kind' => 'link',
-            'source' => $data->source,
-            'captured_at' => now(),
-            'body' => $data->url,
-            'language' => $data->language,
-            'status' => 'new',
-            'meta' => ['url' => $data->url],
-        ]);
+    public function handle(
+        Workspace $workspace,
+        ?User $capturedBy,
+        CaptureScratchpadLinkData $data,
+        bool $queueResolution = true,
+        ?string $telegramUpdateKey = null,
+    ): ScratchpadEntry {
+        return DB::transaction(function () use ($workspace, $data, $queueResolution, $telegramUpdateKey): ScratchpadEntry {
+            $entry = ScratchpadEntry::create([
+                'workspace_id' => $workspace->id,
+                'kind' => 'link',
+                'source' => $data->source,
+                'telegram_update_key' => $telegramUpdateKey,
+                'captured_at' => now(),
+                'body' => $data->url,
+                'language' => $data->language,
+                'status' => 'new',
+                'meta' => ['url' => $data->url],
+            ]);
 
-        $entry->recordStatusTransition(null, 'new');
+            $entry->recordStatusTransition(null, 'new');
 
-        ResolveScratchpadLinkJob::dispatch($entry);
+            if ($queueResolution) {
+                ResolveScratchpadLinkJob::dispatch($entry)->afterCommit();
+            }
 
-        return $entry;
+            return $entry;
+        });
     }
 }

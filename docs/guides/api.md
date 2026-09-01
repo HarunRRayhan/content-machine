@@ -60,16 +60,17 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/videos` | videos:read | filters: `status`, `language`. Default list is slim (no `script_markdown` / `captions` / `deck_manifest`); pass `include=full` or `include=script_markdown,captions,deck_manifest` to opt in. Always includes `has_script` / `has_captions` / `has_deck`. |
 | GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` (full record, including deck) |
 | POST | `/api/v1/videos` | videos:write | create; pass `human_id`+`number` for idempotent import |
-| PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … Drive URLs must be public Google Drive file links. |
+| PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … (publish metadata is read-only). Drive URLs must be public Google Drive file links. |
 | POST | `/api/v1/media-urls/check` | any token | probe a Drive URL: `{ url }` → `{ accessible, message, file_id, share_url, fetch_url }` |
 | POST | `/api/v1/videos/{human_id}/publish` | videos:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). The video needs a Video Drive URL. Always send `when` to schedule. |
 | GET | `/api/v1/posts` | posts:read | filters: `status`, `language`. Default list is slim (no `body` / `captions`); pass `include=full` or `include=body,captions` to opt in. Always includes `has_body` / `has_captions` / `approval_state`. |
 | GET | `/api/v1/posts/{human_id}` | posts:read | full record |
 | POST | `/api/v1/posts` | posts:write | create / idempotent import |
-| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, image_drive_urls, … |
+| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, image_drive_urls, … (publish metadata is read-only) |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
 | POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
 | POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. The Railway `cm-worker` service runs the job. |
+| POST | `/api/v1/posts/{human_id}/reconcile` | posts:write | checkpoint a PostSyncer post after an uncertain create response (`postsyncer_id`). The endpoint verifies workspace and payload before allowing a retry. |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
 Captures made through the API are recorded with `source: api`, and every

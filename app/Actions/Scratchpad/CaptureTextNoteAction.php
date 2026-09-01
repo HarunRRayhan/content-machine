@@ -26,12 +26,17 @@ use App\Models\Workspace;
  */
 class CaptureTextNoteAction
 {
-    public function handle(Workspace $workspace, ?User $capturedBy, CaptureTextNoteData $data): ScratchpadEntry
-    {
+    public function handle(
+        Workspace $workspace,
+        ?User $capturedBy,
+        CaptureTextNoteData $data,
+        ?string $telegramUpdateKey = null,
+    ): ScratchpadEntry {
         $entry = ScratchpadEntry::create([
             'workspace_id' => $workspace->id,
             'kind' => 'text',
             'source' => $data->source,
+            'telegram_update_key' => $telegramUpdateKey,
             'captured_at' => now(),
             'body' => $data->body,
             'language' => $data->language,

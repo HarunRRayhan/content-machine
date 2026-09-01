@@ -84,7 +84,9 @@ jobs:
         run: php artisan migrate --force
 
       - name: Run tests
-        run: ./vendor/bin/pest --parallel
+        # The suite uses one PostgreSQL schema and RefreshDatabase transactions;
+        # parallel workers race migrations and cannot safely share that schema.
+        run: ./vendor/bin/pest
 
   static:
     runs-on: ubuntu-latest
@@ -205,11 +207,13 @@ jobs:
             cm:ci /init
           trap 'docker rm -f cm-s6' EXIT
 
-          for attempt in $(seq 1 30); do
-            if docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue 2>/dev/null | grep -q '^up'; then
-              break
-            fi
-            sleep 1
-          done
+          for service in scratchpad-queue postsyncer-queue; do
+            for attempt in $(seq 1 30); do
+              if docker exec cm-s6 /command/s6-svstat /run/service/$service 2>/dev/null | grep -q '^up'; then
+                break
+              fi
+              sleep 1
+            done
 
-          docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue | grep -q '^up'
+            docker exec cm-s6 /command/s6-svstat /run/service/$service | grep -q '^up'
+          done

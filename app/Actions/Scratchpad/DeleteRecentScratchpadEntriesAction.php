@@ -4,6 +4,7 @@ namespace App\Actions\Scratchpad;
 
 use App\Models\ScratchpadEntry;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Bulk-delete entry point for a "delete/clear my notes" request that names
@@ -21,17 +22,23 @@ class DeleteRecentScratchpadEntriesAction
 
     public function handle(Workspace $workspace): int
     {
-        $entries = ScratchpadEntry::query()
-            ->where('workspace_id', $workspace->id)
-            ->where('status', 'new')
-            ->orderByDesc('captured_at')
-            ->limit(self::LIMIT)
-            ->get();
+        return DB::transaction(function () use ($workspace): int {
+            // Select and delete the whole batch in one transaction. A worker
+            // crash rolls the batch back, so a replay cannot delete the next
+            // batch after partially deleting this one.
+            $entries = ScratchpadEntry::query()
+                ->where('workspace_id', $workspace->id)
+                ->where('status', 'new')
+                ->orderByDesc('captured_at')
+                ->limit(self::LIMIT)
+                ->lockForUpdate()
+                ->get();
 
-        foreach ($entries as $entry) {
-            $this->deleteScratchpadEntryAction->handle($entry);
-        }
+            foreach ($entries as $entry) {
+                $this->deleteScratchpadEntryAction->handle($entry);
+            }
 
-        return $entries->count();
+            return $entries->count();
+        });
     }
 }

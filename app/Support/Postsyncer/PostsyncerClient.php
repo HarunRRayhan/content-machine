@@ -4,6 +4,7 @@ namespace App\Support\Postsyncer;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Throwable;
 
 class PostsyncerClient
 {
@@ -105,14 +106,18 @@ class PostsyncerClient
 
     /**
      * @param  list<string>  $urls
+     * @param  string|null  $idempotencyKey  Stable per-operation/group key for providers that support replay deduplication.
      * @return list<int|string>
      */
-    public function uploadFromUrls(int|string $workspaceId, array $urls): array
+    public function uploadFromUrls(int|string $workspaceId, array $urls, ?string $idempotencyKey = null): array
     {
+        $headers = $idempotencyKey === null || trim($idempotencyKey) === ''
+            ? []
+            : ['Idempotency-Key' => $idempotencyKey];
         $response = $this->request('post', '/media/upload/url', [
             'workspace_id' => $workspaceId,
             'urls' => $urls,
-        ]);
+        ], $headers);
         $data = $this->decodeResponse($response);
 
         $media = $data['media'] ?? [];
@@ -134,11 +139,15 @@ class PostsyncerClient
 
     /**
      * @param  array<string, mixed>  $body
+     * @param  string|null  $idempotencyKey  Stable per-operation/group key for providers that support replay deduplication.
      * @return array<string, mixed>
      */
-    public function createPost(array $body): array
+    public function createPost(array $body, ?string $idempotencyKey = null): array
     {
-        $response = $this->request('post', '/posts', $body);
+        $headers = $idempotencyKey === null || trim($idempotencyKey) === ''
+            ? []
+            : ['Idempotency-Key' => $idempotencyKey];
+        $response = $this->request('post', '/posts', $body, $headers);
 
         return $this->decodeResponse($response);
     }
@@ -153,8 +162,9 @@ class PostsyncerClient
 
     /**
      * @param  array<string, mixed>  $body
+     * @param  array<string, string>  $headers
      */
-    private function request(string $method, string $path, array $body = []): Response
+    private function request(string $method, string $path, array $body = [], array $headers = []): Response
     {
         $apiKey = $this->config->apiKey();
 
@@ -164,13 +174,27 @@ class PostsyncerClient
 
         $url = rtrim($this->config->apiBase(), '/').$path;
 
-        $pending = Http::withToken($apiKey)->timeout(30)->acceptJson();
+        $pending = Http::withToken($apiKey)->timeout(30)->acceptJson()->withHeaders($headers);
 
-        $response = match ($method) {
-            'get' => $pending->get($url),
-            'post' => $pending->post($url, $body),
-            default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
-        };
+        try {
+            $response = match ($method) {
+                'get' => $pending->get($url),
+                'post' => $pending->post($url, $body),
+                default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+            };
+        } catch (Throwable $exception) {
+            // A connection timeout may happen after PostSyncer accepted a
+            // create. Keep it in the unknown-outcome path so retries cannot
+            // silently issue a second create without reconciliation.
+            throw new PostsyncerException(
+                'Could not reach PostSyncer: '.$exception->getMessage(),
+                0,
+                $exception,
+                true,
+                true,
+                false,
+            );
+        }
 
         if (! $response->successful()) {
             throw PostsyncerException::fromResponse($response);

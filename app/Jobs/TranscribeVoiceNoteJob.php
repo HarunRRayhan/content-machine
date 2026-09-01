@@ -10,12 +10,15 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 class TranscribeVoiceNoteJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
 
     public function __construct(
         public readonly Transcription $transcription,
@@ -28,6 +31,29 @@ class TranscribeVoiceNoteJob implements ShouldQueue
     public function handle(TranscribeVoiceNoteAction $action): void
     {
         $action->handle($this->transcription);
+    }
+
+    public function uniqueId(): string
+    {
+        return 'voice-transcription:'.$this->transcription->getKey();
+    }
+
+    /**
+     * Keep duplicate recovery jobs from calling the transcription provider
+     * together without making a failed enqueue unrecoverable behind a unique
+     * dispatch lock.
+     *
+     * @return list<WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping(
+                'voice-transcription:'.$this->transcription->getKey(),
+                60,
+                self::OVERLAP_EXPIRES_AFTER_SECONDS,
+            ))->shared()->dontRelease(),
+        ];
     }
 
     /**

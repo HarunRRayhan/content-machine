@@ -4,11 +4,14 @@ namespace App\Support\Telegram;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 final class HttpTelegramClient implements TelegramClientContract
 {
     private const API_BASE_URL = 'https://api.telegram.org';
+
+    private const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
     public function getMe(string $botToken): TelegramGetMeResult
     {
@@ -33,8 +36,9 @@ final class HttpTelegramClient implements TelegramClientContract
         }
 
         $username = $response->json('result.username');
+        $username = is_string($username) ? ltrim(trim($username), '@') : null;
 
-        if (! is_string($username) || $username === '') {
+        if (! is_string($username) || preg_match('/^[A-Za-z][A-Za-z0-9_]{4,31}$/', $username) !== 1) {
             return TelegramGetMeResult::failure('Telegram did not return a bot username for this token.');
         }
 
@@ -75,10 +79,18 @@ final class HttpTelegramClient implements TelegramClientContract
                 'text' => $text,
             ]);
         } catch (Throwable) {
-            return TelegramApiResult::failure('Could not reach Telegram to send the reply.');
+            $result = TelegramApiResult::failure('Could not reach Telegram to send the reply.');
+            $this->logMessageFailure($chatId, $result->error);
+
+            return $result;
         }
 
-        return $this->toApiResult($response, 'Telegram rejected the message.');
+        $result = $this->toApiResult($response, 'Telegram rejected the message.');
+        if (! $result->successful) {
+            $this->logMessageFailure($chatId, $result->error);
+        }
+
+        return $result;
     }
 
     public function setMyCommands(string $botToken, array $commands): TelegramApiResult
@@ -118,8 +130,17 @@ final class HttpTelegramClient implements TelegramClientContract
             return TelegramFileDownloadResult::failure('Telegram did not return a path for that file.');
         }
 
+        $fileSize = $getFileResponse->json('result.file_size');
+        if ((is_int($fileSize) || (is_string($fileSize) && ctype_digit($fileSize)))
+            && (int) $fileSize > self::MAX_FILE_BYTES
+        ) {
+            return TelegramFileDownloadResult::failure('Telegram file is too large to capture.');
+        }
+
         try {
-            $contentResponse = Http::timeout(30)->get(self::API_BASE_URL."/file/bot{$botToken}/{$filePath}");
+            $contentResponse = Http::timeout(30)
+                ->withOptions(['stream' => true])
+                ->get(self::API_BASE_URL."/file/bot{$botToken}/{$filePath}");
         } catch (Throwable) {
             return TelegramFileDownloadResult::failure('Could not reach Telegram to download the file.');
         }
@@ -128,7 +149,11 @@ final class HttpTelegramClient implements TelegramClientContract
             return TelegramFileDownloadResult::failure('Telegram rejected the file download.');
         }
 
-        return TelegramFileDownloadResult::success($contentResponse->body());
+        $contents = $this->readBodyWithinLimit($contentResponse, self::MAX_FILE_BYTES);
+
+        return $contents === null
+            ? TelegramFileDownloadResult::failure('Telegram file is too large to capture.')
+            : TelegramFileDownloadResult::success($contents);
     }
 
     public function sendChatAction(string $botToken, int $chatId, string $action): TelegramApiResult
@@ -171,5 +196,47 @@ final class HttpTelegramClient implements TelegramClientContract
         return TelegramApiResult::failure(
             is_string($description) && $description !== '' ? $description : $genericError
         );
+    }
+
+    private function readBodyWithinLimit(Response $response, int $maxBytes): ?string
+    {
+        try {
+            $stream = $response->toPsrResponse()->getBody();
+            $size = $stream->getSize();
+
+            if ($size !== null && $size > $maxBytes) {
+                return null;
+            }
+
+            $contents = '';
+            $length = 0;
+
+            while (! $stream->eof()) {
+                $chunk = $stream->read(min(8192, $maxBytes - $length + 1));
+
+                if ($chunk === '') {
+                    break;
+                }
+
+                $length += strlen($chunk);
+                if ($length > $maxBytes) {
+                    return null;
+                }
+
+                $contents .= $chunk;
+            }
+
+            return $contents;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function logMessageFailure(int $chatId, ?string $error): void
+    {
+        Log::warning('Telegram message delivery failed.', [
+            'chat_id' => $chatId,
+            'error' => $error,
+        ]);
     }
 }

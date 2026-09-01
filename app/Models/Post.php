@@ -34,6 +34,9 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property array<string, mixed>|null $postsyncer
  * @property string $publish_state
  * @property string|null $publish_error
+ * @property array<string, mixed>|null $publish_progress
+ * @property CarbonImmutable|null $publish_claimed_at
+ * @property string|null $publish_lease_id
  * @property string $approval_state
  * @property CarbonImmutable|null $approved_at
  * @property int|null $approved_by_user_id
@@ -86,6 +89,9 @@ class Post extends Model
         'platforms',
         'image_drive_urls',
         'postsyncer',
+        'publish_progress',
+        'publish_claimed_at',
+        'publish_lease_id',
         'publish_state',
         'publish_error',
         'approval_state',
@@ -105,6 +111,8 @@ class Post extends Model
             'platforms' => 'array',
             'image_drive_urls' => 'array',
             'postsyncer' => 'array',
+            'publish_progress' => 'array',
+            'publish_claimed_at' => 'datetime',
             'approved_at' => 'datetime',
         ];
     }

@@ -12,9 +12,13 @@ use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\TelegramPostRequest;
+use App\Models\TelegramUpdate;
 use App\Models\Video;
 use App\Support\Telegram\TelegramClientContract;
+use App\Support\Telegram\TelegramUpdateKey;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -64,7 +68,7 @@ class HandleTelegramUpdateAction
         /note <text>: save a Scratch Pad note
         /post <text>: create a draft, or send the next photo/voice/audio
         /approve P-123: approve a generated draft
-        /post-now P-123: publish an approved draft now
+        /post_now P-123: publish an approved draft now
         /schedule P-123 YYYY-MM-DD HH:MM: schedule an approved draft
         /cancel: cancel the pending draft request
         /clearnotes: delete your workspace's most recent untriaged Scratch Pad notes
@@ -113,13 +117,15 @@ class HandleTelegramUpdateAction
             return;
         }
 
+        $telegramUpdateKey = TelegramUpdateKey::from($config, $update);
+
         $messageId = $message['message_id'] ?? null;
         $this->acknowledge($config, $chatId, is_int($messageId) ? $messageId : null);
 
         $text = $this->messageText($message);
 
         if ($text !== null && str_starts_with($text, '/')) {
-            $this->handleCommand($config, $chatId, $fromUserId, $fromUsername, $text, $update);
+            $this->handleCommand($config, $chatId, $fromUserId, $fromUsername, $text, $update, $telegramUpdateKey);
 
             return;
         }
@@ -155,7 +161,7 @@ class HandleTelegramUpdateAction
             $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
 
             if ($intent !== null) {
-                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
+                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent, $update));
 
                 return;
             }
@@ -172,7 +178,7 @@ class HandleTelegramUpdateAction
             $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
         }
 
-        $this->captureTelegramMessageAction->handle($config, $update);
+        $this->captureTelegramMessageAction->handle($config, $update, true, true, $telegramUpdateKey);
     }
 
     /**
@@ -223,9 +229,23 @@ class HandleTelegramUpdateAction
     /**
      * @param  array<string, mixed>  $update
      */
-    private function handleCommand(TelegramBotConfig $config, int $chatId, int $fromUserId, ?string $fromUsername, string $text, array $update): void
-    {
-        [$command, $args] = $this->parseCommand($text);
+    private function handleCommand(
+        TelegramBotConfig $config,
+        int $chatId,
+        int $fromUserId,
+        ?string $fromUsername,
+        string $text,
+        array $update,
+        ?string $telegramUpdateKey,
+    ): void {
+        $parsed = $this->parseCommand($text, $config->bot_username);
+
+        if ($parsed === null) {
+            // A command addressed to another bot in a group chat is not ours.
+            return;
+        }
+
+        [$command, $args] = $parsed;
 
         if ($command === '/start') {
             $link = $this->findLink($config, $fromUserId);
@@ -261,13 +281,13 @@ class HandleTelegramUpdateAction
             '/videos' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'videos')),
             '/posts' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'posts')),
             '/notes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'notes')),
-            '/note' => $this->handleNote($config, $chatId, $args),
+            '/note' => $this->handleNote($config, $chatId, $args, $telegramUpdateKey),
             '/post' => $this->handlePost($config, $link, $chatId, $fromUserId, $args, $update),
             '/approve' => $this->handleApprove($config, $link, $chatId, $fromUserId, $args),
-            '/post-now' => $this->handlePostNow($config, $link, $chatId, $fromUserId, $args),
+            '/post_now' => $this->handlePostNow($config, $link, $chatId, $fromUserId, $args),
             '/schedule' => $this->handleSchedule($config, $link, $chatId, $fromUserId, $args),
             '/cancel' => $this->handleCancel($config, $chatId, $fromUserId, $args),
-            '/clearnotes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'clear_notes')),
+            '/clearnotes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'clear_notes', $update)),
             default => $this->reply($config, $chatId, 'Unknown command. Try /help.'),
         };
     }
@@ -282,14 +302,21 @@ class HandleTelegramUpdateAction
      * clear_notes is a pure lookup; clear_notes deletes, same as typing
      * /clearnotes would.
      */
-    private function intentReply(TelegramBotConfig $config, TelegramBotLink $link, string $intent): string
-    {
+    /**
+     * @param  array<string, mixed>|null  $update
+     */
+    private function intentReply(
+        TelegramBotConfig $config,
+        TelegramBotLink $link,
+        string $intent,
+        ?array $update = null,
+    ): string {
         return match ($intent) {
             'me' => "You're linked as {$link->user->name} ({$link->user->email}).",
             'videos' => $this->recentVideos($config),
             'posts' => $this->recentPosts($config),
             'notes' => $this->recentNotes($config),
-            'clear_notes' => $this->clearNotes($config),
+            'clear_notes' => $this->clearNotes($config, $update),
             default => 'Unknown command. Try /help.',
         };
     }
@@ -315,7 +342,7 @@ class HandleTelegramUpdateAction
         $this->reply($config, $chatId, "✅ Linked as {$link->user->name}. Send /help to see what I can do.");
     }
 
-    private function handleNote(TelegramBotConfig $config, int $chatId, string $args): void
+    private function handleNote(TelegramBotConfig $config, int $chatId, string $args, ?string $telegramUpdateKey): void
     {
         $body = trim($args);
 
@@ -325,18 +352,61 @@ class HandleTelegramUpdateAction
             return;
         }
 
-        $this->captureTextNoteAction->handle($config->workspace, null, CaptureTextNoteData::fromTelegram($body));
+        $lock = $telegramUpdateKey === null
+            ? null
+            : Cache::lock('telegram:capture:'.$telegramUpdateKey, 120);
+
+        if ($lock !== null) {
+            $lock->block(30);
+        }
+
+        try {
+            if ($telegramUpdateKey !== null
+                && ScratchpadEntry::query()
+                    ->where('telegram_update_key', $telegramUpdateKey)
+                    ->exists()
+            ) {
+                $this->reply($config, $chatId, 'Captured.');
+
+                return;
+            }
+
+            $this->captureTextNoteAction->handle(
+                $config->workspace,
+                null,
+                CaptureTextNoteData::fromTelegram($body),
+                $telegramUpdateKey,
+            );
+        } finally {
+            $lock?->release();
+        }
+
         $this->reply($config, $chatId, 'Captured.');
     }
 
     /**
-     * @return array{0: string, 1: string} the lowercased command (with any
-     *                                     "@BotUsername" suffix stripped) and the remaining text
+     * @return array{0: string, 1: string}|null the lowercased command and the
+     *                                          remaining text, or null when another bot owns an @ suffix
      */
-    private function parseCommand(string $text): array
+    private function parseCommand(string $text, ?string $botUsername): ?array
     {
         [$command, $args] = array_pad(preg_split('/\s+/', trim($text), 2) ?: [], 2, '');
-        $command = strtolower(explode('@', $command, 2)[0]);
+        $matches = [];
+
+        if (preg_match('/^\/([a-z0-9_]{1,32})(?:@([a-z][a-z0-9_]{4,31}))?$/i', $command, $matches) !== 1) {
+            return ['/invalid', trim($args)];
+        }
+
+        $targetUsername = $matches[2] ?? null;
+        if ($targetUsername !== null) {
+            $configuredUsername = is_string($botUsername) ? ltrim(trim($botUsername), '@') : '';
+
+            if ($configuredUsername === '' || ! hash_equals(strtolower($configuredUsername), strtolower($targetUsername))) {
+                return null;
+            }
+        }
+
+        $command = '/'.strtolower($matches[1]);
 
         return [$command, trim($args)];
     }
@@ -401,23 +471,38 @@ class HandleTelegramUpdateAction
         int $telegramUserId,
         string $args,
     ): void {
-        $post = $this->postTarget($config, $chatId, $telegramUserId, $args, [TelegramPostRequest::AWAITING_APPROVAL]);
-
-        if ($post === null) {
-            $this->reply($config, $chatId, 'No generated draft is waiting for approval. Use /approve P-123 or start one with /post.');
-
-            return;
-        }
-
         try {
-            $approved = $this->approvePostAction()->handle($post, $link->user);
+            $request = $this->postTarget($config, $chatId, $telegramUserId, $args, [TelegramPostRequest::AWAITING_APPROVAL]);
         } catch (RuntimeException $exception) {
             $this->reply($config, $chatId, $exception->getMessage());
 
             return;
         }
 
-        $this->reply($config, $chatId, "✅ {$approved->human_id} approved. Send /post-now {$approved->human_id} or /schedule {$approved->human_id} YYYY-MM-DD HH:MM.");
+        if ($request === null || $request->post === null) {
+            $this->reply($config, $chatId, 'No generated draft is waiting for approval. Use /approve P-123 or start one with /post.');
+
+            return;
+        }
+
+        $post = $request->post;
+
+        try {
+            $approved = $this->approvePostAction()->handle(
+                $post,
+                $link->user,
+                $request,
+                $config,
+                $telegramUserId,
+                $chatId,
+            );
+        } catch (RuntimeException $exception) {
+            $this->reply($config, $chatId, $exception->getMessage());
+
+            return;
+        }
+
+        $this->reply($config, $chatId, "✅ {$approved->human_id} approved. Send /post_now {$approved->human_id} or /schedule {$approved->human_id} YYYY-MM-DD HH:MM.");
     }
 
     private function handlePostNow(
@@ -427,16 +512,30 @@ class HandleTelegramUpdateAction
         int $telegramUserId,
         string $args,
     ): void {
-        $post = $this->postTarget($config, $chatId, $telegramUserId, $args, [TelegramPostRequest::APPROVED]);
+        try {
+            $request = $this->postTarget($config, $chatId, $telegramUserId, $args, [
+                TelegramPostRequest::APPROVED,
+                TelegramPostRequest::FAILED,
+            ]);
+        } catch (RuntimeException $exception) {
+            $this->reply($config, $chatId, $exception->getMessage());
 
-        if ($post === null) {
+            return;
+        }
+
+        if ($request === null || $request->post === null) {
             $this->reply($config, $chatId, 'No approved draft found. Approve the preview first with /approve P-123.');
 
             return;
         }
 
+        $post = $request->post;
+
         try {
-            $this->enqueuePostPublishAction()->handle($post, $config->workspace, ['confirm_ask' => true]);
+            $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
+                'confirm_ask' => true,
+                'telegram_request_id' => $request->id,
+            ]);
         } catch (ValidationException $exception) {
             $this->reply($config, $chatId, $this->validationMessage($exception));
 
@@ -458,13 +557,24 @@ class HandleTelegramUpdateAction
         string $args,
     ): void {
         [$identifier, $whenText] = $this->scheduleArguments($args);
-        $post = $this->postTarget($config, $chatId, $telegramUserId, $identifier ?? '', [TelegramPostRequest::APPROVED]);
+        try {
+            $request = $this->postTarget($config, $chatId, $telegramUserId, $identifier ?? '', [
+                TelegramPostRequest::APPROVED,
+                TelegramPostRequest::FAILED,
+            ]);
+        } catch (RuntimeException $exception) {
+            $this->reply($config, $chatId, $exception->getMessage());
 
-        if ($post === null) {
+            return;
+        }
+
+        if ($request === null || $request->post === null) {
             $this->reply($config, $chatId, 'No approved draft found. Approve the preview first with /approve P-123.');
 
             return;
         }
+
+        $post = $request->post;
 
         $when = $this->parseScheduleWhen($config, $whenText);
 
@@ -478,6 +588,7 @@ class HandleTelegramUpdateAction
             $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
                 'when' => $when,
                 'confirm_ask' => true,
+                'telegram_request_id' => $request->id,
             ]);
         } catch (ValidationException $exception) {
             $this->reply($config, $chatId, $this->validationMessage($exception));
@@ -494,22 +605,20 @@ class HandleTelegramUpdateAction
 
     private function handleCancel(TelegramBotConfig $config, int $chatId, int $telegramUserId, string $args): void
     {
-        $request = TelegramPostRequest::query()
-            ->forTelegram($config, $telegramUserId, $chatId)
-            ->when(trim($args) !== '', function ($query) use ($config, $args) {
-                $post = $this->findPost($config, trim(explode(' ', trim($args), 2)[0]));
+        try {
+            $request = $this->postTarget(
+                $config,
+                $chatId,
+                $telegramUserId,
+                $args,
+                TelegramPostRequest::ACTIVE_STATES,
+                false,
+            );
+        } catch (RuntimeException $exception) {
+            $this->reply($config, $chatId, $exception->getMessage());
 
-                if ($post === null) {
-                    $query->whereRaw('1 = 0');
-
-                    return;
-                }
-
-                $query->where('post_id', $post->id);
-            })
-            ->whereIn('state', TelegramPostRequest::ACTIVE_STATES)
-            ->latest('id')
-            ->first();
+            return;
+        }
 
         if ($request === null) {
             $this->reply($config, $chatId, 'There is no pending Telegram post request to cancel.');
@@ -517,32 +626,72 @@ class HandleTelegramUpdateAction
             return;
         }
 
-        $this->cancelPostRequestAction()->handle($request);
-        $this->reply($config, $chatId, 'Cancelled the pending Telegram post request. The source capture and any draft remain in Content Machine.');
+        try {
+            $cancelled = $this->cancelPostRequestAction()->handle(
+                $request,
+                $config,
+                $telegramUserId,
+                $chatId,
+            );
+        } catch (RuntimeException) {
+            $this->reply($config, $chatId, 'There is no pending Telegram post request to cancel.');
+
+            return;
+        }
+        $this->reply(
+            $config,
+            $chatId,
+            $cancelled->state === TelegramPostRequest::CANCELLED
+                ? 'Cancelled the pending Telegram post request. The source capture and any draft remain in Content Machine.'
+                : 'That post is already being published, so I did not cancel it.',
+        );
     }
 
     /**
      * @param  list<string>  $states
      */
-    private function postTarget(TelegramBotConfig $config, int $chatId, int $telegramUserId, string $args, array $states): ?Post
-    {
+    private function postTarget(
+        TelegramBotConfig $config,
+        int $chatId,
+        int $telegramUserId,
+        string $args,
+        array $states,
+        bool $requirePost = true,
+    ): ?TelegramPostRequest {
         $identifier = trim($args);
+
+        $query = TelegramPostRequest::query()
+            ->forTelegram($config, $telegramUserId, $chatId)
+            ->whereIn('state', $states);
+
+        if ($requirePost) {
+            $query->whereNotNull('post_id');
+        }
 
         if ($identifier !== '') {
             $identifier = trim(explode(' ', $identifier, 2)[0]);
+            $post = $this->findPost($config, $identifier);
 
-            return $this->findPost($config, $identifier);
+            if ($post === null) {
+                return null;
+            }
+
+            $query->where('post_id', $post->id);
         }
 
-        return TelegramPostRequest::query()
-            ->forTelegram($config, $telegramUserId, $chatId)
-            ->whereIn('state', $states)
-            ->whereNotNull('post_id')
+        $requests = $query
             ->with('post')
             ->latest('id')
-            ->get()
-            ->first(fn (TelegramPostRequest $request): bool => $request->post !== null)
-            ?->post;
+            ->limit(2)
+            ->get();
+
+        if ($requests->count() > 1) {
+            throw new RuntimeException(
+                'More than one matching Telegram post request exists. Include the post id, for example P-123.',
+            );
+        }
+
+        return $requests->first();
     }
 
     private function findPost(TelegramBotConfig $config, string $identifier): ?Post
@@ -692,15 +841,51 @@ class HandleTelegramUpdateAction
      * only permission gate this bot has for any command; there's no
      * per-note ownership to check beyond that.
      */
-    private function clearNotes(TelegramBotConfig $config): string
+    /**
+     * @param  array<string, mixed>|null  $update
+     */
+    private function clearNotes(TelegramBotConfig $config, ?array $update = null): string
     {
-        $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
+        $deleted = DB::transaction(function () use ($config, $update): int {
+            $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
+            $this->markUpdateProcessed($config, $update);
+
+            return $deleted;
+        });
 
         return match (true) {
             $deleted === 0 => 'No notes to delete.',
             $deleted === 1 => 'Deleted 1 note.',
             default => "Deleted {$deleted} notes.",
         };
+    }
+
+    /**
+     * Mark a destructive command complete in the webhook outbox transaction.
+     * If the worker dies after this commit, ProcessTelegramUpdateJob skips the
+     * replay instead of deleting the next batch of notes.
+     *
+     * @param  array<string, mixed>|null  $update
+     */
+    private function markUpdateProcessed(TelegramBotConfig $config, ?array $update): void
+    {
+        $updateId = $update['update_id'] ?? null;
+
+        if (! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId))) {
+            return;
+        }
+
+        $query = TelegramUpdate::query()
+            ->where('telegram_bot_config_id', $config->id)
+            ->where('update_id', (int) $updateId);
+
+        if ($config->webhook_generation !== null) {
+            $query->where('webhook_generation', $config->webhook_generation);
+        } else {
+            $query->whereNull('webhook_generation');
+        }
+
+        $query->update(['processed_at' => now()]);
     }
 
     private function helpText(TelegramBotConfig $config): string

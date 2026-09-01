@@ -8,6 +8,7 @@ use App\Models\TelegramBotConfig;
 use App\Models\TelegramUpdate;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Receives Telegram's webhook deliveries. Per
@@ -41,17 +42,51 @@ class TelegramWebhookController extends Controller
             return response()->noContent();
         }
 
-        $updateId = $request->integer('update_id');
+        $rawUpdateId = $request->input('update_id');
+        if ((! is_int($rawUpdateId) && ! (is_string($rawUpdateId) && ctype_digit($rawUpdateId)))
+            || (int) $rawUpdateId < 0
+        ) {
+            abort(422, 'Invalid Telegram update id.');
+        }
 
-        $update = TelegramUpdate::firstOrCreate([
-            'telegram_bot_config_id' => $config->id,
-            'update_id' => $updateId,
-        ]);
+        $updateId = (int) $rawUpdateId;
+        $payload = $request->all();
+        $webhookGeneration = $config->webhook_generation;
 
-        // Telegram redelivers when it doesn't see a fast 2xx; only the
-        // first sighting of a given update_id gets processed.
-        if ($update->wasRecentlyCreated) {
-            ProcessTelegramUpdateJob::dispatch($config->id, $request->all());
+        /** @var int $inserted */
+        [$update, $inserted] = DB::transaction(function () use ($config, $updateId, $payload, $webhookGeneration): array {
+            $inserted = DB::table('telegram_updates')->insertOrIgnore([
+                'telegram_bot_config_id' => $config->id,
+                'webhook_generation' => $webhookGeneration,
+                'update_id' => $updateId,
+                'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $update = TelegramUpdate::query()
+                ->where('telegram_bot_config_id', $config->id)
+                ->where('webhook_generation', $webhookGeneration)
+                ->where('update_id', $updateId)
+                ->firstOrFail();
+
+            if ($update->payload === null) {
+                $update->forceFill(['payload' => $payload])->save();
+            }
+
+            return [$update, $inserted];
+        });
+
+        // Only the delivery that created the outbox row dispatches immediately.
+        // If that queue insertion fails after the row commits, the scheduled
+        // drain retries it; duplicate Telegram deliveries cannot enqueue a
+        // second copy while the first one is already pending.
+        if ($inserted > 0) {
+            ProcessTelegramUpdateJob::dispatch(
+                $config->id,
+                $update->payload ?? $payload,
+                $update->webhook_generation,
+            );
         }
 
         return response()->noContent();

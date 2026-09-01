@@ -10,12 +10,15 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 class ResolveScratchpadLinkJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
 
     public function __construct(
         public readonly ScratchpadEntry $entry,
@@ -45,6 +48,28 @@ class ResolveScratchpadLinkJob implements ShouldQueue
         $this->failTelegramPostRequests(
             'I could not resolve that link, so I could not create the post draft.',
         );
+    }
+
+    public function uniqueId(): string
+    {
+        return 'scratchpad-link-resolution:'.$this->entry->getKey();
+    }
+
+    /**
+     * Duplicate recovery dispatches must not resolve the same URL together,
+     * but an enqueue failure must remain recoverable from the database row.
+     *
+     * @return list<WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping(
+                'scratchpad-link-resolution:'.$this->entry->getKey(),
+                60,
+                self::OVERLAP_EXPIRES_AFTER_SECONDS,
+            ))->shared()->dontRelease(),
+        ];
     }
 
     /**

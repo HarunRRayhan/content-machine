@@ -5,12 +5,15 @@ namespace Tests\Unit\Support\AiProviders;
 use App\Models\AiProviderCredential;
 use App\Models\AiProviderCredentialModel;
 use App\Support\AiProviders\HttpAiCompletionClient;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class HttpAiCompletionClientTest extends TestCase
 {
+    use RefreshDatabase;
+
     /**
      * @param  array<string, mixed>  $credentialAttrs
      */

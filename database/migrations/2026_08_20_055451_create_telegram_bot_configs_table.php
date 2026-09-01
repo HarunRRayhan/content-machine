@@ -13,8 +13,8 @@ return new class extends Migration
      * column: "enabled" is simply `bot_token !== null`, see
      * TelegramBotConfig::isConnected(). `webhook_secret` and
      * `webhook_slug` are generated once on first successful connect and
-     * then kept stable across disconnect/reconnect, so a workspace's
-     * webhook URL doesn't change every time the bot token is rotated;
+     * and rotated whenever the bot token changes, so deliveries accepted under
+     * an old token cannot be processed with the replacement token;
      * `webhook_slug` is the unguessable path segment
      * (docs/adr/0001-webhook-not-polling.md), `webhook_secret` is the
      * value later sent as X-Telegram-Bot-Api-Secret-Token. Neither is

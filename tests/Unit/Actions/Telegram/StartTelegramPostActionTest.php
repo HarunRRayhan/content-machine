@@ -89,6 +89,38 @@ class StartTelegramPostActionTest extends TestCase
         $this->assertSame(0, ScratchpadEntry::count());
     }
 
+    public function test_a_redelivered_post_command_does_not_create_a_second_request(): void
+    {
+        Queue::fake();
+        ['config' => $config, 'link' => $link] = $this->linkedBot();
+        $update = $this->update('/post write this once');
+        $action = $this->action();
+
+        $action->handle($config, $link, 555, 42, $update);
+        $action->handle($config, $link, 555, 42, $update);
+
+        $this->assertSame(1, TelegramPostRequest::count());
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
+    public function test_a_redelivered_follow_up_source_reuses_the_pending_request(): void
+    {
+        Queue::fake();
+        ['config' => $config, 'link' => $link] = $this->linkedBot();
+        $action = $this->action();
+
+        $waiting = $action->handle($config, $link, 555, 42, $this->update('/post'));
+        $source = $this->update('turn this into a post once');
+        $source['update_id'] = 2;
+
+        $first = $action->handle($config, $link, 555, 42, $source, null, $waiting);
+        $replayed = $action->handle($config, $link, 555, 42, $source);
+
+        $this->assertTrue($replayed->is($first));
+        $this->assertSame(1, TelegramPostRequest::count());
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
     public function test_the_pending_request_is_reused_for_a_text_source(): void
     {
         Queue::fake();

@@ -31,6 +31,15 @@ type Props = {
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
+    publishProgress: {
+        state?: string;
+        current?: {
+            index?: number;
+            group_key?: string;
+            phase?: string;
+        } | null;
+    } | null;
+    reconcileUrl: string;
     approvalState: string;
     timezone: string;
     needsConfirmAsk: boolean;
@@ -222,6 +231,8 @@ export default function PostOverview({
     publishUrl,
     postsyncerReady,
     publishState,
+    publishProgress,
+    reconcileUrl,
     approvalState,
     timezone,
     needsConfirmAsk,
@@ -249,12 +260,28 @@ export default function PostOverview({
         : (workspaces ?? []);
     const hasWorkspaceBuckets = workspaceBuckets.length > 0;
     const publishBusy = ['queued', 'running'].includes(publishState);
+    const publishUncertain = Boolean(
+        publishProgress?.state === 'uncertain' ||
+        (publishProgress?.current !== null &&
+            publishProgress?.current !== undefined &&
+            publishProgress.current.phase !== 'uploading'),
+    );
     const awaitingApproval = approvalState === 'pending';
+    const retryableFailure =
+        publishState === 'failed' &&
+        !publishUncertain &&
+        !awaitingApproval &&
+        !archived &&
+        studioStatus !== 'posted' &&
+        studioStatus !== 'scheduled' &&
+        !hasGroups;
     const showScheduleForm =
         !archived &&
         studioStatus !== 'posted' &&
         studioStatus !== 'scheduled' &&
         !hasGroups &&
+        !publishUncertain &&
+        !retryableFailure &&
         studioStatus === 'draft' &&
         !awaitingApproval;
     const canSchedule =
@@ -362,7 +389,48 @@ export default function PostOverview({
                     </div>
 
                     <div className="act">
-                        {archived ? (
+                        {publishUncertain ? (
+                            <Form
+                                action={reconcileUrl}
+                                method="post"
+                                className="schedule-it"
+                            >
+                                {({ processing, errors }) => (
+                                    <>
+                                        <label className="schedule-it-label">
+                                            <span className="schedule-it-label-row">
+                                                Reconcile PostSyncer create
+                                            </span>
+                                            <input
+                                                name="postsyncer_id"
+                                                type="text"
+                                                inputMode="numeric"
+                                                required
+                                                placeholder="PostSyncer post ID"
+                                                disabled={processing}
+                                            />
+                                        </label>
+                                        <button
+                                            type="submit"
+                                            className="advance"
+                                            disabled={processing}
+                                        >
+                                            Verify and reconcile
+                                        </button>
+                                        {errors.postsyncer_id && (
+                                            <p className="schedule-it-error">
+                                                {errors.postsyncer_id}
+                                            </p>
+                                        )}
+                                        <p className="schedule-it-hint">
+                                            Find the created post in PostSyncer,
+                                            verify its content, then enter its
+                                            ID.
+                                        </p>
+                                    </>
+                                )}
+                            </Form>
+                        ) : archived ? (
                             <>
                                 <span className="badge archived">
                                     🗄️ Archived
@@ -390,6 +458,25 @@ export default function PostOverview({
                                     🗄️ Archive
                                 </button>
                             </>
+                        ) : retryableFailure ? (
+                            <Form action={publishUrl} method="post">
+                                {({ processing, errors }) => (
+                                    <>
+                                        <button
+                                            type="submit"
+                                            className="advance"
+                                            disabled={processing}
+                                        >
+                                            Retry publish
+                                        </button>
+                                        {errors.publish && (
+                                            <p className="schedule-it-error">
+                                                {errors.publish}
+                                            </p>
+                                        )}
+                                    </>
+                                )}
+                            </Form>
                         ) : showScheduleForm ? (
                             <Form
                                 action={publishUrl}

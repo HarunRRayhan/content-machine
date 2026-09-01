@@ -33,19 +33,23 @@ class ConnectTelegramBotActionTest extends TestCase
         $this->assertSame('123:abc', $client->setMyCommandsCalledWith[0]['botToken']);
     }
 
-    public function test_reconnecting_keeps_the_same_webhook_secret_and_slug()
+    public function test_rotating_the_bot_token_rotates_the_webhook_identity()
     {
         $workspace = Workspace::factory()->create();
         $existing = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $originalToken = $existing->bot_token;
         $originalSecret = $existing->webhook_secret;
         $originalSlug = $existing->webhook_slug;
+        $originalGeneration = $existing->webhook_generation;
 
         $client = (new FakeTelegramClient)->willGetMe(TelegramGetMeResult::success('a_new_username'));
         $config = (new ConnectTelegramBotAction($client))->handle($workspace, new ConnectTelegramBotData('999:new-token'));
 
-        $this->assertSame($originalSecret, $config->webhook_secret);
-        $this->assertSame($originalSlug, $config->webhook_slug);
+        $this->assertNotSame($originalSecret, $config->webhook_secret);
+        $this->assertNotSame($originalSlug, $config->webhook_slug);
+        $this->assertNotSame($originalGeneration, $config->webhook_generation);
         $this->assertSame('a_new_username', $config->bot_username);
+        $this->assertSame([$originalToken], $client->deleteWebhookCalledWith);
     }
 
     public function test_a_failed_getme_check_throws_and_stores_nothing()

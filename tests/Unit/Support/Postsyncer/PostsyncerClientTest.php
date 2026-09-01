@@ -45,6 +45,23 @@ class PostsyncerClientTest extends TestCase
             && $request['urls'] === ['https://example.com/a.png']);
     }
 
+    public function test_upload_from_urls_sends_the_idempotency_key_when_provided(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+            ], 200),
+        ]);
+
+        $client = $this->clientWithKey();
+        $client->uploadFromUrls(15211, ['https://example.com/a.png'], 'media-operation-group');
+
+        Http::assertSent(fn ($request) => $request->hasHeader(
+            'Idempotency-Key',
+            'media-operation-group',
+        ));
+    }
+
     public function test_create_post_returns_post_payload(): void
     {
         Http::fake([
@@ -71,6 +88,21 @@ class PostsyncerClientTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts'
             && $request->hasHeader('Authorization', 'Bearer test-api-key')
             && $request['workspace_id'] === 15211);
+    }
+
+    public function test_create_post_sends_the_idempotency_key_when_provided(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 42], 201),
+        ]);
+
+        $client = $this->clientWithKey();
+        $client->createPost(['workspace_id' => 15211], 'publish-operation-group');
+
+        Http::assertSent(fn ($request) => $request->hasHeader(
+            'Idempotency-Key',
+            'publish-operation-group',
+        ));
     }
 
     public function test_list_workspaces_returns_ids_with_names(): void
@@ -210,6 +242,24 @@ class PostsyncerClientTest extends TestCase
         $this->expectExceptionMessage('PostSyncer API error 422: Invalid workspace');
 
         $client->uploadFromUrls(15211, ['https://example.com/a.png']);
+    }
+
+    public function test_a_connection_failure_is_an_unknown_outcome(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::failedConnection('timed out'),
+        ]);
+
+        $client = $this->clientWithKey();
+
+        try {
+            $client->createPost(['workspace_id' => 15211]);
+            $this->fail('A PostSyncer connection failure should throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->retryable);
+            $this->assertTrue($exception->outcomeUnknown);
+            $this->assertStringContainsString('Could not reach PostSyncer', $exception->getMessage());
+        }
     }
 
     public function test_missing_api_key_throws_postsyncer_exception(): void

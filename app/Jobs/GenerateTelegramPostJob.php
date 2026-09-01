@@ -9,12 +9,15 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 class GenerateTelegramPostJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
 
     public function __construct(
         public readonly int $telegramPostRequestId,
@@ -27,6 +30,28 @@ class GenerateTelegramPostJob implements ShouldQueue
     public function handle(GenerateTelegramPostAction $action): void
     {
         $action->handle($this->telegramPostRequestId);
+    }
+
+    public function uniqueId(): string
+    {
+        return 'telegram-post-generation:'.$this->telegramPostRequestId;
+    }
+
+    /**
+     * The request row is the durable completion guard. This lock only keeps
+     * duplicate recovery dispatches from calling the AI provider together.
+     *
+     * @return list<WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping(
+                'telegram-post-generation:'.$this->telegramPostRequestId,
+                60,
+                self::OVERLAP_EXPIRES_AFTER_SECONDS,
+            ))->shared()->dontRelease(),
+        ];
     }
 
     /**

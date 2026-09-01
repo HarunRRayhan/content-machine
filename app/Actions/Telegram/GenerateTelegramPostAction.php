@@ -16,6 +16,7 @@ use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use JsonException;
 use Throwable;
 
 /**
@@ -82,7 +83,7 @@ class GenerateTelegramPostAction
 
         if ($sourceText === '') {
             return $this->fail($request, $entry->kind === 'voice'
-                ? 'The audio transcription is not ready yet. Please try /post-now only after I send the draft preview.'
+                ? 'The audio transcription is not ready yet. Please wait for the draft preview before sending /post_now.'
                 : 'The source did not contain any text to turn into a post.');
         }
 
@@ -101,7 +102,7 @@ class GenerateTelegramPostAction
             return null;
         }
 
-        $draft = $this->parseDraft($result->text, $this->languageFor($request, $entry));
+        $draft = $this->parseDraft($result->text);
 
         if ($draft === null) {
             return $this->fail($request, 'The AI returned an unusable draft. Please try generating it again.');
@@ -256,31 +257,57 @@ class GenerateTelegramPostAction
     /**
      * @return array{title: string, body: string, language: string, captions: array<string, array{caption: string, first_comment: string}>}|null
      */
-    private function parseDraft(string $raw, string $fallbackLanguage): ?array
+    private function parseDraft(string $raw): ?array
     {
         $json = trim($raw);
-        $json = preg_replace('/^```(?:json)?\s*/i', '', $json) ?? $json;
-        $json = preg_replace('/\s*```$/', '', $json) ?? $json;
-        $decoded = json_decode(trim($json), true);
-
-        if (! is_array($decoded)) {
+        try {
+            $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
             return null;
         }
 
-        $title = trim((string) ($decoded['title'] ?? ''));
-        $body = trim((string) ($decoded['body'] ?? ''));
-        $language = $this->normalizeLanguage($decoded['language'] ?? $fallbackLanguage) ?? $fallbackLanguage;
-        $rawCaptions = $decoded['captions'] ?? [];
+        $decodedKeys = is_array($decoded) ? array_keys($decoded) : [];
+        sort($decodedKeys);
 
-        if ($title === '' || ! is_array($rawCaptions)) {
+        if (! is_array($decoded)
+            || $decodedKeys !== ['body', 'captions', 'language', 'title']
+            || ! is_string($decoded['title'])
+            || ! is_string($decoded['body'])
+            || ! is_string($decoded['language'])
+        ) {
+            return null;
+        }
+
+        $title = trim($decoded['title']);
+        $body = trim($decoded['body']);
+        $language = $this->normalizeLanguage($decoded['language']);
+        $rawCaptions = $decoded['captions'];
+        $captionKeys = is_array($rawCaptions) ? array_keys($rawCaptions) : [];
+        sort($captionKeys);
+
+        if ($title === '' || mb_strlen($title) > 255 || ! is_array($rawCaptions)
+            || $language === null
+            || $captionKeys !== self::DEFAULT_PLATFORMS
+        ) {
             return null;
         }
 
         $captions = [];
         foreach (self::DEFAULT_PLATFORMS as $platform) {
             $value = $rawCaptions[$platform] ?? null;
-            $caption = is_array($value) ? trim((string) ($value['caption'] ?? '')) : trim((string) $value);
-            $firstComment = is_array($value) ? trim((string) ($value['first_comment'] ?? '')) : '';
+            $valueKeys = is_array($value) ? array_keys($value) : [];
+            sort($valueKeys);
+
+            if (! is_array($value)
+                || $valueKeys !== ['caption', 'first_comment']
+                || ! is_string($value['caption'])
+                || ! is_string($value['first_comment'])
+            ) {
+                return null;
+            }
+
+            $caption = trim($value['caption']);
+            $firstComment = trim($value['first_comment']);
 
             if ($caption === '') {
                 return null;
@@ -293,7 +320,7 @@ class GenerateTelegramPostAction
         }
 
         return [
-            'title' => Str::limit($title, 255, ''),
+            'title' => $title,
             'body' => $body === '' ? $captions['facebook']['caption'] : $body,
             'language' => $language,
             'captions' => $captions,
@@ -323,13 +350,6 @@ class GenerateTelegramPostAction
                 self::DEFAULT_PLATFORMS,
             ),
         ]];
-    }
-
-    private function languageFor(TelegramPostRequest $request, ScratchpadEntry $entry): string
-    {
-        $transcriptionLanguage = $entry->transcriptions->firstWhere('status', 'done')?->language;
-
-        return $this->normalizeLanguage($entry->language ?? $transcriptionLanguage) ?? 'bn';
     }
 
     private function languageForRequest(TelegramPostRequest $request): string
@@ -388,7 +408,7 @@ class GenerateTelegramPostAction
         $url = route('posts.show', ['post' => $post]).'?tab=captions';
         $preview = "✅ Draft {$post->human_id} is ready.\n\nTitle: {$post->title}\n\n".
             Str::limit($facebookCaption, 900)."\n\nReview it in Content Machine:\n{$url}\n\n".
-            "When you approve it: send /approve {$post->human_id}, then /post-now {$post->human_id} or /schedule {$post->human_id} tomorrow at 9am.";
+            "When you approve it: send /approve {$post->human_id}, then /post_now {$post->human_id} or /schedule {$post->human_id} tomorrow at 9am.";
 
         $this->telegramClient->sendMessage($config->bot_token, $request->telegram_chat_id, $preview);
     }

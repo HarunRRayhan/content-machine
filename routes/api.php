@@ -141,6 +141,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.publish');
 
+    Route::post('posts/{human_id}/reconcile', [PostsApiController::class, 'reconcile'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile');
+
     Route::get('posts/{human_id}/media/{mediaAsset}', [PostsApiController::class, 'media'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.media');

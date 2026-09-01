@@ -9,6 +9,7 @@ use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class UpdatePostActionTest extends TestCase
@@ -212,5 +213,95 @@ class UpdatePostActionTest extends TestCase
         $this->assertSame($groups, $updated->postsyncer);
         $this->assertSame(['facebook' => 'keep me'], $updated->captions);
         $this->assertSame('scheduled', $updated->status);
+    }
+
+    public function test_a_checkpointed_publish_cannot_have_its_metadata_overwritten(): void
+    {
+        $post = Post::factory()->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'options' => [],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [['index' => 0, 'group_key' => 'group-1']],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'creating',
+                    'idempotency_key' => 'idempotency-1',
+                    'media_ids' => [],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'publish_state' => 'idle',
+            'publish_error' => null,
+        ], $post));
+    }
+
+    public function test_a_deterministic_failure_can_be_retried_as_a_new_operation_after_an_edit(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Old title',
+            'captions' => ['facebook' => 'Old caption'],
+            'publish_state' => 'failed',
+            'publish_error' => 'No account id mapped.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'options' => [],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'title' => 'New title',
+            'captions' => ['facebook' => 'New caption'],
+        ], $post));
+
+        $post->refresh();
+        $this->assertSame('New title', $post->title);
+        $this->assertSame('idle', $post->publish_state);
+        $this->assertNull($post->publish_error);
+        $this->assertNull($post->publish_progress);
+        $this->assertSame('pending', $post->approval_state);
+    }
+
+    public function test_published_posts_can_be_archived_and_unarchived(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Published post',
+            'status' => 'posted',
+            'publish_state' => 'succeeded',
+            'postsyncer' => ['groups' => [['post_id' => '99']]],
+            'publish_progress' => ['completed_groups' => [['post_id' => '99']]],
+        ]);
+
+        (new UpdatePostAction)->handle($post, new UpdatePostData(
+            title: $post->title,
+            status: 'archived',
+            hasBody: false,
+        ));
+
+        $post->refresh();
+        $this->assertSame('archived', $post->status);
+
+        (new UpdatePostAction)->handle($post, new UpdatePostData(
+            title: $post->title,
+            status: 'posted',
+            hasBody: false,
+        ));
+
+        $this->assertSame('posted', $post->refresh()->status);
     }
 }

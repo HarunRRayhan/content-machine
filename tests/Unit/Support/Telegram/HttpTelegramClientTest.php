@@ -5,6 +5,7 @@ namespace Tests\Unit\Support\Telegram;
 use App\Support\Telegram\HttpTelegramClient;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class HttpTelegramClientTest extends TestCase
@@ -21,6 +22,19 @@ class HttpTelegramClientTest extends TestCase
         $this->assertTrue($result->successful);
         $this->assertSame('harun_capture_bot', $result->username);
         Http::assertSent(fn ($request) => $request->url() === 'https://api.telegram.org/bot123456:test-token/getMe');
+    }
+
+    public function test_a_getme_username_is_stored_without_a_leading_at_sign()
+    {
+        Http::fake(['api.telegram.org/*' => Http::response([
+            'ok' => true,
+            'result' => ['username' => '@harun_capture_bot'],
+        ])]);
+
+        $result = (new HttpTelegramClient)->getMe('123456:test-token');
+
+        $this->assertTrue($result->successful);
+        $this->assertSame('harun_capture_bot', $result->username);
     }
 
     public function test_a_401_is_reported_as_an_invalid_token()
@@ -101,6 +115,7 @@ class HttpTelegramClientTest extends TestCase
 
     public function test_a_connection_failure_on_send_message_is_reported_without_leaking_the_exception()
     {
+        Log::spy();
         Http::fake(function () {
             throw new ConnectionException('Connection refused');
         });
@@ -109,6 +124,13 @@ class HttpTelegramClientTest extends TestCase
 
         $this->assertFalse($result->successful);
         $this->assertSame('Could not reach Telegram to send the reply.', $result->error);
+        Log::shouldHaveReceived('warning')->once()->with(
+            'Telegram message delivery failed.',
+            [
+                'chat_id' => 1,
+                'error' => 'Could not reach Telegram to send the reply.',
+            ],
+        );
     }
 
     public function test_download_file_fetches_metadata_then_content()
@@ -160,6 +182,39 @@ class HttpTelegramClientTest extends TestCase
 
         $this->assertFalse($result->successful);
         $this->assertSame('Telegram rejected the file download.', $result->error);
+    }
+
+    public function test_download_file_rejects_a_declared_size_over_the_bot_api_limit(): void
+    {
+        Http::fake([
+            'api.telegram.org/bot123:token/getFile*' => Http::response([
+                'ok' => true,
+                'result' => ['file_path' => 'photos/large.jpg', 'file_size' => 20 * 1024 * 1024 + 1],
+            ]),
+            'api.telegram.org/file/*' => Http::response('should not download'),
+        ]);
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Telegram file is too large to capture.', $result->error);
+        Http::assertSentCount(1);
+    }
+
+    public function test_download_file_rejects_content_over_the_bot_api_limit(): void
+    {
+        Http::fake([
+            'api.telegram.org/bot123:token/getFile*' => Http::response([
+                'ok' => true,
+                'result' => ['file_path' => 'photos/large.jpg'],
+            ]),
+            'api.telegram.org/file/*' => Http::response(str_repeat('x', 20 * 1024 * 1024 + 1)),
+        ]);
+
+        $result = (new HttpTelegramClient)->downloadFile('123:token', 'f1');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Telegram file is too large to capture.', $result->error);
     }
 
     public function test_a_connection_failure_on_download_file_is_reported_without_leaking_the_exception()

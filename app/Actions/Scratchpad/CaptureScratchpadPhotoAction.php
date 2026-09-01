@@ -24,15 +24,20 @@ class CaptureScratchpadPhotoAction
 {
     use ResolvesMediaAsset;
 
-    public function handle(Workspace $workspace, ?User $capturedBy, CaptureScratchpadPhotoData $data): ScratchpadEntry
-    {
+    public function handle(
+        Workspace $workspace,
+        ?User $capturedBy,
+        CaptureScratchpadPhotoData $data,
+        ?string $telegramUpdateKey = null,
+    ): ScratchpadEntry {
         $mediaAsset = $this->resolveMediaAsset($workspace, $capturedBy, $data->file, 'image');
 
-        return DB::transaction(function () use ($workspace, $mediaAsset, $data) {
+        return DB::transaction(function () use ($workspace, $mediaAsset, $data, $telegramUpdateKey) {
             $entry = ScratchpadEntry::create([
                 'workspace_id' => $workspace->id,
                 'kind' => 'photo',
                 'source' => $data->source,
+                'telegram_update_key' => $telegramUpdateKey,
                 'captured_at' => now(),
                 'body' => $data->caption,
                 'language' => $data->language,

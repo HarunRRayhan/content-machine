@@ -24,7 +24,7 @@ final class TelegramBotCommands
         ['command' => 'note', 'description' => 'Save a Scratch Pad note'],
         ['command' => 'post', 'description' => 'Create a draft from text, photo, or audio'],
         ['command' => 'approve', 'description' => 'Approve a draft for publishing'],
-        ['command' => 'post-now', 'description' => 'Publish an approved draft now'],
+        ['command' => 'post_now', 'description' => 'Publish an approved draft now'],
         ['command' => 'schedule', 'description' => 'Schedule an approved draft'],
         ['command' => 'cancel', 'description' => 'Cancel a pending draft request'],
         ['command' => 'clearnotes', 'description' => 'Delete your recent untriaged Scratch Pad notes'],

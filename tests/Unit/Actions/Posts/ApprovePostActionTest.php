@@ -67,4 +67,35 @@ class ApprovePostActionTest extends TestCase
         $this->assertSame(TelegramPostRequest::APPROVED, $request->refresh()->state);
         $this->assertNotNull($request->confirmed_at);
     }
+
+    public function test_a_telegram_approval_only_advances_the_request_that_was_confirmed(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->for($workspace)->create();
+        $post = Post::factory()->for($workspace)->create(['approval_state' => 'pending']);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::AWAITING_APPROVAL,
+        ]);
+        $otherRequest = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::AWAITING_APPROVAL,
+        ]);
+        $actor = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $actor->id,
+            'telegram_user_id' => $request->telegram_user_id,
+        ]);
+
+        (new ApprovePostAction)->handle($post, $actor, $request, $config, $request->telegram_user_id, $request->telegram_chat_id);
+
+        $this->assertSame('approved', $post->refresh()->approval_state);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->refresh()->state);
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $otherRequest->refresh()->state);
+    }
 }

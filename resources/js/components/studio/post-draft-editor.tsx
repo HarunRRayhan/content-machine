@@ -1,6 +1,6 @@
-import { router } from '@inertiajs/react';
 import type { FormDataConvertible } from '@inertiajs/core';
-import { useEffect, useState } from 'react';
+import { router } from '@inertiajs/react';
+import { useState } from 'react';
 import type {
     CaptionGroup,
     CaptionPlatform,
@@ -32,12 +32,6 @@ export default function PostDraftEditor({
     const [draftGroups, setDraftGroups] = useState(groups);
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
-
-    useEffect(() => {
-        setDraftTitle(title);
-        setDraftBody(body ?? '');
-        setDraftGroups(groups);
-    }, [body, groups, title]);
 
     if (!editable) {
         return null;
@@ -142,11 +136,7 @@ export default function PostDraftEditor({
                     <p className="text-sm text-red-600">{errors.captions}</p>
                 )}
 
-                <button
-                    type="submit"
-                    className="advance"
-                    disabled={saving}
-                >
+                <button type="submit" className="advance" disabled={saving}>
                     {saving ? 'Saving...' : 'Save draft'}
                 </button>
             </form>
@@ -169,7 +159,7 @@ function CaptionEditor({
 
     return (
         <fieldset className="grid gap-2 rounded-lg border border-border p-3">
-            <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <legend className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {platform.name}
                 {label}
             </legend>
@@ -187,9 +177,7 @@ function CaptionEditor({
                 rows={5}
                 required
             />
-            <label htmlFor={`first-comment-${idPrefix}`}>
-                First comment
-            </label>
+            <label htmlFor={`first-comment-${idPrefix}`}>First comment</label>
             <textarea
                 id={`first-comment-${idPrefix}`}
                 value={platform.first_comment}

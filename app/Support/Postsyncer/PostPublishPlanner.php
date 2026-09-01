@@ -5,6 +5,7 @@ namespace App\Support\Postsyncer;
 use App\Models\Post;
 use App\Support\Content\NormalizeCaptions;
 use Carbon\CarbonImmutable;
+use InvalidArgumentException;
 
 /**
  * Builds PostSyncer publish groups for a post: language workspaces, Twitter thread
@@ -453,6 +454,10 @@ class PostPublishPlanner
             return null;
         }
 
-        return CarbonImmutable::parse($when, $timezone)->timezone($timezone);
+        try {
+            return CarbonImmutable::parse($when, $timezone)->timezone($timezone);
+        } catch (\Throwable) {
+            throw new InvalidArgumentException('The publish time is invalid.');
+        }
     }
 }

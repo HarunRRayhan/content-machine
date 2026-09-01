@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $source_scratchpad_entry_id
  * @property int $telegram_user_id
  * @property int $telegram_chat_id
+ * @property string|null $telegram_update_key
  * @property string $state
  * @property string|null $instruction
  * @property string|null $error_message
@@ -66,6 +67,7 @@ class TelegramPostRequest extends Model
         'source_scratchpad_entry_id',
         'telegram_user_id',
         'telegram_chat_id',
+        'telegram_update_key',
         'state',
         'instruction',
         'error_message',

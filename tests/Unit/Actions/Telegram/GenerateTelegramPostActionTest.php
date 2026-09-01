@@ -204,6 +204,50 @@ class GenerateTelegramPostActionTest extends TestCase
         $this->assertSame(0, Post::count());
         $this->assertSame(TelegramPostRequest::CANCELLED, $request->refresh()->state);
     }
+
+    public function test_malformed_ai_json_fails_without_creating_a_post(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'text',
+            'source' => 'telegram',
+            'body' => 'An untrusted source.',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $completion = new FakePostCompletionClient(json_encode([
+            'title' => ['not', 'a', 'string'],
+            'body' => 'Body',
+            'language' => 'bn',
+            'captions' => [
+                'facebook' => ['caption' => 'Facebook', 'first_comment' => ''],
+                'instagram' => ['caption' => 'Instagram', 'first_comment' => ''],
+            ],
+        ], JSON_THROW_ON_ERROR));
+
+        $post = (new GenerateTelegramPostAction(
+            app(CreatePostAction::class),
+            new AttachExistingPostMediaAction,
+            $completion,
+            $completion,
+            new AiProviderCredentialResolver,
+            new FakeTelegramClient,
+        ))->handle($request->id);
+
+        $this->assertNull($post);
+        $this->assertSame(0, Post::count());
+        $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
+        $this->assertSame('The AI returned an unusable draft. Please try generating it again.', $request->error_message);
+    }
 }
 
 final class FakePostCompletionClient implements AiCompletionClientContract, AiVisionCompletionClientContract

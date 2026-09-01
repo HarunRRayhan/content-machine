@@ -19,15 +19,21 @@ queue starts to hurt.
 | Piece | Where | Role |
 |---|---|---|
 | `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
-| `PublishPostJob` | `cm-web` scratchpad queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. |
+| `PublishPostJob` | `cm-web` `postsyncer` connection, `postsyncer` queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. |
 | `PublishVideoJob` | `cm-worker` default queue | Drive URLs only today; no scratchpad attachment dependency. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
-| `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised `queue:work --queue=scratchpad` for Telegram photo/voice, voice transcription, **and post publishes**. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. Telegram text, links, and commands use `cm-worker`'s supervised `default` queue. |
+| `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised `queue:work --queue=scratchpad` for Telegram photo/voice and voice transcription. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. Telegram text, links, and commands use `cm-worker`'s supervised `default` queue. |
+| `cm-web` PostSyncer worker | same web container (`/init`; follows `SCRATCHPAD_QUEUE_WORKER`) | s6-supervised `queue:work postsyncer --queue=postsyncer --timeout=900` for post publishes. |
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
 buttons use the same enqueue path. Redis is optional later; it is not a
 cutover blocker.
+
+`PublishPostJob` has a 900-second timeout and the dedicated `postsyncer`
+database queue has a 960-second visibility window. Its row lease and overlap
+lock make duplicate dispatches harmless, while leaving the scheduled recovery
+sweep free to re-enqueue a job if queue insertion fails.
 
 ## Settings → PostSyncer
 
@@ -149,6 +155,21 @@ without saving it.
 
 Text-only posts schedule when the post-type matrix allows it for the selected
 platforms.
+
+### Reconcile an uncertain create
+
+If a worker loses the response after `POST /posts`, first find the created post
+in the matching PostSyncer workspace. Verify its content, media, platforms,
+and schedule against the failed operation, then run this on the Content Machine
+deployment:
+
+```bash
+php artisan postsyncer:reconcile-post WORKSPACE_ID P-68 POSTSYNCER_POST_ID
+```
+
+The command calls `GET /posts/{id}` and only records the id when the workspace
+and group payload match. Retry the post afterwards; the reconciled group is
+checkpointed and won't be created again.
 
 ## Status tabs
 

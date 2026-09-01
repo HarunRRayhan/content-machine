@@ -13,8 +13,10 @@ use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Turns one Telegram `message` update into a Scratch Pad capture, reusing
@@ -45,13 +47,19 @@ class CaptureTelegramMessageAction
         private readonly CaptureScratchpadPhotoAction $captureScratchpadPhotoAction,
         private readonly CaptureScratchpadVoiceAction $captureScratchpadVoiceAction,
         private readonly TelegramClientContract $client,
+        private readonly ?PublicUrlGuard $urlGuard = null,
     ) {}
 
     /**
      * @param  array<string, mixed>  $update  the raw Telegram Update payload
      */
-    public function handle(TelegramBotConfig $config, array $update, bool $reply = true): ?ScratchpadEntry
-    {
+    public function handle(
+        TelegramBotConfig $config,
+        array $update,
+        bool $reply = true,
+        bool $queueEnrichment = true,
+        ?string $telegramUpdateKey = null,
+    ): ?ScratchpadEntry {
         $message = $update['message'] ?? null;
 
         if (! is_array($message)) {
@@ -76,27 +84,88 @@ class CaptureTelegramMessageAction
         }
 
         $workspace = $config->workspace;
+
+        if ($telegramUpdateKey !== null) {
+            $lock = Cache::lock('telegram:capture:'.$telegramUpdateKey, 120);
+            $lock->block(30);
+
+            try {
+                return $this->captureUnlocked(
+                    $config,
+                    $botToken,
+                    $workspace,
+                    $chatId,
+                    $update,
+                    $reply,
+                    $queueEnrichment,
+                    $telegramUpdateKey,
+                );
+            } finally {
+                $lock->release();
+            }
+        }
+
+        return $this->captureUnlocked(
+            $config,
+            $botToken,
+            $workspace,
+            $chatId,
+            $update,
+            $reply,
+            $queueEnrichment,
+            null,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $update
+     */
+    private function captureUnlocked(
+        TelegramBotConfig $config,
+        string $botToken,
+        Workspace $workspace,
+        int $chatId,
+        array $update,
+        bool $reply,
+        bool $queueEnrichment,
+        ?string $telegramUpdateKey,
+    ): ?ScratchpadEntry {
+        $message = $update['message'] ?? null;
+        if (! is_array($message)) {
+            return null;
+        }
+
+        $existing = $telegramUpdateKey === null
+            ? null
+            : ScratchpadEntry::query()
+                ->where('telegram_update_key', $telegramUpdateKey)
+                ->first();
+
+        if ($existing !== null) {
+            return $existing;
+        }
+
         $caption = $message['caption'] ?? null;
         $caption = is_string($caption) && trim($caption) !== '' ? trim($caption) : null;
 
         $photoSizes = $message['photo'] ?? null;
 
         if (is_array($photoSizes) && $photoSizes !== []) {
-            return $this->capturePhoto($config, $botToken, $workspace, $chatId, $photoSizes, $caption, $reply);
+            return $this->capturePhoto($config, $botToken, $workspace, $chatId, $photoSizes, $caption, $reply, $telegramUpdateKey);
 
         }
 
         $voice = $message['voice'] ?? null;
 
         if (is_array($voice)) {
-            return $this->captureVoice($config, $botToken, $workspace, $chatId, $voice, $caption, $reply);
+            return $this->captureVoice($config, $botToken, $workspace, $chatId, $voice, $caption, $reply, $queueEnrichment, $telegramUpdateKey);
 
         }
 
         $audio = $message['audio'] ?? null;
 
         if (is_array($audio)) {
-            return $this->captureVoice($config, $botToken, $workspace, $chatId, $audio, $caption, $reply);
+            return $this->captureVoice($config, $botToken, $workspace, $chatId, $audio, $caption, $reply, $queueEnrichment, $telegramUpdateKey);
 
         }
 
@@ -113,7 +182,21 @@ class CaptureTelegramMessageAction
         $text = trim($text);
 
         if (filter_var($text, FILTER_VALIDATE_URL) !== false) {
-            $entry = $this->captureScratchpadLinkAction->handle($workspace, null, CaptureScratchpadLinkData::fromTelegram($text));
+            if (! $this->guard()->isSafe($text)) {
+                if ($reply) {
+                    $this->reply($config, $chatId, 'I can only resolve public http(s) links.');
+                }
+
+                return null;
+            }
+
+            $entry = $this->captureScratchpadLinkAction->handle(
+                $workspace,
+                null,
+                CaptureScratchpadLinkData::fromTelegram($text),
+                $queueEnrichment,
+                $telegramUpdateKey,
+            );
             if ($reply) {
                 $this->reply($config, $chatId, '🔗 Link captured.');
             }
@@ -121,7 +204,12 @@ class CaptureTelegramMessageAction
             return $entry;
         }
 
-        $entry = $this->captureTextNoteAction->handle($workspace, null, CaptureTextNoteData::fromTelegram($text));
+        $entry = $this->captureTextNoteAction->handle(
+            $workspace,
+            null,
+            CaptureTextNoteData::fromTelegram($text),
+            $telegramUpdateKey,
+        );
         if ($reply) {
             $this->reply($config, $chatId, 'Captured.');
         }
@@ -132,8 +220,16 @@ class CaptureTelegramMessageAction
     /**
      * @param  array<int, array<string, mixed>>  $photoSizes  Telegram lists these smallest to largest
      */
-    private function capturePhoto(TelegramBotConfig $config, string $botToken, Workspace $workspace, int $chatId, array $photoSizes, ?string $caption, bool $reply): ?ScratchpadEntry
-    {
+    private function capturePhoto(
+        TelegramBotConfig $config,
+        string $botToken,
+        Workspace $workspace,
+        int $chatId,
+        array $photoSizes,
+        ?string $caption,
+        bool $reply,
+        ?string $telegramUpdateKey,
+    ): ?ScratchpadEntry {
         $largest = end($photoSizes);
         $fileId = is_array($largest) ? ($largest['file_id'] ?? null) : null;
 
@@ -163,7 +259,12 @@ class CaptureTelegramMessageAction
         $file = $this->toUploadedFile((string) $download->contents, 'telegram-photo.jpg', 'image/jpeg');
 
         try {
-            $entry = $this->captureScratchpadPhotoAction->handle($workspace, null, CaptureScratchpadPhotoData::fromTelegram($file, $caption));
+            $entry = $this->captureScratchpadPhotoAction->handle(
+                $workspace,
+                null,
+                CaptureScratchpadPhotoData::fromTelegram($file, $caption),
+                $telegramUpdateKey,
+            );
         } finally {
             @unlink($file->getRealPath());
         }
@@ -178,8 +279,17 @@ class CaptureTelegramMessageAction
     /**
      * @param  array<string, mixed>  $voice
      */
-    private function captureVoice(TelegramBotConfig $config, string $botToken, Workspace $workspace, int $chatId, array $voice, ?string $caption, bool $reply): ?ScratchpadEntry
-    {
+    private function captureVoice(
+        TelegramBotConfig $config,
+        string $botToken,
+        Workspace $workspace,
+        int $chatId,
+        array $voice,
+        ?string $caption,
+        bool $reply,
+        bool $queueEnrichment,
+        ?string $telegramUpdateKey,
+    ): ?ScratchpadEntry {
         $fileId = $voice['file_id'] ?? null;
 
         if (! is_string($fileId)) {
@@ -209,7 +319,13 @@ class CaptureTelegramMessageAction
         $file = $this->toUploadedFile((string) $download->contents, $originalName, $mimeType);
 
         try {
-            $entry = $this->captureScratchpadVoiceAction->handle($workspace, null, CaptureScratchpadVoiceData::fromTelegram($file, $chatId, $caption));
+            $entry = $this->captureScratchpadVoiceAction->handle(
+                $workspace,
+                null,
+                CaptureScratchpadVoiceData::fromTelegram($file, $chatId, $caption),
+                $queueEnrichment,
+                $telegramUpdateKey,
+            );
         } finally {
             @unlink($file->getRealPath());
         }
@@ -252,5 +368,10 @@ class CaptureTelegramMessageAction
         if ($config->bot_token !== null) {
             $this->client->sendMessage($config->bot_token, $chatId, $text);
         }
+    }
+
+    private function guard(): PublicUrlGuard
+    {
+        return $this->urlGuard ?? app(PublicUrlGuard::class);
     }
 }

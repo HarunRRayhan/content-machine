@@ -366,6 +366,7 @@ class PostsController extends Controller
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
+            'publish_progress' => $post->publish_progress,
             'approval_state' => $post->approval_state ?? 'approved',
             'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
