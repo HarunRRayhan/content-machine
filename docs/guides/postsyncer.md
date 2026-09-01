@@ -22,7 +22,7 @@ queue starts to hurt.
 | `PublishPostJob` | `cm-web` scratchpad queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. |
 | `PublishVideoJob` | `cm-worker` default queue | Drive URLs only today; no scratchpad attachment dependency. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
-| `cm-web` scratchpad worker | same web container (`SCRATCHPAD_QUEUE_WORKER=1`) | s6-supervised `queue:work --queue=scratchpad` for Telegram photo/voice, voice transcription, **and post publishes**. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. Telegram text, links, and commands use `cm-worker`'s supervised `default` queue. |
+| `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised `queue:work --queue=scratchpad` for Telegram photo/voice, voice transcription, **and post publishes**. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. Telegram text, links, and commands use `cm-worker`'s supervised `default` queue. |
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish

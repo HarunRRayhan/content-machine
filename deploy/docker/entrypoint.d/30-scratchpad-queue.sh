@@ -2,11 +2,11 @@
 # Consume the "scratchpad" queue on cm-web only. That queue owns jobs that
 # read/write storage/app/uploads (Telegram photo/voice capture, voice
 # transcription). The uploads volume is mounted only on cm-web; cm-worker
-# has no access to it. Set SCRATCHPAD_QUEUE_WORKER=1 on the web service
-# (and leave it unset on the worker) so this process starts here only.
+# has no access to it. The base entrypoint marks its /init web command with
+# SERVERSIDEUP_DEFAULT_COMMAND=true; SCRATCHPAD_QUEUE_WORKER=0 can opt out.
 set -eu
 
-if [ "${SCRATCHPAD_QUEUE_WORKER:-0}" != "1" ]; then
+if [ "${SERVERSIDEUP_DEFAULT_COMMAND:-false}" != "true" ] || [ "${SCRATCHPAD_QUEUE_WORKER:-1}" != "1" ]; then
     exit 0
 fi
 
