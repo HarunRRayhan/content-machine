@@ -50,25 +50,65 @@ class TelegramWebhookControllerTest extends TestCase
         )->assertForbidden();
     }
 
-    public function test_a_correct_secret_dispatches_the_job_and_returns_no_content()
+    public function test_a_link_update_uses_the_default_queue_and_returns_no_content()
     {
         Queue::fake();
         $config = TelegramBotConfig::factory()->connected()->create();
+        $payload = $this->payload(update: 100);
+        $payload['message']['text'] = 'https://example.com';
 
         $response = $this->postJson(
             route('telegram.webhook', ['slug' => $config->webhook_slug]),
-            $this->payload(update: 100),
+            $payload,
             ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
         );
 
         $response->assertNoContent();
         Queue::assertPushed(ProcessTelegramUpdateJob::class, fn (ProcessTelegramUpdateJob $job) => $job->telegramBotConfigId === $config->id
             && $job->update['update_id'] === 100
-            && $job->queue === 'scratchpad');
+            && $job->queue === 'default');
         $this->assertDatabaseHas('telegram_updates', [
             'telegram_bot_config_id' => $config->id,
             'update_id' => 100,
         ]);
+    }
+
+    public function test_a_media_update_uses_the_scratchpad_queue()
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $payload = $this->payload(update: 101);
+        unset($payload['message']['text']);
+        $payload['message']['photo'] = [['file_id' => 'photo-file-id']];
+
+        $this->postJson(
+            route('telegram.webhook', ['slug' => $config->webhook_slug]),
+            $payload,
+            ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
+        )->assertNoContent();
+
+        Queue::assertPushed(ProcessTelegramUpdateJob::class, fn (ProcessTelegramUpdateJob $job) => $job->telegramBotConfigId === $config->id
+            && $job->update['update_id'] === 101
+            && $job->queue === 'scratchpad');
+    }
+
+    public function test_a_voice_update_uses_the_scratchpad_queue()
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $payload = $this->payload(update: 102);
+        unset($payload['message']['text']);
+        $payload['message']['voice'] = ['file_id' => 'voice-file-id'];
+
+        $this->postJson(
+            route('telegram.webhook', ['slug' => $config->webhook_slug]),
+            $payload,
+            ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
+        )->assertNoContent();
+
+        Queue::assertPushed(ProcessTelegramUpdateJob::class, fn (ProcessTelegramUpdateJob $job) => $job->telegramBotConfigId === $config->id
+            && $job->update['update_id'] === 102
+            && $job->queue === 'scratchpad');
     }
 
     public function test_a_disconnected_config_accepts_but_does_not_dispatch()
