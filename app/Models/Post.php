@@ -99,6 +99,33 @@ class Post extends Model
         ];
     }
 
+    public function isPublishInProgress(): bool
+    {
+        return in_array($this->publish_state, ['queued', 'running'], true);
+    }
+
+    public function canRetryPublish(): bool
+    {
+        if ($this->publish_state !== 'failed') {
+            return false;
+        }
+
+        $groups = $this->postsyncer['groups'] ?? null;
+        if (is_array($groups)) {
+            foreach ($groups as $group) {
+                if (is_array($group) && filled($group['post_id'] ?? null)) {
+                    return false;
+                }
+            }
+        }
+
+        $progress = $this->publish_progress;
+
+        return is_array($progress)
+            && ($progress['state'] ?? null) === 'failed'
+            && ($progress['current'] ?? null) === null;
+    }
+
     /**
      * @return BelongsTo<Idea, $this>
      */

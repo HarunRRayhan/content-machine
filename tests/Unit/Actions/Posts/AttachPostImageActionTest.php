@@ -12,6 +12,7 @@ use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class AttachPostImageActionTest extends TestCase
@@ -76,5 +77,20 @@ class AttachPostImageActionTest extends TestCase
         $this->assertSame($first->attachments()->sole()->id, $second->attachments()->sole()->id);
         $this->assertSame(1, MediaAsset::count());
         $this->assertSame(1, Attachment::count());
+    }
+
+    public function test_it_rejects_an_upload_while_a_postsyncer_publish_is_in_progress(): void
+    {
+        Storage::fake('scratchpad');
+
+        $post = Post::factory()->create(['publish_state' => 'queued']);
+
+        $this->expectException(ValidationException::class);
+
+        (new AttachPostImageAction)->handle(
+            $post,
+            null,
+            new AttachPostImageData(file: UploadedFile::fake()->image('cover.png')),
+        );
     }
 }

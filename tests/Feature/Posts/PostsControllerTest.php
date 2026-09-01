@@ -279,6 +279,7 @@ class PostsControllerTest extends TestCase
                 ->where('post.id', $post->id)
                 ->where('post.title', 'Hello post')
                 ->where('post.publish_state', $post->publish_state)
+                ->where('post.publish_retryable', false)
                 ->where('post.postsyncer_ready', false)
                 ->has('post.needs_confirm_ask')
                 ->has('post.postsyncer')

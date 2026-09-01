@@ -58,6 +58,7 @@ class PublishPostAction
             $completedGroups = $this->completedGroups($progress);
 
             foreach ($groups as $index => $group) {
+                $this->assertPlanUnchanged($post, $config, $options, $plan);
                 $groupKey = $this->groupKey($config, $group);
 
                 if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
@@ -132,13 +133,46 @@ class PublishPostAction
             $progress['state'] = 'succeeded';
             $progress['completed_groups'] = $completedGroups;
             $progress['current'] = null;
-            $post->update([
-                'postsyncer' => ['groups' => $publishedGroups],
-                'status' => $this->hasScheduledGroup($groups) ? 'scheduled' : 'posted',
-                'publish_state' => 'succeeded',
-                'publish_error' => null,
-                'publish_progress' => $progress,
-            ]);
+            DB::transaction(function () use (
+                $post,
+                $options,
+                $plan,
+                $publishedGroups,
+                $groups,
+                $progress,
+            ): void {
+                $lockedPost = Post::query()
+                    ->whereKey($post->getKey())
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if (! $lockedPost->isPublishInProgress()) {
+                    throw new PostsyncerException(
+                        'The post publish state changed before finalization. Retry the publish.'
+                    );
+                }
+
+                $lockedPost->loadMissing('workspace');
+                $latestConfig = PostsyncerConfig::fromWorkspace($lockedPost->workspace);
+                $latestGroups = $this->planner->plan($lockedPost, $latestConfig, $options);
+                $latestPlan = $this->planMetadata($latestConfig, $latestGroups, $options);
+
+                if ($latestPlan['hash'] !== $plan['hash']
+                    || $latestPlan['groups'] !== $plan['groups']) {
+                    throw new PostsyncerException(
+                        'The post changed while the PostSyncer publish was running. '
+                        .'The external groups were not finalized in Content Machine.'
+                    );
+                }
+
+                $lockedPost->forceFill([
+                    'postsyncer' => ['groups' => $publishedGroups],
+                    'status' => $this->hasScheduledGroup($groups) ? 'scheduled' : 'posted',
+                    'publish_state' => 'succeeded',
+                    'publish_error' => null,
+                    'publish_progress' => $progress,
+                ])->save();
+            });
         } catch (Throwable $e) {
             $latestPost = $post->fresh();
 
@@ -544,15 +578,11 @@ class PublishPostAction
             }
         }
 
-        $remoteStatus = strtoupper((string) ($remote['status'] ?? ''));
-        $acceptableStatuses = $group->publishNow
-            ? ['PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED']
-            : ['SCHEDULED', 'PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED'];
-        if (! in_array($remoteStatus, $acceptableStatuses, true)) {
-            throw new PostsyncerException(
-                'The supplied PostSyncer post is not in a publishable state.'
-            );
-        }
+        $this->assertPublishableStatus(
+            $remote['status'] ?? null,
+            $group,
+            'The supplied PostSyncer post',
+        );
 
         if (! $group->publishNow) {
             $scheduledAt = $remote['scheduled_at'] ?? null;
@@ -746,6 +776,36 @@ class PublishPostAction
             'groups' => $plannedGroups,
             'options' => $normalizedOptions,
         ];
+    }
+
+    /**
+     * A publish plan is a snapshot. Refuse to create another group if the post
+     * was changed outside the normal mutation guard while this job ran.
+     *
+     * @param  array<string, mixed>  $options
+     * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     */
+    private function assertPlanUnchanged(
+        Post $post,
+        PostsyncerConfig $config,
+        array $options,
+        array $plan,
+    ): void {
+        $post->refresh();
+        $post->loadMissing('workspace');
+        $currentPlan = $this->planMetadata(
+            $config,
+            $this->planner->plan($post, $config, $options),
+            $options,
+        );
+
+        if ($currentPlan['hash'] !== $plan['hash']
+            || $currentPlan['groups'] !== $plan['groups']) {
+            throw new PostsyncerException(
+                'The post changed while the PostSyncer publish was running. '
+                .'Retry requires a new publish plan.'
+            );
+        }
     }
 
     /**
@@ -1120,11 +1180,11 @@ class PublishPostAction
         return is_string($postId) && trim($postId) !== '';
     }
 
-    private function hasNumericPostId(int|string $postId): bool
+    private function hasNumericPostId(mixed $postId): bool
     {
         return is_int($postId)
             ? $postId > 0
-            : ctype_digit($postId) && (int) $postId > 0;
+            : is_string($postId) && ctype_digit($postId) && (int) $postId > 0;
     }
 
     /**
@@ -1139,19 +1199,71 @@ class PublishPostAction
     ): array {
         $postId = $result['id'] ?? null;
 
-        if (! $this->hasExistingPostId($postId)) {
+        if (! $this->hasNumericPostId($postId)) {
             throw new PostsyncerException('PostSyncer returned no post id after creating a group.');
+        }
+
+        $status = $this->assertPublishableStatus(
+            $result['status'] ?? null,
+            $group,
+            'PostSyncer create response',
+        );
+        $scheduledAt = $result['scheduled_at'] ?? null;
+
+        if (! $group->publishNow) {
+            if (! is_string($scheduledAt)
+                || trim($scheduledAt) === ''
+                || $group->when === null) {
+                throw new PostsyncerException(
+                    'PostSyncer create response has no verifiable schedule.'
+                );
+            }
+
+            try {
+                $remoteWhen = CarbonImmutable::parse($scheduledAt, $group->when->timezone);
+            } catch (Throwable) {
+                throw new PostsyncerException(
+                    'PostSyncer create response has an invalid schedule.'
+                );
+            }
+
+            if ($remoteWhen->format('Y-m-d H:i') !== $group->when->format('Y-m-d H:i')) {
+                throw new PostsyncerException(
+                    'PostSyncer create response does not match the requested schedule.'
+                );
+            }
         }
 
         return [
             'index' => $index,
             'group_key' => $groupKey,
             'post_id' => (string) $postId,
-            'status' => strtoupper((string) ($result['status'] ?? '')),
-            'scheduled_at' => isset($result['scheduled_at']) ? (string) $result['scheduled_at'] : null,
+            'status' => $status,
+            'scheduled_at' => is_string($scheduledAt) ? $scheduledAt : null,
             'platforms' => $group->platforms,
             'language' => $group->language,
         ];
+    }
+
+    private function assertPublishableStatus(
+        mixed $status,
+        PublishGroup $group,
+        string $context,
+    ): string {
+        if (! is_string($status) || trim($status) === '') {
+            throw new PostsyncerException("{$context} has no valid lifecycle status.");
+        }
+
+        $normalized = strtoupper(trim($status));
+        $acceptable = $group->publishNow
+            ? ['PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED']
+            : ['SCHEDULED', 'PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED'];
+
+        if (! in_array($normalized, $acceptable, true)) {
+            throw new PostsyncerException("{$context} is not in a publishable state.");
+        }
+
+        return $normalized;
     }
 
     /**

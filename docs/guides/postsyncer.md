@@ -39,6 +39,14 @@ stable per-group key, completed PostSyncer ids, and the current group's
 reconciliation/idempotency key before `POST /posts`. After a later group fails,
 a retry with the original options skips completed groups and finalizes the
 public `postsyncer.groups` only after the entire plan is complete.
+While the job is queued or running, post edits and attachment uploads take a
+row lock and are rejected. This keeps the saved plan and the external payload
+aligned.
+
+Link-upload responses are checked before a create: `count_stored` must match
+the returned media rows, every row must have a valid id, and at least one item
+must be stored for each requested URL. A partial response never becomes a
+text-only publish.
 
 PostSyncer's documented create API does not provide idempotency-key support. If
 the process loses the response after `POST /posts`, the current group is marked
@@ -93,6 +101,9 @@ them. The old `/dashboard/settings/postsyncer` URL redirects to General.
 
 Schedule and Publish stay disabled until the API key is set, the default
 language workspace id is filled, and **Publish enabled** is on.
+Every language present in the captions also needs a configured PostSyncer
+workspace; the planner fails rather than publishing only part of a bilingual
+post.
 
 ## PostSyncer API hosts (confirmed)
 

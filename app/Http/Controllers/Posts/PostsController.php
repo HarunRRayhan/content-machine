@@ -363,6 +363,7 @@ class PostsController extends Controller
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
+            'publish_retryable' => $post->canRetryPublish(),
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'needs_confirm_ask' => $postsyncerConfig !== null

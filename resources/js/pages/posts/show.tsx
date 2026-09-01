@@ -54,6 +54,7 @@ type PostDetail = {
     status: string;
     publish_state: string;
     publish_error: string | null;
+    publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
@@ -186,6 +187,7 @@ export default function PostShow({ post }: PageProps) {
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
+                        publishRetryable={post.publish_retryable}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
                         handles={post.handles}

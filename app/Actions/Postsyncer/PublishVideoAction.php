@@ -8,6 +8,7 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
 use App\Support\Postsyncer\VideoPublishPlanner;
+use Carbon\CarbonImmutable;
 use Throwable;
 
 class PublishVideoAction
@@ -48,6 +49,13 @@ class PublishVideoAction
                 $mediaIds = $group->mediaUrls !== []
                     ? $client->uploadFromUrls($group->workspaceId, $group->mediaUrls)
                     : [];
+
+                if ($group->mediaUrls !== [] && $mediaIds === []) {
+                    throw new PostsyncerException(
+                        'PostSyncer returned no media ids after uploading the video. '
+                        .'Refusing to publish this group without video media.'
+                    );
+                }
 
                 $result = $client->createPost($this->buildPostBody($config, $group, $mediaIds));
                 $publishedGroups[] = $this->formatGroupResult($group, $result);
@@ -224,12 +232,70 @@ class PublishVideoAction
      */
     private function formatGroupResult(PublishGroup $group, array $result): array
     {
+        $postId = $result['id'] ?? null;
+
+        if (! $this->hasNumericPostId($postId)) {
+            throw new PostsyncerException('PostSyncer returned no post id after creating a group.');
+        }
+
+        $status = $this->assertPublishableStatus($result['status'] ?? null, $group);
+        $scheduledAt = $result['scheduled_at'] ?? null;
+
+        if (! $group->publishNow) {
+            if (! is_string($scheduledAt)
+                || trim($scheduledAt) === ''
+                || $group->when === null) {
+                throw new PostsyncerException(
+                    'PostSyncer create response has no verifiable schedule.'
+                );
+            }
+
+            try {
+                $remoteWhen = CarbonImmutable::parse($scheduledAt, $group->when->timezone);
+            } catch (Throwable) {
+                throw new PostsyncerException(
+                    'PostSyncer create response has an invalid schedule.'
+                );
+            }
+
+            if ($remoteWhen->format('Y-m-d H:i') !== $group->when->format('Y-m-d H:i')) {
+                throw new PostsyncerException(
+                    'PostSyncer create response does not match the requested schedule.'
+                );
+            }
+        }
+
         return [
-            'post_id' => (string) ($result['id'] ?? ''),
-            'status' => strtoupper((string) ($result['status'] ?? '')),
-            'scheduled_at' => isset($result['scheduled_at']) ? (string) $result['scheduled_at'] : null,
+            'post_id' => (string) $postId,
+            'status' => $status,
+            'scheduled_at' => is_string($scheduledAt) ? $scheduledAt : null,
             'platforms' => $group->platforms,
             'language' => $group->language,
         ];
+    }
+
+    private function assertPublishableStatus(mixed $status, PublishGroup $group): string
+    {
+        if (! is_string($status) || trim($status) === '') {
+            throw new PostsyncerException('PostSyncer create response has no valid lifecycle status.');
+        }
+
+        $normalized = strtoupper(trim($status));
+        $acceptable = $group->publishNow
+            ? ['PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED']
+            : ['SCHEDULED', 'PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED'];
+
+        if (! in_array($normalized, $acceptable, true)) {
+            throw new PostsyncerException('PostSyncer create response is not in a publishable state.');
+        }
+
+        return $normalized;
+    }
+
+    private function hasNumericPostId(mixed $postId): bool
+    {
+        return is_int($postId)
+            ? $postId > 0
+            : is_string($postId) && ctype_digit($postId) && (int) $postId > 0;
     }
 }

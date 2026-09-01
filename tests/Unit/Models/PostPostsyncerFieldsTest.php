@@ -34,4 +34,26 @@ class PostPostsyncerFieldsTest extends TestCase
         $this->assertSame('operation-1', $post->publish_progress['operation_id']);
         $this->assertSame('failed', $post->publish_progress['state']);
     }
+
+    public function test_retryability_requires_a_deterministic_failed_checkpoint(): void
+    {
+        $post = Post::factory()->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'state' => 'failed',
+                'current' => null,
+            ],
+        ]);
+
+        $this->assertTrue($post->canRetryPublish());
+
+        $post->forceFill([
+            'publish_progress' => [
+                'state' => 'uncertain',
+                'current' => ['index' => 0],
+            ],
+        ])->save();
+
+        $this->assertFalse($post->fresh()->canRetryPublish());
+    }
 }

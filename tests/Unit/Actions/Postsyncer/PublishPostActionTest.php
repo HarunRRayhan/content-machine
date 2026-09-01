@@ -64,6 +64,7 @@ class PublishPostActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915]],
+                'count_stored' => 1,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
@@ -174,8 +175,8 @@ class PublishPostActionTest extends TestCase
         Http::fake(function ($request) use (&$createCalls, &$retrying) {
             if (str_ends_with($request->url(), '/media/upload/url')) {
                 return $retrying
-                    ? Http::response(['media' => [['id' => 915]]], 200)
-                    : Http::response(['media' => []], 200);
+                    ? Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200)
+                    : Http::response(['media' => [], 'count_stored' => 0], 200);
             }
 
             if ($request->url() !== 'https://postsyncer.com/api/v1/posts') {
@@ -301,6 +302,7 @@ class PublishPostActionTest extends TestCase
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
                 'status' => 'scheduled',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
             ], 201),
         ]);
 
@@ -527,11 +529,135 @@ class PublishPostActionTest extends TestCase
         $this->assertNull($post->publish_progress['current']);
     }
 
+    public function test_create_response_without_a_status_is_not_finalized(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('outcome is uncertain', (string) $post->publish_error);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertNotNull($post->publish_progress['current']);
+        $this->assertNull($post->postsyncer);
+    }
+
+    public function test_failed_create_response_is_not_finalized(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'FAILED',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('not in a publishable state', (string) $post->publish_error);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertNotNull($post->publish_progress['current']);
+        $this->assertNull($post->postsyncer);
+    }
+
+    public function test_scheduled_create_response_must_include_the_requested_schedule(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'SCHEDULED',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+        ]);
+
+        $this->action->handle($post, [
+            'confirm_ask' => false,
+            'when' => '2026-08-26T09:12:00+06:00',
+        ]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('no verifiable schedule', (string) $post->publish_error);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertNotNull($post->publish_progress['current']);
+        $this->assertNull($post->postsyncer);
+    }
+
+    public function test_post_changes_during_publish_are_not_finalized_as_success(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Original caption'],
+        ]);
+        $changed = false;
+
+        Http::fake(function ($request) use ($post, &$changed) {
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts' && ! $changed) {
+                Post::query()->whereKey($post->id)->update([
+                    'captions' => ['facebook' => 'Changed caption'],
+                ]);
+                $changed = true;
+
+                return Http::response(['id' => 42, 'status' => 'published'], 201);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('changed while', (string) $post->publish_error);
+        $this->assertNull($post->postsyncer);
+    }
+
     public function test_empty_media_upload_response_fails_instead_of_publishing_text(): void
     {
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [],
+                'count_stored' => 0,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
@@ -558,7 +684,7 @@ class PublishPostActionTest extends TestCase
 
         $post->refresh();
         $this->assertSame('failed', $post->publish_state);
-        $this->assertStringContainsString('no media ids', (string) $post->publish_error);
+        $this->assertStringContainsString('incomplete media upload response', (string) $post->publish_error);
         $this->assertSame('ready', $post->status);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
     }
@@ -600,6 +726,7 @@ class PublishPostActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915]],
+                'count_stored' => 1,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
@@ -670,6 +797,7 @@ class PublishPostActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915]],
+                'count_stored' => 1,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
