@@ -15,9 +15,9 @@
 - No em dashes in user-facing copy
 - Workspace-scope every query (`Workspace::current()`)
 - No live PostSyncer calls in tests (`Http::fake`)
-- v1: dashboard only (no agent publish API)
+- Content Machine is the only publish surface; dashboard and workspace-token API both enqueue the same job
 - Media: PostSyncer link upload (`POST https://postsyncer.com/api/v1/media/upload/url`); not Tailscale multipart
-- Pipeline status flips only on full job success (all-or-nothing per click)
+- Pipeline status flips only on full job success; retries resume private checkpoints rather than replaying completed groups
 - Follow existing Action + Job patterns (`SummarizeCaptureJob` delegates to an Action)
 
 ## File map
@@ -25,6 +25,7 @@
 | Path | Responsibility |
 |---|---|
 | `database/migrations/*_add_postsyncer_publish_columns.php` | Post/Video Drive URL + publish columns |
+| `database/migrations/*_add_publish_progress_to_posts_table.php` | Private resumable post-publish checkpoint |
 | `app/Support/Postsyncer/PostsyncerConfig.php` | Read/write/encrypt workspace settings |
 | `app/Support/Postsyncer/PostsyncerClient.php` | HTTP: accounts, uploadUrl, createPost |
 | `app/Support/Postsyncer/PublishGroup.php` | DTO for one PostSyncer call |
@@ -55,8 +56,8 @@
 - Test: `tests/Unit/Models/PostPostsyncerFieldsTest.php`
 
 **Interfaces:**
-- Produces: Post/Video fillable + casts for `image_drive_urls` / `video_drive_url` / `cover_drive_url` / `postsyncer` / `publish_state` / `publish_error`
-- `publish_state` values: `idle`, `queued`, `running`, `succeeded`, `failed`
+- Produces: Post/Video fillable + casts for `image_drive_urls` / `video_drive_url` / `cover_drive_url` / `postsyncer` / `publish_progress` / `publish_state` / `publish_error`
+- `publish_state` values: `idle`, `queued`, `running`, `succeeded`, `failed`; `uncertain` is private progress state for an unknown external create
 
 - [ ] **Step 1: Write the failing test**
 
@@ -307,11 +308,20 @@ Add fixture JSON under `tests/Fixtures/postsyncer/p48_captions.json` captured fr
 **Interfaces:**
 - `PublishPostAction::handle(Post $post, array $options): void`
   1. Set `publish_state=running`
-  2. Build config + planner groups
-  3. For each group: `uploadFromUrls` → `createPost` body (accounts from config platforms, schedule_type schedule|now)
-  4. On full success: `postsyncer.groups`, status `scheduled` or `posted`, `publish_state=succeeded`, clear error
-  5. On failure: `publish_state=failed`, `publish_error=message`, do not change pipeline status
+  2. Build config + planner groups and persist normalized options plus a plan hash in private progress
+  3. For each unfinished group: upload media, checkpoint the current group, then create the PostSyncer post
+  4. Checkpoint each returned id; if the response may have been lost, preserve the current group as `uncertain` and never replay it automatically
+  5. On full success: `postsyncer.groups`, status `scheduled` or `posted`, `publish_state=succeeded`, clear error
+  6. On failure: `publish_state=failed`, `publish_error=message`, do not change pipeline status; a safe retry preserves the original options and skips completed groups
 - `PublishPostJob` constructor `(Post $post, array $options)` → `handle(PublishPostAction $action)`
+- `postsyncer:reconcile-post` verifies a supplied PostSyncer id for an uncertain
+  group and checkpoints it; the normal retry then continues without replaying
+  that group
+
+Post publishes use the isolated `postsyncer` connection and queue on `cm-web`.
+The existing default `scratchpad` queue remains for Telegram/media jobs. The
+private progress field is not returned by `PostResource`; callers use
+`publish_state`, `publish_error`, and final `postsyncer.groups`.
 
 Use `Http::fake` for success and failure paths.
 
@@ -389,7 +399,9 @@ php artisan postsyncer:seed {workspace_id} --workspaces=/path/to/workspaces.json
 - Test: `tests/Feature/Posts/PublishPostControllerTest.php` — asserts `PublishPostJob` dispatched (`Queue::fake`)
 
 Request body: `{ when: null|string, platforms?: string[], confirm_ask?: bool }`  
-Controller sets `publish_state=queued`, dispatches job, redirects back with flash.
+Controller locks the post row, preserves the original options on a retry,
+sets `publish_state=queued`, dispatches the job, and redirects back with flash.
+The API and dashboard use the same enqueue action.
 
 Disable buttons when `!postsyncer_ready` or `publish_state` in `queued|running`.
 

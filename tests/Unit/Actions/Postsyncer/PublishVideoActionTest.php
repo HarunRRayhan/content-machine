@@ -61,6 +61,7 @@ class PublishVideoActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915], ['id' => 916]],
+                'count_stored' => 2,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
@@ -112,6 +113,7 @@ class PublishVideoActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915]],
+                'count_stored' => 1,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,
@@ -153,6 +155,7 @@ class PublishVideoActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915]],
+                'count_stored' => 1,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,
@@ -215,6 +218,42 @@ class PublishVideoActionTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_empty_media_upload_response_does_not_create_a_text_only_video(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [],
+                'count_stored' => 0,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('incomplete media upload response', (string) $video->publish_error);
+        $this->assertSame('recorded', $video->status);
+        $this->assertNull($video->postsyncer);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
+    }
+
     public function test_second_publish_is_refused_when_groups_have_post_ids(): void
     {
         Http::fake();
@@ -257,6 +296,7 @@ class PublishVideoActionTest extends TestCase
         Http::fake([
             'postsyncer.com/api/v1/media/upload/url' => Http::response([
                 'media' => [['id' => 915]],
+                'count_stored' => 1,
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 77,
@@ -368,6 +408,13 @@ class PublishVideoActionTest extends TestCase
             $video->refresh();
             if ($video->publish_state === 'running') {
                 $seenRunning = true;
+            }
+
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
             }
 
             return Http::response(['id' => 1, 'status' => 'published'], 201);

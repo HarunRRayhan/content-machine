@@ -95,7 +95,9 @@ COPY . .
 COPY deploy/docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY --chmod=755 deploy/docker/entrypoint.d/ /etc/entrypoint.d/
 COPY deploy/docker/s6-overlay/scratchpad-queue/ /etc/s6-overlay/s6-rc.d/scratchpad-queue/
-RUN chmod 755 /etc/s6-overlay/s6-rc.d/scratchpad-queue/run
+COPY deploy/docker/s6-overlay/postsyncer-queue/ /etc/s6-overlay/s6-rc.d/postsyncer-queue/
+RUN chmod 755 /etc/s6-overlay/s6-rc.d/scratchpad-queue/run \
+    /etc/s6-overlay/s6-rc.d/postsyncer-queue/run
 
 RUN mkdir -p storage/app/uploads \
     && chown -R www-data:www-data storage bootstrap/cache

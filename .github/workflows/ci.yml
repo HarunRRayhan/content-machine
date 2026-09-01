@@ -206,10 +206,12 @@ jobs:
           trap 'docker rm -f cm-s6' EXIT
 
           for attempt in $(seq 1 30); do
-            if docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue 2>/dev/null | grep -q '^up'; then
+            if docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue 2>/dev/null | grep -q '^up' \
+              && docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue 2>/dev/null | grep -q '^up'; then
               break
             fi
             sleep 1
           done
 
           docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue | grep -q '^up'
+          docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue | grep -q '^up'

@@ -69,7 +69,7 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, image_drive_urls, … |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
 | POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
-| POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. The Railway `cm-worker` service runs the job. |
+| POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. Attachment-backed post jobs run on the Railway `cm-web` PostSyncer worker. Retries preserve the original options; an uncertain external create requires reconciliation. |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
 Captures made through the API are recorded with `source: api`, and every
@@ -95,7 +95,6 @@ curl -s -X PATCH https://cm.harun.dev/api/v1/scratchpad/01J8... \
 - Deck multipart upload endpoints (manifest fields land via PATCH today;
   binary packages are next)
 - Promotion of an idea → video/post over the API (dashboard promote stays)
-- Publishing and scheduling
 - Rate limiting beyond the default per-minute throttle
 
 ## MCP

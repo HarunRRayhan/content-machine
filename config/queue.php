@@ -44,6 +44,19 @@ return [
             'after_commit' => false,
         ],
 
+        'postsyncer' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            // Queue names are isolated because the database driver does not
+            // persist a connection name on each job row.
+            'queue' => env('POSTSYNCER_QUEUE', 'postsyncer'),
+            // PublishPostJob has a 900-second timeout. Leave a margin before
+            // the database makes a reserved job visible again.
+            'retry_after' => (int) env('POSTSYNCER_QUEUE_RETRY_AFTER', 960),
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),
