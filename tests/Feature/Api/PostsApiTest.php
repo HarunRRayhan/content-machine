@@ -72,6 +72,7 @@ class PostsApiTest extends TestCase
             'number' => 57,
             'body' => str_repeat('paragraph ', 80),
             'captions' => ['facebook' => str_repeat('caption ', 40)],
+            'template' => 'C',
         ]);
 
         $this->acting()->getJson('/api/v1/posts')
@@ -79,6 +80,7 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.0.human_id', 'P-57')
             ->assertJsonPath('data.0.has_body', true)
             ->assertJsonPath('data.0.has_captions', true)
+            ->assertJsonPath('data.0.template', 'C')
             ->assertJsonMissingPath('data.0.body')
             ->assertJsonMissingPath('data.0.captions');
     }

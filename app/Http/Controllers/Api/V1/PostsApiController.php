@@ -59,6 +59,7 @@ class PostsApiController extends Controller
                 'title',
                 'language',
                 'slug',
+                'template',
                 'platforms',
                 'image_drive_urls',
                 'postsyncer',
