@@ -130,9 +130,14 @@ class Post extends Model
 
         $progress = $this->publish_progress;
 
-        return is_array($progress)
-            && ($progress['state'] ?? null) === 'failed'
-            && ($progress['current'] ?? null) === null;
+        if (! is_array($progress) || ($progress['state'] ?? null) !== 'failed') {
+            return false;
+        }
+
+        $current = $progress['current'] ?? null;
+
+        return $current === null
+            || (is_array($current) && ($current['phase'] ?? null) === 'retryable');
     }
 
     /**

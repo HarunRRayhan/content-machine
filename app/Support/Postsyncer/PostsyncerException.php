@@ -15,6 +15,7 @@ class PostsyncerException extends Exception
         public readonly bool $retryable = false,
         public readonly bool $outcomeUnknown = false,
         public readonly bool $responseReceived = false,
+        public readonly bool $safeToRetry = false,
     ) {
         parent::__construct($message, $code, $previous);
     }

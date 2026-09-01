@@ -49,6 +49,15 @@ class PostPostsyncerFieldsTest extends TestCase
 
         $post->forceFill([
             'publish_progress' => [
+                'state' => 'failed',
+                'current' => ['phase' => 'retryable'],
+            ],
+        ])->save();
+
+        $this->assertTrue($post->fresh()->canRetryPublish());
+
+        $post->forceFill([
+            'publish_progress' => [
                 'state' => 'uncertain',
                 'current' => ['index' => 0],
             ],

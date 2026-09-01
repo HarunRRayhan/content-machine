@@ -72,7 +72,7 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
     public function uniqueId(): string
     {
-        return 'post:'.$this->post->getKey().':run:'.($this->runToken ?? 'legacy');
+        return 'post:'.$this->post->getKey().':run:'.($this->runTokenOrNull() ?? 'legacy');
     }
 
     public function uniqueFor(): int
@@ -88,7 +88,7 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
                 ->lockForUpdate()
                 ->first();
 
-            $runToken = $this->effectiveRunToken ?? $this->runToken;
+            $runToken = $this->effectiveRunTokenOrNull() ?? $this->runTokenOrNull();
 
             if ($post === null
                 || ! $this->isCurrentRun($post, $runToken)
@@ -128,7 +128,16 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
     public function handle(PublishPostAction $action): void
     {
         $post = $this->post->fresh();
-        $runToken = $this->runToken ?? $this->effectiveRunToken;
+        $runToken = $this->runTokenOrNull() ?? $this->effectiveRunTokenOrNull();
+
+        if ($runToken === null && $post !== null) {
+            $storedToken = is_array($post->publish_progress)
+                ? ($post->publish_progress['run_token'] ?? null)
+                : null;
+            $runToken = is_string($storedToken) && trim($storedToken) !== ''
+                ? $storedToken
+                : null;
+        }
 
         if ($post !== null && ! $this->isCurrentRun($post, $runToken)) {
             return;
@@ -144,12 +153,22 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
     {
         $progress = $post->publish_progress;
         $storedToken = is_array($progress) ? ($progress['run_token'] ?? null) : null;
-        $runToken ??= $this->runToken;
+        $runToken ??= $this->runTokenOrNull();
 
         if ($runToken === null) {
             return ! is_string($storedToken) || trim($storedToken) === '';
         }
 
         return is_string($storedToken) && hash_equals($storedToken, $runToken);
+    }
+
+    private function runTokenOrNull(): ?string
+    {
+        return isset($this->runToken) ? $this->runToken : null;
+    }
+
+    private function effectiveRunTokenOrNull(): ?string
+    {
+        return isset($this->effectiveRunToken) ? $this->effectiveRunToken : null;
     }
 }

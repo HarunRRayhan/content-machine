@@ -29,6 +29,25 @@ class PublishPostJobTest extends TestCase
         (new PublishPostJob($post, $options))->handle($action);
     }
 
+    public function test_a_legacy_serialized_job_without_a_run_token_remains_safe_to_run(): void
+    {
+        $post = Post::factory()->create();
+        $options = ['when' => '2026-08-26T09:12:00+06:00'];
+        $job = unserialize(serialize(new PublishPostJob($post, $options)));
+
+        $this->assertInstanceOf(PublishPostJob::class, $job);
+        $this->assertSame('post:'.$post->getKey().':run:legacy', $job->uniqueId());
+
+        $action = Mockery::mock(PublishPostAction::class);
+        $action->shouldReceive('handle')->once()->with(
+            Mockery::on(fn (Post $p) => $p->is($post)),
+            $options,
+            Mockery::type('string'),
+        );
+
+        $job->handle($action);
+    }
+
     public function test_job_is_queued_on_the_isolated_postsyncer_worker(): void
     {
         $job = new PublishPostJob(Post::factory()->create(), []);

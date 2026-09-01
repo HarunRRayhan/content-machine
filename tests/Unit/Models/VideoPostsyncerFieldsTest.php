@@ -50,6 +50,15 @@ class VideoPostsyncerFieldsTest extends TestCase
 
         $video->forceFill([
             'publish_progress' => [
+                'state' => 'failed',
+                'current' => ['phase' => 'retryable'],
+            ],
+        ])->save();
+
+        $this->assertTrue($video->fresh()->canRetryPublish());
+
+        $video->forceFill([
+            'publish_progress' => [
                 'state' => 'uncertain',
                 'current' => ['index' => 0],
             ],

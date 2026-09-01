@@ -18,11 +18,11 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public const TIMEOUT_SECONDS = 75;
+    public const TIMEOUT_SECONDS = 180;
 
     public const UNIQUE_FOR_SECONDS = 3600;
 
-    public const OVERLAP_EXPIRES_AFTER_SECONDS = 90;
+    public const OVERLAP_EXPIRES_AFTER_SECONDS = 240;
 
     public int $timeout = self::TIMEOUT_SECONDS;
 
@@ -40,7 +40,11 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
         public readonly Video $video,
         public readonly array $options = [],
         public readonly ?string $runToken = null,
-    ) {}
+    ) {
+        $this->onConnection('postsyncer')->onQueue(
+            (string) config('queue.connections.postsyncer.queue', 'postsyncer'),
+        );
+    }
 
     private ?string $effectiveRunToken = null;
 
@@ -63,7 +67,7 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
 
     public function uniqueId(): string
     {
-        return 'video:'.$this->video->getKey().':run:'.($this->runToken ?? 'legacy');
+        return 'video:'.$this->video->getKey().':run:'.($this->runTokenOrNull() ?? 'legacy');
     }
 
     public function uniqueFor(): int
@@ -124,11 +128,21 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
     public function handle(PublishVideoAction $action): void
     {
         $video = $this->video->fresh();
-        if ($video !== null && ! $this->isCurrentRun($video)) {
+        $runToken = $this->runTokenOrNull();
+        if ($runToken === null && $video !== null) {
+            $storedToken = is_array($video->publish_progress)
+                ? ($video->publish_progress['run_token'] ?? null)
+                : null;
+            $runToken = is_string($storedToken) && trim($storedToken) !== ''
+                ? $storedToken
+                : null;
+        }
+
+        if ($video !== null && ! $this->isCurrentRun($video, $runToken)) {
             return;
         }
 
-        if ($this->runToken === null) {
+        if ($runToken === null) {
             try {
                 $action->handle($this->video, $this->options);
             } finally {
@@ -142,21 +156,31 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $this->effectiveRunToken = $this->runToken;
-        $action->handle($this->video, $this->options, $this->runToken);
+        $this->effectiveRunToken = $runToken;
+        $action->handle($this->video, $this->options, $runToken);
     }
 
-    private function isCurrentRun(Video $video): bool
+    private function isCurrentRun(Video $video, ?string $runToken = null): bool
     {
         $progress = $video->publish_progress;
         $storedToken = is_array($progress) ? ($progress['run_token'] ?? null) : null;
 
-        $runToken = $this->effectiveRunToken ?? $this->runToken;
+        $runToken ??= $this->effectiveRunTokenOrNull() ?? $this->runTokenOrNull();
 
         if ($runToken === null) {
             return ! is_string($storedToken) || trim($storedToken) === '';
         }
 
         return is_string($storedToken) && hash_equals($storedToken, $runToken);
+    }
+
+    private function runTokenOrNull(): ?string
+    {
+        return isset($this->runToken) ? $this->runToken : null;
+    }
+
+    private function effectiveRunTokenOrNull(): ?string
+    {
+        return isset($this->effectiveRunToken) ? $this->effectiveRunToken : null;
     }
 }

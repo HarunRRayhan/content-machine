@@ -990,6 +990,61 @@ class PublishPostActionTest extends TestCase
         $this->assertNull($post->postsyncer);
     }
 
+    public function test_plan_drift_can_be_recovered_from_the_stored_payload_snapshot(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Original caption'],
+        ]);
+        $changed = false;
+
+        Http::fake(function ($request) use ($post, &$changed) {
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts' && ! $changed) {
+                Post::query()->whereKey($post->id)->update([
+                    'captions' => ['facebook' => 'Changed caption'],
+                ]);
+                $changed = true;
+
+                return Http::response(['id' => 42, 'status' => 'published'], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Original caption', 'media' => []]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'Original caption',
+                    ]]],
+                    'status' => 'PUBLISHED',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+        $post->refresh();
+
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertNull($post->postsyncer);
+        $this->assertCount(1, $post->publish_progress['completed_groups']);
+
+        $this->action->recoverPlanDrift($post);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('posted', $post->status);
+        $this->assertTrue($post->publish_progress['plan_drift_recovered']);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(2, count(Http::recorded(fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts/42')));
+    }
+
     public function test_empty_media_upload_response_fails_instead_of_publishing_text(): void
     {
         Http::fake([
@@ -1025,6 +1080,69 @@ class PublishPostActionTest extends TestCase
         $this->assertStringContainsString('incomplete media upload response', (string) $post->publish_error);
         $this->assertSame('ready', $post->status);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
+    }
+
+    public function test_uncertain_media_upload_can_be_reconciled_without_uploading_again(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+        $uploadCalls = 0;
+
+        Http::fake(function ($request) use (&$uploadCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                $uploadCalls++;
+
+                return $uploadCalls === 1
+                    ? Http::response(['message' => 'temporary outage'], 503)
+                    : Http::response(['message' => 'upload must not be retried'], 500);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response(['id' => 42, 'status' => 'published'], 201);
+            }
+
+            return Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'POST', 'caption' => 'Caption',
+                ]]],
+                'status' => 'PUBLISHED',
+            ], 200);
+        });
+
+        try {
+            $this->action->handle($post, ['confirm_ask' => false]);
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->retryable);
+        }
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('uploading', $post->publish_progress['current']['phase']);
+
+        $this->action->reconcileMedia($post, [915]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
+        $this->assertSame(['915'], $post->publish_progress['current']['media_ids']);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(1, $uploadCalls);
     }
 
     public function test_sets_running_before_api_calls(): void

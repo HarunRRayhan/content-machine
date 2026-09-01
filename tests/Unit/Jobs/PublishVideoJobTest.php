@@ -28,6 +28,32 @@ class PublishVideoJobTest extends TestCase
         (new PublishVideoJob($video, $options))->handle($action);
     }
 
+    public function test_a_legacy_serialized_job_without_a_run_token_remains_safe_to_run(): void
+    {
+        $video = Video::factory()->create();
+        $options = ['when' => '2026-08-26T09:12:00+06:00'];
+        $job = unserialize(serialize(new PublishVideoJob($video, $options)));
+
+        $this->assertInstanceOf(PublishVideoJob::class, $job);
+        $this->assertSame('video:'.$video->getKey().':run:legacy', $job->uniqueId());
+
+        $action = Mockery::mock(PublishVideoAction::class);
+        $action->shouldReceive('handle')->once()->with(
+            Mockery::on(fn (Video $v) => $v->is($video)),
+            $options,
+        );
+
+        $job->handle($action);
+    }
+
+    public function test_job_is_queued_on_the_isolated_postsyncer_worker(): void
+    {
+        $job = new PublishVideoJob(Video::factory()->create(), []);
+
+        $this->assertSame('postsyncer', $job->connection);
+        $this->assertSame('postsyncer', $job->queue);
+    }
+
     public function test_job_has_a_video_scoped_lock_and_long_external_api_budget(): void
     {
         $video = Video::factory()->create();

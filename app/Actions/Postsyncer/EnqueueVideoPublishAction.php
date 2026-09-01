@@ -6,9 +6,12 @@ use App\Jobs\PublishVideoJob;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use Illuminate\Bus\UniqueLock;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class EnqueueVideoPublishAction
 {
@@ -32,6 +35,13 @@ class EnqueueVideoPublishAction
         $filtered = array_filter($options, fn ($value) => $value !== null);
 
         $queued = DB::transaction(function () use ($video, $workspace, $filtered): Video {
+            $this->assertAtomicQueueConfiguration();
+
+            Workspace::query()
+                ->whereKey($workspace->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $lockedVideo = Video::query()
                 ->whereKey($video->getKey())
                 ->lockForUpdate()
@@ -71,17 +81,53 @@ class EnqueueVideoPublishAction
                 'publish_progress' => $progress,
             ])->save();
 
-            // The worker must not observe the job before its checkpoint commits.
-            PublishVideoJob::dispatch(
-                $lockedVideo,
-                $filtered,
-                $runToken,
-            )->afterCommit();
+            // The database queue uses the same connection as this transaction.
+            // Insert the job atomically with the queued checkpoint so a queue
+            // write failure rolls the record back instead of leaving it stuck.
+            $this->dispatchJob($lockedVideo, $filtered, $runToken);
 
             return $lockedVideo;
         });
 
         return $queued->fresh() ?? $queued;
+    }
+
+    private function assertAtomicQueueConfiguration(): void
+    {
+        if (config('queue.connections.postsyncer.driver') !== 'database') {
+            throw ValidationException::withMessages([
+                'publish' => __('The PostSyncer queue must use the database driver for atomic publish enqueueing.'),
+            ]);
+        }
+
+        $queueConnection = config('queue.connections.postsyncer.connection')
+            ?: config('database.default');
+
+        if ((string) $queueConnection !== (string) DB::getDefaultConnection()) {
+            throw ValidationException::withMessages([
+                'publish' => __('The PostSyncer queue must use the application database connection for atomic publish enqueueing.'),
+            ]);
+        }
+    }
+
+    /**
+     * Release Laravel's unique lock if the database queue insert fails. The
+     * lock is acquired by PendingDispatch before the job is inserted.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    private function dispatchJob(Video $video, array $options, string $runToken): void
+    {
+        $job = new PublishVideoJob($video, $options, $runToken);
+
+        try {
+            $pending = dispatch($job)->beforeCommit();
+            unset($pending);
+        } catch (Throwable $exception) {
+            (new UniqueLock(app(CacheRepository::class)))->release($job);
+
+            throw $exception;
+        }
     }
 
     /**
@@ -103,7 +149,8 @@ class EnqueueVideoPublishAction
         $current = $progress['current'] ?? null;
         $state = $progress['state'] ?? null;
 
-        if ($state === 'uncertain' || $current !== null) {
+        $currentPhase = is_array($current) ? ($current['phase'] ?? null) : null;
+        if ($state === 'uncertain' || ($current !== null && $currentPhase !== 'retryable')) {
             throw ValidationException::withMessages([
                 'publish' => __('A PostSyncer create has an unknown outcome. Reconcile it before retrying.'),
             ]);
