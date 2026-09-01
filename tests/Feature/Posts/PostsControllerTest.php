@@ -268,6 +268,24 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_show_exposes_template_metadata_for_the_post_attribution_card(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'template' => 'D',
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.template_meta.letter', 'D')
+                ->where('post.template_meta.name', 'Split comparison')
+                ->where('post.template_meta.visual_identity', 'Split comparison')
+                ->where('post.template_meta.preview_url', asset('images/templates/template-d-split-comparison.png'))
+            );
+    }
+
     public function test_show_exposes_handles_from_both_postsyncer_workspaces(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
