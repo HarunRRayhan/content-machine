@@ -52,6 +52,7 @@ type PostDetail = {
     publish_state: string;
     publish_error: string | null;
     approval_state: string;
+    timezone: string;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
@@ -168,13 +169,14 @@ export default function PostShow({ post }: PageProps) {
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
                         approvalState={post.approval_state}
+                        timezone={post.timezone}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
                         handles={post.handles}
                     />
                 )}
 
-                {tab === 'captions' &&
+                {tab === 'captions' && (
                     <>
                         <PostDraftEditor
                             postId={post.id}
@@ -192,9 +194,12 @@ export default function PostShow({ post }: PageProps) {
                                 defaultLang={defaultLang}
                             />
                         ) : (
-                            <p className="empty">No captions on this post yet.</p>
+                            <p className="empty">
+                                No captions on this post yet.
+                            </p>
                         )}
-                    </>}
+                    </>
+                )}
             </div>
         </>
     );

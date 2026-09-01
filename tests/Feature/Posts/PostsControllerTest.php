@@ -253,6 +253,7 @@ class PostsControllerTest extends TestCase
     public function test_show_renders_a_post_in_the_current_workspace()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
+        $workspace->update(['timezone' => 'America/New_York']);
 
         $post = Post::factory()->for($workspace)->create(['title' => 'Hello post']);
 
@@ -261,6 +262,7 @@ class PostsControllerTest extends TestCase
                 ->component('posts/show')
                 ->where('post.id', $post->id)
                 ->where('post.title', 'Hello post')
+                ->where('post.timezone', 'America/New_York')
                 ->where('post.publish_state', $post->publish_state)
                 ->where('post.postsyncer_ready', false)
                 ->has('post.needs_confirm_ask')

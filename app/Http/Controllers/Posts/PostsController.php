@@ -341,6 +341,10 @@ class PostsController extends Controller
             ))->forPreview();
         }
 
+        $timezone = $workspace !== null && trim($workspace->timezone) !== ''
+            ? $workspace->timezone
+            : 'Asia/Dhaka';
+
         return [
             'id' => $post->id,
             'human_id' => $post->human_id,
@@ -363,6 +367,7 @@ class PostsController extends Controller
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
             'approval_state' => $post->approval_state ?? 'approved',
+            'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'needs_confirm_ask' => $postsyncerConfig !== null

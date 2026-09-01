@@ -7,6 +7,7 @@ use App\Models\Post;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class EnqueuePostPublishAction
@@ -20,12 +21,6 @@ class EnqueuePostPublishAction
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
 
-        if (($post->approval_state ?? 'approved') !== 'approved') {
-            throw ValidationException::withMessages([
-                'publish' => __('This post needs human approval before it can be published.'),
-            ]);
-        }
-
         $config = PostsyncerConfig::fromWorkspace($workspace);
 
         if (! $config->isReadyForPublish()) {
@@ -34,35 +29,52 @@ class EnqueuePostPublishAction
             ]);
         }
 
-        if (in_array($post->publish_state, ['queued', 'running'], true)) {
-            throw ValidationException::withMessages([
-                'publish' => __('A publish is already in progress.'),
-            ]);
-        }
-
-        if ($this->alreadyPublishedOnPostsyncer($post)) {
-            throw ValidationException::withMessages([
-                'publish' => __('This post already has PostSyncer posts. Republish is not supported yet.'),
-            ]);
-        }
-
         $filtered = array_filter($options, fn ($value) => $value !== null);
 
-        $post->forceFill([
-            'publish_state' => 'queued',
-            'publish_error' => null,
-        ])->save();
+        // Reload under a row lock so concurrent requests cannot both pass the
+        // state checks and enqueue duplicate PostSyncer jobs.
+        $queuedPost = DB::transaction(function () use ($post): Post {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $post->telegramPostRequests()
-            ->where('state', TelegramPostRequest::FAILED)
-            ->update([
-                'state' => TelegramPostRequest::APPROVED,
-                'error_message' => null,
-            ]);
+            if (($lockedPost->approval_state ?? 'approved') !== 'approved') {
+                throw ValidationException::withMessages([
+                    'publish' => __('This post needs human approval before it can be published.'),
+                ]);
+            }
 
-        PublishPostJob::dispatch($post, $filtered);
+            if (in_array($lockedPost->publish_state, ['queued', 'running'], true)) {
+                throw ValidationException::withMessages([
+                    'publish' => __('A publish is already in progress.'),
+                ]);
+            }
 
-        return $post->fresh() ?? $post;
+            if ($this->alreadyPublishedOnPostsyncer($lockedPost)) {
+                throw ValidationException::withMessages([
+                    'publish' => __('This post already has PostSyncer posts. Republish is not supported yet.'),
+                ]);
+            }
+
+            $lockedPost->forceFill([
+                'publish_state' => 'queued',
+                'publish_error' => null,
+            ])->save();
+
+            $lockedPost->telegramPostRequests()
+                ->where('state', TelegramPostRequest::FAILED)
+                ->update([
+                    'state' => TelegramPostRequest::APPROVED,
+                    'error_message' => null,
+                ]);
+
+            return $lockedPost;
+        });
+
+        PublishPostJob::dispatch($queuedPost, $filtered);
+
+        return $queuedPost->fresh() ?? $queuedPost;
     }
 
     private function alreadyPublishedOnPostsyncer(Post $post): bool

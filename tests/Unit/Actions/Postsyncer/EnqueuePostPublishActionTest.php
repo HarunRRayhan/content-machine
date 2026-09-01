@@ -70,6 +70,30 @@ class EnqueuePostPublishActionTest extends TestCase
             && $job->options['confirm_ask'] === true);
     }
 
+    public function test_a_second_enqueue_cannot_queue_another_job(): void
+    {
+        Queue::fake();
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'approval_state' => 'approved',
+            'publish_state' => 'idle',
+        ]);
+
+        (new EnqueuePostPublishAction)->handle($post, $workspace);
+
+        try {
+            // Use the original stale model to prove the action reloads before
+            // checking state, as two HTTP requests would do.
+            (new EnqueuePostPublishAction)->handle($post, $workspace);
+            $this->fail('A second publish should not be queued.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('already in progress', $exception->errors()['publish'][0]);
+        }
+
+        Queue::assertPushed(PublishPostJob::class, 1);
+    }
+
     public function test_a_failed_telegram_request_is_reactivated_for_a_retry(): void
     {
         Queue::fake();

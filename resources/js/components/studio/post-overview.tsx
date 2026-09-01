@@ -19,7 +19,7 @@ const POST_PIPELINE = [
     { key: 'posted', label: 'Posted' },
 ] as const;
 
-const DHAKA_TZ = 'Asia/Dhaka';
+const DEFAULT_TIMEZONE = 'Asia/Dhaka';
 
 type Props = {
     postId: number;
@@ -32,6 +32,7 @@ type Props = {
     postsyncerReady: boolean;
     publishState: string;
     approvalState: string;
+    timezone: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     handles?: HandleDirectory;
@@ -66,15 +67,74 @@ function groupWhen(group: PostsyncerGroup): string | null {
     return group.published_at ?? group.scheduled_at ?? null;
 }
 
-function parseWhen(value: string): Date | null {
-    const naive = value.match(
-        /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?$/,
+function timezoneParts(date: Date, timezone: string): Record<string, number> {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+    const values: Record<string, number> = {};
+
+    for (const part of parts) {
+        if (part.type !== 'literal') {
+            values[part.type] = Number(part.value);
+        }
+    }
+
+    return values;
+}
+
+function parseNaiveWhen(value: string, timezone: string): Date | null {
+    const match = value.match(
+        /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
     );
 
-    if (naive) {
-        const date = new Date(`${naive[1]}T${naive[2]}:00+06:00`);
+    if (!match) {
+        return null;
+    }
 
-        return Number.isNaN(date.getTime()) ? null : date;
+    const [, year, month, day, hour, minute, second = '0'] = match;
+    const desired = Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second),
+    );
+    let timestamp = desired;
+
+    // Find the UTC instant whose wall-clock parts match the workspace zone.
+    // Iteration also handles daylight-saving offset changes without shipping a
+    // timezone database to the browser.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        const local = timezoneParts(new Date(timestamp), timezone);
+        const rendered = Date.UTC(
+            local.year,
+            local.month - 1,
+            local.day,
+            local.hour,
+            local.minute,
+            local.second,
+        );
+        timestamp += desired - rendered;
+    }
+
+    const date = new Date(timestamp);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseWhen(value: string, timezone: string): Date | null {
+    const naive = parseNaiveWhen(value, timezone);
+
+    if (naive !== null) {
+        return naive;
     }
 
     const date = new Date(value);
@@ -82,25 +142,31 @@ function parseWhen(value: string): Date | null {
     return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatWhen(value: string | null | undefined): string | null {
+function formatWhen(
+    value: string | null | undefined,
+    timezone: string,
+): string | null {
     if (!value) {
         return null;
     }
 
-    const date = parseWhen(value);
+    const date = parseWhen(value, timezone);
 
     if (date === null) {
         return value;
     }
 
     return new Intl.DateTimeFormat('en-GB', {
-        timeZone: DHAKA_TZ,
+        timeZone: timezone,
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(date);
 }
 
-function earliestWhen(groups: PostsyncerGroup[]): string | null {
+function earliestWhen(
+    groups: PostsyncerGroup[],
+    timezone: string,
+): string | null {
     let best: Date | null = null;
     let bestRaw: string | null = null;
 
@@ -111,7 +177,7 @@ function earliestWhen(groups: PostsyncerGroup[]): string | null {
             continue;
         }
 
-        const date = parseWhen(raw);
+        const date = parseWhen(raw, timezone);
 
         if (date === null) {
             continue;
@@ -123,12 +189,15 @@ function earliestWhen(groups: PostsyncerGroup[]): string | null {
         }
     }
 
-    return formatWhen(bestRaw);
+    return formatWhen(bestRaw, timezone);
 }
 
-function datetimeLocalNowInDhaka(date = new Date()): string {
+function datetimeLocalNowInTimezone(
+    timezone: string,
+    date = new Date(),
+): string {
     const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: DHAKA_TZ,
+        timeZone: timezone,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -154,10 +223,12 @@ export default function PostOverview({
     postsyncerReady,
     publishState,
     approvalState,
+    timezone,
     needsConfirmAsk,
     postsyncer,
     handles,
 }: Props) {
+    const effectiveTimezone = timezone.trim() || DEFAULT_TIMEZONE;
     const studioStatus = mapStudioStatus(status);
     const archived = studioStatus === 'archived';
     const stage = archived
@@ -168,7 +239,9 @@ export default function PostOverview({
           );
     const [busy, setBusy] = useState(false);
     const [confirmAskChecked, setConfirmAskChecked] = useState(false);
-    const [minWhen] = useState(() => datetimeLocalNowInDhaka());
+    const [minWhen] = useState(() =>
+        datetimeLocalNowInTimezone(effectiveTimezone),
+    );
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
     const workspaceBuckets = hasGroups
@@ -192,7 +265,7 @@ export default function PostOverview({
         !hasGroups;
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
-    const scheduledAt = earliestWhen(groups);
+    const scheduledAt = earliestWhen(groups, effectiveTimezone);
 
     function advanceStatus(nextStatus: 'archived' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {
@@ -218,15 +291,14 @@ export default function PostOverview({
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     {awaitingApproval ? (
-                        <span className="badge">Needs review before publishing</span>
+                        <span className="badge">
+                            Needs review before publishing
+                        </span>
                     ) : (
                         <span className="badge">Approved for publishing</span>
                     )}
                     {awaitingApproval && (
-                        <Form
-                            action={`/posts/${postId}/approve`}
-                            method="post"
-                        >
+                        <Form action={`/posts/${postId}/approve`} method="post">
                             {({ processing }) => (
                                 <button
                                     type="submit"
@@ -330,7 +402,7 @@ export default function PostOverview({
                                             <span className="schedule-it-label-row">
                                                 Schedule it
                                                 <span className="schedule-it-tz">
-                                                    {DHAKA_TZ}
+                                                    {effectiveTimezone}
                                                 </span>
                                             </span>
                                             <input
@@ -400,7 +472,7 @@ export default function PostOverview({
                             <span className="badge">
                                 🗓️ Scheduled
                                 {scheduledAt
-                                    ? ` · ${scheduledAt} ${DHAKA_TZ}`
+                                    ? ` · ${scheduledAt} ${effectiveTimezone}`
                                     : ''}
                             </span>
                         )}
@@ -408,8 +480,10 @@ export default function PostOverview({
 
                     <WorkspaceScheduleLog
                         buckets={workspaceBuckets}
-                        formatWhen={formatWhen}
-                        timezone={DHAKA_TZ}
+                        formatWhen={(value) =>
+                            formatWhen(value, effectiveTimezone)
+                        }
+                        timezone={effectiveTimezone}
                         handles={handles}
                         heading={
                             studioStatus === 'posted'
