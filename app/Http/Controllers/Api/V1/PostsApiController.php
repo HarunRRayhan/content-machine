@@ -64,6 +64,7 @@ class PostsApiController extends Controller
                 'postsyncer',
                 'publish_state',
                 'publish_error',
+                'approval_state',
                 'status',
                 'created_at',
                 'updated_at',

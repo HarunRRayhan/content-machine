@@ -40,6 +40,7 @@ class CaptureScratchpadVoiceAction
                 'source' => $data->source,
                 'captured_at' => now(),
                 'language' => $data->language,
+                'body' => $data->caption,
                 'status' => 'new',
                 'meta' => $data->telegramChatId !== null ? ['telegram_chat_id' => $data->telegramChatId] : [],
             ]);

@@ -9,10 +9,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * A transcription job/result for an audio or video MediaAsset. Schema-only
- * placeholder in this phase: nothing runs a transcription yet (no AI/LLM
- * integration), so every row here would currently sit at `status=pending`
- * forever.
+ * A transcription job/result for an audio or video MediaAsset. Voice-note
+ * captures create a pending row and the scratchpad queue fills it through the
+ * configured OpenAI-shaped transcription provider.
  *
  * @property int $id
  * @property int|null $scratchpad_entry_id

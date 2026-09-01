@@ -4,6 +4,7 @@ namespace App\Actions\Postsyncer;
 
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
+use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Validation\ValidationException;
@@ -18,6 +19,12 @@ class EnqueuePostPublishAction
     public function handle(Post $post, Workspace $workspace, array $options = []): Post
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
+
+        if (($post->approval_state ?? 'approved') !== 'approved') {
+            throw ValidationException::withMessages([
+                'publish' => __('This post needs human approval before it can be published.'),
+            ]);
+        }
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
 
@@ -45,6 +52,13 @@ class EnqueuePostPublishAction
             'publish_state' => 'queued',
             'publish_error' => null,
         ])->save();
+
+        $post->telegramPostRequests()
+            ->where('state', TelegramPostRequest::FAILED)
+            ->update([
+                'state' => TelegramPostRequest::APPROVED,
+                'error_message' => null,
+            ]);
 
         PublishPostJob::dispatch($post, $filtered);
 

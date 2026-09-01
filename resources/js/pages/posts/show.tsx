@@ -2,6 +2,7 @@ import { Head, Link } from '@inertiajs/react';
 import { useMemo } from 'react';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
+import PostDraftEditor from '@/components/studio/post-draft-editor';
 import PostOverview from '@/components/studio/post-overview';
 import type { WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { useStudioTab } from '@/hooks/use-studio-tab';
@@ -50,6 +51,7 @@ type PostDetail = {
     status: string;
     publish_state: string;
     publish_error: string | null;
+    approval_state: string;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
@@ -85,6 +87,9 @@ export default function PostShow({ post }: PageProps) {
           : post.language === 'bn'
             ? 'bn'
             : null;
+    const editable =
+        ['draft', 'ready'].includes(post.status) &&
+        !['queued', 'running'].includes(post.publish_state);
 
     return (
         <>
@@ -162,6 +167,7 @@ export default function PostShow({ post }: PageProps) {
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
+                        approvalState={post.approval_state}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
                         handles={post.handles}
@@ -169,17 +175,26 @@ export default function PostShow({ post }: PageProps) {
                 )}
 
                 {tab === 'captions' &&
-                    (hasCaptions ? (
-                        <PostCaptionsPanel
+                    <>
+                        <PostDraftEditor
+                            postId={post.id}
+                            title={post.title}
+                            body={post.body}
                             groups={post.captions}
-                            platforms={post.platforms}
-                            imageUrls={post.image_urls}
-                            handles={post.handles}
-                            defaultLang={defaultLang}
+                            editable={editable}
                         />
-                    ) : (
-                        <p className="empty">No captions on this post yet.</p>
-                    ))}
+                        {hasCaptions ? (
+                            <PostCaptionsPanel
+                                groups={post.captions}
+                                platforms={post.platforms}
+                                imageUrls={post.image_urls}
+                                handles={post.handles}
+                                defaultLang={defaultLang}
+                            />
+                        ) : (
+                            <p className="empty">No captions on this post yet.</p>
+                        )}
+                    </>}
             </div>
         </>
     );

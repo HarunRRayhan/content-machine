@@ -31,6 +31,7 @@ type Props = {
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
+    approvalState: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     handles?: HandleDirectory;
@@ -152,6 +153,7 @@ export default function PostOverview({
     publishUrl,
     postsyncerReady,
     publishState,
+    approvalState,
     needsConfirmAsk,
     postsyncer,
     handles,
@@ -174,15 +176,18 @@ export default function PostOverview({
         : (workspaces ?? []);
     const hasWorkspaceBuckets = workspaceBuckets.length > 0;
     const publishBusy = ['queued', 'running'].includes(publishState);
+    const awaitingApproval = approvalState === 'pending';
     const showScheduleForm =
         !archived &&
         studioStatus !== 'posted' &&
         studioStatus !== 'scheduled' &&
         !hasGroups &&
-        studioStatus === 'draft';
+        studioStatus === 'draft' &&
+        !awaitingApproval;
     const canSchedule =
         postsyncerReady &&
         !publishBusy &&
+        !awaitingApproval &&
         studioStatus === 'draft' &&
         !hasGroups;
     const scheduleDisabled =
@@ -207,6 +212,34 @@ export default function PostOverview({
 
     return (
         <div className="overview">
+            <section className="pane">
+                <div className="pane-head">
+                    <span className="k">Approval</span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    {awaitingApproval ? (
+                        <span className="badge">Needs review before publishing</span>
+                    ) : (
+                        <span className="badge">Approved for publishing</span>
+                    )}
+                    {awaitingApproval && (
+                        <Form
+                            action={`/posts/${postId}/approve`}
+                            method="post"
+                        >
+                            {({ processing }) => (
+                                <button
+                                    type="submit"
+                                    className="advance"
+                                    disabled={processing}
+                                >
+                                    Approve draft
+                                </button>
+                            )}
+                        </Form>
+                    )}
+                </div>
+            </section>
             <section className="pane">
                 <div className="pane-head">
                     <span className="k">Status</span>
@@ -359,6 +392,10 @@ export default function PostOverview({
                                     </>
                                 )}
                             </Form>
+                        ) : awaitingApproval ? (
+                            <span className="badge">
+                                Review and approve the draft before scheduling
+                            </span>
                         ) : (
                             <span className="badge">
                                 🗓️ Scheduled

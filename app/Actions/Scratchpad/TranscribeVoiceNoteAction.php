@@ -2,8 +2,10 @@
 
 namespace App\Actions\Scratchpad;
 
+use App\Jobs\GenerateTelegramPostJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiTranscriptionClientContract;
@@ -49,6 +51,11 @@ class TranscribeVoiceNoteAction
                 'error_message' => 'No OpenAI-shaped AI provider is configured for this workspace.',
             ]);
 
+            $this->failTelegramPostRequests(
+                $transcription->scratchpadEntry,
+                'The audio could not be transcribed because no OpenAI-shaped AI provider is configured.',
+            );
+
             return;
         }
 
@@ -64,6 +71,11 @@ class TranscribeVoiceNoteAction
                 'error_code' => 'audio_missing',
                 'error_message' => 'The audio file could not be read from storage.',
             ]);
+
+            $this->failTelegramPostRequests(
+                $transcription->scratchpadEntry,
+                'The audio file could not be read, so I could not create the post draft.',
+            );
 
             return;
         }
@@ -96,6 +108,7 @@ class TranscribeVoiceNoteAction
                 }
 
                 $this->replyOnTelegram($entry, (string) $result->text);
+                $this->queueTelegramPostRequests($entry);
             }
 
             return;
@@ -106,6 +119,11 @@ class TranscribeVoiceNoteAction
             'error_code' => 'transcription_failed',
             'error_message' => $lastError,
         ]);
+
+        $this->failTelegramPostRequests(
+            $transcription->scratchpadEntry,
+            'I could not transcribe that audio, so I could not create the post draft.',
+        );
     }
 
     private function replyOnTelegram(ScratchpadEntry $entry, string $text): void
@@ -127,5 +145,50 @@ class TranscribeVoiceNoteAction
         }
 
         $this->telegramClient->sendMessage((string) $config->bot_token, $chatId, "📝 Transcript: {$text}");
+    }
+
+    private function queueTelegramPostRequests(?ScratchpadEntry $entry): void
+    {
+        if ($entry === null) {
+            return;
+        }
+
+        TelegramPostRequest::query()
+            ->where('source_scratchpad_entry_id', $entry->id)
+            ->where('state', TelegramPostRequest::GENERATING)
+            ->get()
+            ->each(fn (TelegramPostRequest $request) => GenerateTelegramPostJob::dispatch($request->id));
+    }
+
+    private function failTelegramPostRequests(?ScratchpadEntry $entry, string $message): void
+    {
+        if ($entry === null) {
+            return;
+        }
+
+        $requests = TelegramPostRequest::query()
+            ->where('source_scratchpad_entry_id', $entry->id)
+            ->where('state', TelegramPostRequest::GENERATING)
+            ->with('telegramBotConfig')
+            ->get();
+
+        foreach ($requests as $request) {
+            $updated = TelegramPostRequest::query()
+                ->whereKey($request->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->update([
+                    'state' => TelegramPostRequest::FAILED,
+                    'error_message' => $message,
+                ]);
+
+            if ($updated === 0) {
+                continue;
+            }
+
+            $config = $request->telegramBotConfig;
+            if ($config !== null && $config->bot_token !== null) {
+                $this->telegramClient->sendMessage($config->bot_token, $request->telegram_chat_id, "❌ {$message}");
+            }
+        }
     }
 }

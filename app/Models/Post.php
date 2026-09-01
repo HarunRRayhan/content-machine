@@ -10,6 +10,7 @@ use Database\Factories\PostFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
@@ -33,6 +34,9 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property array<string, mixed>|null $postsyncer
  * @property string $publish_state
  * @property string|null $publish_error
+ * @property string $approval_state
+ * @property CarbonImmutable|null $approved_at
+ * @property int|null $approved_by_user_id
  * @property string $status
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
@@ -60,6 +64,11 @@ class Post extends Model
         'failed',
     ];
 
+    public const APPROVAL_STATES = [
+        'pending',
+        'approved',
+    ];
+
     /**
      * @var list<string>
      */
@@ -79,6 +88,9 @@ class Post extends Model
         'postsyncer',
         'publish_state',
         'publish_error',
+        'approval_state',
+        'approved_at',
+        'approved_by_user_id',
         'status',
         'created_by_user_id',
     ];
@@ -93,6 +105,7 @@ class Post extends Model
             'platforms' => 'array',
             'image_drive_urls' => 'array',
             'postsyncer' => 'array',
+            'approved_at' => 'datetime',
         ];
     }
 
@@ -118,5 +131,13 @@ class Post extends Model
     public function attachments(): MorphMany
     {
         return $this->morphMany(Attachment::class, 'attachable')->orderBy('position');
+    }
+
+    /**
+     * @return HasMany<TelegramPostRequest, $this>
+     */
+    public function telegramPostRequests(): HasMany
+    {
+        return $this->hasMany(TelegramPostRequest::class);
     }
 }

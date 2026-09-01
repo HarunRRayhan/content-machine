@@ -93,7 +93,7 @@ class CaptureTelegramMessageActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::count());
         $this->assertCount(1, $this->client->sentMessages);
-        $this->assertStringContainsString('text, links, photos, and voice notes', $this->client->sentMessages[0]['text']);
+        $this->assertStringContainsString('text, links, photos, voice notes, and audio files', $this->client->sentMessages[0]['text']);
     }
 
     public function test_an_update_with_no_message_key_is_ignored()
@@ -191,6 +191,38 @@ class CaptureTelegramMessageActionTest extends TestCase
         $mediaAsset = Attachment::sole()->mediaAsset;
         $this->assertSame('audio/ogg', $mediaAsset->mime);
         $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🎙️ Voice note captured.']], $this->client->sentMessages);
+    }
+
+    public function test_an_audio_file_is_captured_as_voice_with_its_caption()
+    {
+        Storage::fake('scratchpad');
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+        $action = $this->action();
+        $this->client->willDownloadFile(TelegramFileDownloadResult::success('not-really-audio-but-thats-fine'));
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 42],
+                'caption' => 'Turn this recording into a post later',
+                'audio' => [
+                    'file_id' => 'audio-id',
+                    'duration' => 4,
+                    'mime_type' => 'audio/mpeg',
+                    'file_name' => 'recording.mp3',
+                ],
+            ],
+        ];
+
+        $action->handle($config, $update);
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('voice', $entry->kind);
+        $this->assertSame('Turn this recording into a post later', $entry->body);
+        $this->assertSame('recording.mp3', Attachment::sole()->mediaAsset->original_filename);
+        $this->assertSame('audio/mpeg', Attachment::sole()->mediaAsset->mime);
     }
 
     public function test_a_voice_download_failure_replies_honestly_and_captures_nothing()

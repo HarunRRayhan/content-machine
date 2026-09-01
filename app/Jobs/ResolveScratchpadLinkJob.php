@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Actions\Scratchpad\ResolveScratchpadLinkAction;
 use App\Models\ScratchpadEntry;
+use App\Models\TelegramPostRequest;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -30,7 +32,19 @@ class ResolveScratchpadLinkJob implements ShouldQueue
 
         if (($this->entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
             SummarizeCaptureJob::dispatch($this->entry);
+
+            TelegramPostRequest::query()
+                ->where('source_scratchpad_entry_id', $this->entry->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->get()
+                ->each(fn (TelegramPostRequest $request) => GenerateTelegramPostJob::dispatch($request->id));
+
+            return;
         }
+
+        $this->failTelegramPostRequests(
+            'I could not resolve that link, so I could not create the post draft.',
+        );
     }
 
     /**
@@ -51,5 +65,43 @@ class ResolveScratchpadLinkJob implements ShouldQueue
                 'resolved_kind' => 'unresolved',
             ],
         ]);
+
+        $this->failTelegramPostRequests(
+            'I could not resolve that link, so I could not create the post draft.',
+        );
+    }
+
+    private function failTelegramPostRequests(string $message): void
+    {
+        $requests = TelegramPostRequest::query()
+            ->where('source_scratchpad_entry_id', $this->entry->id)
+            ->where('state', TelegramPostRequest::GENERATING)
+            ->with('telegramBotConfig')
+            ->get();
+
+        $client = app(TelegramClientContract::class);
+
+        foreach ($requests as $request) {
+            $updated = TelegramPostRequest::query()
+                ->whereKey($request->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->update([
+                    'state' => TelegramPostRequest::FAILED,
+                    'error_message' => $message,
+                ]);
+
+            if ($updated === 0) {
+                continue;
+            }
+
+            $config = $request->telegramBotConfig;
+            if ($config !== null && $config->bot_token !== null) {
+                $client->sendMessage(
+                    $config->bot_token,
+                    $request->telegram_chat_id,
+                    "❌ {$message}",
+                );
+            }
+        }
     }
 }

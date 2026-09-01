@@ -67,6 +67,55 @@ class HttpAiCompletionClientTest extends TestCase
             && $request['messages'][1]['content'] === 'user content');
     }
 
+    public function test_anthropic_vision_success_sends_a_base64_image_content_block(): void
+    {
+        Http::fake(['api.anthropic.com/*' => Http::response([
+            'content' => [['type' => 'text', 'text' => '{"title":"Photo"}']],
+        ], 200)]);
+
+        $entry = $this->entry([
+            'provider' => 'anthropic',
+            'api_key' => 'sk-ant-test',
+        ]);
+
+        $result = (new HttpAiCompletionClient)->completeWithImage(
+            $entry,
+            'system prompt',
+            'caption or instruction',
+            'image/jpeg',
+            'image-bytes',
+        );
+
+        $this->assertTrue($result->successful);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.anthropic.com/v1/messages'
+            && $request['messages'][0]['content'][0]['type'] === 'image'
+            && $request['messages'][0]['content'][0]['source']['media_type'] === 'image/jpeg'
+            && $request['messages'][0]['content'][0]['source']['data'] === base64_encode('image-bytes')
+            && $request['messages'][0]['content'][1]['text'] === 'caption or instruction');
+    }
+
+    public function test_openai_vision_success_sends_a_data_url_image(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response([
+            'choices' => [['message' => ['content' => '{"title":"Photo"}']]],
+        ], 200)]);
+
+        $entry = $this->entry(['provider' => 'openai', 'api_key' => 'sk-openai-test'], 'gpt-4o');
+
+        $result = (new HttpAiCompletionClient)->completeWithImage(
+            $entry,
+            'system prompt',
+            'caption or instruction',
+            'image/png',
+            'image-bytes',
+        );
+
+        $this->assertTrue($result->successful);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.openai.com/v1/chat/completions'
+            && $request['messages'][1]['content'][0]['text'] === 'caption or instruction'
+            && $request['messages'][1]['content'][1]['image_url']['url'] === 'data:image/png;base64,'.base64_encode('image-bytes'));
+    }
+
     public function test_a_custom_base_url_is_used_when_given()
     {
         Http::fake(['*' => Http::response(['content' => [['text' => 'ok']]], 200)]);

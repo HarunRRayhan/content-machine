@@ -3,6 +3,7 @@
 namespace App\Actions\Postsyncer;
 
 use App\Models\Post;
+use App\Models\TelegramPostRequest;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -21,7 +22,19 @@ class PublishPostAction
      */
     public function handle(Post $post, array $options): void
     {
+        // Queue serialization normally reloads this model, but direct callers
+        // can still hold a stale instance after an edit or approval reset.
+        $post->refresh();
         $originalStatus = $post->status;
+
+        if (($post->approval_state ?? 'approved') !== 'approved') {
+            $post->update([
+                'publish_state' => 'failed',
+                'publish_error' => 'This post needs human approval before it can be published.',
+            ]);
+
+            return;
+        }
 
         $post->update([
             'publish_state' => 'running',
@@ -76,13 +89,29 @@ class PublishPostAction
                 'publish_state' => 'succeeded',
                 'publish_error' => null,
             ]);
+            $this->updateTelegramPostRequests($post, TelegramPostRequest::PUBLISHED);
         } catch (Throwable $e) {
             $post->update([
                 'status' => $originalStatus,
                 'publish_state' => 'failed',
                 'publish_error' => $e->getMessage(),
             ]);
+            $this->updateTelegramPostRequests($post, TelegramPostRequest::FAILED, $e->getMessage());
         }
+    }
+
+    private function updateTelegramPostRequests(Post $post, string $state, ?string $errorMessage = null): void
+    {
+        $post->telegramPostRequests()
+            ->whereIn('state', [
+                TelegramPostRequest::AWAITING_APPROVAL,
+                TelegramPostRequest::APPROVED,
+                TelegramPostRequest::FAILED,
+            ])
+            ->update([
+                'state' => $state,
+                'error_message' => $errorMessage,
+            ]);
     }
 
     /**

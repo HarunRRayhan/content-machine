@@ -4,6 +4,8 @@ namespace Tests\Unit\Actions\Postsyncer;
 
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Post;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\MediaUrlResolver;
 use App\Support\Postsyncer\PostPublishPlanner;
@@ -84,6 +86,12 @@ class PublishPostActionTest extends TestCase
             ],
             'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
         ]);
+        $config = TelegramBotConfig::factory()->for($workspace)->create();
+        $request = TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
 
         $this->action->handle($post, ['confirm_ask' => false]);
 
@@ -100,8 +108,29 @@ class PublishPostActionTest extends TestCase
                 'language' => 'bangla',
             ]],
         ], $post->postsyncer);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->refresh()->state);
 
         Http::assertSentCount(2);
+    }
+
+    public function test_a_pending_post_is_not_published_if_approval_changes_after_enqueue(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'approval_state' => 'pending',
+        ]);
+
+        $this->action->handle($post, []);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('This post needs human approval before it can be published.', $post->publish_error);
+        Http::assertNothingSent();
     }
 
     public function test_schedule_sets_status_scheduled(): void
@@ -123,6 +152,12 @@ class PublishPostActionTest extends TestCase
             'platforms' => ['facebook'],
             'captions' => ['facebook' => 'Scheduled caption'],
         ]);
+        $config = TelegramBotConfig::factory()->for($workspace)->create();
+        $request = TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
 
         $this->action->handle($post, [
             'confirm_ask' => false,
@@ -134,6 +169,7 @@ class PublishPostActionTest extends TestCase
         $this->assertSame('scheduled', $post->status);
         $this->assertSame('SCHEDULED', $post->postsyncer['groups'][0]['status']);
         $this->assertSame('2026-08-26T09:12:00+06:00', $post->postsyncer['groups'][0]['scheduled_at']);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->refresh()->state);
 
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts'
             && $request['schedule_type'] === 'schedule'
@@ -164,6 +200,12 @@ class PublishPostActionTest extends TestCase
             ],
             'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
         ]);
+        $config = TelegramBotConfig::factory()->for($workspace)->create();
+        $request = TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
 
         $this->action->handle($post, ['confirm_ask' => false]);
 
@@ -172,6 +214,8 @@ class PublishPostActionTest extends TestCase
         $this->assertStringContainsString('PostSyncer API error 422', $post->publish_error);
         $this->assertSame('ready', $post->status);
         $this->assertNull($post->postsyncer);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
+        $this->assertStringContainsString('PostSyncer API error 422', (string) $request->error_message);
     }
 
     public function test_empty_media_upload_response_fails_instead_of_publishing_text(): void

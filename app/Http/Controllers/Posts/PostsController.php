@@ -100,6 +100,7 @@ class PostsController extends Controller
                 'title',
                 'status',
                 'publish_state',
+                'approval_state',
                 'language',
                 'platforms',
                 'postsyncer',
@@ -244,6 +245,7 @@ class PostsController extends Controller
             'title' => $post->title,
             'status' => $post->status,
             'publish_state' => $post->publish_state,
+            'approval_state' => $post->approval_state ?? 'approved',
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
             'groups' => $this->presentGroups($post),
@@ -360,6 +362,7 @@ class PostsController extends Controller
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
+            'approval_state' => $post->approval_state ?? 'approved',
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'needs_confirm_ask' => $postsyncerConfig !== null

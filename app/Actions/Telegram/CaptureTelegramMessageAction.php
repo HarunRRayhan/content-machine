@@ -10,6 +10,7 @@ use App\Data\Scratchpad\CaptureScratchpadLinkData;
 use App\Data\Scratchpad\CaptureScratchpadPhotoData;
 use App\Data\Scratchpad\CaptureScratchpadVoiceData;
 use App\Data\Scratchpad\CaptureTextNoteData;
+use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramClientContract;
@@ -31,8 +32,8 @@ use Illuminate\Http\UploadedFile;
  * command. Every message gets a real reply, never silence: capture
  * success or an unsupported-content notice.
  *
- * Text, links, photos, and voice notes are handled. A message with none
- * of those (document, video, sticker, forwarded audio file, ...) gets an
+ * Text, links, photos, voice notes, and audio files are handled. A message with none
+ * of those (document, video, sticker, or other unsupported media) gets an
  * honest "not yet" reply rather than being silently dropped or
  * half-captured from just its caption.
  */
@@ -49,19 +50,19 @@ class CaptureTelegramMessageAction
     /**
      * @param  array<string, mixed>  $update  the raw Telegram Update payload
      */
-    public function handle(TelegramBotConfig $config, array $update): void
+    public function handle(TelegramBotConfig $config, array $update, bool $reply = true): ?ScratchpadEntry
     {
         $message = $update['message'] ?? null;
 
         if (! is_array($message)) {
-            return;
+            return null;
         }
 
         $chatId = $message['chat']['id'] ?? null;
         $fromUserId = $message['from']['id'] ?? null;
 
         if (! is_int($chatId) || ! is_int($fromUserId)) {
-            return;
+            return null;
         }
 
         // Guaranteed non-null: ProcessTelegramUpdateJob only calls this
@@ -71,7 +72,7 @@ class CaptureTelegramMessageAction
         $botToken = $config->bot_token;
 
         if ($botToken === null) {
-            return;
+            return null;
         }
 
         $workspace = $config->workspace;
@@ -81,60 +82,77 @@ class CaptureTelegramMessageAction
         $photoSizes = $message['photo'] ?? null;
 
         if (is_array($photoSizes) && $photoSizes !== []) {
-            $this->capturePhoto($config, $botToken, $workspace, $chatId, $photoSizes, $caption);
+            return $this->capturePhoto($config, $botToken, $workspace, $chatId, $photoSizes, $caption, $reply);
 
-            return;
         }
 
         $voice = $message['voice'] ?? null;
 
         if (is_array($voice)) {
-            $this->captureVoice($config, $botToken, $workspace, $chatId, $voice);
+            return $this->captureVoice($config, $botToken, $workspace, $chatId, $voice, $caption, $reply);
 
-            return;
+        }
+
+        $audio = $message['audio'] ?? null;
+
+        if (is_array($audio)) {
+            return $this->captureVoice($config, $botToken, $workspace, $chatId, $audio, $caption, $reply);
+
         }
 
         $text = $message['text'] ?? null;
 
         if (! is_string($text) || trim($text) === '') {
-            $this->reply($config, $chatId, 'I can only capture text, links, photos, and voice notes right now.');
+            if ($reply) {
+                $this->reply($config, $chatId, 'I can only capture text, links, photos, voice notes, and audio files right now.');
+            }
 
-            return;
+            return null;
         }
 
         $text = trim($text);
 
         if (filter_var($text, FILTER_VALIDATE_URL) !== false) {
-            $this->captureScratchpadLinkAction->handle($workspace, null, CaptureScratchpadLinkData::fromTelegram($text));
-            $this->reply($config, $chatId, '🔗 Link captured.');
+            $entry = $this->captureScratchpadLinkAction->handle($workspace, null, CaptureScratchpadLinkData::fromTelegram($text));
+            if ($reply) {
+                $this->reply($config, $chatId, '🔗 Link captured.');
+            }
 
-            return;
+            return $entry;
         }
 
-        $this->captureTextNoteAction->handle($workspace, null, CaptureTextNoteData::fromTelegram($text));
-        $this->reply($config, $chatId, 'Captured.');
+        $entry = $this->captureTextNoteAction->handle($workspace, null, CaptureTextNoteData::fromTelegram($text));
+        if ($reply) {
+            $this->reply($config, $chatId, 'Captured.');
+        }
+
+        return $entry;
     }
 
     /**
      * @param  array<int, array<string, mixed>>  $photoSizes  Telegram lists these smallest to largest
      */
-    private function capturePhoto(TelegramBotConfig $config, string $botToken, Workspace $workspace, int $chatId, array $photoSizes, ?string $caption): void
+    private function capturePhoto(TelegramBotConfig $config, string $botToken, Workspace $workspace, int $chatId, array $photoSizes, ?string $caption, bool $reply): ?ScratchpadEntry
     {
         $largest = end($photoSizes);
         $fileId = is_array($largest) ? ($largest['file_id'] ?? null) : null;
 
         if (! is_string($fileId)) {
-            $this->reply($config, $chatId, "Couldn't read that photo.");
+            if ($reply) {
+                $this->reply($config, $chatId, "Couldn't read that photo.");
+            }
 
-            return;
+            return null;
         }
 
         $download = $this->client->downloadFile($botToken, $fileId);
 
         if (! $download->successful) {
-            $this->reply($config, $chatId, "Couldn't capture that photo: {$download->error}");
+            if ($reply) {
+                $this->reply($config, $chatId, "Couldn't capture that photo: {$download->error}");
+            }
 
-            return;
+            return null;
         }
 
         // Telegram's own `photo` field is always a compressed JPEG (a
@@ -145,46 +163,62 @@ class CaptureTelegramMessageAction
         $file = $this->toUploadedFile((string) $download->contents, 'telegram-photo.jpg', 'image/jpeg');
 
         try {
-            $this->captureScratchpadPhotoAction->handle($workspace, null, CaptureScratchpadPhotoData::fromTelegram($file, $caption));
+            $entry = $this->captureScratchpadPhotoAction->handle($workspace, null, CaptureScratchpadPhotoData::fromTelegram($file, $caption));
         } finally {
             @unlink($file->getRealPath());
         }
 
-        $this->reply($config, $chatId, '📷 Photo captured.');
+        if ($reply) {
+            $this->reply($config, $chatId, '📷 Photo captured.');
+        }
+
+        return $entry;
     }
 
     /**
      * @param  array<string, mixed>  $voice
      */
-    private function captureVoice(TelegramBotConfig $config, string $botToken, Workspace $workspace, int $chatId, array $voice): void
+    private function captureVoice(TelegramBotConfig $config, string $botToken, Workspace $workspace, int $chatId, array $voice, ?string $caption, bool $reply): ?ScratchpadEntry
     {
         $fileId = $voice['file_id'] ?? null;
 
         if (! is_string($fileId)) {
-            $this->reply($config, $chatId, "Couldn't read that voice note.");
+            if ($reply) {
+                $this->reply($config, $chatId, "Couldn't read that voice note.");
+            }
 
-            return;
+            return null;
         }
 
         $download = $this->client->downloadFile($botToken, $fileId);
 
         if (! $download->successful) {
-            $this->reply($config, $chatId, "Couldn't capture that voice note: {$download->error}");
+            if ($reply) {
+                $this->reply($config, $chatId, "Couldn't capture that voice note: {$download->error}");
+            }
 
-            return;
+            return null;
         }
 
         $mimeType = $voice['mime_type'] ?? null;
         $mimeType = is_string($mimeType) && $mimeType !== '' ? $mimeType : 'audio/ogg';
-        $file = $this->toUploadedFile((string) $download->contents, 'telegram-voice.'.$this->extensionForMime($mimeType), $mimeType);
+        $originalName = $voice['file_name'] ?? null;
+        $originalName = is_string($originalName) && $originalName !== ''
+            ? $originalName
+            : 'telegram-voice.'.$this->extensionForMime($mimeType);
+        $file = $this->toUploadedFile((string) $download->contents, $originalName, $mimeType);
 
         try {
-            $this->captureScratchpadVoiceAction->handle($workspace, null, CaptureScratchpadVoiceData::fromTelegram($file, $chatId));
+            $entry = $this->captureScratchpadVoiceAction->handle($workspace, null, CaptureScratchpadVoiceData::fromTelegram($file, $chatId, $caption));
         } finally {
             @unlink($file->getRealPath());
         }
 
-        $this->reply($config, $chatId, '🎙️ Voice note captured.');
+        if ($reply) {
+            $this->reply($config, $chatId, '🎙️ Voice note captured.');
+        }
+
+        return $entry;
     }
 
     private function toUploadedFile(string $contents, string $filename, string $mimeType): UploadedFile

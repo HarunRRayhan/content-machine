@@ -72,11 +72,13 @@ class PostsApiTest extends TestCase
             'number' => 57,
             'body' => str_repeat('paragraph ', 80),
             'captions' => ['facebook' => str_repeat('caption ', 40)],
+            'approval_state' => 'pending',
         ]);
 
         $this->acting()->getJson('/api/v1/posts')
             ->assertOk()
             ->assertJsonPath('data.0.human_id', 'P-57')
+            ->assertJsonPath('data.0.approval_state', 'pending')
             ->assertJsonPath('data.0.has_body', true)
             ->assertJsonPath('data.0.has_captions', true)
             ->assertJsonMissingPath('data.0.body')

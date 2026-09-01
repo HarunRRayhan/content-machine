@@ -98,4 +98,18 @@ class ProcessTelegramUpdateJobTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::count());
     }
+
+    public function test_audio_updates_use_the_scratchpad_queue(): void
+    {
+        $job = new ProcessTelegramUpdateJob(1, [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 1],
+                'from' => ['id' => 1],
+                'audio' => ['file_id' => 'audio-id'],
+            ],
+        ]);
+
+        $this->assertSame('scratchpad', $job->queue);
+    }
 }

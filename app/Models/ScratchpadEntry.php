@@ -14,8 +14,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Str;
 
 /**
- * A raw capture from the Scratch Pad: a quick text note today, a voice
- * memo/photo/link/file once later phases add them. Nothing here is
+ * A raw capture from the Scratch Pad: a text note, link, photo, or voice
+ * memo. Nothing here is
  * triaged automatically; `status`/`intent` only change when a human routes
  * it via scratchpad-triage.
  *

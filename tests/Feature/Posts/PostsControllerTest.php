@@ -621,6 +621,28 @@ class PostsControllerTest extends TestCase
         ]);
     }
 
+    public function test_update_accepts_caption_edits_and_reopens_approval(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $post = Post::factory()->for($workspace)->create([
+            'approval_state' => 'approved',
+            'body' => 'Old body.',
+            'captions' => ['facebook' => ['caption' => 'Old caption']],
+        ]);
+
+        $response = $this->patch(route('posts.update', $post), [
+            'title' => $post->title,
+            'body' => 'New body.',
+            'captions' => ['facebook' => ['caption' => 'New caption']],
+        ]);
+
+        $response->assertRedirect(route('posts.show', $post));
+        $post->refresh();
+        $this->assertSame('New body.', $post->body);
+        $this->assertSame(['facebook' => ['caption' => 'New caption']], $post->captions);
+        $this->assertSame('pending', $post->approval_state);
+    }
+
     public function test_update_404s_for_a_post_in_a_different_workspace()
     {
         $this->actingAsWorkspaceMember();

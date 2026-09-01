@@ -11,8 +11,9 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Text, link, and command updates use the supervised default queue. Photo and
- * voice updates stay on scratchpad because their media files live on cm-web.
+ * Text, link, and command updates use the supervised default queue. Photo,
+ * voice, and audio updates stay on scratchpad because their media files live
+ * on cm-web.
  */
 class ProcessTelegramUpdateJob implements ShouldQueue
 {
@@ -29,7 +30,7 @@ class ProcessTelegramUpdateJob implements ShouldQueue
 
         $message = $update['message'] ?? null;
 
-        if (is_array($message) && (isset($message['photo']) || isset($message['voice']))) {
+        if (is_array($message) && (isset($message['photo']) || isset($message['voice']) || isset($message['audio']))) {
             // Photo/voice captures write into the scratchpad uploads volume,
             // which is mounted only on cm-web (Railway volumes are one-service).
             // cm-worker's default queue has no volume, so media updates must

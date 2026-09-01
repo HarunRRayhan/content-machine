@@ -58,6 +58,7 @@ class PostResource extends JsonResource
             'status' => $this->status,
             'publish_state' => $this->publish_state,
             'publish_error' => $this->publish_error,
+            'approval_state' => $this->approval_state ?? 'approved',
             'postsyncer' => $this->postsyncer,
             'idea_id' => $this->idea_id,
             'attachments' => $this->relationLoaded('attachments')

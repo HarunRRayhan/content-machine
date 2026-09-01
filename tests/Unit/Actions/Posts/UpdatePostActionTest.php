@@ -6,6 +6,8 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramPostRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -71,6 +73,56 @@ class UpdatePostActionTest extends TestCase
 
         $this->assertSame('ready', $updated->status);
         $this->assertSame(['https://drive.google.com/file/d/photo/view'], $updated->image_drive_urls);
+    }
+
+    public function test_status_only_patch_keeps_existing_body_and_approval(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Keep title',
+            'body' => 'Keep body.',
+            'approval_state' => 'approved',
+            'status' => 'draft',
+        ]);
+
+        $request = UpdatePostRequest::create('/posts/1', 'PATCH', [
+            'title' => 'Keep title',
+            'status' => 'ready',
+        ]);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromRequest($request));
+
+        $post->refresh();
+        $this->assertSame('Keep body.', $post->body);
+        $this->assertSame('approved', $post->approval_state);
+    }
+
+    public function test_editing_captions_requires_approval_again(): void
+    {
+        $post = Post::factory()->create([
+            'approval_state' => 'approved',
+            'captions' => ['facebook' => ['caption' => 'Old caption']],
+        ]);
+        $config = TelegramBotConfig::factory()->for($post->workspace)->create();
+        $telegramRequest = TelegramPostRequest::factory()->for($post->workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
+
+        $request = UpdatePostRequest::create('/posts/1', 'PATCH', [
+            'title' => $post->title,
+            'body' => $post->body,
+            'captions' => ['facebook' => ['caption' => 'New caption']],
+        ]);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromRequest($request));
+
+        $post->refresh();
+        $this->assertSame(['facebook' => ['caption' => 'New caption']], $post->captions);
+        $this->assertSame('pending', $post->approval_state);
+        $this->assertNull($post->approved_at);
+        $this->assertNull($post->approved_by_user_id);
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $telegramRequest->refresh()->state);
     }
 
     public function test_empty_image_drive_urls_field_clears_existing_values(): void

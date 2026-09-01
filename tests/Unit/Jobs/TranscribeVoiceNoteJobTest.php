@@ -5,9 +5,16 @@ namespace Tests\Unit\Jobs;
 use App\Actions\Scratchpad\TranscribeVoiceNoteAction;
 use App\Jobs\TranscribeVoiceNoteJob;
 use App\Models\MediaAsset;
+use App\Models\ScratchpadEntry;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
+use App\Models\Workspace;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
+use RuntimeException;
+use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
 class TranscribeVoiceNoteJobTest extends TestCase
@@ -25,5 +32,40 @@ class TranscribeVoiceNoteJobTest extends TestCase
         ));
 
         (new TranscribeVoiceNoteJob($transcription))->handle($action);
+    }
+
+    public function test_failed_marks_a_telegram_post_request_as_failed(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'voice',
+            'source' => 'telegram',
+        ]);
+        $mediaAsset = MediaAsset::factory()->create(['workspace_id' => $workspace->id]);
+        $transcription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $entry->id,
+            'media_asset_id' => $mediaAsset->id,
+            'status' => 'processing',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $client);
+
+        (new TranscribeVoiceNoteJob($transcription))->failed(new RuntimeException('provider crashed'));
+
+        $this->assertSame('failed', $transcription->refresh()->status);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
+        $this->assertStringContainsString('could not transcribe', $client->sentMessages[0]['text']);
     }
 }
