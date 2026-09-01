@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Console;
 
+use App\Models\Post;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -29,6 +30,24 @@ class DeployCommandTest extends TestCase
         $this->artisan('cm:deploy')->assertExitCode(0);
 
         $this->assertSame(1, User::where('email', 'admin@example.com')->count());
+    }
+
+    public function test_it_backfills_known_post_templates(): void
+    {
+        config(['app.admin_email' => 'admin@example.com', 'app.admin_name' => 'Admin']);
+
+        Post::factory()->create([
+            'human_id' => 'P-45',
+            'number' => 45,
+            'template' => null,
+        ]);
+
+        $this->artisan('cm:deploy')->assertExitCode(0);
+
+        $this->assertDatabaseHas('posts', [
+            'human_id' => 'P-45',
+            'template' => 'B',
+        ]);
     }
 
     public function test_it_creates_the_scratchpad_uploads_directory_when_missing()

@@ -1,6 +1,8 @@
 import { Head, Link } from '@inertiajs/react';
+import { ArrowUpRight } from 'lucide-react';
 import { useMemo } from 'react';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
+import TemplatePreview from '@/components/media/template-preview';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostOverview from '@/components/studio/post-overview';
 import type { WorkspaceBucket } from '@/components/studio/workspace-schedule';
@@ -46,6 +48,8 @@ type PostDetail = {
         letter: string;
         name: string;
         label: string;
+        preview_url: string;
+        visual_identity: string;
     } | null;
     status: string;
     publish_state: string;
@@ -98,20 +102,40 @@ export default function PostShow({ post }: PageProps) {
                     <div className="vhead-t">
                         <span className="no">P-{post.number}</span>
                         <h2>{post.title}</h2>
-                        {post.template_meta && (
-                            <Link
-                                href={showTemplate.url(
-                                    post.template_meta.letter,
-                                )}
-                                className="mt-1 inline-flex w-fit items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-                            >
-                                {post.template_meta.label}
-                                <span className="ml-1 text-muted-foreground">
-                                    · {post.template_meta.name}
-                                </span>
-                            </Link>
-                        )}
                     </div>
+                    {post.template_meta && (
+                        <Link
+                            href={showTemplate.url(post.template_meta.letter)}
+                            aria-label={`Open ${post.template_meta.label} details`}
+                            className="group flex w-full max-w-xl items-center overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg2)] text-left no-underline transition hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow)]"
+                        >
+                            <TemplatePreview
+                                src={post.template_meta.preview_url}
+                                alt={`${post.template_meta.label} preview`}
+                                letter={post.template_meta.letter}
+                                className="size-20 shrink-0"
+                            />
+                            <span className="min-w-0 flex-1 px-3 py-2.5">
+                                <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-[var(--ink-faint)] uppercase">
+                                    Template reference
+                                    <ArrowUpRight className="size-3.5" />
+                                </span>
+                                <span className="mt-0.5 block truncate text-sm font-semibold text-[var(--ink)]">
+                                    {post.template_meta.label}
+                                    <span className="font-normal text-[var(--ink-soft)]">
+                                        {' · '}
+                                        {post.template_meta.name}
+                                    </span>
+                                </span>
+                                <span className="mt-1 block truncate text-xs text-[var(--ink-soft)]">
+                                    <span className="font-medium text-[var(--ink)]">
+                                        Type:
+                                    </span>{' '}
+                                    {post.template_meta.visual_identity}
+                                </span>
+                            </span>
+                        </Link>
+                    )}
                 </div>
 
                 {post.idea_id && (

@@ -1,4 +1,5 @@
 import { Head, Link, router } from '@inertiajs/react';
+import TemplatePreview from '@/components/media/template-preview';
 import { IndexWorkspaceChips } from '@/components/studio/workspace-schedule';
 import type {
     PostsyncerGroup,
@@ -8,6 +9,7 @@ import { postShowUrl } from '@/lib/content-urls';
 import { POST_STATUS_LABELS, studioPostStatus } from '@/lib/platform-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
+import { show as showTemplate } from '@/routes/media/templates';
 import { index } from '@/routes/posts';
 
 type IdeaRow = {
@@ -25,6 +27,14 @@ type PostRow = {
     human_id: string;
     number: number;
     title: string;
+    template: string | null;
+    template_meta: {
+        letter: string;
+        name: string;
+        label: string;
+        preview_url: string;
+        visual_identity: string;
+    } | null;
     status: string;
     publish_state: string;
     language: string | null;
@@ -194,6 +204,7 @@ export default function PostsIndex({
                                 <tr>
                                     <th>ID</th>
                                     <th>Title</th>
+                                    {!isIdeation && <th>Template</th>}
                                     <th>
                                         {isIdeation ? 'Score' : 'Workspaces'}
                                     </th>
@@ -260,6 +271,62 @@ export default function PostsIndex({
                                             </td>
                                             <td className="c-title">
                                                 {row.title}
+                                            </td>
+                                            <td>
+                                                {row.template_meta ? (
+                                                    <Link
+                                                        href={showTemplate.url(
+                                                            row.template_meta
+                                                                .letter,
+                                                        )}
+                                                        className="group inline-flex max-w-56 items-center gap-2"
+                                                        onClick={(event) =>
+                                                            event.stopPropagation()
+                                                        }
+                                                    >
+                                                        <TemplatePreview
+                                                            src={
+                                                                row
+                                                                    .template_meta
+                                                                    .preview_url
+                                                            }
+                                                            alt={`${row.template_meta.label} preview`}
+                                                            letter={
+                                                                row
+                                                                    .template_meta
+                                                                    .letter
+                                                            }
+                                                            className="size-10 shrink-0 rounded-md"
+                                                        />
+                                                        <span className="min-w-0">
+                                                            <span className="block truncate text-sm font-medium">
+                                                                {
+                                                                    row
+                                                                        .template_meta
+                                                                        .label
+                                                                }
+                                                                <span className="font-normal text-[var(--ink-soft)]">
+                                                                    {' · '}
+                                                                    {
+                                                                        row
+                                                                            .template_meta
+                                                                            .name
+                                                                    }
+                                                                </span>
+                                                            </span>
+                                                            <span className="block truncate text-xs text-[var(--ink-soft)]">
+                                                                Type:{' '}
+                                                                {
+                                                                    row
+                                                                        .template_meta
+                                                                        .visual_identity
+                                                                }
+                                                            </span>
+                                                        </span>
+                                                    </Link>
+                                                ) : (
+                                                    '—'
+                                                )}
                                             </td>
                                             <td className="c-plat">
                                                 <IndexWorkspaceChips
