@@ -123,15 +123,32 @@ class PostsyncerClient
         $media = $data['media'] ?? [];
 
         if (! is_array($media)) {
-            return [];
+            throw new PostsyncerException(
+                'PostSyncer returned an invalid media upload response. Refusing to publish with invalid media.'
+            );
+        }
+
+        $countStored = $data['count_stored'] ?? null;
+        if ($countStored !== null
+            && (! is_int($countStored) || $countStored !== count($media))
+        ) {
+            throw new PostsyncerException(
+                'PostSyncer returned an incomplete media upload response. Refusing to publish with missing media.'
+            );
         }
 
         $ids = [];
 
         foreach ($media as $item) {
-            if (is_array($item) && array_key_exists('id', $item)) {
-                $ids[] = $item['id'];
+            $id = is_array($item) ? ($item['id'] ?? null) : null;
+
+            if (! $this->hasNumericId($id)) {
+                throw new PostsyncerException(
+                    'PostSyncer returned a media item without a valid id. Refusing to publish with invalid media.'
+                );
             }
+
+            $ids[] = $id;
         }
 
         return $ids;
@@ -157,7 +174,7 @@ class PostsyncerClient
      */
     public function getPost(int|string $id): array
     {
-        return $this->decodeResponse($this->request('get', '/posts/'.$id));
+        return $this->decodeResponse($this->request('get', '/posts/'.rawurlencode((string) $id)));
     }
 
     /**
@@ -211,5 +228,12 @@ class PostsyncerClient
         $json = $response->json();
 
         return is_array($json) ? $json : [];
+    }
+
+    private function hasNumericId(mixed $id): bool
+    {
+        return is_int($id)
+            ? $id > 0
+            : is_string($id) && ctype_digit($id) && (int) $id > 0;
     }
 }

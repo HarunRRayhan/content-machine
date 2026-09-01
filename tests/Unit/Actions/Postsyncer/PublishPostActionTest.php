@@ -181,6 +181,61 @@ class PublishPostActionTest extends TestCase
             && $request['schedule_for']['timezone'] === 'Asia/Dhaka');
     }
 
+    public function test_create_response_without_a_publishable_status_is_not_marked_successful(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 42], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Status must be verified'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertStringContainsString('no valid lifecycle status', (string) $post->publish_error);
+        $this->assertNull($post->postsyncer);
+    }
+
+    public function test_create_response_with_the_wrong_schedule_is_not_marked_successful(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'scheduled',
+                'scheduled_at' => '2026-08-26T10:12:00+06:00',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Schedule must be verified'],
+        ]);
+
+        $this->action->handle($post, [
+            'when' => '2026-08-26T09:12:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertStringContainsString('does not match the requested schedule', (string) $post->publish_error);
+        $this->assertNull($post->postsyncer);
+    }
+
     public function test_a_failed_later_group_resumes_without_recreating_completed_groups(): void
     {
         $workspace = Workspace::factory()->create();
@@ -455,6 +510,39 @@ class PublishPostActionTest extends TestCase
         $this->assertSame('failed', $post->publish_state);
         $this->assertStringContainsString('no media ids', (string) $post->publish_error);
         $this->assertSame('ready', $post->status);
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
+    }
+
+    public function test_partial_media_upload_response_fails_instead_of_publishing_with_missing_images(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Do not drop the second image'],
+            'image_drive_urls' => [
+                'https://drive.google.com/file/d/abc/view',
+                'https://drive.google.com/file/d/def/view',
+            ],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('incomplete media response', (string) $post->publish_error);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
     }
 

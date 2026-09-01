@@ -62,6 +62,20 @@ class PostsyncerClientTest extends TestCase
         ));
     }
 
+    public function test_upload_from_urls_rejects_a_media_item_without_a_numeric_id(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 'not-a-media-id']],
+            ], 200),
+        ]);
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('without a valid id');
+
+        $this->clientWithKey()->uploadFromUrls(15211, ['https://example.com/a.png']);
+    }
+
     public function test_create_post_returns_post_payload(): void
     {
         Http::fake([
@@ -226,6 +240,20 @@ class PostsyncerClientTest extends TestCase
         $this->assertSame(130052, $post['id']);
         $this->assertSame('PUBLISHED', $post['status']);
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts/130052');
+    }
+
+    public function test_get_post_url_encodes_the_remote_id(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts/*' => Http::response([
+                'id' => 42,
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $this->clientWithKey()->getPost('42/other');
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts/42%2Fother');
     }
 
     public function test_non_success_response_throws_postsyncer_exception(): void

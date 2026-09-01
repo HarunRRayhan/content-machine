@@ -128,9 +128,13 @@ class PublishPostAction
                     // PostSyncer can return 200 with an empty media list when a
                     // signed/Drive URL fails to fetch. Never continue as a
                     // text post when the planner expected images (P-57).
-                    if ($mediaIds === []) {
+                    if (count($mediaIds) !== count($group->mediaUrls)) {
+                        $mediaError = $mediaIds === []
+                            ? 'no media ids'
+                            : 'an incomplete media response';
+
                         throw new PostsyncerException(
-                            'PostSyncer returned no media ids for '.implode(', ', $group->platforms)
+                            'PostSyncer returned '.$mediaError.' for '.implode(', ', $group->platforms)
                             .' after uploading '.count($group->mediaUrls).' url(s).'
                             .' Refusing to publish this group without images.'
                         );
@@ -238,7 +242,7 @@ class PublishPostAction
      */
     public function reconcile(Post $post, int|string $postsyncerPostId): void
     {
-        if (! $this->hasExistingPostId($postsyncerPostId)) {
+        if (! $this->hasNumericPostId($postsyncerPostId)) {
             throw new PostsyncerException('A PostSyncer post id is required for reconciliation.');
         }
 
@@ -499,11 +503,13 @@ class PublishPostAction
 
         foreach ($expected['content'] as $index => $expectedItem) {
             $remoteItem = $remoteContent[$index] ?? null;
+            $remoteMedia = is_array($remoteItem) ? ($remoteItem['media'] ?? []) : [];
+            $actualMediaIds = $this->responseMediaIds($remoteMedia);
 
             if (! is_array($remoteItem)
                 || ($remoteItem['text'] ?? null) !== ($expectedItem['text'] ?? null)
-                || $this->responseMediaIds($remoteItem['media'] ?? [])
-                    !== array_map('strval', $expectedItem['media'] ?? [])
+                || $actualMediaIds === null
+                || $actualMediaIds !== array_map('strval', $expectedItem['media'] ?? [])
             ) {
                 throw new PostsyncerException(
                     'The supplied PostSyncer post does not match the current publish group.'
@@ -545,6 +551,43 @@ class PublishPostAction
             );
         }
 
+        $expectedAccounts = $this->buildAccounts(
+            $config->language($group->language)['platforms'],
+            $group,
+            is_array($group->threadTweets) && $group->threadTweets !== [],
+        );
+
+        foreach ($group->platforms as $index => $platform) {
+            $remotePlatform = null;
+
+            foreach ($remotePlatforms as $candidate) {
+                if (is_array($candidate)
+                    && strtolower((string) ($candidate['platform'] ?? '')) === strtolower($platform)
+                ) {
+                    $remotePlatform = $candidate;
+
+                    break;
+                }
+            }
+
+            if (! is_array($remotePlatform)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post does not match the current publish group.'
+                );
+            }
+
+            $expectedAccountId = $expectedAccounts[$index]['id'] ?? null;
+            $remoteAccountId = $remotePlatform['account_id'] ?? data_get($remotePlatform, 'account.id');
+
+            if ($remoteAccountId !== null
+                && (string) $remoteAccountId !== (string) $expectedAccountId
+            ) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post targets a different account.'
+                );
+            }
+        }
+
         if (! $group->publishNow) {
             $scheduledAt = $remote['scheduled_at'] ?? null;
 
@@ -582,20 +625,22 @@ class PublishPostAction
     }
 
     /**
-     * @return list<string>
+     * @return list<string>|null
      */
-    private function responseMediaIds(mixed $media): array
+    private function responseMediaIds(mixed $media): ?array
     {
         if (! is_array($media)) {
-            return [];
+            return null;
         }
 
         $ids = [];
         foreach ($media as $item) {
             $id = is_array($item) ? ($item['id'] ?? null) : $item;
-            if ($this->hasExistingPostId($id)) {
-                $ids[] = (string) $id;
+            if (! $this->hasNumericPostId($id)) {
+                return null;
             }
+
+            $ids[] = (string) $id;
         }
 
         return $ids;
@@ -1564,6 +1609,13 @@ class PublishPostAction
         return is_string($postId) && trim($postId) !== '';
     }
 
+    private function hasNumericPostId(mixed $postId): bool
+    {
+        return is_int($postId)
+            ? $postId > 0
+            : is_string($postId) && ctype_digit($postId) && (int) $postId > 0;
+    }
+
     /**
      * @param  array<string, mixed>  $result
      * @return array{index: int, group_key: string, post_id: string, status: string, scheduled_at: string|null, platforms: list<string>, language: string}
@@ -1574,21 +1626,75 @@ class PublishPostAction
         int $index,
         string $groupKey,
     ): array {
+        $result = $this->normalizePostResponse($result);
         $postId = $result['id'] ?? null;
 
-        if (! $this->hasExistingPostId($postId)) {
+        if (! $this->hasNumericPostId($postId)) {
             throw new PostsyncerException('PostSyncer returned no post id after creating a group.');
+        }
+
+        $status = $this->assertPublishableStatus(
+            $result['status'] ?? null,
+            $group,
+            'PostSyncer create response',
+        );
+        $scheduledAt = $result['scheduled_at'] ?? null;
+
+        if (! $group->publishNow) {
+            if (! is_string($scheduledAt)
+                || trim($scheduledAt) === ''
+                || $group->when === null
+            ) {
+                throw new PostsyncerException(
+                    'PostSyncer create response has no verifiable schedule.'
+                );
+            }
+
+            try {
+                $remoteWhen = CarbonImmutable::parse($scheduledAt, $group->when->timezone);
+            } catch (Throwable) {
+                throw new PostsyncerException(
+                    'PostSyncer create response has an invalid schedule.'
+                );
+            }
+
+            if ($remoteWhen->format('Y-m-d H:i') !== $group->when->format('Y-m-d H:i')) {
+                throw new PostsyncerException(
+                    'PostSyncer create response does not match the requested schedule.'
+                );
+            }
         }
 
         return [
             'index' => $index,
             'group_key' => $groupKey,
             'post_id' => (string) $postId,
-            'status' => strtoupper((string) ($result['status'] ?? '')),
-            'scheduled_at' => isset($result['scheduled_at']) ? (string) $result['scheduled_at'] : null,
+            'status' => $status,
+            'scheduled_at' => is_string($scheduledAt) ? $scheduledAt : null,
             'platforms' => $group->platforms,
             'language' => $group->language,
         ];
+    }
+
+    private function assertPublishableStatus(
+        mixed $status,
+        PublishGroup $group,
+        string $context,
+    ): string {
+        if (! is_string($status) || trim($status) === '') {
+            throw new PostsyncerException("{$context} has no valid lifecycle status.");
+        }
+
+        $normalized = strtoupper(trim($status));
+        $acceptable = $group->publishNow
+            ? ['PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED']
+            : ['SCHEDULED', 'PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED'];
+
+        if (! in_array($normalized, $acceptable, true)) {
+            throw new PostsyncerException("{$context} is not in a publishable state.");
+        }
+
+        return $normalized;
     }
 
     /**
