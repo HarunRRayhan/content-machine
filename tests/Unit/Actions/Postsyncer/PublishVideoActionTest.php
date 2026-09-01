@@ -7,8 +7,10 @@ use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\MediaUrlResolver;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -67,6 +69,26 @@ class PublishVideoActionTest extends TestCase
                 'id' => 42,
                 'status' => 'published',
             ], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'FB reel caption',
+                    'media' => [['id' => 915]],
+                    'cover_image' => ['thumbnail' => 916],
+                ]],
+                'platforms' => [
+                    ['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'REELS',
+                        'caption' => 'FB reel caption',
+                    ]],
+                    ['platform' => 'instagram', 'account_id' => 101, 'settings' => [
+                        'post_type' => 'REELS',
+                        'caption' => 'IG reel caption',
+                    ]],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
         ]);
 
         $workspace = Workspace::factory()->create();
@@ -105,7 +127,170 @@ class PublishVideoActionTest extends TestCase
             ]],
         ], $video->postsyncer);
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
+    }
+
+    public function test_create_polls_an_async_canonical_response_before_checkpointing(): void
+    {
+        $lookups = 0;
+        Http::fake(function ($request) use (&$lookups) {
+            if ($request->url() === 'https://postsyncer.com/api/v1/media/upload/url') {
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response(['id' => 42, 'status' => 'queued'], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                $lookups++;
+
+                if ($lookups === 1) {
+                    return Http::response(['id' => 42, 'status' => 'PENDING'], 200);
+                }
+
+                return Http::response(['data' => [
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'REELS', 'caption' => 'Reel caption',
+                    ]]],
+                    'status' => 'PUBLISHED',
+                ]], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame(2, $lookups);
+        Http::assertSentCount(4);
+    }
+
+    public function test_canonical_connection_failure_is_retried_without_recreating(): void
+    {
+        $lookups = 0;
+        Http::fake(function ($request) use (&$lookups) {
+            if ($request->url() === 'https://postsyncer.com/api/v1/media/upload/url') {
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response(['id' => 43, 'status' => 'published'], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/43') {
+                $lookups++;
+
+                if ($lookups < 3) {
+                    throw new ConnectionException('connection refused');
+                }
+
+                return Http::response([
+                    'id' => 43,
+                    'workspace_id' => 15211,
+                    'content' => [[
+                        'text' => 'Reel caption',
+                        'media' => [['id' => 915]],
+                    ]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'REELS', 'caption' => 'Reel caption',
+                    ]]],
+                    'status' => 'PUBLISHED',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame(3, $lookups);
+        $this->assertCount(1, Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts',
+        ));
+    }
+
+    public function test_canonical_payload_mismatch_becomes_uncertain_without_recreating(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 44, 'status' => 'published'], 201),
+            'postsyncer.com/api/v1/posts/44' => Http::response([
+                'id' => 44,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'Wrong caption',
+                    'media' => [['id' => 915]],
+                ]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS', 'caption' => 'Reel caption',
+                ]]],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('outcome is uncertain', (string) $video->publish_error);
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertNotNull($video->publish_progress['current']);
+        $this->assertCount(1, Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts',
+        ));
     }
 
     public function test_schedule_sets_status_scheduled(): void
@@ -120,6 +305,20 @@ class PublishVideoActionTest extends TestCase
                 'status' => 'scheduled',
                 'scheduled_at' => '2026-08-26T09:12:00+06:00',
             ], 201),
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'Scheduled reel caption',
+                    'media' => [['id' => 915]],
+                ]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS',
+                    'caption' => 'Scheduled reel caption',
+                ]]],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
+            ], 200),
         ]);
 
         $workspace = Workspace::factory()->create();
@@ -162,6 +361,20 @@ class PublishVideoActionTest extends TestCase
                 'status' => 'scheduled',
                 'scheduled_at' => '2026-08-26T09:12:00+06:00',
             ], 201),
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'Scheduled reel caption',
+                    'media' => [['id' => 915]],
+                ]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS',
+                    'caption' => 'Scheduled reel caption',
+                ]]],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
+            ], 200),
         ]);
 
         $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
@@ -302,6 +515,19 @@ class PublishVideoActionTest extends TestCase
                 'id' => 77,
                 'status' => 'published',
             ], 201),
+            'postsyncer.com/api/v1/posts/77' => Http::response([
+                'id' => 77,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'Retry after empty plan',
+                    'media' => [['id' => 915]],
+                ]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS',
+                    'caption' => 'Retry after empty plan',
+                ]]],
+                'status' => 'PUBLISHED',
+            ], 200),
         ]);
 
         $workspace = Workspace::factory()->create();
@@ -360,6 +586,108 @@ class PublishVideoActionTest extends TestCase
         $this->assertStringContainsString('PostSyncer API error 422', $video->publish_error);
         $this->assertSame('recorded', $video->status);
         $this->assertNull($video->postsyncer);
+    }
+
+    public function test_lost_create_response_records_an_uncertain_current_group(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'gateway timeout',
+            ], 500),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('outcome is uncertain', (string) $video->publish_error);
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame(0, $video->publish_progress['current']['index']);
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+        $this->assertNull($video->postsyncer);
+    }
+
+    public function test_confirm_failed_reconciliation_requires_the_explicit_flag(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Scheduled reel caption'],
+        ]);
+        $options = [
+            'when' => '2026-08-26T09:12:00+06:00',
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ];
+
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
+        ]);
+        $this->action->handle($video, $options);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Scheduled reel caption', 'media' => [['id' => 915]]]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS', 'caption' => 'Scheduled reel caption',
+                ]]],
+                'status' => 'FAILED',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
+            ], 200),
+        ]);
+
+        try {
+            $this->action->reconcile($video, 99);
+            $this->fail('Reconciliation should require explicit confirmation for FAILED.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('not in a publishable state', $exception->getMessage());
+        }
+
+        $this->action->reconcile($video, 99, true);
+
+        $video->refresh();
+        $group = $video->publish_progress['completed_groups'][0];
+        $this->assertSame('FAILED', $group['status']);
+        $this->assertSame('FAILED', $group['remote_status']);
+        $this->assertTrue($group['operator_confirmed']);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'must not create again'], 500),
+        ]);
+        $this->action->handle($video, $options);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('scheduled', $video->status);
+        $this->assertSame('FAILED', $video->postsyncer['groups'][0]['status']);
+        Http::assertNothingSent();
     }
 
     public function test_missing_video_drive_url_fails_without_changing_status(): void

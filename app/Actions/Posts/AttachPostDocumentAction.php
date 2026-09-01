@@ -26,9 +26,9 @@ class AttachPostDocumentAction
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($lockedPost->isPublishInProgress()) {
+            if ($lockedPost->isPublishInProgress() || $lockedPost->hasUncertainPublish()) {
                 throw ValidationException::withMessages([
-                    'publish' => __('A post cannot be edited while its PostSyncer publish is queued or running.'),
+                    'publish' => __('A post cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
                 ]);
             }
 

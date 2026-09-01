@@ -52,12 +52,19 @@ class EnqueuePostPublishAction
             }
 
             $progress = $lockedPost->publish_progress;
+            $runToken = (string) Str::uuid();
 
             if ($progress !== null) {
                 [$filtered, $progress] = $this->resumeOptions($lockedPost, $filtered);
             } else {
-                $progress = $this->newProgress($filtered);
+                $progress = $this->newProgress($filtered, $runToken);
             }
+
+            // A retry is a new run even when it resumes the same operation.
+            // This fences off an automatic queue retry still holding the old
+            // job's serialized options.
+            $progress['run_token'] = $runToken;
+            $progress['state'] = 'queued';
 
             $lockedPost->forceFill([
                 'publish_state' => 'queued',
@@ -67,7 +74,7 @@ class EnqueuePostPublishAction
 
             // Do not let a worker observe a queued job before its progress
             // checkpoint and state transition commit.
-            PublishPostJob::dispatch($lockedPost, $filtered)->afterCommit();
+            PublishPostJob::dispatch($lockedPost, $filtered, $runToken)->afterCommit();
 
             return $lockedPost;
         });
@@ -152,11 +159,12 @@ class EnqueuePostPublishAction
      * @param  array<string, mixed>  $options
      * @return array<string, mixed>
      */
-    private function newProgress(array $options): array
+    private function newProgress(array $options, string $runToken): array
     {
         return [
             'version' => 1,
             'operation_id' => (string) Str::uuid(),
+            'run_token' => $runToken,
             'options' => $options,
             'plan_hash' => null,
             'planned_groups' => [],

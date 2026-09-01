@@ -104,6 +104,7 @@ type Props = {
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
+    publishRetryable: boolean;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
 };
@@ -228,6 +229,7 @@ export default function VideoOverview({
     publishUrl,
     postsyncerReady,
     publishState,
+    publishRetryable,
     needsConfirmAsk,
     postsyncer,
 }: Props) {
@@ -312,10 +314,14 @@ export default function VideoOverview({
     const hasGroups = groups.length > 0;
     const fakeScheduled = studioStatus === 'scheduled' && !hasGroups;
     const publishBusy = ['queued', 'running'].includes(publishState);
+    const publishFailed = publishState === 'failed';
     const showScheduleForm =
         !archived &&
         studioStatus !== 'posted' &&
+        !publishFailed &&
         (studioStatus === 'recorded' || fakeScheduled);
+    const showRetryForm =
+        !archived && studioStatus !== 'posted' && !hasGroups && publishFailed;
     const hasVideoDriveUrl = Boolean(videoDriveUrl?.trim());
     const missingVideoDriveUrl =
         !hasVideoDriveUrl && studioStatus === 'recorded';
@@ -326,6 +332,9 @@ export default function VideoOverview({
         (studioStatus === 'recorded' || fakeScheduled);
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
+    const canRetry =
+        postsyncerReady && !publishBusy && hasVideoDriveUrl && publishRetryable;
+    const retryDisabled = !canRetry || (needsConfirmAsk && !confirmAskChecked);
     const scheduledAt = earliestWhen(groups);
 
     const chips = [
@@ -633,6 +642,61 @@ export default function VideoOverview({
                                     </button>
                                 )}
                             </>
+                        ) : showRetryForm ? (
+                            <Form
+                                action={publishUrl}
+                                method="post"
+                                className="schedule-it"
+                            >
+                                {({ processing, errors }) => (
+                                    <>
+                                        {needsConfirmAsk && (
+                                            <label className="schedule-it-confirm">
+                                                <input
+                                                    type="checkbox"
+                                                    name="confirm_ask"
+                                                    value="1"
+                                                    checked={confirmAskChecked}
+                                                    onChange={(event) =>
+                                                        setConfirmAskChecked(
+                                                            event.target
+                                                                .checked,
+                                                        )
+                                                    }
+                                                />
+                                                Confirm ask-gated platforms
+                                            </label>
+                                        )}
+                                        <button
+                                            type="submit"
+                                            className="advance"
+                                            disabled={
+                                                processing || retryDisabled
+                                            }
+                                        >
+                                            Retry publish
+                                        </button>
+                                        {errors.publish && (
+                                            <p className="schedule-it-error">
+                                                {errors.publish}
+                                            </p>
+                                        )}
+                                        {!postsyncerReady && (
+                                            <p className="schedule-it-hint">
+                                                Configure PostSyncer in Settings
+                                                before retrying.
+                                            </p>
+                                        )}
+                                        {!publishRetryable && (
+                                            <p className="schedule-it-hint">
+                                                Reconcile the uncertain
+                                                PostSyncer create before
+                                                retrying.
+                                            </p>
+                                        )}
+                                    </>
+                                )}
+                            </Form>
                         ) : studioStatus === 'scheduled' ? (
                             <span className="badge">
                                 🗓️ Scheduled

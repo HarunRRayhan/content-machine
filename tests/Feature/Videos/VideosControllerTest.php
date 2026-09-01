@@ -8,7 +8,9 @@ use App\Models\MediaAsset;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -238,9 +240,57 @@ class VideosControllerTest extends TestCase
                 ->where('video.id', $video->id)
                 ->where('video.title', 'Hello video')
                 ->where('video.publish_state', $video->publish_state)
+                ->where('video.publish_retryable', false)
                 ->where('video.postsyncer_ready', false)
                 ->has('video.needs_confirm_ask')
                 ->has('video.postsyncer')
+            );
+    }
+
+    public function test_show_uses_saved_retry_platforms_for_confirmation(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'instagram' => ['reel' => 'ask'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'en',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['instagram' => 'Instagram reel caption'],
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => [
+                    'platforms' => ['instagram'],
+                    'confirm_ask' => false,
+                ],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->get(route('videos.show', $video))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.needs_confirm_ask', true)
+                ->where('video.publish_retryable', true)
             );
     }
 

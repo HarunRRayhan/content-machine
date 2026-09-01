@@ -104,6 +104,15 @@ class Post extends Model
         return in_array($this->publish_state, ['queued', 'running'], true);
     }
 
+    public function hasUncertainPublish(): bool
+    {
+        $progress = $this->publish_progress;
+
+        return is_array($progress)
+            && (($progress['state'] ?? null) === 'uncertain'
+                || ($progress['current'] ?? null) !== null);
+    }
+
     public function canRetryPublish(): bool
     {
         if ($this->publish_state !== 'failed') {

@@ -52,6 +52,7 @@ type VideoDetail = {
     status: string;
     publish_state: string;
     publish_error: string | null;
+    publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
@@ -194,6 +195,7 @@ export default function VideoShow({ video }: PageProps) {
                         publishUrl={`/videos/${video.id}/publish`}
                         postsyncerReady={video.postsyncer_ready}
                         publishState={video.publish_state}
+                        publishRetryable={video.publish_retryable}
                         needsConfirmAsk={video.needs_confirm_ask}
                         postsyncer={video.postsyncer}
                     />

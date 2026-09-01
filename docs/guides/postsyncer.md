@@ -20,7 +20,7 @@ queue starts to hurt.
 |---|---|---|
 | `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
 | `PublishPostJob` | `cm-web` `postsyncer` connection, `postsyncer` queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. The queue name is separate because the database driver does not tag rows with a connection name. |
-| `PublishVideoJob` | `cm-worker` default queue | Drive URLs only today; no scratchpad attachment dependency. |
+| `PublishVideoJob` | `cm-worker` default queue | Drive URLs only today; no scratchpad attachment dependency. Unique and fenced per video operation. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
 | `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised default-connection `queue:work --queue=scratchpad` for Telegram photo/voice and voice transcription. |
 | `cm-web` PostSyncer worker | same web container (`/init`; follows `SCRATCHPAD_QUEUE_WORKER`) | s6-supervised `queue:work postsyncer --queue=postsyncer --timeout=900` for **post publishes**. |
@@ -28,20 +28,22 @@ queue starts to hurt.
 
 `PublishPostJob` has a 900-second timeout and the dedicated `postsyncer` database
 queue connection has a 960-second visibility window. Keep
-`POSTSYNCER_QUEUE_RETRY_AFTER` above the worker timeout. The job is unique per
-post and uses a shared overlap lock, so a second request or a queue redelivery
-cannot run another publish beside the first one. The default database queue
-keeps its 90-second window for video and other jobs.
+`POSTSYNCER_QUEUE_RETRY_AFTER` above the worker timeout. Both publish jobs are
+unique for the record and use a shared overlap lock. Each queued job also carries
+the run token it owns, so an old retry cannot write over a newer operation.
+The video job stays below the default database queue's 90-second visibility
+window.
 
-The action checkpoints progress in the private `posts.publish_progress` column,
-not in public `postsyncer.groups`. It records the normalized options, plan hash,
-stable per-group key, completed PostSyncer ids, and the current group's
-reconciliation/idempotency key before `POST /posts`. After a later group fails,
-a retry with the original options skips completed groups and finalizes the
-public `postsyncer.groups` only after the entire plan is complete.
-While the job is queued or running, post edits and attachment uploads take a
-row lock and are rejected. This keeps the saved plan and the external payload
-aligned.
+The actions checkpoint progress in private `posts.publish_progress` and
+`videos.publish_progress` columns, not in public `postsyncer.groups`. Progress
+records the normalized options, plan hash, stable per-group key, completed
+PostSyncer ids, and the current group's reconciliation key before `POST /posts`.
+After a later group fails, a retry with the original options skips completed
+groups and finalizes public `postsyncer.groups` only after the entire plan is
+complete.
+While a job is queued or running, post and video edits take a row lock and are
+rejected. A video with an uncertain create also stays locked until it is
+reconciled. This keeps the saved plan and the external payload aligned.
 
 Link-upload responses are checked before a create: `count_stored` must match
 the returned media rows, every row must have a valid id, and at least one item
@@ -51,8 +53,8 @@ text-only publish.
 PostSyncer's documented create API does not provide idempotency-key support. If
 the process loses the response after `POST /posts`, the current group is marked
 `uncertain` and must be reconciled against PostSyncer before retrying; it is
-never replayed automatically. Older partial records without progress metadata
-are rejected rather than guessed.
+never replayed automatically. This applies to posts and videos. Older partial
+video records without progress metadata are rejected rather than guessed.
 
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
 buttons use the same enqueue path. The private progress checkpoint is an
@@ -69,11 +71,17 @@ against the failed operation and run this on the Content Machine deployment:
 
 ```bash
 php artisan postsyncer:reconcile-post WORKSPACE_ID P-68 POSTSYNCER_POST_ID
+php artisan postsyncer:reconcile-video WORKSPACE_ID BV-68 POSTSYNCER_POST_ID
 ```
 
-The command calls `GET /posts/{id}` and only records the id when the workspace
-and group payload match. Retry the post from the dashboard or API afterwards;
-the reconciled group is checkpointed and will not be created again.
+The commands call `GET /posts/{id}` and only record the id when the workspace
+and group payload match. Retry the post or video from the dashboard or API
+afterwards; the reconciled group is checkpointed and will not be created again.
+If the matching remote record is `FAILED`, reconciliation refuses it by
+default. Use `--confirm-failed` only after verifying that PostSyncer actually
+accepted the content; Content Machine preserves the group's raw `FAILED` status,
+stores the operator confirmation marker, and counts it as effectively delivered
+without losing the failure signal on later status syncs.
 
 ## Settings → PostSyncer
 
@@ -174,8 +182,9 @@ disable. On success the pipeline status moves to **Scheduled** (future time) or
 `publish_state` is `failed`, and **Retry** resumes unfinished groups rather than
 recreating the full plan when no external create has an unknown outcome. A
 response-loss/timeout state is `uncertain` in `publish_progress` and requires
-manual reconciliation first. The retry path preserves the original `when`, so
-omitting `when` on a retry cannot turn a scheduled publish into publish-now.
+manual reconciliation first. The retry path preserves the original `when` and
+platform subset, so omitting `when` on a retry cannot turn a scheduled publish
+into publish-now or expand a partial retry to other platforms.
 
 ## Drive URL fields
 
