@@ -58,7 +58,7 @@ class PublishPostAction
             $completedGroups = $this->completedGroups($progress);
 
             foreach ($groups as $index => $group) {
-                $this->assertPlanUnchanged($post, $config, $options, $plan);
+                $this->assertPlanUnchanged($post, $options, $plan);
                 $groupKey = $this->groupKey($config, $group);
 
                 if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
@@ -787,12 +787,12 @@ class PublishPostAction
      */
     private function assertPlanUnchanged(
         Post $post,
-        PostsyncerConfig $config,
         array $options,
         array $plan,
     ): void {
         $post->refresh();
         $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
         $currentPlan = $this->planMetadata(
             $config,
             $this->planner->plan($post, $config, $options),
