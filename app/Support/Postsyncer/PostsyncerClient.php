@@ -148,7 +148,7 @@ class PostsyncerClient
      */
     public function getPost(int|string $id): array
     {
-        return $this->decodeResponse($this->request('get', '/posts/'.$id));
+        return $this->decodeResponse($this->request('get', '/posts/'.rawurlencode((string) $id)));
     }
 
     /**

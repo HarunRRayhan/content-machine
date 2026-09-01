@@ -31,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property array<string, mixed>|null $platforms
  * @property array<int, string>|null $image_drive_urls
  * @property array<string, mixed>|null $postsyncer
+ * @property array<string, mixed>|null $publish_progress
  * @property string $publish_state
  * @property string|null $publish_error
  * @property string $status
@@ -77,6 +78,7 @@ class Post extends Model
         'platforms',
         'image_drive_urls',
         'postsyncer',
+        'publish_progress',
         'publish_state',
         'publish_error',
         'status',
@@ -93,6 +95,7 @@ class Post extends Model
             'platforms' => 'array',
             'image_drive_urls' => 'array',
             'postsyncer' => 'array',
+            'publish_progress' => 'array',
         ];
     }
 

@@ -18,6 +18,12 @@ class PostPostsyncerFieldsTest extends TestCase
             'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
             'publish_state' => 'idle',
             'postsyncer' => ['groups' => []],
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'state' => 'failed',
+                'completed_groups' => [],
+            ],
         ]);
 
         $post->refresh();
@@ -25,5 +31,7 @@ class PostPostsyncerFieldsTest extends TestCase
         $this->assertSame(['https://drive.google.com/file/d/abc/view'], $post->image_drive_urls);
         $this->assertSame('idle', $post->publish_state);
         $this->assertSame(['groups' => []], $post->postsyncer);
+        $this->assertSame('operation-1', $post->publish_progress['operation_id']);
+        $this->assertSame('failed', $post->publish_progress['state']);
     }
 }

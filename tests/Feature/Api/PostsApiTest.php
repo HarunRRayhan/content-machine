@@ -316,6 +316,7 @@ class PostsApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.human_id', 'CM-TEST-1')
             ->assertJsonPath('data.publish_state', 'queued')
+            ->assertJsonMissingPath('data.publish_progress')
             ->assertJsonPath('data.publish_error', null);
 
         $post = Post::query()->where('human_id', 'CM-TEST-1')->sole();
