@@ -113,6 +113,33 @@ class HttpTelegramClientTest extends TestCase
             && $request['text'] === 'Captured.');
     }
 
+    public function test_send_message_marks_unknown_http_outcomes_as_uncertain(): void
+    {
+        foreach ([408, 425, 500] as $status) {
+            Http::fake(['*' => Http::response(['ok' => false, 'description' => 'try again'], $status)]);
+
+            $result = (new HttpTelegramClient)->sendMessage('123:token', 1, 'hi');
+
+            $this->assertFalse($result->successful);
+            $this->assertTrue($result->outcomeUnknown);
+        }
+    }
+
+    public function test_send_message_keeps_rate_limits_retryable_not_uncertain(): void
+    {
+        Http::fake(['*' => Http::response([
+            'ok' => false,
+            'description' => 'Too Many Requests',
+            'parameters' => ['retry_after' => 30],
+        ], 429)]);
+
+        $result = (new HttpTelegramClient)->sendMessage('123:token', 1, 'hi');
+
+        $this->assertFalse($result->successful);
+        $this->assertFalse($result->outcomeUnknown);
+        $this->assertSame(30, $result->retryAfterSeconds);
+    }
+
     public function test_a_connection_failure_on_send_message_is_reported_without_leaking_the_exception()
     {
         Log::spy();

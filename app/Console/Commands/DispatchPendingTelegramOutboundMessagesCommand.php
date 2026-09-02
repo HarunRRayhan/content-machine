@@ -57,29 +57,39 @@ class DispatchPendingTelegramOutboundMessagesCommand extends Command
         }
 
         if ($retryStatuses !== []) {
-            $retryIds = TelegramOutboundMessage::query()
-                ->whereIn('status', $retryStatuses)
-                ->when(
-                    $this->option('retry-uncertain') && $staleSendingIds->isNotEmpty(),
-                    fn ($query) => $query->whereNotIn('id', $staleSendingIds),
-                )
-                ->orderBy('id')
-                ->limit($limit)
-                ->pluck('id');
+            DB::transaction(function () use ($retryStatuses, $staleSendingIds, $limit): void {
+                $retryIds = TelegramOutboundMessage::query()
+                    ->whereIn('status', $retryStatuses)
+                    ->whereNull('dispatch_lease_id')
+                    ->when(
+                        $this->option('retry-uncertain') && $staleSendingIds->isNotEmpty(),
+                        fn ($query) => $query->whereNotIn('id', $staleSendingIds),
+                    )
+                    ->orderBy('id')
+                    ->limit($limit)
+                    ->lock('FOR UPDATE SKIP LOCKED')
+                    ->pluck('id');
 
-            TelegramOutboundMessage::query()
-                ->whereIn('id', $retryIds)
-                ->update([
-                    'status' => TelegramOutboundMessage::PENDING,
-                    'failed_at' => null,
-                    'last_error' => null,
-                    'next_attempt_at' => null,
-                    'last_attempt_at' => null,
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                    'sent_at' => null,
-                    'updated_at' => now(),
-                ]);
+                if ($retryIds->isEmpty()) {
+                    return;
+                }
+
+                TelegramOutboundMessage::query()
+                    ->whereIn('id', $retryIds)
+                    ->whereIn('status', $retryStatuses)
+                    ->whereNull('dispatch_lease_id')
+                    ->update([
+                        'status' => TelegramOutboundMessage::PENDING,
+                        'failed_at' => null,
+                        'last_error' => null,
+                        'next_attempt_at' => null,
+                        'last_attempt_at' => null,
+                        'dispatch_claimed_at' => null,
+                        'dispatch_lease_id' => null,
+                        'sent_at' => null,
+                        'updated_at' => now(),
+                    ]);
+            });
         }
 
         /** @var list<array{id: int, lease_id: string}> $claims */

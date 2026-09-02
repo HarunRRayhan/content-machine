@@ -108,4 +108,24 @@ class DispatchPendingTelegramOutboundMessagesCommandTest extends TestCase
         $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $stale->refresh()->status);
         Queue::assertNothingPushed();
     }
+
+    public function test_retry_does_not_reopen_a_message_with_a_live_dispatch_lease(): void
+    {
+        Queue::fake();
+        $message = TelegramOutboundMessage::factory()->create([
+            'status' => TelegramOutboundMessage::UNCERTAIN,
+            'failed_at' => now(),
+            'dispatch_claimed_at' => now(),
+            'dispatch_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages', [
+            '--retry-uncertain' => true,
+        ])
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 0 pending Telegram outbound message(s).');
+
+        $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $message->refresh()->status);
+        Queue::assertNothingPushed();
+    }
 }

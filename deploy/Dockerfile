@@ -94,6 +94,7 @@ COPY . .
 
 COPY deploy/docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY --chmod=755 deploy/docker/start-worker.sh /usr/local/bin/cm-start-worker
+COPY --chmod=755 deploy/docker/wait-for-migrations.sh /usr/local/bin/cm-wait-for-migrations
 COPY --chmod=755 deploy/docker/entrypoint.d/ /etc/entrypoint.d/
 COPY deploy/docker/s6-overlay/scratchpad-queue/ /etc/s6-overlay/s6-rc.d/scratchpad-queue/
 COPY deploy/docker/s6-overlay/postsyncer-queue/ /etc/s6-overlay/s6-rc.d/postsyncer-queue/

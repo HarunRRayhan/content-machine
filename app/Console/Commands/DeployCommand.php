@@ -25,7 +25,7 @@ class DeployCommand extends Command
      *
      * @var list<string>
      */
-    private const TELEGRAM_CUTOVER_MIGRATIONS = [
+    public const TELEGRAM_CUTOVER_MIGRATIONS = [
         '2026_09_02_000005_scope_telegram_outbound_logical_keys_to_generation.php',
         '2026_09_02_000006_drop_legacy_telegram_update_unique_index.php',
     ];

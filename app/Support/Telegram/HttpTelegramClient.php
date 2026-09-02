@@ -208,6 +208,7 @@ final class HttpTelegramClient implements TelegramClientContract
             is_string($description) && $description !== '' ? $description : $genericError,
             $retryAfter,
             $response->status(),
+            in_array($response->status(), [408, 425], true) || $response->status() >= 500,
         );
     }
 
