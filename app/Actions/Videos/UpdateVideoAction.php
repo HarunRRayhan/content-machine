@@ -5,6 +5,7 @@ namespace App\Actions\Videos;
 use App\Data\Videos\UpdateVideoData;
 use App\Models\Video;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class UpdateVideoAction
 {
@@ -15,6 +16,12 @@ class UpdateVideoAction
                 ->whereKey($video->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            if ($lockedVideo->isPublishInProgress() || $lockedVideo->hasUncertainPublish()) {
+                throw ValidationException::withMessages([
+                    'publish' => __('A video cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
+                ]);
+            }
 
             $attributes = [];
 

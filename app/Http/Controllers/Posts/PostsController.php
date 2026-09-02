@@ -342,6 +342,18 @@ class PostsController extends Controller
             ))->forPreview();
         }
 
+        $publishOptions = is_array($post->publish_progress)
+            && is_array($post->publish_progress['options'] ?? null)
+            ? $post->publish_progress['options']
+            : [];
+        $needsConfirmAsk = $postsyncerConfig !== null
+            && app(PostPublishPlanner::class)->needsConfirmAsk(
+                $post,
+                $postsyncerConfig,
+                $publishOptions,
+            )
+            && ! (bool) ($publishOptions['confirm_ask'] ?? false);
+
         return [
             'id' => $post->id,
             'human_id' => $post->human_id,
@@ -363,10 +375,10 @@ class PostsController extends Controller
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
+            'publish_retryable' => $post->canRetryPublish(),
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
-            'needs_confirm_ask' => $postsyncerConfig !== null
-                && app(PostPublishPlanner::class)->needsConfirmAsk($post, $postsyncerConfig),
+            'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),

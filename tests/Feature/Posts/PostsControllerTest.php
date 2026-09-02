@@ -279,9 +279,109 @@ class PostsControllerTest extends TestCase
                 ->where('post.id', $post->id)
                 ->where('post.title', 'Hello post')
                 ->where('post.publish_state', $post->publish_state)
+                ->where('post.publish_retryable', false)
                 ->where('post.postsyncer_ready', false)
                 ->has('post.needs_confirm_ask')
                 ->has('post.postsyncer')
+            );
+    }
+
+    public function test_show_uses_saved_retry_platforms_for_confirmation(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['photo' => 'on'],
+                    'threads' => ['photo' => 'ask'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['facebook', 'threads'],
+            'captions' => [
+                'facebook' => 'Facebook caption',
+                'threads' => 'Threads caption',
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => [
+                    'platforms' => ['facebook'],
+                    'confirm_ask' => false,
+                ],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.needs_confirm_ask', false)
+            );
+    }
+
+    public function test_show_does_not_reask_for_a_confirmed_retry(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => ['threads' => ['photo' => 'ask']],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['threads'],
+            'captions' => ['threads' => 'Threads caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['confirm_ask' => true],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.needs_confirm_ask', false)
             );
     }
 

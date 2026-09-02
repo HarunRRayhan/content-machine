@@ -186,3 +186,32 @@ jobs:
           docker run --rm cm:ci sh -c "cp .env.example .env && php artisan key:generate --force && php artisan about --only=environment"
           docker run --rm cm:ci yt-dlp --version
           docker run --rm cm:ci ffmpeg -version
+
+      - name: Smoke test web queue service
+        run: |
+          docker run --detach --rm --name cm-s6 \
+            --env APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+            --env APP_ENV=production \
+            --env AUTORUN_ENABLED=false \
+            --env QUEUE_CONNECTION=database \
+            --env DB_CONNECTION=pgsql \
+            --env DB_HOST=127.0.0.1 \
+            --env DB_PORT=1 \
+            --env DB_DATABASE=unused \
+            --env DB_USERNAME=unused \
+            --env DB_PASSWORD=unused \
+            --env CACHE_STORE=array \
+            --env SESSION_DRIVER=array \
+            cm:ci /init
+          trap 'docker rm -f cm-s6' EXIT
+
+          for attempt in $(seq 1 30); do
+            if docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue 2>/dev/null | grep -q '^up' \
+              && docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue 2>/dev/null | grep -q '^up'; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue | grep -q '^up'
+          docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue | grep -q '^up'

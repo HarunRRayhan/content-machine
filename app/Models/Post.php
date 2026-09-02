@@ -31,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property array<string, mixed>|null $platforms
  * @property array<int, string>|null $image_drive_urls
  * @property array<string, mixed>|null $postsyncer
+ * @property array<string, mixed>|null $publish_progress
  * @property string $publish_state
  * @property string|null $publish_error
  * @property string $status
@@ -77,6 +78,7 @@ class Post extends Model
         'platforms',
         'image_drive_urls',
         'postsyncer',
+        'publish_progress',
         'publish_state',
         'publish_error',
         'status',
@@ -93,7 +95,49 @@ class Post extends Model
             'platforms' => 'array',
             'image_drive_urls' => 'array',
             'postsyncer' => 'array',
+            'publish_progress' => 'array',
         ];
+    }
+
+    public function isPublishInProgress(): bool
+    {
+        return in_array($this->publish_state, ['queued', 'running'], true);
+    }
+
+    public function hasUncertainPublish(): bool
+    {
+        $progress = $this->publish_progress;
+
+        return is_array($progress)
+            && (($progress['state'] ?? null) === 'uncertain'
+                || ($progress['current'] ?? null) !== null);
+    }
+
+    public function canRetryPublish(): bool
+    {
+        if ($this->publish_state !== 'failed') {
+            return false;
+        }
+
+        $groups = $this->postsyncer['groups'] ?? null;
+        if (is_array($groups)) {
+            foreach ($groups as $group) {
+                if (is_array($group) && filled($group['post_id'] ?? null)) {
+                    return false;
+                }
+            }
+        }
+
+        $progress = $this->publish_progress;
+
+        if (! is_array($progress) || ($progress['state'] ?? null) !== 'failed') {
+            return false;
+        }
+
+        $current = $progress['current'] ?? null;
+
+        return $current === null
+            || (is_array($current) && ($current['phase'] ?? null) === 'retryable');
     }
 
     /**

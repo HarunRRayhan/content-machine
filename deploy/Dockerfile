@@ -73,7 +73,8 @@ ARG YTDLP_SHA256=6bbb3d314cde4febe36e5fa1d55462e29c974f63444e707871834f6d8cc210a
 # ffmpeg + yt-dlp: not used yet, baked in now for the Telegram bot's media
 # pipeline (a later phase) so this Dockerfile doesn't need revisiting then.
 # supervisor: runs the worker service's queue/schedule processes (see
-# deploy/docker/supervisord.conf); the web service doesn't use it.
+# deploy/docker/supervisord.conf). The web service's scratchpad queue is
+# supervised by the base image's s6 init (see deploy/docker/s6-overlay).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
@@ -93,6 +94,10 @@ COPY . .
 
 COPY deploy/docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY --chmod=755 deploy/docker/entrypoint.d/ /etc/entrypoint.d/
+COPY deploy/docker/s6-overlay/scratchpad-queue/ /etc/s6-overlay/s6-rc.d/scratchpad-queue/
+COPY deploy/docker/s6-overlay/postsyncer-queue/ /etc/s6-overlay/s6-rc.d/postsyncer-queue/
+RUN chmod 755 /etc/s6-overlay/s6-rc.d/scratchpad-queue/run \
+    /etc/s6-overlay/s6-rc.d/postsyncer-queue/run
 
 RUN mkdir -p storage/app/uploads \
     && chown -R www-data:www-data storage bootstrap/cache

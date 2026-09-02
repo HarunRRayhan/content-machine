@@ -61,10 +61,12 @@ class PostPublishPlanner
         $groups = [];
         foreach ($byLanguage as $language => $platformCaptions) {
             $langConfig = $config->language($language);
-            $workspaceId = $langConfig['workspace_id'] ?? '';
+            $workspaceId = $langConfig['workspace_id'] ?? null;
 
-            if ($workspaceId === '') {
-                continue;
+            if ($workspaceId === null || $workspaceId === '') {
+                throw new PostsyncerException(
+                    "No PostSyncer workspace is configured for {$language}."
+                );
             }
 
             $included = [];

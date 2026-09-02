@@ -4,6 +4,8 @@ namespace App\Actions\Posts;
 
 use App\Data\Posts\UpdatePostData;
 use App\Models\Post;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class UpdatePostAction
 {
@@ -49,8 +51,21 @@ class UpdatePostAction
             }
         }
 
-        $post->forceFill($attributes)->save();
+        return DB::transaction(function () use ($post, $attributes): Post {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        return $post;
+            if ($lockedPost->isPublishInProgress() || $lockedPost->hasUncertainPublish()) {
+                throw ValidationException::withMessages([
+                    'publish' => __('A post cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
+                ]);
+            }
+
+            $lockedPost->forceFill($attributes)->save();
+
+            return $lockedPost;
+        });
     }
 }

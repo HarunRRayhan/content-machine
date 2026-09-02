@@ -7,6 +7,7 @@ use App\Data\Posts\UpdatePostData;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class UpdatePostActionTest extends TestCase
@@ -52,6 +53,40 @@ class UpdatePostActionTest extends TestCase
         $this->assertSame('P-4', $post->human_id);
         $this->assertSame('draft', $post->status);
         $this->assertNull($post->idea_id);
+    }
+
+    public function test_it_rejects_edits_while_a_postsyncer_publish_is_in_progress(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Original title',
+            'publish_state' => 'running',
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, new UpdatePostData(
+            title: 'Changed title',
+            body: 'Changed body.',
+        ));
+    }
+
+    public function test_it_rejects_edits_when_the_postsyncer_outcome_is_uncertain(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Original title',
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'state' => 'uncertain',
+                'current' => ['index' => 0],
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, new UpdatePostData(
+            title: 'Changed title',
+            body: 'Changed body.',
+        ));
     }
 
     public function test_title_and_status_patch_keeps_existing_image_drive_urls(): void

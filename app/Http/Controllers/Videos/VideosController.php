@@ -273,6 +273,15 @@ class VideosController extends Controller
         );
         $postsyncerConfig = PostsyncerConfig::fromWorkspace($workspace);
         $googleDriveConfig = GoogleDriveConfig::fromWorkspace($workspace);
+        $publishOptions = is_array($video->publish_progress)
+            && is_array($video->publish_progress['options'] ?? null)
+            ? $video->publish_progress['options']
+            : [];
+        $needsConfirmAsk = app(VideoPublishPlanner::class)->needsConfirmAsk(
+            $video,
+            $postsyncerConfig,
+            $publishOptions,
+        ) && ! (bool) ($publishOptions['confirm_ask'] ?? false);
 
         return [
             'id' => $video->id,
@@ -296,9 +305,10 @@ class VideosController extends Controller
             'status' => $video->status,
             'publish_state' => $video->publish_state,
             'publish_error' => $video->publish_error,
+            'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
             'postsyncer_ready' => $postsyncerConfig->isReadyForPublish(),
-            'needs_confirm_ask' => app(VideoPublishPlanner::class)->needsConfirmAsk($video, $postsyncerConfig),
+            'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),

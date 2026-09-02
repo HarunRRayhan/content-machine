@@ -10,9 +10,10 @@ use App\Support\Postsyncer\PostsyncerException;
 
 /**
  * Live-check scheduled posts and videos against PostSyncer and mark them
- * posted once every stored group is terminal: PUBLISHED, or FAILED with at
- * least one sibling PUBLISHED (English Instagram often reports FAILED while
- * already live; waiting forever leaves the CM row stuck on Scheduled).
+ * posted once every stored group is terminal: PUBLISHED, or an
+ * operator-confirmed FAILED group that was already verified as delivered
+ * (English Instagram often reports FAILED while already live; waiting forever
+ * leaves the CM row stuck on Scheduled).
  */
 class SyncScheduledPostsAction
 {
@@ -118,8 +119,12 @@ class SyncScheduledPostsAction
                 continue;
             }
 
-            $status = strtoupper((string) ($live['status'] ?? $group['status'] ?? ''));
+            $remoteStatus = strtoupper((string) ($live['status'] ?? $group['status'] ?? ''));
+            $status = $remoteStatus;
             $group['status'] = $status;
+            if (($group['operator_confirmed'] ?? false) === true) {
+                $group['remote_status'] = $remoteStatus;
+            }
 
             if (isset($live['scheduled_at']) && is_scalar($live['scheduled_at'])) {
                 $group['scheduled_at'] = (string) $live['scheduled_at'];
@@ -132,7 +137,8 @@ class SyncScheduledPostsAction
             $updated[] = $group;
             $anyChecked = true;
 
-            if ($status === 'PUBLISHED') {
+            if ($status === 'PUBLISHED'
+                || ($status === 'FAILED' && ($group['operator_confirmed'] ?? false) === true)) {
                 $anyPublished = true;
             }
 

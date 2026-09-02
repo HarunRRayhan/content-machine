@@ -258,6 +258,32 @@ class PostPublishPlannerTest extends TestCase
         $this->planner->plan($post, $config, ['confirm_ask' => false]);
     }
 
+    public function test_throws_when_a_caption_language_has_no_postsyncer_workspace(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['text' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+        $config = PostsyncerConfig::fromWorkspace($workspace->fresh());
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'English caption'],
+        ]);
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('english');
+
+        $this->planner->plan($post, $config, ['confirm_ask' => false]);
+    }
+
     public function test_needs_confirm_ask_when_ask_platform_in_publish_set(): void
     {
         $workspace = Workspace::factory()->create();

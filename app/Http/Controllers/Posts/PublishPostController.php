@@ -23,11 +23,15 @@ class PublishPostController extends Controller
             'confirm_ask' => $request->has('confirm_ask') ? $request->boolean('confirm_ask') : null,
         ], fn ($value) => $value !== null);
 
-        $action->handle($post, $workspace, $options);
+        $queued = $action->handle($post, $workspace, $options);
+
+        $queuedWhen = is_array($queued->publish_progress)
+            ? ($queued->publish_progress['options']['when'] ?? null)
+            : null;
 
         Inertia::flash('toast', [
             'type' => 'success',
-            'message' => filled($options['when'] ?? null)
+            'message' => filled($queuedWhen)
                 ? __('Post scheduled for publishing.')
                 : __('Post queued for immediate publishing.'),
         ]);

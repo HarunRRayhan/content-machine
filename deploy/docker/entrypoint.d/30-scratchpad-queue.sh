@@ -1,23 +1,17 @@
 #!/bin/sh
-# Consume the "scratchpad" queue on cm-web only. That queue owns jobs that
-# read/write storage/app/uploads (Telegram photo/voice capture, voice
-# transcription). The uploads volume is mounted only on cm-web; cm-worker
-# has no access to it. Set SCRATCHPAD_QUEUE_WORKER=1 on the web service
-# (and leave it unset on the worker) so this process starts here only.
+# Consume the media-backed queues on cm-web only. The default-connection
+# scratchpad worker handles Telegram photo/voice capture and transcription;
+# the dedicated postsyncer worker handles post publishes. The uploads volume
+# is mounted only on cm-web; cm-worker has no access to it. The base entrypoint
+# marks its /init web command with SERVERSIDEUP_DEFAULT_COMMAND=true;
+# SCRATCHPAD_QUEUE_WORKER=0 can opt out of both workers.
 set -eu
 
-if [ "${SCRATCHPAD_QUEUE_WORKER:-0}" != "1" ]; then
+if [ "${SERVERSIDEUP_DEFAULT_COMMAND:-false}" != "true" ] || [ "${SCRATCHPAD_QUEUE_WORKER:-1}" != "1" ]; then
     exit 0
 fi
 
-# Backgrounded under the image entrypoint: the web process tree is
-# managed by /init (nginx + php-fpm). A dedicated s6 unit would be
-# cleaner long-term; this keeps the web start command unchanged.
-if [ "$(id -u)" = "0" ]; then
-    su -s /bin/sh www-data -c \
-        'php /var/www/html/artisan queue:work --queue=scratchpad --tries=3 --backoff=10,60,300 --max-time=3600 --sleep=1 --rest=0.5' \
-        >/proc/1/fd/1 2>/proc/1/fd/2 &
-else
-    php /var/www/html/artisan queue:work --queue=scratchpad --tries=3 --backoff=10,60,300 --max-time=3600 --sleep=1 --rest=0.5 \
-        >/proc/1/fd/1 2>/proc/1/fd/2 &
-fi
+# Register the long-running worker with the web image's s6 init. s6 owns
+# restart and shutdown; this entrypoint script only selects the web service.
+touch /etc/s6-overlay/s6-rc.d/user/contents.d/scratchpad-queue
+touch /etc/s6-overlay/s6-rc.d/user/contents.d/postsyncer-queue

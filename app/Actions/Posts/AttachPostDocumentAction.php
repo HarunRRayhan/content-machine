@@ -7,6 +7,7 @@ use App\Data\Posts\AttachPostDocumentData;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Stores an uploaded post document (LinkedIn carousel PDF) on the private
@@ -19,33 +20,43 @@ class AttachPostDocumentAction
 
     public function handle(Post $post, ?User $uploadedBy, AttachPostDocumentData $data): Post
     {
-        $workspace = $post->workspace;
-        if ($workspace === null) {
-            throw new \RuntimeException('Post is missing a workspace.');
-        }
+        return DB::transaction(function () use ($post, $uploadedBy, $data): Post {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        $mediaAsset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, 'document');
+            if ($lockedPost->isPublishInProgress() || $lockedPost->hasUncertainPublish()) {
+                throw ValidationException::withMessages([
+                    'publish' => __('A post cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
+                ]);
+            }
 
-        return DB::transaction(function () use ($post, $mediaAsset) {
-            $existing = $post->attachments()
+            $workspace = $lockedPost->workspace;
+            if ($workspace === null) {
+                throw new \RuntimeException('Post is missing a workspace.');
+            }
+
+            $mediaAsset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, 'document');
+            $existing = $lockedPost->attachments()
                 ->where('media_asset_id', $mediaAsset->id)
                 ->first();
 
             if ($existing !== null) {
-                return $post->fresh(['attachments.mediaAsset']) ?? $post;
+                return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
             }
 
-            $maxPosition = $post->attachments()->max('position');
+            $maxPosition = $lockedPost->attachments()->max('position');
             $position = $maxPosition === null ? 0 : ((int) $maxPosition) + 1;
 
-            $post->attachments()->create([
+            $lockedPost->attachments()->create([
                 'media_asset_id' => $mediaAsset->id,
                 'role' => 'document',
                 'platform' => 'linkedin',
                 'position' => $position,
             ]);
 
-            return $post->fresh(['attachments.mediaAsset']) ?? $post;
+            return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
         });
     }
 }

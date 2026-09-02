@@ -1,6 +1,7 @@
-import { Form, Link, router } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
+import PublishDialog from '@/components/content/publish-dialog';
 import TemplatePreview from '@/components/media/template-preview';
 import {
     PlatformChipRow,
@@ -41,6 +42,7 @@ type Props = {
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
+    publishRetryable: boolean;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     handles?: HandleDirectory;
@@ -135,23 +137,6 @@ function earliestWhen(groups: PostsyncerGroup[]): string | null {
     return formatWhen(bestRaw);
 }
 
-function datetimeLocalNowInDhaka(date = new Date()): string {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: DHAKA_TZ,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-    }).formatToParts(date);
-
-    const get = (type: Intl.DateTimeFormatPartTypes): string =>
-        parts.find((part) => part.type === type)?.value ?? '';
-
-    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
-}
-
 export default function PostOverview({
     postId,
     title,
@@ -163,6 +148,7 @@ export default function PostOverview({
     publishUrl,
     postsyncerReady,
     publishState,
+    publishRetryable,
     needsConfirmAsk,
     postsyncer,
     handles,
@@ -176,8 +162,6 @@ export default function PostOverview({
               POST_PIPELINE.findIndex((step) => step.key === studioStatus),
           );
     const [busy, setBusy] = useState(false);
-    const [confirmAskChecked, setConfirmAskChecked] = useState(false);
-    const [minWhen] = useState(() => datetimeLocalNowInDhaka());
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
     const workspaceBuckets = hasGroups
@@ -185,19 +169,25 @@ export default function PostOverview({
         : (workspaces ?? []);
     const hasWorkspaceBuckets = workspaceBuckets.length > 0;
     const publishBusy = ['queued', 'running'].includes(publishState);
-    const showScheduleForm =
+    const showPublishControls =
         !archived &&
         studioStatus !== 'posted' &&
         studioStatus !== 'scheduled' &&
         !hasGroups &&
-        studioStatus === 'draft';
-    const canSchedule =
+        (studioStatus === 'draft' || publishState === 'failed');
+    const canPublish =
         postsyncerReady &&
         !publishBusy &&
-        studioStatus === 'draft' &&
-        !hasGroups;
-    const scheduleDisabled =
-        !canSchedule || (needsConfirmAsk && !confirmAskChecked);
+        !hasGroups &&
+        (studioStatus === 'draft' ||
+            (publishState === 'failed' && publishRetryable));
+    const publishDisabledReason = publishBusy
+        ? 'A publish job is already queued or running.'
+        : publishState === 'failed' && !publishRetryable
+          ? 'Reconcile the uncertain PostSyncer create before retrying.'
+          : !postsyncerReady
+            ? 'Configure PostSyncer in Settings before publishing.'
+            : null;
     const scheduledAt = earliestWhen(groups);
 
     function advanceStatus(nextStatus: 'archived' | 'posted') {
@@ -296,80 +286,17 @@ export default function PostOverview({
                                     🗄️ Archive
                                 </button>
                             </>
-                        ) : showScheduleForm ? (
-                            <Form
-                                action={publishUrl}
-                                method="post"
-                                className="schedule-it"
-                            >
-                                {({ processing, errors }) => (
-                                    <>
-                                        <label className="schedule-it-label">
-                                            <span className="schedule-it-label-row">
-                                                Schedule it
-                                                <span className="schedule-it-tz">
-                                                    {DHAKA_TZ}
-                                                </span>
-                                            </span>
-                                            <input
-                                                name="when"
-                                                type="datetime-local"
-                                                required
-                                                min={minWhen}
-                                                disabled={!canSchedule}
-                                            />
-                                        </label>
-                                        {needsConfirmAsk && (
-                                            <label className="schedule-it-confirm">
-                                                <input
-                                                    type="checkbox"
-                                                    name="confirm_ask"
-                                                    value="1"
-                                                    checked={confirmAskChecked}
-                                                    onChange={(event) =>
-                                                        setConfirmAskChecked(
-                                                            event.target
-                                                                .checked,
-                                                        )
-                                                    }
-                                                />
-                                                Confirm ask-gated platforms
-                                            </label>
-                                        )}
-                                        <button
-                                            type="submit"
-                                            className="advance"
-                                            disabled={
-                                                processing || scheduleDisabled
-                                            }
-                                        >
-                                            🗓️ Schedule it
-                                        </button>
-                                        {errors.when && (
-                                            <p className="schedule-it-error">
-                                                {errors.when}
-                                            </p>
-                                        )}
-                                        {errors.publish && (
-                                            <p className="schedule-it-error">
-                                                {errors.publish}
-                                            </p>
-                                        )}
-                                        {!postsyncerReady && (
-                                            <p className="schedule-it-hint">
-                                                Configure PostSyncer in Settings
-                                                before scheduling.
-                                            </p>
-                                        )}
-                                        {publishBusy && (
-                                            <p className="schedule-it-hint">
-                                                A publish job is already queued
-                                                or running.
-                                            </p>
-                                        )}
-                                    </>
-                                )}
-                            </Form>
+                        ) : showPublishControls ? (
+                            <PublishDialog
+                                disabled={!canPublish}
+                                disabledReason={publishDisabledReason}
+                                publishState={publishState}
+                                publishUrl={publishUrl}
+                                entityLabel="post"
+                                needsConfirmAsk={needsConfirmAsk}
+                                retryOnly={publishState === 'failed'}
+                                showStatus={false}
+                            />
                         ) : (
                             <span className="badge">
                                 🗓️ Scheduled

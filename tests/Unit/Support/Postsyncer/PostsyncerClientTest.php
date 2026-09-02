@@ -45,6 +45,43 @@ class PostsyncerClientTest extends TestCase
             && $request['urls'] === ['https://example.com/a.png']);
     }
 
+    public function test_upload_from_urls_rejects_a_partial_response(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+        ]);
+
+        $client = $this->clientWithKey();
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('incomplete media upload response');
+
+        $client->uploadFromUrls(15211, [
+            'https://example.com/a.png',
+            'https://example.com/b.png',
+        ]);
+    }
+
+    public function test_upload_from_urls_rejects_a_media_item_without_a_valid_id(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => null]],
+                'count_stored' => 1,
+            ], 200),
+        ]);
+
+        $client = $this->clientWithKey();
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('without a valid id');
+
+        $client->uploadFromUrls(15211, ['https://example.com/a.png']);
+    }
+
     public function test_create_post_returns_post_payload(): void
     {
         Http::fake([

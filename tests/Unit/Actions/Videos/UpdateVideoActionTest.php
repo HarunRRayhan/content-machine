@@ -7,6 +7,7 @@ use App\Data\Videos\UpdateVideoData;
 use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Video;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class UpdateVideoActionTest extends TestCase
@@ -52,6 +53,40 @@ class UpdateVideoActionTest extends TestCase
         $this->assertSame('V-4', $video->human_id);
         $this->assertSame('draft', $video->status);
         $this->assertNull($video->idea_id);
+    }
+
+    public function test_it_rejects_edits_while_a_postsyncer_publish_is_queued_or_running(): void
+    {
+        $video = Video::factory()->create([
+            'title' => 'Original title',
+            'publish_state' => 'running',
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdateVideoAction)->handle($video, new UpdateVideoData(
+            title: 'Changed title',
+            body: 'Changed body.',
+        ));
+    }
+
+    public function test_it_rejects_edits_when_the_postsyncer_outcome_is_uncertain(): void
+    {
+        $video = Video::factory()->create([
+            'title' => 'Original title',
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'state' => 'uncertain',
+                'current' => ['index' => 0],
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdateVideoAction)->handle($video, new UpdateVideoData(
+            title: 'Changed title',
+            body: 'Changed body.',
+        ));
     }
 
     public function test_title_and_status_patch_keeps_existing_drive_urls(): void
