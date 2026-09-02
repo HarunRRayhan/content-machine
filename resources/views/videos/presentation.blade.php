@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $video->human_id }} · Presentation</title>
     <link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
     <link rel="icon" href="/favicon.ico?v=3" sizes="32x32">
@@ -83,7 +84,14 @@
             background:repeating-linear-gradient(to bottom, var(--cm-border) 0 6px, transparent 6px 12px)}
         .pres-notes{flex:1 1 260px; min-width:240px; max-width:520px}
         .pres-cue{font-family:var(--font-bn); font-size:26px; font-weight:600; line-height:1.45; color:var(--cm-fg);
-            padding:18px; border:1px solid var(--cm-border); border-radius:14px; background:var(--cm-muted); margin-bottom:12px}
+            padding:18px; border:1px solid var(--cm-border); border-radius:14px; background:var(--cm-muted); margin:0}
+        .pres-cue-row{display:flex; align-items:stretch; gap:8px; margin-bottom:12px}
+        .pres-cue-row .pres-cue{flex:1}
+        .pres-cue-editbtn{width:48px; border:1px solid var(--cm-border); border-radius:12px; background:var(--cm-muted); color:var(--cm-fg); cursor:pointer; font-size:20px}
+        .pres-cue-editor[hidden], .pres-cue-row[hidden]{display:none}
+        .pres-cue-editor textarea{display:block; width:100%; min-height:120px; resize:vertical; font:600 22px/1.45 var(--font-bn); color:var(--cm-fg); background:var(--cm-muted); border:1px solid var(--cm-border); border-radius:12px; padding:14px; margin-bottom:8px}
+        .pres-cue-actions{display:flex; gap:8px; justify-content:flex-end}
+        .pres-cue-error{color:#b91c1c; font-size:13px; margin:8px 0}
         .pres-keys{font-family:var(--font-cue); font-size:11px; color:var(--cm-muted-fg); margin-bottom:16px}
         {!! $manifest['lib_css'] ?? '' !!}
         {!! $manifest['css'] ?? '' !!}
@@ -105,7 +113,18 @@
             <div class="pres-vidno" id="presVidNo">{{ $video->human_id }}</div>
             <div class="pres-stepno" id="presStepNo"></div>
             <div class="pres-dots" id="presDots"></div>
-            <div class="pres-cue" id="presCue"></div>
+            <div class="pres-cue-row" id="presCueRow">
+                <div class="pres-cue" id="presCue"></div>
+                <button type="button" class="pres-cue-editbtn" id="presCueEditBtn" title="Edit this script line" aria-label="Edit this script line">✎</button>
+            </div>
+            <div class="pres-cue-editor" id="presCueEditor" hidden>
+                <textarea id="presCueInput" rows="3" aria-label="Script line"></textarea>
+                <div class="pres-cue-actions">
+                    <button type="button" class="pres-fs-btn" id="presCueCancelBtn">Cancel</button>
+                    <button type="button" class="pres-fs-btn" id="presCueSaveBtn">Save</button>
+                </div>
+                <div class="pres-cue-error" id="presCueError" role="alert" hidden></div>
+            </div>
             <div class="pres-keys">Space / → next · ← back · R restart · F fullscreen</div>
             <button type="button" class="pres-fs-btn" id="presFsBtn">⛶ <span id="presFsLbl">Fullscreen</span></button>
         </div>
@@ -129,6 +148,15 @@
             const shell = document.getElementById('presShell');
             const fsBtn = document.getElementById('presFsBtn');
             const fsLbl = document.getElementById('presFsLbl');
+            const cueRow = document.getElementById('presCueRow');
+            const cueEditor = document.getElementById('presCueEditor');
+            const cueInput = document.getElementById('presCueInput');
+            const cueEditBtn = document.getElementById('presCueEditBtn');
+            const cueCancelBtn = document.getElementById('presCueCancelBtn');
+            const cueSaveBtn = document.getElementById('presCueSaveBtn');
+            const cueError = document.getElementById('presCueError');
+            const cueUpdateUrl = @json(route('videos.presentation.cue', $video));
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
             if (!deck) {
                 stageEl.innerHTML = '<div class="pres-load-error">Deck JavaScript did not register a presentation.</div>';
@@ -171,13 +199,82 @@
                 presStep = Math.max(0, Math.min(Math.max(steps.length - 1, 0), n));
                 const step = steps[presStep] || {};
                 cueEl.textContent = step.cue || step.note || ('Slide ' + (presStep + 1));
+                if (cueEditBtn) {
+                    cueEditBtn.hidden = typeof step.cue !== 'string' || step.cue.trim() === '';
+                }
                 stepNoEl.textContent = 'Step ' + presStep + ' / ' + Math.max(steps.length - 1, 0);
                 dotsEl.querySelectorAll('.pres-dot').forEach(function (dot, i) {
                     dot.classList.toggle('active', i === presStep);
                 });
             }
 
+            function exitCueEdit() {
+                if (cueRow) cueRow.hidden = false;
+                if (cueEditor) cueEditor.hidden = true;
+                if (cueError) {
+                    cueError.hidden = true;
+                    cueError.textContent = '';
+                }
+            }
+
+            function enterCueEdit() {
+                if (!cueInput || !cueRow || !cueEditor) return;
+                const step = steps[presStep] || {};
+                if (typeof step.cue !== 'string' || step.cue.trim() === '') return;
+                cueInput.value = step.cue;
+                cueRow.hidden = true;
+                cueEditor.hidden = false;
+                cueInput.focus();
+                cueInput.select();
+            }
+
+            async function saveCueEdit() {
+                if (!cueInput || !cueSaveBtn) return;
+                const cue = cueInput.value.trim();
+                if (!cue || /[\r\n]/.test(cue)) {
+                    if (cueError) {
+                        cueError.textContent = 'Enter one non-empty line.';
+                        cueError.hidden = false;
+                    }
+                    return;
+                }
+                cueSaveBtn.disabled = true;
+                cueSaveBtn.textContent = 'Saving…';
+                try {
+                    const response = await fetch(cueUpdateUrl, {
+                        method: 'PATCH',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body: JSON.stringify({
+                            step: presStep,
+                            current_cue: (steps[presStep] || {}).cue || '',
+                            cue,
+                        }),
+                    });
+                    const result = await response.json();
+                    if (!response.ok || !result.ok) {
+                        throw new Error(result.error || 'Save failed.');
+                    }
+                    if (steps[presStep]) steps[presStep].cue = result.cue || cue;
+                    updateChrome(presStep);
+                    exitCueEdit();
+                } catch (error) {
+                    if (cueError) {
+                        cueError.textContent = error instanceof Error ? error.message : 'Save failed.';
+                        cueError.hidden = false;
+                    }
+                } finally {
+                    cueSaveBtn.disabled = false;
+                    cueSaveBtn.textContent = 'Save';
+                }
+            }
+
             function showPresStep(n) {
+                exitCueEdit();
                 if (isReveal && presRevealInstance) {
                     const target = Math.max(0, Math.min(steps.length - 1, n));
                     const delta = target - presStep;
@@ -251,6 +348,9 @@
             });
 
             if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
+            if (cueEditBtn) cueEditBtn.addEventListener('click', enterCueEdit);
+            if (cueCancelBtn) cueCancelBtn.addEventListener('click', exitCueEdit);
+            if (cueSaveBtn) cueSaveBtn.addEventListener('click', saveCueEdit);
 
             document.addEventListener('keydown', function (e) {
                 if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;

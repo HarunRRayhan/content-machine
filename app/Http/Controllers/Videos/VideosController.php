@@ -14,6 +14,7 @@ use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\ParseVideoScript;
 use App\Support\Content\PresenceFlags;
+use App\Support\Content\PresentationManifest;
 use App\Support\GoogleDrive\GoogleDriveConfig;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
@@ -255,7 +256,7 @@ class VideosController extends Controller
             'has_deck' => PresenceFlags::bool(
                 $video,
                 'has_deck',
-                fn () => ! empty($video->deck_manifest),
+                fn () => PresentationManifest::isUsable($video->deck_manifest),
             ),
             'created_at' => $video->created_at?->toIso8601String(),
         ];
@@ -282,7 +283,7 @@ class VideosController extends Controller
             'script_markdown' => $video->script_markdown,
             'parsed' => $parsed,
             'captions' => NormalizeCaptions::forDashboard($video->captions),
-            'has_deck' => ! empty($video->deck_manifest),
+            'has_deck' => PresentationManifest::isUsable($video->deck_manifest),
             'images' => $this->presentImages($video),
             'video_drive_url' => $video->video_drive_url,
             'cover_drive_url' => $video->cover_drive_url,

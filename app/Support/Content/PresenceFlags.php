@@ -22,7 +22,7 @@ final class PresenceFlags
             ->select($columns)
             ->selectRaw("(script_markdown IS NOT NULL AND BTRIM(script_markdown) <> '') AS has_script")
             ->selectRaw("(captions IS NOT NULL AND captions::text NOT IN ('null', '{}', '[]')) AS has_captions")
-            ->selectRaw("(deck_manifest IS NOT NULL AND deck_manifest::text NOT IN ('null', '{}', '[]')) AS has_deck");
+            ->selectRaw("(deck_manifest IS NOT NULL AND jsonb_typeof(deck_manifest->'js') = 'string' AND BTRIM(deck_manifest->>'js') <> '') AS has_deck");
     }
 
     /**

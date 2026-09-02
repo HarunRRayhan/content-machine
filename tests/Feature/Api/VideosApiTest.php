@@ -79,6 +79,19 @@ class VideosApiTest extends TestCase
             ->assertJsonMissingPath('data.0.deck_manifest');
     }
 
+    public function test_index_does_not_mark_an_unusable_deck_manifest(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-63',
+            'number' => 63,
+            'deck_manifest' => ['engine' => 'reveal', 'js' => ''],
+        ]);
+
+        $this->acting()->getJson('/api/v1/videos')
+            ->assertOk()
+            ->assertJsonPath('data.0.has_deck', false);
+    }
+
     public function test_index_include_full_returns_heavy_fields(): void
     {
         Video::factory()->for($this->workspace)->create([

@@ -1,5 +1,5 @@
-import { usePage } from '@inertiajs/react';
-import { useCallback, useState } from 'react';
+import { router, usePage } from '@inertiajs/react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 
 /**
  * Keep a Studio show-page tab in sync with `?tab=` so shared links open the
@@ -10,9 +10,23 @@ export function useStudioTab<T extends string>(
     fallback: T,
 ): [T, (next: T) => void] {
     const page = usePage();
-    const [tab, setTabState] = useState<T>(() =>
-        resolveTab(page.url, validTabs, fallback),
+    const currentUrl = browserUrl(page.url);
+    const [selection, setSelection] = useState<{ pageUrl: string; tab: T }>(
+        () => ({
+            pageUrl: currentUrl,
+            tab: resolveTab(currentUrl, validTabs, fallback),
+        }),
     );
+    const tab =
+        selection.pageUrl === currentUrl && validTabs.includes(selection.tab)
+            ? selection.tab
+            : resolveTab(currentUrl, validTabs, fallback);
+
+    useLayoutEffect(() => {
+        if (hasInvalidTabQuery(currentUrl, validTabs)) {
+            replaceTabQuery(fallback, fallback);
+        }
+    }, [currentUrl, validTabs, fallback]);
 
     const setTab = useCallback(
         (next: T) => {
@@ -20,13 +34,17 @@ export function useStudioTab<T extends string>(
                 return;
             }
 
-            setTabState(next);
+            setSelection({ pageUrl: currentUrl, tab: next });
             replaceTabQuery(next, fallback);
         },
-        [validTabs, fallback],
+        [currentUrl, validTabs, fallback],
     );
 
     return [tab, setTab];
+}
+
+function browserUrl(pageUrl: string): string {
+    return typeof window !== 'undefined' ? window.location.href : pageUrl;
 }
 
 function resolveTab<T extends string>(
@@ -66,9 +84,28 @@ function replaceTabQuery(tab: string, fallback: string): void {
         url.searchParams.set('tab', tab);
     }
 
-    window.history.replaceState(
-        window.history.state,
-        '',
-        `${url.pathname}${url.search}${url.hash}`,
-    );
+    router.replace({
+        url: `${url.pathname}${url.search}${url.hash}`,
+        preserveScroll: true,
+        preserveState: true,
+    });
+}
+
+function hasInvalidTabQuery<T extends string>(
+    pageUrl: string,
+    validTabs: readonly T[],
+): boolean {
+    try {
+        const url = new URL(
+            pageUrl,
+            typeof window !== 'undefined'
+                ? window.location.origin
+                : 'http://localhost',
+        );
+        const raw = url.searchParams.get('tab');
+
+        return raw !== null && !(validTabs as readonly string[]).includes(raw);
+    } catch {
+        return false;
+    }
 }
