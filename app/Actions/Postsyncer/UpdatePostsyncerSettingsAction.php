@@ -5,6 +5,7 @@ namespace App\Actions\Postsyncer;
 use App\Models\Post;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Postsyncer\LegacyPublishProgress;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -29,6 +30,7 @@ class UpdatePostsyncerSettingsAction
             }
 
             PostsyncerConfig::write($lockedWorkspace, $input);
+            $this->repairLegacyAccountFailures($lockedWorkspace);
         });
     }
 
@@ -37,11 +39,20 @@ class UpdatePostsyncerSettingsAction
         foreach ([Post::class, Video::class] as $model) {
             $records = $model::query()
                 ->where('workspace_id', $workspace->getKey())
-                ->get(['publish_state', 'publish_progress']);
+                ->get(['publish_state', 'publish_error', 'publish_progress']);
 
             foreach ($records as $record) {
                 if (in_array($record->publish_state, ['queued', 'running'], true)) {
                     return true;
+                }
+
+                if (LegacyPublishProgress::isMissingAccountFailure(
+                    $record->publish_error,
+                    $record->publish_progress,
+                )) {
+                    if (($record->publish_progress['legacy_repair'] ?? null) !== 'missing_account') {
+                        continue;
+                    }
                 }
 
                 if ($record->publish_state !== 'failed'
@@ -57,5 +68,31 @@ class UpdatePostsyncerSettingsAction
         }
 
         return false;
+    }
+
+    private function repairLegacyAccountFailures(Workspace $workspace): void
+    {
+        foreach ([Post::class, Video::class] as $model) {
+            $records = $model::query()
+                ->where('workspace_id', $workspace->getKey())
+                ->get(['id', 'publish_state', 'publish_error', 'publish_progress']);
+
+            foreach ($records as $record) {
+                if ($record->publish_state !== 'failed'
+                    || ! LegacyPublishProgress::isMissingAccountFailure(
+                        $record->publish_error,
+                        $record->publish_progress,
+                    )) {
+                    continue;
+                }
+
+                $record->forceFill([
+                    'publish_state' => 'failed',
+                    'publish_progress' => LegacyPublishProgress::markRetryable(
+                        $record->publish_progress,
+                    ),
+                ])->save();
+            }
+        }
     }
 }

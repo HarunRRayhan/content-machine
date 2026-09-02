@@ -169,4 +169,38 @@ class EnqueueVideoPublishActionTest extends TestCase
 
         Queue::assertNothingPushed();
     }
+
+    public function test_retry_rejects_ask_confirmation_changes_with_retryable_media(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['confirm_ask' => false],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [['index' => 0, 'group_key' => 'group-1']],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'retryable',
+                    'idempotency_key' => 'request-1',
+                    'media_ids' => [915],
+                ],
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new EnqueueVideoPublishAction)->handle($video, $workspace, ['confirm_ask' => true]);
+
+        Queue::assertNothingPushed();
+    }
 }

@@ -173,12 +173,13 @@ class EnqueuePostPublishAction
 
         // Schedule and platform changes could target a different operation.
         // The confirmation gate is safe to change only before any external
-        // group has been checkpointed, which lets a failed ask-gated preflight
-        // be approved from the retry dialog.
+        // progress has been checkpointed, which lets a failed ask-gated
+        // preflight be approved from the retry dialog.
         if (array_key_exists('confirm_ask', $requested)
             && (bool) ($requested['confirm_ask'] ?? false)
                 !== (bool) ($options['confirm_ask'] ?? false)) {
-            if ($this->hasCompletedGroups($progress)) {
+            if ($this->hasCompletedGroups($progress)
+                || ($progress['current'] ?? null) !== null) {
                 throw ValidationException::withMessages([
                     'publish' => __('Only the ask-platform confirmation may change when retrying a publish.'),
                 ]);

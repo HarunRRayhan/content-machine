@@ -4,6 +4,7 @@ namespace App\Actions\Postsyncer;
 
 use App\Models\Post;
 use App\Models\Workspace;
+use App\Support\Postsyncer\LegacyPublishProgress;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -28,6 +29,7 @@ class PublishPostAction
     {
         $post->refresh();
         $originalStatus = $post->status;
+        $publishError = $post->publish_error;
         $options = $this->normalizeOptions($options);
         $progress = $post->publish_progress;
 
@@ -64,7 +66,7 @@ class PublishPostAction
             }
 
             $plan = $this->planMetadata($config, $groups, $options);
-            $progress = $this->prepareProgress($post, $progress, $plan, $runToken);
+            $progress = $this->prepareProgress($post, $progress, $plan, $runToken, $publishError);
             if ($progress === null) {
                 return;
             }
@@ -841,7 +843,14 @@ class PublishPostAction
 
         $completed = $this->completedGroups($latest);
         foreach ($this->completedGroups($local) as $localGroup) {
-            $completed = $this->upsertCompletedGroup($completed, $localGroup);
+            $index = $localGroup['index'] ?? null;
+            $groupKey = $localGroup['group_key'] ?? null;
+
+            if (is_int($index)
+                && is_string($groupKey)
+                && $this->completedGroup($completed, $index, $groupKey) === null) {
+                $completed[] = $localGroup;
+            }
         }
 
         usort(
@@ -1553,6 +1562,7 @@ class PublishPostAction
         ?array $existing,
         array $plan,
         string $runToken,
+        ?string $publishError,
     ): ?array {
         if ($existing === null) {
             $progress = [
@@ -1576,8 +1586,18 @@ class PublishPostAction
 
         $this->assertProgressShape($existing);
 
-        if ($this->hasUnknownCurrent($existing)
-            || ($existing['state'] ?? null) === 'uncertain') {
+        $legacyAccountFailure = LegacyPublishProgress::isMissingAccountFailure(
+            $publishError,
+            $existing,
+        );
+
+        if ($legacyAccountFailure) {
+            $existing = $this->repairLegacyAccountProgress($existing, $plan);
+        }
+
+        if (! $legacyAccountFailure
+            && ($this->hasUnknownCurrent($existing)
+                || ($existing['state'] ?? null) === 'uncertain')) {
             throw new PostsyncerException(
                 'A PostSyncer media upload or create has an unknown outcome. Resolve it before retrying.'
             );
@@ -1597,7 +1617,9 @@ class PublishPostAction
         $storedGroups = $existing['planned_groups'] ?? null;
 
         if ($storedHash === null) {
-            if ($storedGroups !== [] || $this->completedGroups($existing) !== []) {
+            if ($storedGroups !== []
+                || $this->completedGroups($existing) !== []
+                || ($existing['current'] ?? null) !== null) {
                 throw new PostsyncerException(
                     'PostSyncer publish progress has no plan metadata. Reconcile it before retrying.'
                 );
@@ -1630,6 +1652,44 @@ class PublishPostAction
         }
 
         return $existing;
+    }
+
+    /**
+     * Move a legacy pre-create account failure onto the current plan while
+     * retaining its registered media ids. Completed groups must still match
+     * the new plan before normal retry validation can continue.
+     *
+     * @param  array<string, mixed>  $progress
+     * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     * @return array<string, mixed>
+     */
+    private function repairLegacyAccountProgress(array $progress, array $plan): array
+    {
+        $current = $progress['current'] ?? null;
+        $index = is_array($current) ? ($current['index'] ?? null) : null;
+        $planned = is_int($index) ? ($plan['groups'][$index] ?? null) : null;
+
+        if (! is_array($current)
+            || ! is_int($index)
+            || ! is_array($planned)) {
+            throw new PostsyncerException(
+                'This post has a legacy account-mapping checkpoint that cannot be repaired safely.'
+            );
+        }
+
+        $current['phase'] = 'retryable';
+        $current['group_key'] = $planned['group_key'];
+        $current['idempotency_key'] = $this->idempotencyKey(
+            (string) $progress['operation_id'],
+            $index,
+            $planned['group_key'],
+        );
+        $progress['current'] = $current;
+        $progress['plan_hash'] = $plan['hash'];
+        $progress['planned_groups'] = $plan['groups'];
+        $progress['state'] = 'running';
+
+        return $progress;
     }
 
     /**

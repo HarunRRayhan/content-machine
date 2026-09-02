@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Settings;
 
+use App\Models\Post;
 use App\Models\User;
+use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -274,6 +276,79 @@ class PostsyncerSettingsControllerTest extends TestCase
         $this->assertTrue($config->isPlatformEnabled('bangla', 'facebook'));
         $this->assertSame('on', $config->postTypes()['platforms']['facebook']['text']);
         $this->assertSame('off', $config->postTypes()['overrides']['english']['twitter']['photo']);
+    }
+
+    public function test_settings_update_repairs_legacy_account_mapping_checkpoints(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+
+        $legacyProgress = [
+            'version' => 1,
+            'operation_id' => 'operation-1',
+            'run_token' => 'run-1',
+            'options' => ['when' => null, 'confirm_ask' => false],
+            'plan_hash' => 'legacy-plan',
+            'planned_groups' => [['index' => 0, 'group_key' => 'legacy-group']],
+            'completed_groups' => [],
+            'current' => [
+                'index' => 0,
+                'group_key' => 'legacy-group',
+                'phase' => 'creating',
+                'idempotency_key' => 'legacy-request',
+                'media_ids' => [915],
+                'media_urls' => ['https://example.com/media'],
+            ],
+            'state' => 'uncertain',
+        ];
+        $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. No account id mapped for platform facebook.';
+
+        $post = Post::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_error' => $error,
+            'publish_progress' => $legacyProgress,
+        ]);
+        $video = Video::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_error' => $error,
+            'publish_progress' => $legacyProgress,
+        ]);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'page' => 'workspaces',
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => '100'],
+                    ],
+                ],
+            ],
+        ])->assertRedirect(route('settings.postsyncer.workspaces'));
+
+        $this->assertSame(
+            '100',
+            PostsyncerConfig::fromWorkspace($workspace->fresh())->language('bangla')['platforms']['facebook']['account_id'],
+        );
+
+        foreach ([$post, $video] as $record) {
+            $record->refresh();
+            $this->assertSame('failed', $record->publish_state);
+            $this->assertSame('failed', $record->publish_progress['state'], (string) $record->publish_error);
+            $this->assertSame('retryable', $record->publish_progress['current']['phase']);
+            $this->assertSame('missing_account', $record->publish_progress['legacy_repair']);
+            $this->assertTrue($record->canRetryPublish());
+        }
     }
 
     public function test_refresh_accounts_uses_the_selected_workspace_id(): void
