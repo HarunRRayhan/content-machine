@@ -114,6 +114,13 @@ class HandleTelegramUpdateAction
             return;
         }
 
+        // Workspace commands and captures are private-chat only. The webhook
+        // rejects these before persistence too, but keep the worker boundary
+        // closed for already-queued or manually replayed updates.
+        if (! is_array($message['chat'] ?? null) || ($message['chat']['type'] ?? null) !== 'private') {
+            return;
+        }
+
         if ($dispatchLeaseId !== null
             && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
             return;

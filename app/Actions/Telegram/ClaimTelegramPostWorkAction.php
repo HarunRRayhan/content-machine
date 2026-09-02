@@ -2,7 +2,9 @@
 
 namespace App\Actions\Telegram;
 
+use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
+use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -18,12 +20,14 @@ class ClaimTelegramPostWorkAction
     public function claim(int $requestId): ?string
     {
         return DB::transaction(function () use ($requestId): ?string {
-            $request = TelegramPostRequest::query()
-                ->whereKey($requestId)
-                ->lockForUpdate()
-                ->first();
+            $locked = $this->lockCurrentRequest($requestId);
+            if ($locked === null) {
+                return null;
+            }
 
-            if ($request === null || $request->state !== TelegramPostRequest::GENERATING) {
+            $request = $locked['request'];
+
+            if ($request->state !== TelegramPostRequest::GENERATING) {
                 return null;
             }
 
@@ -51,12 +55,14 @@ class ClaimTelegramPostWorkAction
     public function acquire(int $requestId, ?string $leaseId = null): ?string
     {
         return DB::transaction(function () use ($requestId, $leaseId): ?string {
-            $request = TelegramPostRequest::query()
-                ->whereKey($requestId)
-                ->lockForUpdate()
-                ->first();
+            $locked = $this->lockCurrentRequest($requestId);
+            if ($locked === null) {
+                return null;
+            }
 
-            if ($request === null || $request->state !== TelegramPostRequest::GENERATING) {
+            $request = $locked['request'];
+
+            if ($request->state !== TelegramPostRequest::GENERATING) {
                 return null;
             }
 
@@ -103,18 +109,24 @@ class ClaimTelegramPostWorkAction
 
     public function renew(int $requestId, string $leaseId): bool
     {
-        $now = now();
+        return DB::transaction(function () use ($requestId, $leaseId): bool {
+            $locked = $this->lockCurrentRequest($requestId, requireConnected: false);
+            if ($locked === null) {
+                return false;
+            }
 
-        return TelegramPostRequest::query()
-            ->whereKey($requestId)
-            ->where('state', TelegramPostRequest::GENERATING)
-            ->where('work_lease_id', $leaseId)
-            ->whereNotNull('work_claimed_at')
-            ->where('work_claimed_at', '>', $now->copy()->subSeconds(self::LEASE_SECONDS))
-            ->update([
-                'work_claimed_at' => $now,
-                'updated_at' => $now,
-            ]) === 1;
+            $request = $locked['request'];
+            $now = now();
+
+            return $request->state === TelegramPostRequest::GENERATING
+                && $request->work_lease_id === $leaseId
+                && $request->work_claimed_at !== null
+                && $request->work_claimed_at->isAfter($now->copy()->subSeconds(self::LEASE_SECONDS))
+                && (bool) $request->forceFill([
+                    'work_claimed_at' => $now,
+                    'updated_at' => $now,
+                ])->save();
+        });
     }
 
     public function clear(int $requestId, ?string $leaseId = null): void
@@ -123,6 +135,8 @@ class ClaimTelegramPostWorkAction
 
         if ($leaseId !== null) {
             $query->where('work_lease_id', $leaseId);
+        } else {
+            $query->whereNull('work_lease_id');
         }
 
         $query->update([
@@ -130,5 +144,63 @@ class ClaimTelegramPostWorkAction
             'work_lease_id' => null,
             'updated_at' => now(),
         ]);
+    }
+
+    /**
+     * Rotation and every post-work finalizer lock the bot config before the
+     * request. A request created by the old web fleet may be adopted while
+     * that same identity is still current; a different generation fails
+     * closed instead.
+     *
+     * @return array{config: TelegramBotConfig, request: TelegramPostRequest}|null
+     */
+    private function lockCurrentRequest(int $requestId, bool $requireConnected = true): ?array
+    {
+        $reference = TelegramPostRequest::query()
+            ->whereKey($requestId)
+            ->first(['telegram_bot_config_id']);
+
+        if ($reference === null) {
+            return null;
+        }
+
+        $configReference = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->first(['workspace_id']);
+
+        if ($configReference === null) {
+            return null;
+        }
+
+        Workspace::query()
+            ->whereKey($configReference->workspace_id)
+            ->lockForUpdate()
+            ->first();
+        $config = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->lockForUpdate()
+            ->first();
+        $request = TelegramPostRequest::query()
+            ->whereKey($requestId)
+            ->lockForUpdate()
+            ->first();
+
+        if ($config === null
+            || $request === null
+            || $request->telegram_bot_config_id !== $config->id
+            || ($requireConnected && ! $config->isConnected())
+        ) {
+            return null;
+        }
+
+        if ($request->webhook_generation === null && $config->webhook_generation !== null) {
+            $request->forceFill([
+                'webhook_generation' => $config->webhook_generation,
+            ])->save();
+        } elseif ($request->webhook_generation !== $config->webhook_generation) {
+            return null;
+        }
+
+        return ['config' => $config, 'request' => $request];
     }
 }

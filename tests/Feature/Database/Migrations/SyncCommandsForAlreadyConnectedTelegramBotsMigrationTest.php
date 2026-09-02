@@ -9,6 +9,7 @@ use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
@@ -52,6 +53,7 @@ class SyncCommandsForAlreadyConnectedTelegramBotsMigrationTest extends TestCase
         DB::table('telegram_bot_configs')->insert([
             'workspace_id' => Workspace::factory()->create()->id,
             'bot_token' => 'not-actually-encrypted',
+            'webhook_generation' => (string) Str::uuid(),
             'ai_chat_enabled' => false,
             'created_at' => now(),
             'updated_at' => now(),

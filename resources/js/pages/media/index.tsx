@@ -142,7 +142,7 @@ export default function MediaIndex({ tab, tabLabel, items }: PageProps) {
                                                 ? 'video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov'
                                                 : tab === 'gifs'
                                                   ? 'image/gif,.gif'
-                                                  : 'image/jpeg,image/png,image/webp,image/svg+xml,.jpg,.jpeg,.png,.webp,.svg'
+                                                  : 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp'
                                         }
                                         required
                                     />

@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishVideoJob;
+use App\Models\Idea;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
@@ -138,6 +139,57 @@ class VideosApiTest extends TestCase
             ->assertJsonPath('data.human_id', 'BV-53');
 
         $this->assertDatabaseCount('videos', 1);
+    }
+
+    public function test_an_explicit_import_advances_the_generated_video_sequence(): void
+    {
+        $this->acting()->postJson('/api/v1/videos', [
+            'human_id' => 'BV-1',
+            'number' => 1,
+            'title' => 'Imported video',
+        ])->assertCreated();
+
+        $this->acting()->postJson('/api/v1/videos', [
+            'title' => 'Generated video',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'V-2');
+    }
+
+    public function test_store_rejects_an_idea_from_another_workspace(): void
+    {
+        $foreignIdea = Idea::factory()->for(Workspace::factory())->create([
+            'kind' => 'video',
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos', [
+            'title' => 'Cross-workspace video',
+            'idea_id' => $foreignIdea->id,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('idea_id');
+
+        $this->assertDatabaseMissing('videos', ['title' => 'Cross-workspace video']);
+    }
+
+    public function test_a_write_only_token_does_not_receive_the_video_script_or_deck(): void
+    {
+        $writeToken = (new CreateWorkspaceApiTokenAction)->handle(
+            $this->workspace,
+            User::factory()->create(),
+            new CreateWorkspaceApiTokenData('write-only', ['videos:write']),
+        )['plaintext'];
+
+        $this->withToken($writeToken)->postJson('/api/v1/videos', [
+            'title' => 'Private video',
+            'body' => 'Private body',
+            'script_markdown' => 'Private script',
+            'deck_manifest' => ['js' => 'alert(1)'],
+        ])
+            ->assertCreated()
+            ->assertJsonMissingPath('data.body')
+            ->assertJsonMissingPath('data.script_markdown')
+            ->assertJsonMissingPath('data.deck_manifest');
     }
 
     public function test_show_and_patch_address_by_human_id(): void

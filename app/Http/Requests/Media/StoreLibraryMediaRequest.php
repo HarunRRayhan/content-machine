@@ -35,8 +35,8 @@ class StoreLibraryMediaRequest extends FormRequest
     {
         return match ($tab) {
             MediaLibraryTab::Images => [
-                'mimes:jpg,jpeg,png,webp,svg',
-                'mimetypes:image/jpeg,image/png,image/webp,image/svg+xml',
+                'mimes:jpg,jpeg,png,webp',
+                'mimetypes:image/jpeg,image/png,image/webp',
                 'max:20480',
             ],
             MediaLibraryTab::Gifs => [

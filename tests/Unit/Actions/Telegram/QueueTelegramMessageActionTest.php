@@ -7,7 +7,9 @@ use App\Jobs\SendTelegramOutboundMessageJob;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramOutboundMessage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class QueueTelegramMessageActionTest extends TestCase
@@ -63,5 +65,74 @@ class QueueTelegramMessageActionTest extends TestCase
         $this->assertSame($first->id, $second->id);
         $this->assertSame(['first'], $second->chunks);
         Queue::assertPushed(SendTelegramOutboundMessageJob::class, 1);
+    }
+
+    public function test_a_legacy_global_key_is_reused_during_the_expand_phase(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $legacy = TelegramOutboundMessage::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'logical_key' => 'telegram:test:rotated',
+            'chunks' => ['old'],
+            'status' => TelegramOutboundMessage::SENT,
+            'sent_at' => now(),
+        ]);
+        $config->update(['webhook_generation' => (string) Str::uuid()]);
+        $legacyIndex = 'telegram_outbound_legacy_fence_test_unique';
+        DB::statement("CREATE UNIQUE INDEX {$legacyIndex} ON telegram_outbound_messages (telegram_bot_config_id, logical_key)");
+
+        try {
+            $message = (new QueueTelegramMessageAction)->handle(
+                $config->fresh(),
+                555,
+                'new',
+                'telegram:test:rotated',
+            );
+        } finally {
+            DB::statement("DROP INDEX IF EXISTS {$legacyIndex}");
+        }
+
+        $this->assertSame($legacy->id, $message->id);
+        $this->assertSame($config->fresh()->webhook_generation, $message->webhook_generation);
+        $this->assertSame(['new'], $message->chunks);
+        $this->assertSame(TelegramOutboundMessage::PENDING, $message->status);
+        Queue::assertPushed(SendTelegramOutboundMessageJob::class, 1);
+    }
+
+    public function test_an_in_flight_legacy_row_is_not_overwritten_during_expand(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $legacy = TelegramOutboundMessage::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'logical_key' => 'telegram:test:in-flight',
+            'chunks' => ['old'],
+            'status' => TelegramOutboundMessage::SENDING,
+            'dispatch_claimed_at' => now(),
+            'dispatch_lease_id' => (string) Str::uuid(),
+        ]);
+        $config->update(['webhook_generation' => (string) Str::uuid()]);
+        $legacyIndex = 'telegram_outbound_legacy_in_flight_test_unique';
+        DB::statement("CREATE UNIQUE INDEX {$legacyIndex} ON telegram_outbound_messages (telegram_bot_config_id, logical_key)");
+
+        try {
+            $message = (new QueueTelegramMessageAction)->handle(
+                $config->fresh(),
+                555,
+                'new',
+                'telegram:test:in-flight',
+            );
+        } finally {
+            DB::statement("DROP INDEX IF EXISTS {$legacyIndex}");
+        }
+
+        $this->assertSame($legacy->id, $message->id);
+        $this->assertSame(TelegramOutboundMessage::SENDING, $message->refresh()->status);
+        $this->assertSame(['old'], $message->chunks);
+        $this->assertSame(555, $message->chat_id);
+        Queue::assertNothingPushed();
     }
 }

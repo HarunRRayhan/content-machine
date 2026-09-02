@@ -5,6 +5,7 @@ namespace Tests\Unit\Support\AiProviders;
 use App\Models\AiProviderCredential;
 use App\Models\AiProviderCredentialModel;
 use App\Support\AiProviders\HttpAiCompletionClient;
+use App\Support\LinkResolution\PublicUrlGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -128,9 +129,29 @@ class HttpAiCompletionClientTest extends TestCase
             'base_url' => 'https://proxy.example.com/anthropic',
         ]);
 
-        (new HttpAiCompletionClient)->complete($entry, 'sys', 'user');
+        (new HttpAiCompletionClient(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '1.1.1.1']],
+        )))->complete($entry, 'sys', 'user');
 
         Http::assertSent(fn ($request) => $request->url() === 'https://proxy.example.com/anthropic/v1/messages');
+    }
+
+    public function test_a_custom_base_url_resolving_to_a_private_ip_is_rejected(): void
+    {
+        Http::fake();
+
+        $entry = $this->entry([
+            'provider' => 'anthropic',
+            'base_url' => 'https://internal.example/anthropic',
+        ]);
+
+        $result = (new HttpAiCompletionClient(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '127.0.0.1']],
+        )))->complete($entry, 'sys', 'user');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Could not reach the completion provider.', $result->error);
+        Http::assertNothingSent();
     }
 
     public function test_a_provider_error_message_is_surfaced_when_present()

@@ -103,11 +103,18 @@ final class ProcessLinkResolver implements LinkResolverContract
             }
 
             try {
+                $curlOptions = $this->guard()->curlResolveOptions($currentUrl);
+
+                if ($curlOptions === null) {
+                    return ResolvedLink::unresolved('metadata only (redirected to an unsafe URL)');
+                }
+
                 $response = Http::withUserAgent(self::USER_AGENT)
                     ->timeout(10)
                     ->withOptions([
                         'allow_redirects' => false,
                         'stream' => true,
+                        ...$curlOptions,
                     ])
                     ->get($currentUrl);
             } catch (Throwable) {
@@ -134,7 +141,7 @@ final class ProcessLinkResolver implements LinkResolverContract
             break;
         }
 
-        if (! $response->successful() || ! str_contains($response->header('Content-Type'), 'html')) {
+        if (! $response->successful() || ! str_contains((string) $response->header('Content-Type'), 'html')) {
             return ResolvedLink::unresolved('metadata only (page fetch failed)');
         }
 

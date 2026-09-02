@@ -5,7 +5,9 @@ namespace App\Jobs;
 use App\Actions\Telegram\ClaimTelegramPostWorkAction;
 use App\Actions\Telegram\GenerateTelegramPostAction;
 use App\Actions\Telegram\QueueTelegramMessageAction;
+use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
+use App\Models\Workspace;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -38,6 +40,15 @@ class GenerateTelegramPostJob implements ShouldQueue
 
     public function handle(GenerateTelegramPostAction $action): void
     {
+        if ($this->queue !== 'scratchpad') {
+            self::dispatch(
+                $this->telegramPostRequestId,
+                $this->workLeaseId,
+            )->onQueue('scratchpad');
+
+            return;
+        }
+
         $requestExists = TelegramPostRequest::query()
             ->whereKey($this->telegramPostRequestId)
             ->exists();
@@ -95,44 +106,68 @@ class GenerateTelegramPostJob implements ShouldQueue
     {
         report($exception);
 
-        $request = TelegramPostRequest::query()
-            ->whereKey($this->telegramPostRequestId)
-            ->where('state', TelegramPostRequest::GENERATING)
-            ->with('telegramBotConfig')
-            ->first();
-
-        if ($request === null) {
-            return;
-        }
-
         $message = 'I could not create the post draft because an unexpected error occurred.';
-        DB::transaction(function () use ($request, $message): void {
-            $lockedRequest = TelegramPostRequest::query()
-                ->with('telegramBotConfig')
-                ->whereKey($request->id)
+        DB::transaction(function () use ($message): void {
+            $reference = TelegramPostRequest::query()
+                ->whereKey($this->telegramPostRequestId)
+                ->first(['telegram_bot_config_id']);
+
+            if ($reference === null) {
+                return;
+            }
+
+            $configReference = TelegramBotConfig::query()
+                ->whereKey($reference->telegram_bot_config_id)
+                ->first(['workspace_id']);
+
+            if ($configReference === null) {
+                return;
+            }
+
+            Workspace::query()
+                ->whereKey($configReference->workspace_id)
                 ->lockForUpdate()
                 ->first();
 
-            if ($lockedRequest === null
+            $config = TelegramBotConfig::query()
+                ->whereKey($reference->telegram_bot_config_id)
+                ->lockForUpdate()
+                ->first();
+            $lockedRequest = TelegramPostRequest::query()
+                ->whereKey($this->telegramPostRequestId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($config === null || $lockedRequest === null) {
+                return;
+            }
+
+            if ($lockedRequest->webhook_generation === null && $config->webhook_generation !== null) {
+                $lockedRequest->forceFill([
+                    'webhook_generation' => $config->webhook_generation,
+                ])->save();
+            } elseif ($lockedRequest->webhook_generation !== $config->webhook_generation) {
+                if ($lockedRequest->state === TelegramPostRequest::GENERATING) {
+                    $lockedRequest->forceFill([
+                        'state' => TelegramPostRequest::CANCELLED,
+                        'cancelled_at' => now(),
+                        'error_message' => 'The Telegram bot connection changed before this draft was generated.',
+                        'work_claimed_at' => null,
+                        'work_lease_id' => null,
+                    ])->save();
+                }
+
+                return;
+            }
+
+            if (! $config->isConnected()
                 || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                || ($this->workLeaseId !== null
+                    && ($lockedRequest->work_lease_id !== $this->workLeaseId
+                        || $lockedRequest->work_claimed_at === null
+                        || ! $lockedRequest->work_claimed_at->isAfter(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS))))
+                || ($this->workLeaseId === null && $lockedRequest->work_lease_id !== null)
             ) {
-                return;
-            }
-
-            if ($this->workLeaseId !== null
-                && $lockedRequest->work_lease_id !== $this->workLeaseId
-            ) {
-                return;
-            }
-
-            if ($this->workLeaseId !== null
-                && ($lockedRequest->work_claimed_at === null
-                    || $lockedRequest->work_claimed_at->isBefore(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS)))
-            ) {
-                return;
-            }
-
-            if ($this->workLeaseId === null && $lockedRequest->work_lease_id !== null) {
                 return;
             }
 
@@ -143,8 +178,7 @@ class GenerateTelegramPostJob implements ShouldQueue
                 'work_lease_id' => null,
             ])->save();
 
-            $config = $lockedRequest->telegramBotConfig;
-            if ($config !== null && $config->bot_token !== null) {
+            if ($config->bot_token !== null) {
                 (new QueueTelegramMessageAction)->handle(
                     $config,
                     $lockedRequest->telegram_chat_id,

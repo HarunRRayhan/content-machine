@@ -13,6 +13,7 @@
 /storage/framework/cache/*
 /storage/framework/sessions/*
 /storage/framework/views/*
+/storage/app/uploads/*
 !/storage/logs/.gitignore
 !/storage/framework/cache/.gitignore
 !/storage/framework/sessions/.gitignore
@@ -22,6 +23,13 @@
 /.env
 /.env.*
 !/.env.example
+
+# Local credentials and signing material; never send these into Docker build
+# context where a broad COPY could bake them into an image layer.
+/.secrets
+/auth.json
+/storage/*.key
+/storage/**/*.key
 
 /public/build
 /public/hot

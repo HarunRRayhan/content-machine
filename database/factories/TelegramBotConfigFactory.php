@@ -24,7 +24,7 @@ class TelegramBotConfigFactory extends Factory
             'bot_token' => null,
             'webhook_secret' => null,
             'webhook_slug' => null,
-            'webhook_generation' => null,
+            'webhook_generation' => (string) Str::uuid(),
             'bot_username' => null,
             'ai_chat_enabled' => false,
             'connected_at' => null,

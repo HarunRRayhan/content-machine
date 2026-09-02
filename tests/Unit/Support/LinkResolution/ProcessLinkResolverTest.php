@@ -106,6 +106,20 @@ class ProcessLinkResolverTest extends TestCase
         $this->assertSame('metadata only (no readable title or description)', $resolved->resolvedVia);
     }
 
+    public function test_it_reports_unresolved_when_a_successful_page_has_no_content_type(): void
+    {
+        Process::fake(['*' => Process::result(exitCode: 1)]);
+
+        Http::fake([
+            '*' => Http::response('<html><title>Missing header</title></html>', 200),
+        ]);
+
+        $resolved = (new ProcessLinkResolver)->resolve('https://example.com/missing-content-type');
+
+        $this->assertSame('unresolved', $resolved->kind);
+        $this->assertSame('metadata only (page fetch failed)', $resolved->resolvedVia);
+    }
+
     public function test_it_does_not_buffer_an_oversized_html_page(): void
     {
         Process::fake(['*' => Process::result(exitCode: 1)]);

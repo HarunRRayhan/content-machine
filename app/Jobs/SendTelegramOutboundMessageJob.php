@@ -66,6 +66,16 @@ class SendTelegramOutboundMessageJob implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
+        if ($exception !== null) {
+            report($exception);
+        }
+
+        // A pre-lease serialized job cannot prove that it still owns a
+        // pending row. The outbox dispatcher will recover it by state instead.
+        if ($this->dispatchLeaseId === null) {
+            return;
+        }
+
         $recorded = DB::transaction(function (): bool {
             $query = TelegramOutboundMessage::query()
                 ->whereKey($this->telegramOutboundMessageId)
@@ -103,8 +113,6 @@ class SendTelegramOutboundMessageJob implements ShouldQueue
             return true;
         });
 
-        if ($recorded && $exception !== null) {
-            report($exception);
-        }
+        unset($recorded);
     }
 }

@@ -54,7 +54,10 @@ final class HttpTelegramClient implements TelegramClientContract
                 'allowed_updates' => json_encode(['message']),
             ]);
         } catch (Throwable) {
-            return TelegramApiResult::failure('Could not reach Telegram to register the webhook.');
+            return TelegramApiResult::failure(
+                'Could not reach Telegram to register the webhook.',
+                outcomeUnknown: true,
+            );
         }
 
         return $this->toApiResult($response, 'Telegram rejected the webhook registration.');
@@ -65,10 +68,46 @@ final class HttpTelegramClient implements TelegramClientContract
         try {
             $response = Http::timeout(10)->post(self::API_BASE_URL."/bot{$botToken}/deleteWebhook");
         } catch (Throwable) {
-            return TelegramApiResult::failure('Could not reach Telegram to remove the webhook.');
+            return TelegramApiResult::failure(
+                'Could not reach Telegram to remove the webhook.',
+                outcomeUnknown: true,
+            );
         }
 
         return $this->toApiResult($response, 'Telegram rejected the webhook removal.');
+    }
+
+    public function getWebhookInfo(string $botToken): TelegramWebhookInfoResult
+    {
+        try {
+            $response = Http::timeout(10)->get(self::API_BASE_URL."/bot{$botToken}/getWebhookInfo");
+        } catch (Throwable) {
+            return TelegramWebhookInfoResult::failure('Could not reach Telegram to inspect the webhook.');
+        }
+
+        if (! $response->successful() || $response->json('ok') !== true) {
+            $description = $response->json('description');
+
+            return TelegramWebhookInfoResult::failure(
+                is_string($description) && $description !== ''
+                    ? $description
+                    : 'Telegram returned an unexpected webhook response.',
+            );
+        }
+
+        $url = $response->json('result.url');
+        $url = is_string($url) ? $url : null;
+        $pendingUpdateCount = $response->json('result.pending_update_count');
+        $pendingUpdateCount = is_int($pendingUpdateCount)
+            || (is_string($pendingUpdateCount) && ctype_digit($pendingUpdateCount))
+            ? (int) $pendingUpdateCount
+            : null;
+
+        if ($url === null || $pendingUpdateCount === null) {
+            return TelegramWebhookInfoResult::failure('Telegram returned incomplete webhook information.');
+        }
+
+        return TelegramWebhookInfoResult::success($url, $pendingUpdateCount);
     }
 
     public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult

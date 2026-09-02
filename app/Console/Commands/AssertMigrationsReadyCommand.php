@@ -30,7 +30,7 @@ class AssertMigrationsReadyCommand extends Command
             );
             $pending = array_diff(array_keys($files), $ran);
 
-            if (app()->environment('production') && ! config('app.telegram_cutover_ready')) {
+            if (app()->environment('production', 'prod') && ! config('app.telegram_cutover_ready')) {
                 $deferred = array_map(
                     fn (string $migration): string => pathinfo($migration, PATHINFO_FILENAME),
                     DeployCommand::TELEGRAM_CUTOVER_MIGRATIONS,

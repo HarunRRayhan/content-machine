@@ -20,7 +20,7 @@ class DispatchPendingTelegramUpdatesCommandTest extends TestCase
         $payload = [
             'update_id' => 77,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'text' => 'pending',
             ],
@@ -67,6 +67,26 @@ class DispatchPendingTelegramUpdatesCommandTest extends TestCase
         ]);
     }
 
+    public function test_it_marks_missing_payloads_as_unreplayable_instead_of_leaving_them_pending(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $update = TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'update_id' => 102,
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-updates')
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 0 pending Telegram update(s).');
+
+        $update->refresh();
+        $this->assertNotNull($update->failed_at);
+        $this->assertSame(
+            'The Telegram update payload was not stored and cannot be replayed.',
+            $update->last_error,
+        );
+    }
+
     public function test_failed_updates_are_reopened_only_with_the_explicit_option(): void
     {
         Queue::fake();
@@ -77,7 +97,7 @@ class DispatchPendingTelegramUpdatesCommandTest extends TestCase
             'payload' => [
                 'update_id' => 101,
                 'message' => [
-                    'chat' => ['id' => 555],
+                    'chat' => ['id' => 555, 'type' => 'private'],
                     'from' => ['id' => 42],
                     'text' => 'retry me',
                 ],

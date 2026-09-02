@@ -24,4 +24,11 @@ class CurrentApiToken
     {
         return $this->token;
     }
+
+    public function can(string $ability): bool
+    {
+        // Resources are also used by MCP and internal callers, where there is
+        // no bearer token and the complete representation is intentional.
+        return $this->token === null || $this->token->hasAbility($ability);
+    }
 }

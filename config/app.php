@@ -154,6 +154,14 @@ return [
 
     'admin_name' => env('ADMIN_NAME', 'Admin'),
 
-    'telegram_cutover_ready' => (bool) env('CM_TELEGRAM_CUTOVER_READY', false),
+    'telegram_cutover_ready' => filter_var(
+        env('CM_TELEGRAM_CUTOVER_READY', false),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
+
+    'telegram_old_web_fleet_drained' => filter_var(
+        env('CM_TELEGRAM_OLD_WEB_FLEET_DRAINED', false),
+        FILTER_VALIDATE_BOOLEAN,
+    ),
 
 ];

@@ -24,6 +24,14 @@ Schedule::command('telegram:dispatch-pending-post-work')
     ->everyMinute()
     ->withoutOverlapping(2);
 
+Schedule::command('telegram:recover-connection-operations')
+    ->everyMinute()
+    ->withoutOverlapping(2);
+
+Schedule::command('cm:requeue-legacy-media-jobs')
+    ->everyMinute()
+    ->withoutOverlapping(2);
+
 Schedule::command('postsyncer:dispatch-pending-publishes')
     ->everyMinute()
     ->withoutOverlapping(2);

@@ -17,6 +17,7 @@ use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
@@ -69,7 +70,12 @@ class CaptureTelegramMessageAction
             return null;
         }
 
-        $chatId = $message['chat']['id'] ?? null;
+        $chat = $message['chat'] ?? null;
+        if (! is_array($chat) || ($chat['type'] ?? null) !== 'private') {
+            return null;
+        }
+
+        $chatId = $chat['id'] ?? null;
         $fromUserId = $message['from']['id'] ?? null;
 
         if (! is_int($chatId) || ! is_int($fromUserId)) {
@@ -79,27 +85,13 @@ class CaptureTelegramMessageAction
         $this->replyContextKey = $telegramUpdateKey
             ?? hash('sha256', $config->id.':'.serialize($update));
 
-        // Guaranteed non-null: ProcessTelegramUpdateJob only calls this
-        // Action for a connected config. Narrowed here, once, so every
-        // downloadFile()/sendMessage() call below gets a definite string
-        // rather than repeating a null-check at each call site.
-        $botToken = $config->bot_token;
-
-        if ($botToken === null) {
-            return null;
-        }
-
-        $workspace = $config->workspace;
-
         if ($telegramUpdateKey !== null) {
             $lock = Cache::lock('telegram:capture:'.$telegramUpdateKey, 120);
             $lock->block(30);
 
             try {
-                return $this->captureUnlocked(
+                return $this->captureCurrentGeneration(
                     $config,
-                    $botToken,
-                    $workspace,
                     $chatId,
                     $update,
                     $reply,
@@ -111,16 +103,70 @@ class CaptureTelegramMessageAction
             }
         }
 
-        return $this->captureUnlocked(
+        return $this->captureCurrentGeneration(
             $config,
-            $botToken,
-            $workspace,
             $chatId,
             $update,
             $reply,
             $queueEnrichment,
             null,
         );
+    }
+
+    /**
+     * Keep the bot identity locked through the capture and its Telegram
+     * acknowledgement. Rotation must not commit between the generation check
+     * and persistence of a source capture.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function captureCurrentGeneration(
+        TelegramBotConfig $config,
+        int $chatId,
+        array $update,
+        bool $reply,
+        bool $queueEnrichment,
+        ?string $telegramUpdateKey,
+    ): ?ScratchpadEntry {
+        return DB::transaction(function () use ($config, $chatId, $update, $reply, $queueEnrichment, $telegramUpdateKey): ?ScratchpadEntry {
+            $configReference = TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->first(['workspace_id']);
+
+            if ($configReference === null) {
+                return null;
+            }
+
+            Workspace::query()
+                ->whereKey($configReference->workspace_id)
+                ->lockForUpdate()
+                ->first();
+
+            $lockedConfig = TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedConfig === null
+                || ! $lockedConfig->isConnected()
+                || ($config->webhook_generation !== null
+                    && $lockedConfig->webhook_generation !== $config->webhook_generation)
+                || $lockedConfig->bot_token === null
+            ) {
+                return null;
+            }
+
+            return $this->captureUnlocked(
+                $lockedConfig,
+                $lockedConfig->bot_token,
+                $lockedConfig->workspace,
+                $chatId,
+                $update,
+                $reply,
+                $queueEnrichment,
+                $telegramUpdateKey,
+            );
+        });
     }
 
     /**

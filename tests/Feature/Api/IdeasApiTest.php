@@ -133,4 +133,22 @@ class IdeasApiTest extends TestCase
 
         $this->assertSame(1, Idea::query()->where('human_id', 'VI-27')->count());
     }
+
+    public function test_a_write_only_token_does_not_receive_idea_details(): void
+    {
+        $writeToken = (new CreateWorkspaceApiTokenAction)->handle(
+            $this->workspace,
+            User::factory()->create(),
+            new CreateWorkspaceApiTokenData('write-only', ['ideas:write']),
+        )['plaintext'];
+
+        $this->withToken($writeToken)->postJson('/api/v1/ideas', [
+            'kind' => 'post',
+            'title' => 'Private idea',
+            'body' => 'Private rationale',
+        ])
+            ->assertCreated()
+            ->assertJsonMissingPath('data.body')
+            ->assertJsonMissingPath('data.details');
+    }
 }

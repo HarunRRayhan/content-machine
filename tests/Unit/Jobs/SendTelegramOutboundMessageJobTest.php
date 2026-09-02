@@ -9,7 +9,9 @@ use App\Models\TelegramOutboundMessage;
 use App\Support\Telegram\TelegramApiResult;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
@@ -152,5 +154,35 @@ class SendTelegramOutboundMessageJobTest extends TestCase
         (new SendTelegramOutboundMessageJob($message->id))->failed(new RuntimeException('late failure'));
 
         $this->assertSame(TelegramOutboundMessage::SENT, $message->refresh()->status);
+    }
+
+    public function test_identity_lock_contention_releases_a_recovery_lease_without_failing_the_row(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $leaseId = (string) Str::uuid();
+        $message = TelegramOutboundMessage::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'dispatch_claimed_at' => now(),
+            'dispatch_lease_id' => $leaseId,
+        ]);
+        $client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $client);
+        $lock = Cache::lock('telegram:bot-identity:workspace:'.$config->workspace_id, 120);
+        $this->assertTrue($lock->get());
+
+        try {
+            (new SendTelegramOutboundMessageJob($message->id, $leaseId))
+                ->handle(app(SendTelegramOutboundMessageAction::class));
+        } finally {
+            $lock->release();
+        }
+
+        $message->refresh();
+        $this->assertSame(TelegramOutboundMessage::PENDING, $message->status);
+        $this->assertNull($message->dispatch_claimed_at);
+        $this->assertNull($message->dispatch_lease_id);
+        $this->assertSame([], $client->sentMessages);
     }
 }

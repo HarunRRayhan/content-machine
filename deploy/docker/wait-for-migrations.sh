@@ -2,6 +2,12 @@
 
 set -eu
 
+case "${CM_MIGRATION_GATE:-true}" in
+    0|false|FALSE|no|NO)
+        exit 0
+        ;;
+esac
+
 cd /var/www/html
 
 attempt=0

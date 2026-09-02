@@ -72,4 +72,36 @@ class TeamManagementTest extends TestCase
 
         $response->assertSessionHasErrors(['email', 'role']);
     }
+
+    public function test_a_member_cannot_send_an_invitation(): void
+    {
+        $team = Team::factory()->create();
+        $user = User::factory()->create(['current_team_id' => $team->id]);
+        $team->members()->attach($user->id, ['role' => 'member']);
+
+        $this->actingAs($user)
+            ->post(route('dashboard.team.invitations.store'), [
+                'email' => 'new-member@example.com',
+                'role' => 'member',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('team_invitations', ['email' => 'new-member@example.com']);
+    }
+
+    public function test_an_admin_cannot_invite_an_owner(): void
+    {
+        $team = Team::factory()->create();
+        $user = User::factory()->create(['current_team_id' => $team->id]);
+        $team->members()->attach($user->id, ['role' => 'admin']);
+
+        $this->actingAs($user)
+            ->post(route('dashboard.team.invitations.store'), [
+                'email' => 'new-owner@example.com',
+                'role' => 'owner',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('team_invitations', ['email' => 'new-owner@example.com']);
+    }
 }

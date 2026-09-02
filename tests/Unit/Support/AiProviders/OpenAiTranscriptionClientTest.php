@@ -4,6 +4,7 @@ namespace Tests\Unit\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
 use App\Support\AiProviders\OpenAiTranscriptionClient;
+use App\Support\LinkResolution\PublicUrlGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -39,9 +40,28 @@ class OpenAiTranscriptionClientTest extends TestCase
 
         $credential = AiProviderCredential::factory()->openai()->make(['base_url' => 'https://proxy.example.com/openai/v1']);
 
-        (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
+        (new OpenAiTranscriptionClient(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '1.1.1.1']],
+        )))->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
 
         Http::assertSent(fn ($request) => $request->url() === 'https://proxy.example.com/openai/v1/audio/transcriptions');
+    }
+
+    public function test_a_custom_base_url_resolving_to_a_private_ip_is_rejected(): void
+    {
+        Http::fake();
+
+        $credential = AiProviderCredential::factory()->make([
+            'base_url' => 'https://internal.example/v1',
+        ]);
+
+        $result = (new OpenAiTranscriptionClient(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '192.168.1.1']],
+        )))->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('Could not reach the transcription provider.', $result->error);
+        Http::assertNothingSent();
     }
 
     public function test_a_provider_error_message_is_surfaced_when_present()

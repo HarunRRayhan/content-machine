@@ -3,6 +3,7 @@
 namespace App\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
+use App\Support\LinkResolution\PublicUrlGuard;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -18,17 +19,28 @@ final class OpenAiTranscriptionClient implements AiTranscriptionClientContract
 
     private const MODEL = 'whisper-1';
 
+    public function __construct(
+        private readonly ?PublicUrlGuard $urlGuard = null,
+    ) {}
+
     public function transcribe(AiProviderCredential $credential, string $audioContents, string $filename, string $mimeType): AiTranscriptionResult
     {
-        // See HttpAiProviderVerifier::verifyOpenAi() for why this is a bare
-        // "/audio/transcriptions": the base URL already carries the version.
-        $baseUrl = rtrim($credential->base_url ?? self::DEFAULT_BASE_URL, '/');
-
         try {
+            // See HttpAiProviderVerifier::verifyOpenAi() for why this is a bare
+            // "/audio/transcriptions": the base URL already carries the version.
+            $endpoint = (new AiProviderBaseUrl($this->urlGuard))->resolve(
+                $credential->base_url,
+                self::DEFAULT_BASE_URL,
+            );
+
             $response = Http::withToken($credential->api_key)
                 ->timeout(60)
+                ->withOptions([
+                    'allow_redirects' => false,
+                    ...$endpoint['options'],
+                ])
                 ->attach('file', $audioContents, $filename, ['Content-Type' => $mimeType])
-                ->post("{$baseUrl}/audio/transcriptions", [
+                ->post($endpoint['url'].'/audio/transcriptions', [
                     'model' => self::MODEL,
                     'response_format' => 'verbose_json',
                 ]);

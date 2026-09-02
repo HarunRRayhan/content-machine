@@ -92,7 +92,11 @@ class VideosApiController extends Controller
             'video_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['nullable', 'string', Rule::in(Video::STATUSES)],
-            'idea_id' => ['nullable', 'integer'],
+            'idea_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('ideas', 'id')->where('workspace_id', $workspace->id),
+            ],
         ]);
 
         $video = $action->handle($workspace, $payload);

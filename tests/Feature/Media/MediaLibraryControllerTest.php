@@ -119,6 +119,20 @@ class MediaLibraryControllerTest extends TestCase
         Storage::disk('scratchpad')->assertExists($asset->path);
     }
 
+    public function test_store_rejects_svg_uploads(): void
+    {
+        Storage::fake('scratchpad');
+        $this->actingAsWorkspaceMember();
+
+        $this->post(route('media.store'), [
+            'tab' => 'images',
+            'file' => UploadedFile::fake()->create('unsafe.svg', 1, 'image/svg+xml'),
+        ])
+            ->assertSessionHasErrors('file');
+
+        $this->assertDatabaseCount('media_assets', 0);
+    }
+
     public function test_show_is_scoped_to_the_current_workspace(): void
     {
         $this->actingAsWorkspaceMember();

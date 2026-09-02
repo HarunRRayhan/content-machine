@@ -712,6 +712,22 @@ class PostsControllerTest extends TestCase
             ->assertHeader('Content-Type', 'image/jpeg');
     }
 
+    public function test_media_404s_for_an_unattached_asset_in_the_current_workspace(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create();
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/unattached.jpg',
+            'mime' => 'image/jpeg',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'secret');
+
+        $this->get(route('posts.media', [$post, $media]))->assertNotFound();
+    }
+
     public function test_media_404s_for_an_asset_in_a_different_workspace(): void
     {
         Storage::fake('scratchpad');

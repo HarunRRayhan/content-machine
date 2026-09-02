@@ -7,6 +7,7 @@ use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishPostJob;
 use App\Models\Attachment;
+use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
@@ -66,6 +67,52 @@ class PostsApiTest extends TestCase
         ])
             ->assertOk()
             ->assertJsonPath('data.status', 'archived');
+    }
+
+    public function test_an_explicit_import_advances_the_generated_post_sequence(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'BP-1',
+            'number' => 1,
+            'title' => 'Imported post',
+        ])->assertCreated();
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'title' => 'Generated post',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'P-2');
+    }
+
+    public function test_store_rejects_an_idea_from_another_workspace(): void
+    {
+        $foreignIdea = Idea::factory()->for(Workspace::factory())->create();
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'title' => 'Cross-workspace post',
+            'idea_id' => $foreignIdea->id,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('idea_id');
+
+        $this->assertDatabaseMissing('posts', ['title' => 'Cross-workspace post']);
+    }
+
+    public function test_a_write_only_token_does_not_receive_the_post_body(): void
+    {
+        $writeToken = (new CreateWorkspaceApiTokenAction)->handle(
+            $this->workspace,
+            User::factory()->create(),
+            new CreateWorkspaceApiTokenData('write-only', ['posts:write']),
+        )['plaintext'];
+
+        $this->withToken($writeToken)->postJson('/api/v1/posts', [
+            'title' => 'Private post',
+            'body' => 'Private body',
+        ])
+            ->assertCreated()
+            ->assertJsonMissingPath('data.body')
+            ->assertJsonMissingPath('data.captions');
     }
 
     public function test_index_omits_heavy_fields_by_default(): void

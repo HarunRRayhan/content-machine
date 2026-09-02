@@ -156,6 +156,10 @@ class PostsController extends Controller
 
         abort_if($post->workspace_id !== $workspace->id, 404);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+        abort_unless(
+            $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(),
+            404,
+        );
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,

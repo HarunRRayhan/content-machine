@@ -40,6 +40,7 @@ class CreateVideoAction
                 $number = isset($attributes['number'])
                     ? (int) $attributes['number']
                     : $this->numberFromHumanId($humanId);
+                $this->reserveContentIdAction->advancePast($workspace, 'video', $number);
             } else {
                 $contentId = $this->reserveContentIdAction->handle($workspace, 'video');
                 $humanId = $contentId->human_id;

@@ -44,6 +44,16 @@ class TranscribeVoiceNoteJob implements ShouldQueue
 
     public function handle(TranscribeVoiceNoteAction $action): void
     {
+        if ($this->queue !== 'scratchpad') {
+            self::dispatch(
+                $this->transcription,
+                $this->workRequestId,
+                $this->workLeaseId,
+            )->onQueue('scratchpad');
+
+            return;
+        }
+
         $requestId = $this->workRequestId;
         if ($requestId === null) {
             $entryId = $this->transcription->scratchpad_entry_id;

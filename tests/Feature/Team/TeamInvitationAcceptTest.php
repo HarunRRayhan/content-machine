@@ -40,8 +40,11 @@ class TeamInvitationAcceptTest extends TestCase
     public function test_an_authenticated_visitor_can_accept_directly()
     {
         $team = Team::factory()->create();
-        $invitation = TeamInvitation::factory()->for($team)->create(['role' => 'admin']);
         $user = User::factory()->create(['current_team_id' => null]);
+        $invitation = TeamInvitation::factory()->for($team)->create([
+            'email' => $user->email,
+            'role' => 'admin',
+        ]);
 
         $response = $this->actingAs($user)->post(route('invitations.accept', $invitation->token));
 
@@ -53,6 +56,22 @@ class TeamInvitationAcceptTest extends TestCase
         ]);
         $this->assertSame($team->id, $user->fresh()->current_team_id);
         $this->assertNotNull($invitation->fresh()->accepted_at);
+    }
+
+    public function test_an_authenticated_user_with_a_different_email_cannot_accept(): void
+    {
+        $invitation = TeamInvitation::factory()->create(['email' => 'invited@example.com']);
+        $user = User::factory()->create(['email' => 'other@example.com']);
+
+        $this->actingAs($user)
+            ->post(route('invitations.accept', $invitation->token))
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('team_user', [
+            'team_id' => $invitation->team_id,
+            'user_id' => $user->id,
+        ]);
+        $this->assertNull($invitation->fresh()->accepted_at);
     }
 
     public function test_accepting_an_expired_invitation_fails_gracefully()
