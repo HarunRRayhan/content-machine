@@ -594,6 +594,76 @@ class PublishVideoActionTest extends TestCase
         $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
     }
 
+    public function test_reconciliation_replaces_a_duplicate_completed_checkpoint(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'gateway timeout',
+            ], 500),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+        $options = [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ];
+
+        $this->action->handle($video, $options);
+        $video->refresh();
+
+        $progress = $video->publish_progress;
+        $progress['completed_groups'][] = [
+            'index' => 0,
+            'group_key' => $progress['current']['group_key'],
+            'post_id' => '98',
+            'status' => 'PUBLISHED',
+            'scheduled_at' => null,
+            'platforms' => ['facebook'],
+            'language' => 'bangla',
+        ];
+        $video->forceFill(['publish_progress' => $progress])->save();
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS', 'caption' => 'Reel caption',
+                ]]],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $this->action->reconcile($video, 99);
+
+        $video->refresh();
+        $this->assertCount(1, $video->publish_progress['completed_groups']);
+        $this->assertSame('99', $video->publish_progress['completed_groups'][0]['post_id']);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'must not create again',
+            ], 500),
+        ]);
+        $this->action->handle($video, $options);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        Http::assertNothingSent();
+    }
+
     public function test_second_publish_is_refused_when_groups_have_post_ids(): void
     {
         Http::fake();
@@ -713,6 +783,90 @@ class PublishVideoActionTest extends TestCase
         $this->assertStringContainsString('PostSyncer API error 422', $video->publish_error);
         $this->assertSame('recorded', $video->status);
         $this->assertNull($video->postsyncer);
+    }
+
+    public function test_missing_account_mapping_is_retriable_without_uploading_media(): void
+    {
+        $ready = false;
+        Http::fake(function ($request) use (&$ready) {
+            if (! $ready) {
+                return Http::response(['message' => 'Unexpected request'], 500);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/media/upload/url') {
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response(['id' => 42, 'status' => 'published'], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'REELS', 'caption' => 'Reel caption',
+                    ]]],
+                    'status' => 'PUBLISHED',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+        $options = [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ];
+
+        $this->action->handle($video, $options);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('No account id mapped', (string) $video->publish_error);
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertTrue($video->canRetryPublish());
+        Http::assertNothingSent();
+
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                    ],
+                ],
+            ],
+        ]);
+        $ready = true;
+
+        $this->action->handle($video, $options);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
     }
 
     public function test_lost_create_response_records_an_uncertain_current_group(): void

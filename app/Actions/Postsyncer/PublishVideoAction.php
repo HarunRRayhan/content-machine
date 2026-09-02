@@ -68,6 +68,7 @@ class PublishVideoAction
             if ($progress === null) {
                 return;
             }
+            $this->assertAccountsConfigured($config, $groups);
             $completedGroups = $this->completedGroups($progress);
 
             if (! $this->allPlannedGroupsCompleted($progress)) {
@@ -378,14 +379,17 @@ class PublishVideoAction
                 $confirmFailed,
             );
 
-            $completedGroups = $this->completedGroups($latestProgress);
-            $completedGroups[] = $this->formatProgressGroup(
+            $reconciledGroup = $this->formatProgressGroup(
                 $latestGroup,
                 $remote,
                 $index,
                 $current['group_key'],
                 $confirmFailed && strtoupper((string) ($remote['status'] ?? '')) === 'FAILED',
                 $this->buildPostBody($latestConfig, $latestGroup, $current['media_ids']),
+            );
+            $completedGroups = $this->upsertCompletedGroup(
+                $this->completedGroups($latestProgress),
+                $reconciledGroup,
             );
             usort(
                 $completedGroups,
@@ -661,6 +665,23 @@ class PublishVideoAction
     }
 
     /**
+     * Validate all account mappings before any media is registered remotely.
+     * The progress checkpoint is already persisted, so a settings fix can be
+     * applied and retried without leaving an uncertain media upload behind.
+     *
+     * @param  list<PublishGroup>  $groups
+     */
+    private function assertAccountsConfigured(PostsyncerConfig $config, array $groups): void
+    {
+        foreach ($groups as $group) {
+            $this->buildAccounts(
+                $config->language($group->language)['platforms'],
+                $group,
+            );
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $platformAccounts
      * @return list<array{id: int|string, settings: array<string, mixed>}>
      */
@@ -893,13 +914,7 @@ class PublishVideoAction
 
         $completed = $this->completedGroups($latest);
         foreach ($this->completedGroups($local) as $localGroup) {
-            if ($this->completedGroup(
-                $completed,
-                (int) ($localGroup['index'] ?? -1),
-                (string) ($localGroup['group_key'] ?? ''),
-            ) === null) {
-                $completed[] = $localGroup;
-            }
+            $completed = $this->upsertCompletedGroup($completed, $localGroup);
         }
 
         usort(
@@ -1558,10 +1573,16 @@ class PublishVideoAction
         } elseif (! is_string($storedHash)
             || $storedHash !== $plan['hash']
             || $storedGroups !== $plan['groups']) {
-            throw new PostsyncerException(
-                'The publish plan changed since this operation started. '
-                .'Reconcile the existing PostSyncer posts before retrying.'
-            );
+            if ($this->completedGroups($existing) === []
+                && ($existing['current'] ?? null) === null) {
+                $existing['plan_hash'] = $plan['hash'];
+                $existing['planned_groups'] = $plan['groups'];
+            } else {
+                throw new PostsyncerException(
+                    'The publish plan changed since this operation started. '
+                    .'Reconcile the existing PostSyncer posts before retrying.'
+                );
+            }
         }
 
         $this->assertCompletedGroupsBelongToPlan($existing, $plan['groups']);
@@ -1709,6 +1730,37 @@ class PublishVideoAction
         }
 
         return null;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $groups
+     * @param  array<string, mixed>  $replacement
+     * @return list<array<string, mixed>>
+     */
+    private function upsertCompletedGroup(array $groups, array $replacement): array
+    {
+        $upserted = false;
+        $deduplicated = [];
+
+        foreach ($groups as $group) {
+            if (($group['index'] ?? null) === ($replacement['index'] ?? null)
+                && ($group['group_key'] ?? null) === ($replacement['group_key'] ?? null)) {
+                if (! $upserted) {
+                    $deduplicated[] = $replacement;
+                    $upserted = true;
+                }
+
+                continue;
+            }
+
+            $deduplicated[] = $group;
+        }
+
+        if (! $upserted) {
+            $deduplicated[] = $replacement;
+        }
+
+        return $deduplicated;
     }
 
     /**
