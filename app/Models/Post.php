@@ -32,6 +32,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property array<string, mixed>|null $platforms
  * @property array<int, string>|null $image_drive_urls
  * @property array<string, mixed>|null $postsyncer
+ * @property array<string, mixed>|null $publish_progress
  * @property string $publish_state
  * @property string|null $publish_error
  * @property array<string, mixed>|null $publish_progress
@@ -90,8 +91,6 @@ class Post extends Model
         'image_drive_urls',
         'postsyncer',
         'publish_progress',
-        'publish_claimed_at',
-        'publish_lease_id',
         'publish_state',
         'publish_error',
         'approval_state',
@@ -112,9 +111,48 @@ class Post extends Model
             'image_drive_urls' => 'array',
             'postsyncer' => 'array',
             'publish_progress' => 'array',
-            'publish_claimed_at' => 'datetime',
-            'approved_at' => 'datetime',
         ];
+    }
+
+    public function isPublishInProgress(): bool
+    {
+        return in_array($this->publish_state, ['queued', 'running'], true);
+    }
+
+    public function hasUncertainPublish(): bool
+    {
+        $progress = $this->publish_progress;
+
+        return is_array($progress)
+            && (($progress['state'] ?? null) === 'uncertain'
+                || ($progress['current'] ?? null) !== null);
+    }
+
+    public function canRetryPublish(): bool
+    {
+        if ($this->publish_state !== 'failed') {
+            return false;
+        }
+
+        $groups = $this->postsyncer['groups'] ?? null;
+        if (is_array($groups)) {
+            foreach ($groups as $group) {
+                if (is_array($group) && filled($group['post_id'] ?? null)) {
+                    return false;
+                }
+            }
+        }
+
+        $progress = $this->publish_progress;
+
+        if (! is_array($progress) || ($progress['state'] ?? null) !== 'failed') {
+            return false;
+        }
+
+        $current = $progress['current'] ?? null;
+
+        return $current === null
+            || (is_array($current) && ($current['phase'] ?? null) === 'retryable');
     }
 
     /**

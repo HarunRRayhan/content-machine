@@ -75,7 +75,7 @@ class PostsApiTest extends TestCase
             'number' => 57,
             'body' => str_repeat('paragraph ', 80),
             'captions' => ['facebook' => str_repeat('caption ', 40)],
-            'approval_state' => 'pending',
+            'template' => 'C',
         ]);
 
         $this->acting()->getJson('/api/v1/posts')
@@ -84,6 +84,7 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.0.approval_state', 'pending')
             ->assertJsonPath('data.0.has_body', true)
             ->assertJsonPath('data.0.has_captions', true)
+            ->assertJsonPath('data.0.template', 'C')
             ->assertJsonMissingPath('data.0.body')
             ->assertJsonMissingPath('data.0.captions');
     }
@@ -335,6 +336,7 @@ class PostsApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.human_id', 'CM-TEST-1')
             ->assertJsonPath('data.publish_state', 'queued')
+            ->assertJsonMissingPath('data.publish_progress')
             ->assertJsonPath('data.publish_error', null);
 
         $post = Post::query()->where('human_id', 'CM-TEST-1')->sole();

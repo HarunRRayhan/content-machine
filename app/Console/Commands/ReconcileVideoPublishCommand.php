@@ -2,39 +2,39 @@
 
 namespace App\Console\Commands;
 
-use App\Actions\Postsyncer\PublishPostAction;
-use App\Models\Post;
+use App\Actions\Postsyncer\PublishVideoAction;
+use App\Models\Video;
 use Illuminate\Console\Command;
 use Throwable;
 
-class ReconcilePostPublishCommand extends Command
+class ReconcileVideoPublishCommand extends Command
 {
-    protected $signature = 'postsyncer:reconcile-post
+    protected $signature = 'postsyncer:reconcile-video
                             {workspace_id : Content Machine workspace id}
-                            {post : Content Machine post human id}
+                            {video : Content Machine video human id}
                             {postsyncer_id : PostSyncer post id created by the uncertain attempt}
                             {--confirm-failed : Explicitly accept a matching remote post whose status is FAILED}';
 
-    protected $description = 'Verify and checkpoint a PostSyncer post after a lost create response';
+    protected $description = 'Verify and checkpoint a PostSyncer video after a lost create response';
 
-    public function handle(PublishPostAction $action): int
+    public function handle(PublishVideoAction $action): int
     {
         $workspaceId = (int) $this->argument('workspace_id');
-        $humanId = (string) $this->argument('post');
+        $humanId = (string) $this->argument('video');
         $postsyncerId = (string) $this->argument('postsyncer_id');
-        $post = Post::query()
+        $video = Video::query()
             ->where('workspace_id', $workspaceId)
             ->where('human_id', $humanId)
             ->first();
 
-        if ($post === null) {
-            $this->components->error("Post {$humanId} was not found in workspace {$workspaceId}.");
+        if ($video === null) {
+            $this->components->error("Video {$humanId} was not found in workspace {$workspaceId}.");
 
             return self::FAILURE;
         }
 
         try {
-            $action->reconcile($post, $postsyncerId, (bool) $this->option('confirm-failed'));
+            $action->reconcile($video, $postsyncerId, (bool) $this->option('confirm-failed'));
         } catch (Throwable $exception) {
             $this->components->error($exception->getMessage());
 

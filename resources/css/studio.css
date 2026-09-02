@@ -121,6 +121,11 @@
     flex-wrap: wrap;
 }
 
+.studio-page .post-tabbar {
+    margin-left: auto;
+    margin-right: auto;
+}
+
 .studio-page .tabbar button,
 .studio-page .tabbar a {
     font-family: var(--font-bn);

@@ -98,6 +98,7 @@ class PostsController extends Controller
                 'number',
                 'human_id',
                 'title',
+                'template',
                 'status',
                 'publish_state',
                 'approval_state',
@@ -243,6 +244,8 @@ class PostsController extends Controller
             'human_id' => $post->human_id,
             'number' => $post->number,
             'title' => $post->title,
+            'template' => $post->template,
+            'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'approval_state' => $post->approval_state ?? 'approved',
@@ -341,9 +344,17 @@ class PostsController extends Controller
             ))->forPreview();
         }
 
-        $timezone = $workspace !== null && trim($workspace->timezone) !== ''
-            ? $workspace->timezone
-            : 'Asia/Dhaka';
+        $publishOptions = is_array($post->publish_progress)
+            && is_array($post->publish_progress['options'] ?? null)
+            ? $post->publish_progress['options']
+            : [];
+        $needsConfirmAsk = $postsyncerConfig !== null
+            && app(PostPublishPlanner::class)->needsConfirmAsk(
+                $post,
+                $postsyncerConfig,
+                $publishOptions,
+            )
+            && ! (bool) ($publishOptions['confirm_ask'] ?? false);
 
         return [
             'id' => $post->id,
@@ -366,13 +377,10 @@ class PostsController extends Controller
             'status' => $post->status,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
-            'publish_progress' => $post->publish_progress,
-            'approval_state' => $post->approval_state ?? 'approved',
-            'timezone' => $timezone,
+            'publish_retryable' => $post->canRetryPublish(),
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
-            'needs_confirm_ask' => $postsyncerConfig !== null
-                && app(PostPublishPlanner::class)->needsConfirmAsk($post, $postsyncerConfig),
+            'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),

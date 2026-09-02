@@ -66,6 +66,7 @@ Token abilities (additive): `videos:read`, `videos:write`, `posts:read`, `posts:
 | GET | `/api/v1/videos/{human_id}/media/{mediaAsset}` | videos:read |
 | GET/POST/PATCH | `/api/v1/posts` … | posts:* |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write |
+| POST | `/api/v1/posts/{human_id}/publish` | posts:write; queues the resumable PostSyncer publish job |
 | GET | `/api/v1/posts/{human_id}/media/{mediaAsset}` | posts:read |
 
 List endpoints are cursor-paginated like ideas. Create accepts an optional `human_id` for idempotent import.

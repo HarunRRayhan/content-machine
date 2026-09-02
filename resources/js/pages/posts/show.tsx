@@ -10,7 +10,6 @@ import type { LangCode } from '@/lib/lang-meta';
 import type { HandleDirectory } from '@/lib/post-caption-mock';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
-import { show as showTemplate } from '@/routes/media/templates';
 import { index } from '@/routes/posts';
 
 type PostDetail = {
@@ -47,20 +46,13 @@ type PostDetail = {
         letter: string;
         name: string;
         label: string;
+        preview_url: string;
+        visual_identity: string;
     } | null;
     status: string;
     publish_state: string;
     publish_error: string | null;
-    publish_progress: {
-        state?: string;
-        current?: {
-            index?: number;
-            group_key?: string;
-            phase?: string;
-        } | null;
-    } | null;
-    approval_state: string;
-    timezone: string;
+    publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
@@ -112,19 +104,6 @@ export default function PostShow({ post }: PageProps) {
                     <div className="vhead-t">
                         <span className="no">P-{post.number}</span>
                         <h2>{post.title}</h2>
-                        {post.template_meta && (
-                            <Link
-                                href={showTemplate.url(
-                                    post.template_meta.letter,
-                                )}
-                                className="mt-1 inline-flex w-fit items-center rounded-md border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:border-foreground/40 hover:text-foreground"
-                            >
-                                {post.template_meta.label}
-                                <span className="ml-1 text-muted-foreground">
-                                    · {post.template_meta.name}
-                                </span>
-                            </Link>
-                        )}
                     </div>
                 </div>
 
@@ -146,7 +125,7 @@ export default function PostShow({ post }: PageProps) {
                     contentStatus={post.status}
                 />
 
-                <div className="tabbar" role="tablist">
+                <div className="tabbar post-tabbar" role="tablist">
                     <button
                         type="button"
                         role="tab"
@@ -172,14 +151,12 @@ export default function PostShow({ post }: PageProps) {
                         status={post.status}
                         platforms={post.platforms}
                         language={post.language}
+                        templateMeta={post.template_meta}
                         workspaces={post.workspaces}
                         publishUrl={`/posts/${post.id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
-                        publishProgress={post.publish_progress}
-                        reconcileUrl={`/posts/${post.id}/reconcile`}
-                        approvalState={post.approval_state}
-                        timezone={post.timezone}
+                        publishRetryable={post.publish_retryable}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
                         handles={post.handles}

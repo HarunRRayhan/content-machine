@@ -6,25 +6,34 @@ use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Post;
 use App\Models\TelegramPostRequest;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Throwable;
 
-class PublishPostJob implements ShouldQueue
+class PublishPostJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public const TIMEOUT_SECONDS = 900;
+
+    public const UNIQUE_FOR_SECONDS = 3600;
 
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 1020;
 
     public int $timeout = self::TIMEOUT_SECONDS;
 
     public int $tries = 3;
+
+    /**
+     * @var list<int>
+     */
+    public array $backoff = [10, 60, 300];
 
     /**
      * @var list<int>
@@ -45,8 +54,7 @@ class PublishPostJob implements ShouldQueue
     public function __construct(
         public readonly Post $post,
         public readonly array $options = [],
-        ?string $operationId = null,
-        ?string $leaseId = null,
+        public readonly ?string $runToken = null,
     ) {
         $this->operationId = $operationId;
         $this->leaseId = $leaseId;
@@ -59,8 +67,10 @@ class PublishPostJob implements ShouldQueue
         );
     }
 
+    private ?string $effectiveRunToken = null;
+
     /**
-     * Keep duplicate dispatches and visibility-timeout redeliveries from
+     * Keep a duplicate dispatch or a visibility-timeout redelivery from
      * running beside the original publish attempt.
      *
      * @return list<WithoutOverlapping>
@@ -78,104 +88,103 @@ class PublishPostJob implements ShouldQueue
 
     public function uniqueId(): string
     {
-        return 'post:'.$this->post->getKey();
+        return 'post:'.$this->post->getKey().':run:'.($this->runTokenOrNull() ?? 'legacy');
+    }
+
+    public function uniqueFor(): int
+    {
+        return self::UNIQUE_FOR_SECONDS;
     }
 
     public function failed(?Throwable $exception): void
     {
-        if ($exception !== null) {
-            report($exception);
-        }
-
-        $operationId = $this->operationId;
-        $leaseId = $this->leaseId;
-
-        // Legacy jobs have no durable claim identity. Their action path owns
-        // failure recording; this hook must not infer ownership from the
-        // serialized Post snapshot, which may now belong to a newer retry.
-        if ($leaseId === null) {
-            return;
-        }
-
-        DB::transaction(function () use ($exception, $operationId, $leaseId): void {
+        $recorded = DB::transaction(function () use ($exception): bool {
             $post = Post::query()
                 ->whereKey($this->post->getKey())
                 ->lockForUpdate()
                 ->first();
 
-            if ($post === null || $post->publish_state === 'succeeded') {
-                return;
+            $runToken = $this->effectiveRunTokenOrNull() ?? $this->runTokenOrNull();
+
+            if ($post === null
+                || ! $this->isCurrentRun($post, $runToken)
+                || $post->publish_state === 'succeeded') {
+                return false;
             }
 
             $progress = $post->publish_progress;
-            if ($operationId !== null
-                && (! is_array($progress) || ($progress['operation_id'] ?? null) !== $operationId)
-            ) {
-                // A newer retry owns the row. The old worker must not overwrite
-                // its state or Telegram request.
-                return;
-            }
-
-            if ($post->publish_lease_id !== $leaseId) {
-                return;
-            }
-
             $unknownOutcome = false;
             if (is_array($progress)) {
                 $current = $progress['current'] ?? null;
-                $unknownOutcome = ($current !== null
-                    && (! is_array($current) || ($current['phase'] ?? null) !== 'uploading'))
-                    || ($progress['state'] ?? null) === 'uncertain';
+                $unknownOutcome = $current !== null || ($progress['state'] ?? null) === 'uncertain';
                 $progress['state'] = $unknownOutcome ? 'uncertain' : 'failed';
             }
 
-            $error = $exception?->getMessage() ?? 'The PostSyncer publish job failed.';
+            $error = $exception?->getMessage()
+                ?? 'The PostSyncer publish job failed.';
             if ($unknownOutcome) {
-                $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. '.$error;
+                $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. '
+                    .$error;
             }
 
             $post->forceFill([
                 'publish_state' => 'failed',
                 'publish_error' => $error,
                 'publish_progress' => $progress,
-                'publish_claimed_at' => null,
-                'publish_lease_id' => null,
             ])->save();
 
-            /** @var mixed $requestId */
-            $requestId = $this->options['telegram_request_id'] ?? null;
-            if (is_int($requestId) || (is_string($requestId) && ctype_digit($requestId))) {
-                TelegramPostRequest::query()
-                    ->whereKey((int) $requestId)
-                    ->where('post_id', $post->id)
-                    ->whereIn('state', [
-                        TelegramPostRequest::APPROVED,
-                        TelegramPostRequest::FAILED,
-                    ])
-                    ->update([
-                        'state' => TelegramPostRequest::FAILED,
-                        'error_message' => $error,
-                    ]);
-            }
+            return true;
         });
+
+        if ($recorded && $exception !== null) {
+            report($exception);
+        }
     }
 
     public function handle(PublishPostAction $action): void
     {
-        if ($this->operationId === null && $this->leaseId === null) {
-            // A legacy serialized job may be redelivered after a newer
-            // operation has already written progress. It cannot prove that
-            // its stale options belong to that operation, so let the durable
-            // progress owner continue instead.
-            if (is_array($this->post->fresh()?->publish_progress)) {
-                return;
-            }
+        $post = $this->post->fresh();
+        $runToken = $this->runTokenOrNull() ?? $this->effectiveRunTokenOrNull();
 
-            $action->handle($this->post, $this->options);
+        if ($runToken === null && $post !== null) {
+            $storedToken = is_array($post->publish_progress)
+                ? ($post->publish_progress['run_token'] ?? null)
+                : null;
+            $runToken = is_string($storedToken) && trim($storedToken) !== ''
+                ? $storedToken
+                : null;
+        }
 
+        if ($post !== null && ! $this->isCurrentRun($post, $runToken)) {
             return;
         }
 
-        $action->handle($this->post, $this->options, $this->operationId, $this->leaseId);
+        $runToken ??= (string) Str::uuid();
+        $this->effectiveRunToken = $runToken;
+
+        $action->handle($this->post, $this->options, $runToken);
+    }
+
+    private function isCurrentRun(Post $post, ?string $runToken = null): bool
+    {
+        $progress = $post->publish_progress;
+        $storedToken = is_array($progress) ? ($progress['run_token'] ?? null) : null;
+        $runToken ??= $this->runTokenOrNull();
+
+        if ($runToken === null) {
+            return ! is_string($storedToken) || trim($storedToken) === '';
+        }
+
+        return is_string($storedToken) && hash_equals($storedToken, $runToken);
+    }
+
+    private function runTokenOrNull(): ?string
+    {
+        return isset($this->runToken) ? $this->runToken : null;
+    }
+
+    private function effectiveRunTokenOrNull(): ?string
+    {
+        return isset($this->effectiveRunToken) ? $this->effectiveRunToken : null;
     }
 }

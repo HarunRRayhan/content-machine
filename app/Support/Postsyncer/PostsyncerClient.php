@@ -120,20 +120,38 @@ class PostsyncerClient
         ], $headers);
         $data = $this->decodeResponse($response);
 
-        $media = $data['media'] ?? [];
+        $media = $data['media'] ?? null;
+        $countStored = $data['count_stored'] ?? null;
 
-        if (! is_array($media)) {
+        if (! is_array($media)
+            || ! is_int($countStored)
+            || $countStored !== count($media)) {
             throw new PostsyncerException(
-                'PostSyncer returned an invalid media upload response. Refusing to publish with invalid media.'
+                'PostSyncer returned an incomplete media upload response. '
+                .'Refusing to publish with missing media.'
             );
         }
 
-        $countStored = $data['count_stored'] ?? null;
-        if ($countStored !== null
-            && (! is_int($countStored) || $countStored !== count($media))
-        ) {
+        if ($media === [] && $urls === []) {
+            return [];
+        }
+
+        // A successful response that stored nothing is a definitive upload
+        // rejection. Unlike a timeout or a partial response, it is safe to
+        // retry because PostSyncer returned no media ids at all.
+        if ($countStored === 0) {
             throw new PostsyncerException(
-                'PostSyncer returned an incomplete media upload response. Refusing to publish with missing media.'
+                'PostSyncer returned an incomplete media upload response. '
+                .'Refusing to publish with missing media.',
+                safeToRetry: true,
+                responseReceived: true,
+            );
+        }
+
+        if ($countStored < count($urls)) {
+            throw new PostsyncerException(
+                'PostSyncer returned an incomplete media upload response. '
+                .'Refusing to publish with missing media.'
             );
         }
 
@@ -142,9 +160,10 @@ class PostsyncerClient
         foreach ($media as $item) {
             $id = is_array($item) ? ($item['id'] ?? null) : null;
 
-            if (! $this->hasNumericId($id)) {
+            if (! $this->hasMediaId($id)) {
                 throw new PostsyncerException(
-                    'PostSyncer returned a media item without a valid id. Refusing to publish with invalid media.'
+                    'PostSyncer returned a media item without a valid id. '
+                    .'Refusing to publish with invalid media.'
                 );
             }
 
@@ -234,7 +253,7 @@ class PostsyncerClient
         return is_array($json) ? $json : [];
     }
 
-    private function hasNumericId(mixed $id): bool
+    private function hasMediaId(mixed $id): bool
     {
         return is_int($id)
             ? $id > 0

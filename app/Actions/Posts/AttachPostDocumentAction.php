@@ -7,6 +7,7 @@ use App\Data\Posts\AttachPostDocumentData;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Stores an uploaded post document (LinkedIn carousel PDF) on the private
@@ -19,19 +20,24 @@ class AttachPostDocumentAction
 
     public function handle(Post $post, ?User $uploadedBy, AttachPostDocumentData $data): Post
     {
-        $workspace = $post->workspace;
-        if ($workspace === null) {
-            throw new \RuntimeException('Post is missing a workspace.');
-        }
-
-        $mediaAsset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, 'document');
-
-        return DB::transaction(function () use ($post, $mediaAsset): Post {
+        return DB::transaction(function () use ($post, $uploadedBy, $data): Post {
             $lockedPost = Post::query()
                 ->whereKey($post->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            if ($lockedPost->isPublishInProgress() || $lockedPost->hasUncertainPublish()) {
+                throw ValidationException::withMessages([
+                    'publish' => __('A post cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
+                ]);
+            }
+
+            $workspace = $lockedPost->workspace;
+            if ($workspace === null) {
+                throw new \RuntimeException('Post is missing a workspace.');
+            }
+
+            $mediaAsset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, 'document');
             $existing = $lockedPost->attachments()
                 ->where('media_asset_id', $mediaAsset->id)
                 ->first();
@@ -49,8 +55,6 @@ class AttachPostDocumentAction
                 'platform' => 'linkedin',
                 'position' => $position,
             ]);
-
-            $lockedPost->invalidateApproval();
 
             return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
         });

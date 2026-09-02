@@ -2,9 +2,9 @@
 
 namespace Tests\Unit\Actions\Postsyncer;
 
-use App\Actions\Postsyncer\EnqueuePostPublishAction;
-use App\Jobs\PublishPostJob;
-use App\Models\Post;
+use App\Actions\Postsyncer\EnqueueVideoPublishAction;
+use App\Jobs\PublishVideoJob;
+use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Bus\UniqueLock;
@@ -18,7 +18,7 @@ use RuntimeException;
 use Tests\TestCase;
 use Throwable;
 
-class EnqueuePostPublishActionTest extends TestCase
+class EnqueueVideoPublishActionTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -40,11 +40,11 @@ class EnqueuePostPublishActionTest extends TestCase
 
         $workspace = Workspace::factory()->create();
         $this->configureWorkspace($workspace);
-        $post = Post::factory()->for($workspace)->create([
-            'status' => 'ready',
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
         ]);
 
-        $queued = (new EnqueuePostPublishAction)->handle($post, $workspace, [
+        $queued = (new EnqueueVideoPublishAction)->handle($video, $workspace, [
             'when' => '2026-09-02T09:20:00+06:00',
             'platforms' => ['facebook'],
             'confirm_ask' => false,
@@ -56,8 +56,8 @@ class EnqueuePostPublishActionTest extends TestCase
         $this->assertNotEmpty($progress['run_token']);
         $this->assertSame('queued', $progress['state']);
 
-        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($queued, $progress): bool {
-            return $job->post->is($queued)
+        Queue::assertPushed(PublishVideoJob::class, function (PublishVideoJob $job) use ($queued, $progress): bool {
+            return $job->video->is($queued)
                 && $job->runToken === $progress['run_token']
                 && $job->options['when'] === '2026-09-02T09:20:00+06:00';
         });
@@ -67,13 +67,13 @@ class EnqueuePostPublishActionTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $this->configureWorkspace($workspace);
-        $post = Post::factory()->for($workspace)->create([
-            'status' => 'ready',
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
         ]);
         $queuedJob = null;
 
         Event::listen(JobQueueing::class, function (JobQueueing $event) use (&$queuedJob): void {
-            if ($event->job instanceof PublishPostJob) {
+            if ($event->job instanceof PublishVideoJob) {
                 $queuedJob = $event->job;
                 throw new RuntimeException('queue insert failed');
             }
@@ -81,7 +81,7 @@ class EnqueuePostPublishActionTest extends TestCase
 
         $exception = null;
         try {
-            (new EnqueuePostPublishAction)->handle($post, $workspace, [
+            (new EnqueueVideoPublishAction)->handle($video, $workspace, [
                 'platforms' => ['facebook'],
                 'confirm_ask' => false,
             ]);
@@ -90,10 +90,10 @@ class EnqueuePostPublishActionTest extends TestCase
         }
 
         $this->assertInstanceOf(RuntimeException::class, $exception);
-        $this->assertInstanceOf(PublishPostJob::class, $queuedJob);
-        $this->assertSame('ready', $post->fresh()->status);
-        $this->assertSame('idle', $post->fresh()->publish_state);
-        $this->assertNull($post->fresh()->publish_progress);
+        $this->assertInstanceOf(PublishVideoJob::class, $queuedJob);
+        $this->assertSame('recorded', $video->fresh()->status);
+        $this->assertSame('idle', $video->fresh()->publish_state);
+        $this->assertNull($video->fresh()->publish_progress);
         $this->assertDatabaseCount('jobs', 0);
 
         $lock = new UniqueLock(app(CacheRepository::class));
@@ -107,7 +107,7 @@ class EnqueuePostPublishActionTest extends TestCase
 
         $workspace = Workspace::factory()->create();
         $this->configureWorkspace($workspace);
-        $post = Post::factory()->for($workspace)->create([
+        $video = Video::factory()->for($workspace)->create([
             'publish_state' => 'failed',
             'publish_progress' => [
                 'version' => 1,
@@ -125,13 +125,13 @@ class EnqueuePostPublishActionTest extends TestCase
             ],
         ]);
 
-        (new EnqueuePostPublishAction)->handle($post, $workspace, []);
+        (new EnqueueVideoPublishAction)->handle($video, $workspace, []);
 
-        $progress = $post->fresh()->publish_progress;
+        $progress = $video->fresh()->publish_progress;
         $this->assertSame('operation-1', $progress['operation_id']);
         $this->assertNotSame('old-run', $progress['run_token']);
         $this->assertSame('queued', $progress['state']);
-        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job): bool {
+        Queue::assertPushed(PublishVideoJob::class, function (PublishVideoJob $job): bool {
             return $job->options['when'] === '2026-09-02T09:20:00+06:00';
         });
     }
@@ -142,7 +142,7 @@ class EnqueuePostPublishActionTest extends TestCase
 
         $workspace = Workspace::factory()->create();
         $this->configureWorkspace($workspace);
-        $post = Post::factory()->for($workspace)->create([
+        $video = Video::factory()->for($workspace)->create([
             'publish_state' => 'failed',
             'publish_progress' => [
                 'version' => 1,
@@ -157,7 +157,7 @@ class EnqueuePostPublishActionTest extends TestCase
                     'group_key' => 'group-1',
                     'phase' => 'creating',
                     'idempotency_key' => 'request-1',
-                    'media_ids' => [],
+                    'media_ids' => [915],
                 ],
                 'state' => 'uncertain',
             ],
@@ -165,6 +165,8 @@ class EnqueuePostPublishActionTest extends TestCase
 
         $this->expectException(ValidationException::class);
 
-        (new EnqueuePostPublishAction)->handle($post, $workspace, []);
+        (new EnqueueVideoPublishAction)->handle($video, $workspace, []);
+
+        Queue::assertNothingPushed();
     }
 }

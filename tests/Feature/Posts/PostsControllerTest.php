@@ -64,6 +64,23 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_index_exposes_template_metadata_for_post_rows(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'template' => 'D',
+        ]);
+
+        $this->get(route('posts.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->where('items.data.0.template', 'D')
+                ->where('items.data.0.template_meta.name', 'Split comparison')
+                ->where('items.data.0.template_meta.preview_url', asset('images/templates/template-d-split-comparison.png'))
+            );
+    }
+
     public function test_index_defaults_to_draft_tab_when_status_is_missing(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
@@ -265,9 +282,127 @@ class PostsControllerTest extends TestCase
                 ->where('post.title', 'Hello post')
                 ->where('post.timezone', 'America/New_York')
                 ->where('post.publish_state', $post->publish_state)
+                ->where('post.publish_retryable', false)
                 ->where('post.postsyncer_ready', false)
                 ->has('post.needs_confirm_ask')
                 ->has('post.postsyncer')
+            );
+    }
+
+    public function test_show_uses_saved_retry_platforms_for_confirmation(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['photo' => 'on'],
+                    'threads' => ['photo' => 'ask'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['facebook', 'threads'],
+            'captions' => [
+                'facebook' => 'Facebook caption',
+                'threads' => 'Threads caption',
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => [
+                    'platforms' => ['facebook'],
+                    'confirm_ask' => false,
+                ],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.needs_confirm_ask', false)
+            );
+    }
+
+    public function test_show_does_not_reask_for_a_confirmed_retry(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => ['threads' => ['photo' => 'ask']],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['threads'],
+            'captions' => ['threads' => 'Threads caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['confirm_ask' => true],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.needs_confirm_ask', false)
+            );
+    }
+
+    public function test_show_exposes_template_metadata_for_the_post_attribution_card(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'template' => 'D',
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.template_meta.letter', 'D')
+                ->where('post.template_meta.name', 'Split comparison')
+                ->where('post.template_meta.visual_identity', 'Split comparison')
+                ->where('post.template_meta.preview_url', asset('images/templates/template-d-split-comparison.png'))
             );
     }
 

@@ -13,7 +13,7 @@ Make Content Machine the place that configures PostSyncer and schedules/publishe
 
 | Topic | Choice |
 |---|---|
-| v1 surface | Dashboard settings + Schedule / Publish now (no agent publish API) |
+| v1 surface | Dashboard settings + Schedule / Publish now + workspace-token publish API |
 | Config home | Per CM workspace Settings UI (API key, bases, Bangla/English maps, post-type rules) |
 | Scope | Posts **and** videos |
 | Video media | Google Drive URLs on the video (`video_drive_url`, `cover_drive_url`); PostSyncer **link upload** |
@@ -24,7 +24,7 @@ Make Content Machine the place that configures PostSyncer and schedules/publishe
 
 ## Non-goals (v1)
 
-- Agent/API `POST .../publish`
+- Direct PostSyncer access from agents or Script Studio
 - Google Drive OAuth / folder picker
 - Multipart file upload from CM as the primary path (link upload first; keep upload base URL for optional fallback later)
 - Polling PostSyncer to auto-flip `scheduled` → `posted` when a scheduled item goes live
@@ -34,7 +34,7 @@ Make Content Machine the place that configures PostSyncer and schedules/publishe
 ## Architecture
 
 ```text
-Dashboard Schedule/Publish
+Dashboard Schedule/Publish or workspace-token API
         │
         ▼
 Validate settings + media + platforms
@@ -47,8 +47,9 @@ Queue worker
         │
         ├─ Resolve groups (language workspace, platforms, media, captions)
         ├─ PostSyncer link-upload each media URL
-        ├─ POST /posts per group
-        └─ Write postsyncer.groups + status + publish_state
+        ├─ Checkpoint private progress before each POST /posts
+        ├─ POST /posts per unfinished group
+        └─ Write public postsyncer.groups + status + publish_state only after the plan succeeds
 ```
 
 PostSyncer remains the system that actually posts to Facebook / Instagram / etc. CM only orchestrates.
@@ -86,6 +87,7 @@ postsyncer:
 | `video_drive_url` | string nullable | Required before schedule/publish |
 | `cover_drive_url` | string nullable | Optional |
 | `postsyncer` | jsonb nullable | See shape below |
+| `publish_progress` | jsonb nullable | Private resumable operation checkpoint; not part of the API resource |
 | `publish_state` | string | `idle` \| `queued` \| `running` \| `succeeded` \| `failed` |
 | `publish_error` | text nullable | Last failure message |
 
@@ -95,6 +97,7 @@ postsyncer:
 |---|---|---|
 | `image_drive_urls` | jsonb nullable | Array of Drive URLs when attachments absent |
 | `postsyncer` | jsonb nullable | Same shape as videos |
+| `publish_progress` | jsonb nullable | Private resumable operation checkpoint; not part of the API resource |
 | `publish_state` | string | same enum |
 | `publish_error` | text nullable | |
 
@@ -121,7 +124,13 @@ postsyncer:
 - Publish now → content `status = posted`
 - Failure → pipeline `status` unchanged; `publish_state = failed`
 
-v1 is **all-or-nothing per click**: if any group fails, do not set `scheduled`/`posted`; keep any partial PostSyncer ids out of the success path (or record them only inside `publish_error` context for support — prefer not writing partial `groups` as success). Retry re-runs the full plan.
+The public success path remains **all-or-nothing per operation**: if any group
+fails, do not set `scheduled`/`posted` and do not write partial ids to public
+`postsyncer.groups`. The private `publish_progress` checkpoint records the
+normalized options, plan hash, completed group ids, and the current group before
+its external create. A normal retry skips completed groups and preserves the
+original options. If the response from `POST /posts` may have been lost, the
+operation is marked `uncertain` and must be reconciled before any retry.
 
 ## Settings UI
 
@@ -169,11 +178,25 @@ Post and video **show** pages: **Schedule** and **Publish now**. Hidden or disab
 ### Job
 
 1. Set `publish_state = queued` (then `running` when worker starts)  
-2. For each group: link-upload media → create PostSyncer post  
-3. On full success: write `postsyncer.groups`, set pipeline status, `publish_state = succeeded`  
-4. On failure: `publish_state = failed`, `publish_error = …`  
+2. Persist the operation options and plan metadata in private `publish_progress`
+3. For each unfinished group: link-upload media, checkpoint the current group, then create the PostSyncer post
+4. Checkpoint each returned PostSyncer id; do not expose it as public success yet
+5. On full success: write `postsyncer.groups`, set pipeline status, `publish_state = succeeded`
+6. On failure: `publish_state = failed`, `publish_error = …`; preserve the checkpoint
 
-UI: banner on detail + list badge while queued/running; error + Retry after failure.
+UI: banner on detail + list badge while queued/running; error + Retry after
+failure when the checkpoint has no unknown external create. An `uncertain`
+checkpoint is a manual reconciliation state, not an automatic retry. An
+operator verifies the remote post or video and runs
+`php artisan postsyncer:reconcile-post WORKSPACE_ID HUMAN_ID POSTSYNCER_ID`
+or `php artisan postsyncer:reconcile-video WORKSPACE_ID HUMAN_ID POSTSYNCER_ID`.
+The command checkpoints the verified group before the normal Retry continues.
+
+Post publishes use the dedicated `postsyncer` database connection and queue on
+`cm-web`. The queue name is separate from the default `scratchpad` queue because
+the database driver does not store a connection name on each job row. The
+worker timeout is 900 seconds and the dedicated queue visibility window is 960
+seconds.
 
 ### Link upload
 
@@ -212,7 +235,7 @@ Feature flag: workspace `postsyncer.publish_enabled` (or env). When false, CM hi
 ## Testing
 
 - Unit: group splitting fixtures ported from known posts (e.g. bilingual P-48 patterns), media resolution hybrid  
-- Feature: settings save/encrypt, refresh-accounts mock, enqueue job, job success/failure status transitions  
+- Feature: settings save/encrypt, refresh-accounts mock, enqueue job, job success/failure status transitions, resumable publish checkpoints, and unknown-outcome handling
 - Fake PostSyncer HTTP client in tests (no live network)  
 - Manual: schedule a draft post and a video with Drive links against PostSyncer staging/prod with Harun’s confirmation  
 
@@ -240,6 +263,6 @@ Detailed task breakdown belongs in `docs/superpowers/plans/` after this spec is 
 
 - [x] No unresolved placeholders left as “TBD” for product behavior  
 - [x] Consistent with locked decisions (B dashboard, A settings, Drive A, media C, bilingual A, queue 2)  
-- [x] Scope excludes agent API and Drive OAuth  
+- [x] Scope excludes direct PostSyncer access and Drive OAuth
 - [x] Cutover and rollback flag present  
 - [x] Ties list-tab UX to the same project without blocking publish  

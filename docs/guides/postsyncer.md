@@ -20,16 +20,102 @@ queue starts to hurt.
 | Piece | Where | Role |
 |---|---|---|
 | `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
-| `PublishPostJob` | `cm-web` `postsyncer` connection, `postsyncer` queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. |
-| `PublishVideoJob` | disabled | Video publishing is blocked until durable retry and reconciliation support is complete. |
+| `PublishPostJob` | `cm-web` `postsyncer` connection, `postsyncer` queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. The queue name is separate because the database driver does not tag rows with a connection name. |
+| `PublishVideoJob` | `cm-web` `postsyncer` connection, `postsyncer` queue | Drive URLs only today; no scratchpad attachment dependency. Unique and fenced per video operation. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
-| `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised `queue:work --queue=scratchpad` for Telegram photo/voice and voice transcription. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. Telegram text, links, and commands use `cm-worker`'s supervised `default` queue. |
-| `cm-web` PostSyncer worker | same web container (`/init`; follows `SCRATCHPAD_QUEUE_WORKER`) | s6-supervised `queue:work postsyncer --queue=postsyncer --timeout=900` for post publishes. |
+| `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised default-connection `queue:work --queue=scratchpad` for Telegram photo/voice and voice transcription. |
+| `cm-web` PostSyncer worker | same web container (`/init`; follows `SCRATCHPAD_QUEUE_WORKER`) | s6-supervised `queue:work postsyncer --queue=postsyncer --timeout=900` for **post and video publishes**. |
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
+`PublishPostJob` has a 900-second timeout and the dedicated `postsyncer` database
+queue connection has a 960-second visibility window. `PublishVideoJob` has a
+180-second timeout and uses the same connection, leaving enough time for its
+media upload, create, and canonical verification calls. Keep
+`POSTSYNCER_QUEUE_RETRY_AFTER` above the longest worker timeout. Both publish
+jobs are unique for the record and use a shared overlap lock whose expiry is
+longer than the video timeout. Each queued job also carries the run token it
+owns, so an old retry cannot write over a newer operation.
+
+The actions checkpoint progress in private `posts.publish_progress` and
+`videos.publish_progress` columns, not in public `postsyncer.groups`. Progress
+records the normalized options, plan hash, stable per-group key, completed
+PostSyncer ids, and the current group's upload or create reconciliation key
+before calling PostSyncer.
+After a later group fails, a retry with the original options skips completed
+groups and finalizes public `postsyncer.groups` only after the entire plan is
+complete.
+While a job is queued or running, post and video edits take a row lock and are
+rejected. A video with an uncertain create also stays locked until it is
+reconciled. This keeps the saved plan and the external payload aligned.
+
+Link-upload responses are checked before a create: `count_stored` must match
+the returned media rows, every row must have a valid id, and at least one item
+must be stored for each requested URL. A partial response never becomes a
+text-only publish.
+
+PostSyncer's documented media-upload and create APIs do not provide
+idempotency-key support. If the process loses a media-upload or `POST /posts`
+response, the current group is marked `uncertain` and must be reconciled before
+retrying; it is never replayed automatically. Older partial video records
+without progress metadata are rejected rather than guessed.
+
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
-buttons use the same enqueue path. Redis is optional later; it is not a
-cutover blocker.
+buttons use the same enqueue path. The private progress checkpoint is an
+internal database field and is not returned by the API; callers use
+`publish_state`, `publish_error`, and the public `postsyncer.groups` result.
+Redis is optional later; it is not a cutover blocker.
+
+### Reconcile an uncertain media upload
+
+PostSyncer does not provide an idempotency key for media registration. If the
+upload response was lost, inspect the media records in the matching PostSyncer
+workspace and supply their ids in the same order as the saved upload URLs:
+
+```bash
+php artisan postsyncer:reconcile-post-media WORKSPACE_ID P-68 MEDIA_ID[,MEDIA_ID...]
+php artisan postsyncer:reconcile-video-media WORKSPACE_ID BV-68 MEDIA_ID[,MEDIA_ID...]
+```
+
+The command requires exactly one valid id per uploaded URL and changes the
+checkpoint to a retryable create. It never uploads the URLs again.
+
+### Reconcile an uncertain create
+
+PostSyncer does not accept an idempotency key on create. If a worker loses the
+response after `POST /posts`, first find the created post in the matching
+PostSyncer workspace. Then verify its content, media, platforms, and schedule
+against the failed operation and run this on the Content Machine deployment:
+
+```bash
+php artisan postsyncer:reconcile-post WORKSPACE_ID P-68 POSTSYNCER_POST_ID
+php artisan postsyncer:reconcile-video WORKSPACE_ID BV-68 POSTSYNCER_POST_ID
+```
+
+The commands call `GET /posts/{id}` and only record the id when the workspace
+and group payload match. Retry the post or video from the dashboard or API
+afterwards; the reconciled group is checkpointed and will not be created again.
+If the matching remote record is `FAILED`, reconciliation refuses it by
+default. Use `--confirm-failed` only after verifying that PostSyncer actually
+accepted the content; Content Machine preserves the group's raw `FAILED` status,
+stores the operator confirmation marker, and counts it as effectively delivered
+without losing the failure signal on later status syncs.
+
+### Recover a drifted plan
+
+If local content changes after every external group has been checkpointed, a
+normal retry refuses to finalize the operation because the saved payload and
+the current plan differ. After verifying that the saved payload snapshots match
+the remote posts, explicitly recover the operation:
+
+```bash
+php artisan postsyncer:recover-post-plan-drift WORKSPACE_ID P-68
+php artisan postsyncer:recover-video-plan-drift WORKSPACE_ID BV-68
+```
+
+This only applies when every planned group has a saved post id and payload
+snapshot. It rechecks each remote post before marking the operation successful;
+it never creates a new PostSyncer post. Use `--confirm-failed` only when a saved
+group is already an operator-confirmed remote `FAILED` record.
 
 `PublishPostJob` has a 900-second timeout and the dedicated `postsyncer`
 database queue has a 960-second visibility window. Its row lease and overlap
@@ -60,9 +146,11 @@ them. The old `/dashboard/settings/postsyncer` URL redirects to General.
 | **Refresh** | Reloads accounts for the workspace currently selected in the dropdown. |
 | **Connection** | The Workspaces page says whether PostSyncer returned workspaces for the saved API key. |
 
-Post Schedule and Publish stay disabled until the API key is set, the default
-language workspace id is filled, and **Publish enabled** is on. Video Schedule
-and Publish remain disabled independently.
+Schedule and Publish stay disabled until the API key is set, the default
+language workspace id is filled, and **Publish enabled** is on.
+Every language present in the captions also needs a configured PostSyncer
+workspace; the planner fails rather than publishing only part of a bilingual
+post.
 
 ## PostSyncer API hosts (confirmed)
 
@@ -74,6 +162,7 @@ All authenticated calls use `Authorization: Bearer <api_key>`.
 | List accounts | `GET https://postsyncer.com/api/v1/accounts` (filter client-side by `workspace_id`) |
 | Link-upload media | `POST https://postsyncer.com/api/v1/media/upload/url` with `{ "workspace_id", "urls": ["…"] }` |
 | Create / schedule post | `POST https://postsyncer.com/api/v1/posts` |
+| Read a post for reconciliation | `GET https://postsyncer.com/api/v1/posts/{id}` |
 | File upload (legacy / fallback) | `POST https://upload.postsyncer.com/api/v1/media/upload/file` on the **upload** subdomain, not the main API host |
 
 CM registers Google Drive or attachment URLs through the link-upload endpoint,
@@ -129,7 +218,12 @@ Twitter-thread isolation, and media-set grouping (ported from personal-content
 While a job runs, `publish_state` shows `queued` or `running` and buttons
 disable. On success the pipeline status moves to **Scheduled** (future time) or
 **Posted** / **Published** (publish now). On failure, status stays unchanged,
-`publish_state` is `failed`, and **Retry** re-runs the full plan.
+`publish_state` is `failed`, and **Retry** resumes unfinished groups rather than
+recreating the full plan when no external create has an unknown outcome. A
+response-loss/timeout state is `uncertain` in `publish_progress` and requires
+manual reconciliation first. The retry path preserves the original `when` and
+platform subset, so omitting `when` on a retry cannot turn a scheduled publish
+into publish-now or expand a partial retry to other platforms.
 
 ## Drive URL fields
 

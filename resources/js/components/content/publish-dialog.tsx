@@ -24,6 +24,8 @@ type PublishDialogProps = {
     publishUrl: string;
     entityLabel: string;
     needsConfirmAsk?: boolean;
+    retryOnly?: boolean;
+    showStatus?: boolean;
 };
 
 function publishStatusLabel(
@@ -98,13 +100,15 @@ export default function PublishDialog({
     publishUrl,
     entityLabel,
     needsConfirmAsk = false,
+    retryOnly = false,
+    showStatus = true,
 }: PublishDialogProps) {
     const [open, setOpen] = useState(false);
-    const [mode, setMode] = useState<'now' | 'schedule'>('now');
+    const [mode, setMode] = useState<'now' | 'schedule' | 'retry'>('now');
     const [confirmAskChecked, setConfirmAskChecked] = useState(false);
     const publishBusy = ['queued', 'running'].includes(publishState);
 
-    function openDialog(nextMode: 'now' | 'schedule') {
+    function openDialog(nextMode: 'now' | 'schedule' | 'retry') {
         setMode(nextMode);
         setConfirmAskChecked(false);
         setOpen(true);
@@ -122,11 +126,13 @@ export default function PublishDialog({
 
     return (
         <div className="space-y-3">
-            <PublishStatusBanner
-                publishState={publishState}
-                publishError={publishError}
-                contentStatus={contentStatus}
-            />
+            {showStatus && (
+                <PublishStatusBanner
+                    publishState={publishState}
+                    publishError={publishError}
+                    contentStatus={contentStatus}
+                />
+            )}
 
             {!disabledReason && !publishBusy && (
                 <p className="text-sm text-muted-foreground">
@@ -141,35 +147,51 @@ export default function PublishDialog({
             )}
 
             <div className="flex flex-wrap gap-2">
-                <Button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => openDialog('now')}
-                >
-                    Publish now
-                </Button>
-                <Button
-                    type="button"
-                    variant="outline"
-                    disabled={disabled}
-                    onClick={() => openDialog('schedule')}
-                >
-                    Schedule
-                </Button>
+                {retryOnly ? (
+                    <Button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => openDialog('retry')}
+                    >
+                        Retry publish
+                    </Button>
+                ) : (
+                    <>
+                        <Button
+                            type="button"
+                            disabled={disabled}
+                            onClick={() => openDialog('now')}
+                        >
+                            Publish now
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={disabled}
+                            onClick={() => openDialog('schedule')}
+                        >
+                            Schedule
+                        </Button>
+                    </>
+                )}
             </div>
 
             <Dialog open={open} onOpenChange={handleOpenChange}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>
-                            {mode === 'now'
-                                ? `Publish ${entityLabel} now`
-                                : `Schedule ${entityLabel}`}
+                            {mode === 'retry'
+                                ? `Retry ${entityLabel}`
+                                : mode === 'now'
+                                  ? `Publish ${entityLabel} now`
+                                  : `Schedule ${entityLabel}`}
                         </DialogTitle>
                         <DialogDescription>
-                            {mode === 'now'
-                                ? 'PostSyncer will publish as soon as the job runs.'
-                                : 'Choose when PostSyncer should publish.'}
+                            {mode === 'retry'
+                                ? 'Resume the failed PostSyncer publish without changing its original options.'
+                                : mode === 'now'
+                                  ? 'PostSyncer will publish as soon as the job runs.'
+                                  : 'Choose when PostSyncer should publish.'}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -242,7 +264,9 @@ export default function PublishDialog({
                                     >
                                         {mode === 'now'
                                             ? 'Publish now'
-                                            : 'Schedule publish'}
+                                            : mode === 'retry'
+                                              ? 'Retry publish'
+                                              : 'Schedule publish'}
                                     </Button>
                                 </DialogFooter>
                             </>

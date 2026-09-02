@@ -25,27 +25,11 @@ class DeployCommand extends Command
 
     public function handle(): int
     {
-        if (! $this->ensureScratchpadUploadsDirectory()) {
-            return self::FAILURE;
-        }
-
-        if ($this->call('migrate', ['--force' => true]) !== self::SUCCESS) {
-            return self::FAILURE;
-        }
-
-        // EnsureAdminUser creates the first workspace on a fresh install;
-        // presentation sync must run after that workspace exists.
-        if ($this->call('cm:ensure-admin') !== self::SUCCESS) {
-            return self::FAILURE;
-        }
-
-        // A fresh instance without ADMIN_EMAIL has no workspace yet. There
-        // is nothing to sync, and that must not make the deploy fail.
-        if (Workspace::query()->exists()
-            && $this->call('cm:sync-presentation-library') !== self::SUCCESS
-        ) {
-            return self::FAILURE;
-        }
+        $this->ensureScratchpadUploadsDirectory();
+        $this->call('migrate', ['--force' => true]);
+        $this->call('cm:sync-presentation-library');
+        $this->call('posts:backfill-templates');
+        $this->call('cm:ensure-admin');
 
         return self::SUCCESS;
     }

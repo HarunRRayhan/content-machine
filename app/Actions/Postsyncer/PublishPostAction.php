@@ -4,13 +4,14 @@ namespace App\Actions\Postsyncer;
 
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
-use App\Models\TelegramPostRequest;
+use App\Models\Workspace;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Throwable;
@@ -29,29 +30,31 @@ class PublishPostAction
      * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options
      * @return array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}
      */
-    public function freezePlan(Post $post, PostsyncerConfig $config, array $options): array
+    public function handle(Post $post, array $options, ?string $runToken = null): void
     {
-        $normalizedOptions = $this->normalizeOptions($options);
-        $groups = $this->planner->plan($post, $config, $normalizedOptions);
-
-        return $this->planMetadata($config, $groups, $normalizedOptions);
-    }
-
-    /**
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options
-     */
-    public function handle(
-        Post $post,
-        array $options,
-        ?string $operationId = null,
-        ?string $leaseId = null,
-    ): void {
-        // Queue serialization normally reloads this model, but direct callers
-        // can still hold a stale instance after an edit or approval reset.
         $post->refresh();
         $originalStatus = $post->status;
         $options = $this->normalizeOptions($options);
-        $claimLeaseId = null;
+        $progress = $post->publish_progress;
+
+        // Direct callers from before run fencing can resume the current
+        // checkpoint; queued jobs guard legacy no-token deliveries themselves.
+        $runToken ??= is_string($progress['run_token'] ?? null)
+            ? $progress['run_token']
+            : (string) Str::uuid();
+
+        // A duplicate delivery after finalization must not create another
+        // PostSyncer post.
+        if ($post->publish_state === 'succeeded' && $this->hasExistingPublicGroup($post)) {
+            return;
+        }
+
+        if (! $this->startRun($post, $runToken)) {
+            return;
+        }
+
+        $post->refresh();
+        $progress = $post->publish_progress;
 
         try {
             $claimed = $this->claimPost($post, $options, $operationId, $leaseId);
@@ -76,159 +79,219 @@ class PublishPostAction
             }
 
             $plan = $this->planMetadata($config, $groups, $options);
-            $progress = $this->prepareProgress($post, $post->publish_progress, $plan);
+            $progress = $this->prepareProgress($post, $progress, $plan, $runToken);
+            if ($progress === null) {
+                return;
+            }
+            $this->assertAccountsConfigured($config, $groups);
             $completedGroups = $this->completedGroups($progress);
 
-            foreach ($groups as $index => $group) {
-                $groupKey = $this->groupKey($config, $group);
+            if (! $this->allPlannedGroupsCompleted($progress)) {
+                foreach ($groups as $index => $group) {
+                    if (! $this->assertPlanUnchanged($post, $options, $plan, $runToken)) {
+                        return;
+                    }
+                    $groupKey = $this->groupKey($config, $group);
 
-                if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
-                    continue;
-                }
-
-                $createIdempotencyKey = $this->idempotencyKey(
-                    (string) $progress['operation_id'],
-                    $index,
-                    $groupKey,
-                );
-                $mediaIdempotencyKey = $this->mediaIdempotencyKey(
-                    (string) $progress['operation_id'],
-                    $index,
-                    $groupKey,
-                );
-                $mediaIds = [];
-
-                // Persist the upload phase before calling PostSyncer. If the
-                // worker dies during the upload, retrying the same
-                // idempotency key is safe and the post create is never
-                // attempted with missing media.
-                $progress['state'] = 'running';
-                $progress['current'] = [
-                    'index' => $index,
-                    'group_key' => $groupKey,
-                    'phase' => $group->mediaUrls === [] ? 'creating' : 'uploading',
-                    'idempotency_key' => $createIdempotencyKey,
-                    'media_idempotency_key' => $mediaIdempotencyKey,
-                    'media_ids' => [],
-                ];
-
-                if (! $this->checkpointCurrent($post, $progress, $claimLeaseId)) {
-                    throw new PostsyncerException(
-                        'The publish was cancelled or approval changed before the PostSyncer request.'
-                    );
-                }
-
-                if ($group->mediaUrls !== []) {
-                    $mediaIds = $client->uploadFromUrls(
-                        $group->workspaceId,
-                        $group->mediaUrls,
-                        $mediaIdempotencyKey,
-                    );
-
-                    // PostSyncer can return 200 with an empty media list when a
-                    // signed/Drive URL fails to fetch. Never continue as a
-                    // text post when the planner expected images (P-57).
-                    if (count($mediaIds) !== count($group->mediaUrls)) {
-                        $mediaError = $mediaIds === []
-                            ? 'no media ids'
-                            : 'an incomplete media response';
-
-                        throw new PostsyncerException(
-                            'PostSyncer returned '.$mediaError.' for '.implode(', ', $group->platforms)
-                            .' after uploading '.count($group->mediaUrls).' url(s).'
-                            .' Refusing to publish this group without images.'
-                        );
+                    if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
+                        continue;
                     }
 
-                    $progress['current']['phase'] = 'creating';
-                    $progress['current']['media_ids'] = $mediaIds;
+                    $mediaIds = $this->reconciledMediaIdsForGroup($progress, $index, $groupKey);
+                    if ($mediaIds === null) {
+                        $mediaIds = [];
+                        $progress['state'] = 'running';
+                        $progress['current'] = [
+                            'index' => $index,
+                            'group_key' => $groupKey,
+                            'phase' => $group->mediaUrls !== [] ? 'uploading' : 'creating',
+                            'idempotency_key' => $this->idempotencyKey(
+                                (string) $progress['operation_id'],
+                                $index,
+                                $groupKey,
+                            ),
+                            'media_ids' => [],
+                            'media_urls' => $group->mediaUrls,
+                        ];
+                        if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                            return;
+                        }
 
-                    if (! $this->checkpointCurrent($post, $progress, $claimLeaseId)) {
-                        throw new PostsyncerException(
-                            'The publish was cancelled or approval changed after the media upload.'
-                        );
+                        if ($group->mediaUrls !== []) {
+                            $mediaIds = $client->uploadFromUrls($group->workspaceId, $group->mediaUrls);
+
+                            // PostSyncer can return 200 with an empty media list when a
+                            // signed/Drive URL fails to fetch. Never continue as a
+                            // text post when the planner expected images (P-57).
+                            if ($mediaIds === []) {
+                                throw new PostsyncerException(
+                                    'PostSyncer returned no media ids for '.implode(', ', $group->platforms)
+                                    .' after uploading '.count($group->mediaUrls).' url(s).'
+                                    .' Refusing to publish this group without images.'
+                                );
+                            }
+
+                            $progress['current']['phase'] = 'creating';
+                            $progress['current']['media_ids'] = $mediaIds;
+                            if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                                return;
+                            }
+                        }
                     }
-                }
 
-                $body = $this->buildPostBody($config, $group, $mediaIds);
+                    $post->refresh();
+                    if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+                        return;
+                    }
 
-                $result = $client->createPost(
-                    $body,
-                    (string) $progress['current']['idempotency_key'],
-                );
-                $completedGroups[] = $this->formatProgressGroup(
-                    $group,
-                    $result,
-                    $index,
-                    $groupKey,
-                );
-                usort(
-                    $completedGroups,
-                    fn (array $left, array $right): int => ((int) $left['index']) <=> ((int) $right['index']),
-                );
+                    $body = $this->buildPostBody($config, $group, $mediaIds);
 
-                // Checkpoint each external create before attempting another
-                // group, so a later failure resumes without recreating it.
-                $progress['completed_groups'] = $completedGroups;
-                $progress['current'] = null;
+                    $progress['state'] = 'running';
+                    $progress['current'] = [
+                        'index' => $index,
+                        'group_key' => $groupKey,
+                        'phase' => 'creating',
+                        'idempotency_key' => $this->idempotencyKey(
+                            (string) $progress['operation_id'],
+                            $index,
+                            $groupKey,
+                        ),
+                        'media_ids' => $mediaIds,
+                        'media_urls' => $group->mediaUrls,
+                        'expected_payload' => $body,
+                    ];
+                    if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                        return;
+                    }
 
-                if (! $this->checkpointCompleted(
-                    $post,
-                    $progress,
-                    $index,
-                    $groupKey,
-                    $claimLeaseId,
-                )) {
-                    throw new PostsyncerException(
-                        'The publish lease changed after the PostSyncer create. The result will be reconciled by the active worker.'
+                    $result = $client->createPost($body);
+                    $post->refresh();
+                    if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+                        return;
+                    }
+                    $verified = $this->verifyCreatedPost(
+                        $client,
+                        $result,
+                        $config,
+                        $group,
+                        $mediaIds,
                     );
+                    $post->refresh();
+                    if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+                        return;
+                    }
+                    $completedGroups[] = $this->formatProgressGroup(
+                        $group,
+                        $verified,
+                        $index,
+                        $groupKey,
+                        false,
+                        $body,
+                    );
+                    usort(
+                        $completedGroups,
+                        fn (array $left, array $right): int => ((int) $left['index']) <=> ((int) $right['index']),
+                    );
+
+                    // Checkpoint each external create. A later group may fail or
+                    // the worker may be restarted before the whole plan finishes.
+                    $progress['completed_groups'] = $completedGroups;
+                    $progress['current'] = null;
+                    if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                        return;
+                    }
                 }
             }
 
-            $publishedGroups = [];
-            foreach ($groups as $index => $group) {
-                $groupKey = $this->groupKey($config, $group);
-                $completed = $this->completedGroup($completedGroups, $index, $groupKey);
-
-                if ($completed === null) {
-                    throw new PostsyncerException(
-                        'PostSyncer publish progress is incomplete. Retry the publish.'
-                    );
-                }
-
-                $publishedGroups[] = $this->publicGroup($completed);
+            $operationComplete = $this->allPlannedGroupsCompleted($progress);
+            if (! $operationComplete) {
+                throw new PostsyncerException(
+                    'PostSyncer publish progress is incomplete. Retry the publish.'
+                );
             }
+
+            $publishedGroups = array_map(
+                fn (array $completed): array => $this->publicGroup($completed),
+                $completedGroups,
+            );
 
             $progress['state'] = 'succeeded';
             $progress['completed_groups'] = $completedGroups;
             $progress['current'] = null;
-
-            if (! $this->finalizeSuccess($post, $publishedGroups, $progress, $groups, $options, $claimLeaseId)) {
-                throw new PostsyncerException(
-                    'The publish could not be finalized because its approval or cancellation state changed.'
-                );
-            }
-        } catch (Throwable $e) {
-            $failure = $this->recordFailure(
+            DB::transaction(function () use (
                 $post,
-                $originalStatus,
                 $options,
-                $operationId,
-                $claimLeaseId,
+                $plan,
+                $publishedGroups,
+                $progress,
+                $runToken,
+            ): void {
+                $lockedPost = Post::query()
+                    ->whereKey($post->getKey())
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if (! $this->runTokenMatches($lockedPost->publish_progress, $runToken)) {
+                    return;
+                }
+
+                if (! $lockedPost->isPublishInProgress()) {
+                    throw new PostsyncerException(
+                        'The post publish state changed before finalization. Retry the publish.'
+                    );
+                }
+
+                $lockedPost->loadMissing('workspace');
+                $latestConfig = PostsyncerConfig::fromWorkspace($lockedPost->workspace);
+                $latestGroups = $this->planner->plan($lockedPost, $latestConfig, $options);
+                $latestPlan = $this->planMetadata($latestConfig, $latestGroups, $options);
+
+                if ($latestPlan['hash'] !== $plan['hash']
+                    || $latestPlan['groups'] !== $plan['groups']) {
+                    throw new PostsyncerException(
+                        'The post changed while the PostSyncer publish was running. '
+                        .'The external groups were not finalized in Content Machine.'
+                    );
+                }
+
+                $lockedPost->forceFill([
+                    'postsyncer' => ['groups' => $publishedGroups],
+                    'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
+                    'publish_state' => 'succeeded',
+                    'publish_error' => null,
+                    'publish_progress' => $progress,
+                ])->save();
+            });
+        } catch (Throwable $e) {
+            $unknownOutcome = $this->recordFailureForRun(
+                $post,
+                $runToken,
+                $originalStatus,
+                is_array($progress) ? $progress : null,
                 $e,
             );
 
-            if ($failure === null) {
-                // A later worker owns the row, or it already finalized the
-                // operation. Never overwrite that state from this exception.
+            if ($unknownOutcome === null) {
                 return;
             }
 
-            // Deterministic validation/auth/resource errors are recorded and
-            // deliberately consumed. Unknown outcomes are retried by the
-            // queue worker, but the checkpoint makes every retry stop before
-            // another POST /posts call.
-            if (! ($e instanceof PostsyncerException && ! $e->retryable)) {
+            // Keep deterministic PostSyncer errors in the record. Only
+            // failures that are safe to repeat should reach the queue worker.
+            if (! $unknownOutcome
+                && ! ($e instanceof PostsyncerException && ! $e->retryable)) {
+                throw $e;
+            }
+
+            // A transient media response must reach the worker's retry policy,
+            // but the persisted `uploading` checkpoint prevents that retry from
+            // uploading the same asset again after an uncertain response.
+            $phase = is_array($progress['current'] ?? null)
+                ? ($progress['current']['phase'] ?? null)
+                : null;
+            if ($phase === 'uploading'
+                && (($e instanceof PostsyncerException && $e->retryable)
+                    || $e instanceof ConnectionException)
+                && ! ($e instanceof PostsyncerException && $e->safeToRetry)) {
                 throw $e;
             }
         }
@@ -240,8 +303,11 @@ class PublishPostAction
      * this method verifies the id belongs to the expected workspace and
      * payload before checkpointing it.
      */
-    public function reconcile(Post $post, int|string $postsyncerPostId): void
-    {
+    public function reconcile(
+        Post $post,
+        int|string $postsyncerPostId,
+        bool $confirmFailed = false,
+    ): void {
         if (! $this->hasNumericPostId($postsyncerPostId)) {
             throw new PostsyncerException('A PostSyncer post id is required for reconciliation.');
         }
@@ -256,9 +322,7 @@ class PublishPostAction
         $this->assertProgressShape($progress);
 
         if (($progress['state'] ?? null) !== 'uncertain'
-            || ! is_array($progress['current'] ?? null)
-            || ($progress['current']['phase'] ?? null) !== 'creating'
-        ) {
+            || ! is_array($progress['current'] ?? null)) {
             throw new PostsyncerException(
                 'This post does not have an uncertain PostSyncer create to reconcile.'
             );
@@ -273,8 +337,7 @@ class PublishPostAction
         $group = $groups[$index] ?? null;
 
         if (! $group instanceof PublishGroup
-            || $this->groupKey($config, $group) !== $current['group_key']
-        ) {
+            || $this->groupKey($config, $group) !== $current['group_key']) {
             throw new PostsyncerException(
                 'The PostSyncer reconciliation group no longer matches the publish plan.'
             );
@@ -288,6 +351,7 @@ class PublishPostAction
             $group,
             $current['media_ids'],
             $postsyncerPostId,
+            $confirmFailed,
         );
 
         DB::transaction(function () use (
@@ -297,6 +361,7 @@ class PublishPostAction
             $remote,
             $index,
             $postsyncerPostId,
+            $confirmFailed,
         ): void {
             $lockedPost = Post::query()
                 ->whereKey($post->getKey())
@@ -308,8 +373,7 @@ class PublishPostAction
                 || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
                 || ($latestProgress['state'] ?? null) !== 'uncertain'
                 || ($latestProgress['current']['index'] ?? null) !== $current['index']
-                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
-            ) {
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']) {
                 throw new PostsyncerException(
                     'The PostSyncer progress changed while reconciliation was running.'
                 );
@@ -317,16 +381,11 @@ class PublishPostAction
 
             $lockedPost->loadMissing('workspace');
             $latestConfig = PostsyncerConfig::fromWorkspace($lockedPost->workspace);
-            $latestGroups = $this->planner->plan(
-                $lockedPost,
-                $latestConfig,
-                $latestProgress['options'],
-            );
+            $latestGroups = $this->planner->plan($lockedPost, $latestConfig, $latestProgress['options']);
             $latestGroup = $latestGroups[$current['index']] ?? null;
 
             if (! $latestGroup instanceof PublishGroup
-                || $this->groupKey($latestConfig, $latestGroup) !== $current['group_key']
-            ) {
+                || $this->groupKey($latestConfig, $latestGroup) !== $current['group_key']) {
                 throw new PostsyncerException(
                     'The post or PostSyncer settings changed while reconciliation was running.'
                 );
@@ -338,14 +397,20 @@ class PublishPostAction
                 $latestGroup,
                 $current['media_ids'],
                 $postsyncerPostId,
+                $confirmFailed,
             );
 
-            $completedGroups = $this->completedGroups($latestProgress);
-            $completedGroups[] = $this->formatProgressGroup(
+            $reconciledGroup = $this->formatProgressGroup(
                 $latestGroup,
                 $remote,
                 $index,
                 $current['group_key'],
+                $confirmFailed && strtoupper((string) ($remote['status'] ?? '')) === 'FAILED',
+                $this->buildPostBody($latestConfig, $latestGroup, $current['media_ids']),
+            );
+            $completedGroups = $this->upsertCompletedGroup(
+                $this->completedGroups($latestProgress),
+                $reconciledGroup,
             );
             usort(
                 $completedGroups,
@@ -366,1072 +431,219 @@ class PublishPostAction
         $post->refresh();
     }
 
-    private function hasDefinitiveResponse(Throwable $exception): bool
-    {
-        return $exception instanceof PostsyncerException
-            && $exception->responseReceived
-            && ! $exception->outcomeUnknown;
-    }
-
     /**
-     * Record a failure while holding the same row lease used by publish
-     * checkpoints. Returning null means a newer worker owns the operation.
+     * Checkpoint media ids after an upload response was lost. PostSyncer does
+     * not expose an idempotency key for media imports, so retrying the upload
+     * is not safe until an operator supplies the ids already present there.
      *
-     * @param  array<string, mixed>  $options
-     * @return array{error: string, unknown: bool}|null
-     */
-    private function recordFailure(
-        Post $post,
-        string $originalStatus,
-        array $options,
-        ?string $operationId,
-        ?string $leaseId,
-        Throwable $exception,
-    ): ?array {
-        // A failure before claimPost established a lease is not owned by this
-        // worker. In particular, a legacy serialized job must not overwrite a
-        // newer operation from its stale model/options snapshot.
-        if ($leaseId === null) {
-            return null;
-        }
-
-        return DB::transaction(function () use (
-            $post,
-            $originalStatus,
-            $options,
-            $operationId,
-            $leaseId,
-            $exception,
-        ): ?array {
-            $locked = Post::query()
-                ->whereKey($post->getKey())
-                ->lockForUpdate()
-                ->first();
-
-            if ($locked === null || $locked->publish_state === 'succeeded') {
-                return null;
-            }
-
-            $progress = $locked->publish_progress;
-
-            if ($operationId !== null
-                && (! is_array($progress) || ($progress['operation_id'] ?? null) !== $operationId)
-            ) {
-                return null;
-            }
-
-            if ($locked->publish_lease_id !== $leaseId) {
-                return null;
-            }
-
-            // A non-error response proves that the create did not happen. A
-            // timeout or 5xx response does not, so preserve the current group
-            // and require reconciliation instead of creating a duplicate.
-            if ($this->hasDefinitiveResponse($exception) && is_array($progress)) {
-                $progress['current'] = null;
-            }
-
-            $unknownOutcome = is_array($progress)
-                && ($this->hasUnknownCurrent($progress) || ($progress['state'] ?? null) === 'uncertain');
-
-            if ($progress !== null) {
-                $progress['state'] = $unknownOutcome ? 'uncertain' : 'failed';
-            }
-
-            $error = $exception->getMessage();
-            if ($unknownOutcome) {
-                $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. '.$error;
-            }
-
-            $locked->forceFill([
-                'status' => $originalStatus,
-                'publish_state' => 'failed',
-                'publish_error' => $error,
-                'publish_progress' => $progress,
-                'publish_claimed_at' => null,
-                'publish_lease_id' => null,
-            ])->save();
-            $this->updateTelegramPostRequests($locked, TelegramPostRequest::FAILED, $error, $options);
-
-            return ['error' => $error, 'unknown' => $unknownOutcome];
-        });
-    }
-
-    /**
-     * @param  array<string, mixed>  $remote
      * @param  list<int|string>  $mediaIds
      */
-    private function assertReconciledPost(
-        array $remote,
-        PostsyncerConfig $config,
-        PublishGroup $group,
-        array $mediaIds,
-        int|string $postsyncerPostId,
-    ): void {
-        if ((string) ($remote['id'] ?? '') !== (string) $postsyncerPostId) {
-            throw new PostsyncerException('The supplied PostSyncer post id was not found.');
-        }
-
-        $remoteStatus = strtoupper((string) ($remote['status'] ?? ''));
-        $allowedStatuses = $group->publishNow
-            ? ['PUBLISHED']
-            : ['SCHEDULED', 'PUBLISHED'];
-
-        if (! in_array($remoteStatus, $allowedStatuses, true)) {
-            throw new PostsyncerException(
-                'The supplied PostSyncer post is not in a publishable terminal state.',
-            );
-        }
-
-        $remoteWorkspaceId = $remote['workspace_id'] ?? data_get($remote, 'workspace.id');
-        if ($remoteWorkspaceId === null
-            || (string) $remoteWorkspaceId !== (string) $group->workspaceId
-        ) {
-            throw new PostsyncerException(
-                'The supplied PostSyncer post belongs to a different workspace.'
-            );
-        }
-
-        $expected = $this->buildPostBody($config, $group, $mediaIds);
-        $remoteContent = $remote['content'] ?? null;
-
-        if (! is_array($remoteContent) || count($remoteContent) !== count($expected['content'])) {
-            throw new PostsyncerException(
-                'The supplied PostSyncer post does not match the current publish group.'
-            );
-        }
-
-        foreach ($expected['content'] as $index => $expectedItem) {
-            $remoteItem = $remoteContent[$index] ?? null;
-            $remoteMedia = is_array($remoteItem) ? ($remoteItem['media'] ?? []) : [];
-            $actualMediaIds = $this->responseMediaIds($remoteMedia);
-
-            if (! is_array($remoteItem)
-                || ($remoteItem['text'] ?? null) !== ($expectedItem['text'] ?? null)
-                || $actualMediaIds === null
-                || $actualMediaIds !== array_map('strval', $expectedItem['media'] ?? [])
-            ) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post does not match the current publish group.'
-                );
-            }
-
-            if ((bool) ($remoteItem['is_first_comment'] ?? false)
-                !== (bool) ($expectedItem['is_first_comment'] ?? false)
-                || (int) ($remoteItem['first_comment_delay'] ?? 0)
-                    !== (int) ($expectedItem['first_comment_delay'] ?? 0)
-            ) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post does not match the current publish group.'
-                );
-            }
-        }
-
-        $remotePlatforms = $remote['platforms'] ?? null;
-        if (! is_array($remotePlatforms)) {
-            throw new PostsyncerException(
-                'The supplied PostSyncer post has no platform details to verify.'
-            );
-        }
-
-        $actualPlatforms = [];
-        foreach ($remotePlatforms as $platform) {
-            if (is_array($platform) && is_string($platform['platform'] ?? null)) {
-                $actualPlatforms[] = strtolower($platform['platform']);
-            }
-        }
-
-        $expectedPlatforms = array_map('strtolower', $group->platforms);
-        sort($actualPlatforms);
-        sort($expectedPlatforms);
-
-        if ($actualPlatforms !== $expectedPlatforms) {
-            throw new PostsyncerException(
-                'The supplied PostSyncer post does not match the current publish group.'
-            );
-        }
-
-        $expectedAccounts = $this->buildAccounts(
-            $config->language($group->language)['platforms'],
-            $group,
-            is_array($group->threadTweets) && $group->threadTweets !== [],
-        );
-
-        foreach ($group->platforms as $index => $platform) {
-            $remotePlatform = null;
-
-            foreach ($remotePlatforms as $candidate) {
-                if (is_array($candidate)
-                    && strtolower((string) ($candidate['platform'] ?? '')) === strtolower($platform)
-                ) {
-                    $remotePlatform = $candidate;
-
-                    break;
-                }
-            }
-
-            if (! is_array($remotePlatform)) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post does not match the current publish group.'
-                );
-            }
-
-            $expectedAccountId = $expectedAccounts[$index]['id'] ?? null;
-            $remoteAccountId = $remotePlatform['account_id'] ?? data_get($remotePlatform, 'account.id');
-
-            if ($remoteAccountId !== null
-                && (string) $remoteAccountId !== (string) $expectedAccountId
-            ) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post targets a different account.'
-                );
-            }
-        }
-
-        if (! $group->publishNow) {
-            $scheduledAt = $remote['scheduled_at'] ?? null;
-
-            if (! is_string($scheduledAt) || trim($scheduledAt) === '' || $group->when === null) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post has no verifiable schedule.'
-                );
-            }
-
-            try {
-                $remoteWhen = CarbonImmutable::parse($scheduledAt, $group->when->timezone);
-            } catch (Throwable) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post has an invalid schedule.'
-                );
-            }
-
-            if ($remoteWhen->format('Y-m-d H:i') !== $group->when->format('Y-m-d H:i')) {
-                throw new PostsyncerException(
-                    'The supplied PostSyncer post does not match the requested schedule.'
-                );
-            }
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $response
-     * @return array<string, mixed>
-     */
-    private function normalizePostResponse(array $response): array
+    public function reconcileMedia(Post $post, array $mediaIds): void
     {
-        return ! array_key_exists('id', $response) && is_array($response['data'] ?? null)
-            ? $response['data']
-            : $response;
-    }
+        $post->refresh();
+        $progress = $post->publish_progress;
 
-    /**
-     * @return list<string>|null
-     */
-    private function responseMediaIds(mixed $media): ?array
-    {
-        if (! is_array($media)) {
-            return null;
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to reconcile.');
         }
 
-        $ids = [];
-        foreach ($media as $item) {
-            $id = is_array($item) ? ($item['id'] ?? null) : $item;
-            if (! $this->hasNumericPostId($id)) {
-                return null;
-            }
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
 
-            $ids[] = (string) $id;
+        if (($progress['state'] ?? null) !== 'uncertain'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'uploading') {
+            throw new PostsyncerException(
+                'This post does not have an uncertain PostSyncer media upload to reconcile.'
+            );
         }
 
-        return $ids;
-    }
+        $expectedCount = is_array($current['media_urls'] ?? null)
+            ? count($current['media_urls'])
+            : 0;
+        $normalized = $this->normalizeMediaIds($mediaIds);
 
-    /**
-     * @param  array<string, mixed>|null  $options
-     */
-    private function updateTelegramPostRequests(
-        Post $post,
-        string $state,
-        ?string $errorMessage = null,
-        ?array $options = null,
-    ): void {
-        $query = $post->telegramPostRequests()
-            ->whereIn('state', [
-                TelegramPostRequest::AWAITING_APPROVAL,
-                TelegramPostRequest::APPROVED,
-                TelegramPostRequest::FAILED,
-            ]);
-
-        $requestId = $options === null ? null : $this->telegramRequestId($options);
-
-        if ($requestId !== null) {
-            $query->whereKey($requestId);
+        if ($expectedCount === 0 || count($normalized) !== $expectedCount) {
+            throw new PostsyncerException(
+                "Supply exactly {$expectedCount} PostSyncer media ids in upload order."
+            );
         }
 
-        $query->update([
-            'state' => $state,
-            'error_message' => $errorMessage,
-        ]);
-    }
-
-    /**
-     * Claim a queued/idle/failed publish under a row lock. A duplicate job
-     * sees `running` and exits before it can call PostSyncer.
-     *
-     * @param  array<string, mixed>  $options
-     */
-    private function claimPost(
-        Post $post,
-        array $options,
-        ?string $operationId = null,
-        ?string $leaseId = null,
-    ): ?Post {
-        return DB::transaction(function () use ($post, $options, $operationId, $leaseId): ?Post {
-            $locked = Post::query()
+        DB::transaction(function () use ($post, $progress, $current, $normalized): void {
+            $lockedPost = Post::query()
                 ->whereKey($post->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
 
-            $progress = $locked->publish_progress;
-
-            if ($operationId !== null
-                && (! is_array($progress) || ($progress['operation_id'] ?? null) !== $operationId)
-            ) {
-                return null;
-            }
-
-            if ($leaseId !== null && $locked->publish_lease_id !== $leaseId) {
-                $safeUploadRetry = $locked->publish_lease_id === null
-                    && $locked->publish_state === 'failed'
-                    && is_array($progress)
-                    && is_array($progress['current'] ?? null)
-                    && ($progress['current']['phase'] ?? null) === 'uploading';
-
-                if (! $safeUploadRetry) {
-                    return null;
-                }
-            }
-
-            if ($locked->publish_state === 'succeeded') {
-                return null;
-            }
-
-            if ($locked->publish_state === 'failed'
-                && is_array($progress)
-                && ($this->hasUnknownCurrent($progress) || ($progress['state'] ?? null) === 'uncertain')
-            ) {
-                return null;
-            }
-
-            if ($locked->publish_state === 'running') {
-                $claimedAt = $locked->publish_claimed_at;
-                // A worker is forcibly stopped at the job timeout. The queue
-                // lease is longer than that, so a redelivery after a crash is
-                // safe to reclaim before the overlap lock expires.
-                $staleAt = now()->subSeconds(PublishPostJob::TIMEOUT_SECONDS);
-
-                if ($claimedAt !== null && $claimedAt->greaterThan($staleAt)) {
-                    return null;
-                }
-
-                $unknownOutcome = is_array($progress)
-                    && ($this->hasUnknownCurrent($progress) || ($progress['state'] ?? null) === 'uncertain');
-
-                if ($unknownOutcome) {
-                    $progress['state'] = 'uncertain';
-
-                    $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. The previous publish worker lease expired.';
-                    $locked->forceFill([
-                        'publish_state' => 'failed',
-                        'publish_error' => $error,
-                        'publish_progress' => $progress,
-                        'publish_claimed_at' => null,
-                        'publish_lease_id' => null,
-                    ])->save();
-                    $this->updateTelegramPostRequests($locked, TelegramPostRequest::FAILED, $error, $options);
-
-                    return null;
-                }
-            }
-
-            $telegramRequest = $this->lockTelegramRequest($locked, $options);
-
-            if ($telegramRequest !== null
-                && in_array($telegramRequest->state, [
-                    TelegramPostRequest::CANCELLED,
-                    TelegramPostRequest::PUBLISHED,
-                ], true)
-            ) {
-                if ($locked->publish_state === 'queued') {
-                    $locked->forceFill([
-                        'publish_state' => 'idle',
-                        'publish_error' => null,
-                        'publish_claimed_at' => null,
-                        'publish_lease_id' => null,
-                    ])->save();
-                }
-
-                return null;
-            }
-
-            if (($locked->approval_state ?? 'approved') !== 'approved') {
-                $locked->forceFill([
-                    'publish_state' => 'failed',
-                    'publish_error' => 'This post needs human approval before it can be published.',
-                    'publish_claimed_at' => null,
-                    'publish_lease_id' => null,
-                ])->save();
-
-                return null;
-            }
-
-            if ($telegramRequest?->state === TelegramPostRequest::FAILED) {
-                $telegramRequest->forceFill([
-                    'state' => TelegramPostRequest::APPROVED,
-                    'error_message' => null,
-                ])->save();
-            }
-
-            $newLeaseId = $locked->publish_state === 'running'
-                ? (string) Str::uuid()
-                : ($locked->publish_lease_id ?? (string) Str::uuid());
-
-            $locked->forceFill([
-                'publish_state' => 'running',
-                'publish_error' => null,
-                'publish_claimed_at' => now(),
-                'publish_lease_id' => $newLeaseId,
-            ])->save();
-
-            return $locked;
-        });
-    }
-
-    /**
-     * Lock the Telegram request associated with this operation. The request
-     * is optional for dashboard/API publishes, but when present it is the
-     * cancellation and approval boundary for the publish job.
-     *
-     * @param  array<string, mixed>  $options
-     */
-    private function lockTelegramRequest(Post $post, array $options): ?TelegramPostRequest
-    {
-        $requestId = $this->telegramRequestId($options);
-
-        if ($requestId === null) {
-            return null;
-        }
-
-        $request = TelegramPostRequest::query()
-            ->whereKey($requestId)
-            ->lockForUpdate()
-            ->first();
-
-        if ($request === null
-            || $request->workspace_id !== $post->workspace_id
-            || $request->post_id !== $post->id
-        ) {
-            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
-        }
-
-        if (! in_array($request->state, [
-            TelegramPostRequest::APPROVED,
-            TelegramPostRequest::FAILED,
-            TelegramPostRequest::CANCELLED,
-            TelegramPostRequest::PUBLISHED,
-        ], true)) {
-            throw new PostsyncerException('The Telegram draft is not ready to publish.');
-        }
-
-        return $request;
-    }
-
-    /**
-     * Persist the pre-create checkpoint only while approval and Telegram
-     * cancellation still permit the operation.
-     *
-     * @param  array<string, mixed>  $progress
-     */
-    private function checkpointCurrent(Post $post, array $progress, ?string $leaseId): bool
-    {
-        return DB::transaction(function () use ($post, $progress, $leaseId): bool {
-            $locked = Post::query()
-                ->whereKey($post->getKey())
-                ->lockForUpdate()
-                ->first();
-
-            if ($locked === null
-                || $locked->publish_state !== 'running'
-                || ($locked->approval_state ?? 'approved') !== 'approved'
-                || ! is_array($locked->publish_progress)
-                || ($locked->publish_progress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
-                || ($leaseId !== null && $locked->publish_lease_id !== $leaseId)
-            ) {
-                return false;
-            }
-
-            $request = $this->lockTelegramRequest($locked, $progress['options'] ?? []);
-            if ($request !== null
-                && $request->state !== TelegramPostRequest::APPROVED
-            ) {
-                return false;
-            }
-
-            $locked->forceFill(['publish_progress' => $progress])->save();
-
-            return true;
-        });
-    }
-
-    /**
-     * Persist a successful external create only while this worker still owns
-     * the operation. A stale worker must not erase a newer worker's current
-     * checkpoint after the queue visibility timeout expires.
-     *
-     * @param  array<string, mixed>  $progress
-     */
-    private function checkpointCompleted(
-        Post $post,
-        array $progress,
-        int $index,
-        string $groupKey,
-        ?string $leaseId,
-    ): bool {
-        return DB::transaction(function () use ($post, $progress, $index, $groupKey, $leaseId): bool {
-            $locked = Post::query()
-                ->whereKey($post->getKey())
-                ->lockForUpdate()
-                ->first();
-
-            $latestProgress = $locked?->publish_progress;
-            $latestCurrent = is_array($latestProgress) ? ($latestProgress['current'] ?? null) : null;
-
-            if ($locked === null
-                || $locked->publish_state !== 'running'
-                || ($locked->approval_state ?? 'approved') !== 'approved'
-                || ($leaseId !== null && $locked->publish_lease_id !== $leaseId)
-                || ! is_array($latestProgress)
+            if (! is_array($latestProgress)
                 || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
-                || ! is_array($latestCurrent)
-                || ($latestCurrent['index'] ?? null) !== $index
-                || ($latestCurrent['group_key'] ?? null) !== $groupKey
-            ) {
-                return false;
+                || ($latestProgress['state'] ?? null) !== 'uncertain'
+                || ($latestProgress['current']['index'] ?? null) !== $current['index']
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'uploading') {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while media reconciliation was running.'
+                );
             }
 
-            $request = $this->lockTelegramRequest($locked, $progress['options'] ?? []);
-            if ($request !== null && $request->state !== TelegramPostRequest::APPROVED) {
-                return false;
-            }
-
-            $locked->forceFill(['publish_progress' => $progress])->save();
-
-            return true;
+            $latestProgress['current']['phase'] = 'retryable';
+            $latestProgress['current']['media_ids'] = $normalized;
+            $latestProgress['state'] = 'failed';
+            $lockedPost->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'PostSyncer media upload reconciled. Retry the publish to create the post.',
+                'publish_progress' => $latestProgress,
+            ])->save();
         });
+
+        $post->refresh();
     }
 
     /**
-     * Finalize the public post record under the same lock used by edits and
-     * cancellation. Public groups are written only after every planned group
-     * has a durable external id.
-     *
-     * @param  list<array<string, mixed>>  $publishedGroups
-     * @param  array<string, mixed>  $progress
-     * @param  list<PublishGroup>  $groups
-     * @param  array<string, mixed>  $options
+     * Recover an operation whose local content or settings drifted after all
+     * of its external groups were created. This is deliberately separate from
+     * normal retry: the operator is accepting the persisted old payload.
      */
-    private function finalizeSuccess(
-        Post $post,
-        array $publishedGroups,
-        array $progress,
-        array $groups,
-        array $options,
-        ?string $leaseId,
-    ): bool {
-        return DB::transaction(function () use ($post, $publishedGroups, $progress, $groups, $options, $leaseId): bool {
-            $locked = Post::query()
+    public function recoverPlanDrift(Post $post, bool $confirmFailed = false): void
+    {
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to recover.');
+        }
+
+        $this->assertProgressShape($progress);
+
+        if (($progress['state'] ?? null) !== 'failed'
+            || ($progress['current'] ?? null) !== null
+            || $this->completedGroups($progress) === []) {
+            throw new PostsyncerException(
+                'This post does not have a fully checkpointed PostSyncer operation with plan drift.'
+            );
+        }
+
+        $storedHash = $progress['plan_hash'] ?? null;
+        $storedGroups = $progress['planned_groups'] ?? null;
+        if (! is_string($storedHash)
+            || ! is_array($storedGroups)
+            || ! array_is_list($storedGroups)
+            || $storedGroups === []) {
+            throw new PostsyncerException(
+                'This post has no recoverable PostSyncer plan metadata.'
+            );
+        }
+
+        /** @var list<array{index: int, group_key: string}> $storedGroups */
+        $this->assertCompletedGroupsBelongToPlan($progress, $storedGroups);
+
+        if (! $this->allPlannedGroupsCompleted($progress)) {
+            throw new PostsyncerException(
+                'This post has unfinished PostSyncer groups. Plan drift cannot be recovered safely; clean up the created groups before starting a new publish.'
+            );
+        }
+
+        $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
+        $currentPlan = $this->planMetadata(
+            $config,
+            $this->planner->plan($post, $config, $progress['options']),
+            $progress['options'],
+        );
+
+        if ($storedHash === $currentPlan['hash'] && $storedGroups === $currentPlan['groups']) {
+            throw new PostsyncerException('The PostSyncer publish plan has not drifted.');
+        }
+
+        $completedGroups = $this->completedGroups($progress);
+        $client = new PostsyncerClient($config);
+
+        foreach ($storedGroups as $planned) {
+            $index = $planned['index'];
+            $groupKey = $planned['group_key'];
+            $completed = $this->completedGroup($completedGroups, $index, $groupKey);
+
+            if ($completed === null || ! is_array($completed['expected_payload'] ?? null)) {
+                throw new PostsyncerException(
+                    'This post is missing the payload snapshot required for plan-drift recovery.'
+                );
+            }
+
+            $expectedPayload = $completed['expected_payload'];
+            $snapshotGroup = $this->publishGroupFromSnapshot($completed, $expectedPayload);
+            $remote = $this->normalizePostResponse($client->getPost($completed['post_id']));
+            $this->assertReconciledPost(
+                $remote,
+                $config,
+                $snapshotGroup,
+                [],
+                $completed['post_id'],
+                $confirmFailed || ($completed['operator_confirmed'] ?? false) === true,
+                $expectedPayload,
+            );
+        }
+
+        $publishedGroups = array_map(
+            fn (array $completed): array => $this->publicGroup($completed),
+            $completedGroups,
+        );
+        $progress['state'] = 'succeeded';
+        $progress['current'] = null;
+        $progress['plan_drift_recovered'] = true;
+
+        DB::transaction(function () use (
+            $post,
+            $progress,
+            $completedGroups,
+            $publishedGroups,
+            $currentPlan,
+        ): void {
+            Workspace::query()
+                ->whereKey($post->workspace_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $lockedPost = Post::query()
                 ->whereKey($post->getKey())
                 ->lockForUpdate()
-                ->first();
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
 
-            if ($locked === null
-                || $locked->publish_state !== 'running'
-                || ($locked->approval_state ?? 'approved') !== 'approved'
-                || ! is_array($locked->publish_progress)
-                || ($locked->publish_progress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
-                || ($leaseId !== null && $locked->publish_lease_id !== $leaseId)
-            ) {
-                return false;
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($latestProgress['state'] ?? null) !== 'failed'
+                || ($latestProgress['current'] ?? null) !== null
+                || $this->completedGroups($latestProgress) !== $completedGroups) {
+                throw new PostsyncerException(
+                    'The post publish progress changed while plan-drift recovery was running.'
+                );
             }
 
-            $request = $this->lockTelegramRequest($locked, $options);
-            if ($request !== null && $request->state !== TelegramPostRequest::APPROVED) {
-                return false;
+            $lockedPost->loadMissing('workspace');
+            $latestConfig = PostsyncerConfig::fromWorkspace($lockedPost->workspace);
+            $latestPlan = $this->planMetadata(
+                $latestConfig,
+                $this->planner->plan($lockedPost, $latestConfig, $latestProgress['options']),
+                $latestProgress['options'],
+            );
+            if ($latestPlan['hash'] !== $currentPlan['hash']
+                || $latestPlan['groups'] !== $currentPlan['groups']) {
+                throw new PostsyncerException(
+                    'The post changed while plan-drift recovery was running.'
+                );
             }
 
-            $locked->forceFill([
+            $lockedPost->forceFill([
                 'postsyncer' => ['groups' => $publishedGroups],
-                'status' => $this->hasScheduledGroup($groups) ? 'scheduled' : 'posted',
+                'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
                 'publish_state' => 'succeeded',
                 'publish_error' => null,
                 'publish_progress' => $progress,
-                'publish_claimed_at' => null,
-                'publish_lease_id' => null,
             ])->save();
-
-            $this->updateTelegramPostRequests($locked, TelegramPostRequest::PUBLISHED, null, $options);
-
-            return true;
         });
-    }
 
-    /**
-     * @param  array<string, mixed>  $options
-     */
-    private function telegramRequestId(array $options): ?int
-    {
-        $id = $options['telegram_request_id'] ?? null;
-
-        if ($id === null) {
-            return null;
-        }
-
-        if (is_int($id) && $id > 0) {
-            return $id;
-        }
-
-        if (is_string($id) && ctype_digit($id) && (int) $id > 0) {
-            return (int) $id;
-        }
-
-        throw new PostsyncerException('The Telegram publish request id is invalid.');
-    }
-
-    /**
-     * @param  array<string, mixed>  $options
-     * @return array<string, mixed>
-     */
-    private function normalizeOptions(array $options): array
-    {
-        $normalized = [
-            'when' => array_key_exists('when', $options) && $options['when'] !== null
-                ? (string) $options['when']
-                : null,
-            'confirm_ask' => (bool) ($options['confirm_ask'] ?? false),
-        ];
-
-        if (array_key_exists('platforms', $options)) {
-            $platforms = is_array($options['platforms'])
-                ? array_values(array_map(
-                    fn (mixed $platform): string => strtolower((string) $platform),
-                    $options['platforms'],
-                ))
-                : [];
-            sort($platforms);
-            $normalized['platforms'] = $platforms;
-        }
-
-        $requestId = $this->telegramRequestId($options);
-        if ($requestId !== null) {
-            $normalized['telegram_request_id'] = $requestId;
-        }
-
-        ksort($normalized);
-
-        return $normalized;
-    }
-
-    /**
-     * @param  list<PublishGroup>  $groups
-     * @param  array<string, mixed>  $options
-     * @return array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}
-     */
-    private function planMetadata(PostsyncerConfig $config, array $groups, array $options): array
-    {
-        $plannedGroups = [];
-
-        foreach ($groups as $index => $group) {
-            $plannedGroups[] = [
-                'index' => $index,
-                'group_key' => $this->groupKey($config, $group),
-            ];
-        }
-
-        $normalizedOptions = $this->normalizeOptions($options);
-        $hash = hash('sha256', $this->canonicalJson([
-            'options' => $normalizedOptions,
-            'groups' => $plannedGroups,
-        ]));
-
-        return [
-            'hash' => $hash,
-            'groups' => $plannedGroups,
-            'options' => $normalizedOptions,
-        ];
-    }
-
-    /**
-     * @param  array<string, mixed>|null  $existing
-     * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
-     * @return array<string, mixed>
-     */
-    private function prepareProgress(Post $post, ?array $existing, array $plan): array
-    {
-        if ($existing === null) {
-            $progress = [
-                'version' => 1,
-                'operation_id' => (string) Str::uuid(),
-                'options' => $plan['options'],
-                'plan_hash' => $plan['hash'],
-                'planned_groups' => $plan['groups'],
-                'completed_groups' => [],
-                'current' => null,
-                'state' => 'running',
-            ];
-
-            $post->forceFill(['publish_progress' => $progress])->save();
-
-            return $progress;
-        }
-
-        $this->assertProgressShape($existing);
-
-        if ($this->hasUnknownCurrent($existing)
-            || ($existing['state'] ?? null) === 'uncertain'
-        ) {
-            throw new PostsyncerException(
-                'A PostSyncer create has an unknown outcome. Reconcile it before retrying.'
-            );
-        }
-
-        $storedOptions = $existing['options'] ?? null;
-        if (! is_array($storedOptions)
-            || $this->canonicalJson($this->normalizeOptions($storedOptions))
-                !== $this->canonicalJson($plan['options'])
-        ) {
-            throw new PostsyncerException(
-                'The publish options changed since this operation started. Reconcile the existing PostSyncer posts before retrying.'
-            );
-        }
-
-        $storedHash = $existing['plan_hash'] ?? null;
-        $storedGroups = $existing['planned_groups'] ?? null;
-
-        if ($storedHash === null) {
-            if ($storedGroups !== [] || $this->completedGroups($existing) !== []) {
-                throw new PostsyncerException(
-                    'PostSyncer publish progress has no plan metadata. Reconcile it before retrying.'
-                );
-            }
-
-            $existing['plan_hash'] = $plan['hash'];
-            $existing['planned_groups'] = $plan['groups'];
-        } elseif (! is_string($storedHash)
-            || $storedHash !== $plan['hash']
-            || $storedGroups !== $plan['groups']
-        ) {
-            throw new PostsyncerException(
-                'The publish plan changed since this operation started. Reconcile the existing PostSyncer posts before retrying.'
-            );
-        }
-
-        $this->assertCompletedGroupsBelongToPlan($existing, $plan['groups']);
-
-        $existing['options'] = $plan['options'];
-        $existing['state'] = 'running';
-        $existing['current'] = null;
-        $post->forceFill(['publish_progress' => $existing])->save();
-
-        return $existing;
-    }
-
-    /**
-     * @param  array<string, mixed>  $progress
-     */
-    private function assertProgressShape(array $progress): void
-    {
-        $state = $progress['state'] ?? null;
-        $plannedGroups = $progress['planned_groups'] ?? null;
-        $completedGroups = $progress['completed_groups'] ?? null;
-
-        if (($progress['version'] ?? null) !== 1
-            || ! is_string($progress['operation_id'] ?? null)
-            || trim($progress['operation_id']) === ''
-            || ! in_array($state, ['queued', 'running', 'failed', 'succeeded', 'uncertain'], true)
-            || ! is_array($progress['options'] ?? null)
-            || ! is_array($plannedGroups)
-            || ! is_array($completedGroups)
-        ) {
-            throw new PostsyncerException(
-                'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
-            );
-        }
-
-        foreach ($plannedGroups as $planned) {
-            if (! is_array($planned)
-                || ! is_int($planned['index'] ?? null)
-                || ! is_string($planned['group_key'] ?? null)
-                || trim($planned['group_key']) === ''
-            ) {
-                throw new PostsyncerException(
-                    'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
-                );
-            }
-        }
-
-        foreach ($completedGroups as $completed) {
-            if (! is_array($completed)
-                || ! is_int($completed['index'] ?? null)
-                || ! is_string($completed['group_key'] ?? null)
-                || ! $this->hasExistingPostId($completed['post_id'] ?? null)
-            ) {
-                throw new PostsyncerException(
-                    'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
-                );
-            }
-        }
-
-        $current = $progress['current'] ?? null;
-        $currentPhase = is_array($current) && array_key_exists('phase', $current)
-            ? $current['phase']
-            : null;
-        $currentMediaIdempotencyKey = is_array($current) && array_key_exists('media_idempotency_key', $current)
-            ? $current['media_idempotency_key']
-            : null;
-        if ($current !== null
-            && (! is_array($current)
-                || ! is_int($current['index'] ?? null)
-                || ! is_string($current['group_key'] ?? null)
-                || ! is_string($current['idempotency_key'] ?? null)
-                || trim($current['idempotency_key']) === ''
-                || ! in_array($currentPhase, ['uploading', 'creating'], true)
-                || ($currentPhase === 'uploading'
-                    && (! is_string($currentMediaIdempotencyKey)
-                        || trim($currentMediaIdempotencyKey) === ''))
-                || ! is_array($current['media_ids'] ?? null)
-            )
-        ) {
-            throw new PostsyncerException(
-                'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
-            );
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $progress
-     * @return list<array<string, mixed>>
-     */
-    private function completedGroups(array $progress): array
-    {
-        $groups = $progress['completed_groups'] ?? [];
-
-        return is_array($groups)
-            ? array_values(array_filter($groups, static fn (mixed $group): bool => is_array($group)))
-            : [];
-    }
-
-    /**
-     * @param  array<string, mixed>  $progress
-     * @param  list<array{index: int, group_key: string}>  $plannedGroups
-     */
-    private function assertCompletedGroupsBelongToPlan(array $progress, array $plannedGroups): void
-    {
-        $seen = [];
-
-        foreach ($this->completedGroups($progress) as $completed) {
-            $index = $completed['index'] ?? null;
-            $key = $completed['group_key'] ?? null;
-            $planned = is_int($index) ? ($plannedGroups[$index] ?? null) : null;
-
-            if (! is_int($index)
-                || ! is_string($key)
-                || isset($seen[$index])
-                || ! is_array($planned)
-                || $planned['group_key'] !== $key
-            ) {
-                throw new PostsyncerException(
-                    'Existing PostSyncer progress does not match this publish plan. Reconcile it before retrying.'
-                );
-            }
-
-            $seen[$index] = true;
-        }
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $groups
-     * @return array<string, mixed>|null
-     */
-    private function completedGroup(array $groups, int $index, string $groupKey): ?array
-    {
-        foreach ($groups as $group) {
-            if (($group['index'] ?? null) === $index
-                && ($group['group_key'] ?? null) === $groupKey
-            ) {
-                return $group;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param  list<PublishGroup>  $groups
-     */
-    private function hasScheduledGroup(array $groups): bool
-    {
-        foreach ($groups as $group) {
-            if (! $group->publishNow) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param  array<string, mixed>  $value
-     */
-    private function canonicalJson(array $value): string
-    {
-        return json_encode($this->canonicalValue($value), JSON_THROW_ON_ERROR);
-    }
-
-    private function canonicalValue(mixed $value): mixed
-    {
-        if (! is_array($value)) {
-            return $value;
-        }
-
-        if (array_is_list($value)) {
-            return array_map(
-                fn (mixed $item): mixed => $this->canonicalValue($item),
-                $value,
-            );
-        }
-
-        $canonical = [];
-        foreach ($value as $key => $item) {
-            $canonical[(string) $key] = $this->canonicalValue($item);
-        }
-        ksort($canonical);
-
-        return $canonical;
-    }
-
-    /**
-     * A current group means the external create may have happened without a
-     * response being persisted. Replaying it would be unsafe.
-     *
-     * @param  array<string, mixed>  $progress
-     */
-    private function hasUnknownCurrent(array $progress): bool
-    {
-        $current = $progress['current'] ?? null;
-
-        if ($current === null) {
-            return false;
-        }
-
-        // Media upload retries reuse the stable media idempotency key. A
-        // create-phase checkpoint is different: the remote post may already
-        // exist and must be reconciled before any retry.
-        return ! is_array($current) || ($current['phase'] ?? null) !== 'uploading';
-    }
-
-    private function idempotencyKey(string $operationId, int $index, string $groupKey): string
-    {
-        return hash('sha256', $operationId.'|'.$index.'|'.$groupKey);
-    }
-
-    private function mediaIdempotencyKey(string $operationId, int $index, string $groupKey): string
-    {
-        return hash('sha256', 'media|'.$operationId.'|'.$index.'|'.$groupKey);
-    }
-
-    private function groupKey(PostsyncerConfig $config, PublishGroup $group): string
-    {
-        $langConfig = $config->language($group->language);
-        $platformAccounts = $langConfig['platforms'];
-        $accounts = [];
-        $platforms = $group->platforms;
-        sort($platforms);
-
-        foreach ($platforms as $platform) {
-            $platformConfig = is_array($platformAccounts[$platform] ?? null)
-                ? $platformAccounts[$platform]
-                : [];
-            $accounts[$platform] = $platformConfig['account_id'] ?? null;
-        }
-
-        ksort($accounts);
-
-        return hash('sha256', $this->canonicalJson([
-            'language' => $group->language,
-            'workspace_id' => (string) $group->workspaceId,
-            'platforms' => $platforms,
-            'accounts' => $accounts,
-            'media_urls' => array_map(
-                fn (string $url): string => $this->stableMediaUrl($url),
-                $group->mediaUrls,
-            ),
-            'captions' => $group->captions,
-            'thread_tweets' => $group->threadTweets,
-            'first_comment' => $group->firstComment,
-            'when' => $group->when?->toIso8601String(),
-            'publish_now' => $group->publishNow,
-        ]));
-    }
-
-    private function stableMediaUrl(string $url): string
-    {
-        $parts = parse_url($url);
-
-        if (! is_array($parts)) {
-            return $url;
-        }
-
-        $query = [];
-        if (is_string($parts['query'] ?? null)) {
-            parse_str($parts['query'], $query);
-        }
-
-        $transientKeys = [
-            'expires',
-            'signature',
-            'x-amz-algorithm',
-            'x-amz-credential',
-            'x-amz-date',
-            'x-amz-expires',
-            'x-amz-signedheaders',
-            'x-amz-signature',
-            'x-amz-security-token',
-        ];
-
-        foreach (array_keys($query) as $key) {
-            if (in_array(strtolower((string) $key), $transientKeys, true)) {
-                unset($query[$key]);
-            }
-        }
-
-        ksort($query);
-
-        $canonical = '';
-        if (isset($parts['scheme'])) {
-            $canonical .= $parts['scheme'].'://';
-        }
-        if (isset($parts['host'])) {
-            $canonical .= $parts['host'];
-        }
-        if (isset($parts['port'])) {
-            $canonical .= ':'.$parts['port'];
-        }
-        $canonical .= $parts['path'] ?? '';
-        if ($query !== []) {
-            $canonical .= '?'.http_build_query($query);
-        }
-
-        return $canonical !== '' ? $canonical : $url;
+        $post->refresh();
     }
 
     /**
@@ -1489,6 +701,508 @@ class PublishPostAction
         }
 
         return $body;
+    }
+
+    /**
+     * Validate all account mappings before any media is registered remotely.
+     * The progress checkpoint is already persisted, so a settings fix can be
+     * applied and retried without leaving an uncertain media upload behind.
+     *
+     * @param  list<PublishGroup>  $groups
+     */
+    private function assertAccountsConfigured(PostsyncerConfig $config, array $groups): void
+    {
+        foreach ($groups as $group) {
+            $this->buildAccounts(
+                $config->language($group->language)['platforms'],
+                $group,
+                is_array($group->threadTweets) && $group->threadTweets !== [],
+            );
+        }
+    }
+
+    private function hasDefinitiveResponse(Throwable $exception): bool
+    {
+        return $exception instanceof PostsyncerException
+            && $exception->responseReceived
+            && ! $exception->outcomeUnknown;
+    }
+
+    /**
+     * Verify a successful create through PostSyncer's canonical resource. A
+     * create has already happened when this lookup starts, so an unavailable
+     * or mismatched resource remains an uncertain outcome and is never replayed
+     * automatically.
+     *
+     * @param  array<string, mixed>  $created
+     * @param  list<int|string>  $mediaIds
+     * @return array<string, mixed>
+     */
+    private function verifyCreatedPost(
+        PostsyncerClient $client,
+        array $created,
+        PostsyncerConfig $config,
+        PublishGroup $group,
+        array $mediaIds,
+    ): array {
+        $created = $this->normalizePostResponse($created);
+        $postId = $created['id'] ?? null;
+
+        if (! $this->hasNumericPostId($postId)) {
+            throw new PostsyncerException(
+                'PostSyncer accepted the create but returned no verifiable post id.',
+                0,
+                null,
+                false,
+                true,
+                true,
+            );
+        }
+
+        $lastException = null;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            if ($attempt > 0) {
+                usleep(100000 * $attempt);
+            }
+
+            $remote = [];
+
+            try {
+                $remote = $this->normalizePostResponse($client->getPost((string) $postId));
+                $this->assertReconciledPost($remote, $config, $group, $mediaIds, $postId);
+
+                return $remote;
+            } catch (Throwable $exception) {
+                $lastException = $exception;
+
+                if (! $this->shouldRetryCanonicalLookup($remote, $exception)) {
+                    break;
+                }
+            }
+        }
+
+        $message = 'PostSyncer accepted post '.(string) $postId
+            .' but its canonical payload could not be verified.';
+        if ($lastException->getMessage() !== '') {
+            $message .= ' '.$lastException->getMessage();
+        }
+
+        throw new PostsyncerException(
+            $message.' Reconcile PostSyncer before retrying.',
+            $lastException instanceof PostsyncerException ? $lastException->getCode() : 0,
+            $lastException,
+            false,
+            true,
+            true,
+        );
+    }
+
+    /**
+     * PostSyncer may expose a newly-created record before its canonical
+     * payload is populated. Retry only those transient/asynchronous states;
+     * a stable payload mismatch should go straight to reconciliation.
+     *
+     * @param  array<string, mixed>  $remote
+     */
+    private function shouldRetryCanonicalLookup(array $remote, Throwable $exception): bool
+    {
+        if ($exception instanceof ConnectionException) {
+            return true;
+        }
+
+        if ($exception instanceof PostsyncerException) {
+            $code = (int) $exception->getCode();
+
+            if (in_array($code, [404, 408, 425, 429], true) || $code >= 500) {
+                return true;
+            }
+        }
+
+        return in_array(
+            strtoupper((string) ($remote['status'] ?? '')),
+            ['IN_QUEUE', 'PENDING', 'QUEUED'],
+            true,
+        );
+    }
+
+    /**
+     * Prefer the latest persisted progress, but never discard a local current
+     * group when its checkpoint write failed. Keeping that group is safer than
+     * replaying a create whose response may already have been accepted.
+     *
+     * @param  array<string, mixed>|null  $local
+     * @param  array<string, mixed>|null  $latest
+     * @return array<string, mixed>|null
+     */
+    private function failureProgress(?array $local, ?array $latest): ?array
+    {
+        if ($local === null) {
+            return $latest;
+        }
+
+        if ($latest === null
+            || ($local['operation_id'] ?? null) !== ($latest['operation_id'] ?? null)) {
+            return $local;
+        }
+
+        $merged = $latest;
+        $localCurrent = $local['current'] ?? null;
+        $latestCurrent = $latest['current'] ?? null;
+
+        if (is_array($localCurrent) && $latestCurrent === null) {
+            $merged['current'] = $localCurrent;
+        }
+
+        $completed = $this->completedGroups($latest);
+        foreach ($this->completedGroups($local) as $localGroup) {
+            $completed = $this->upsertCompletedGroup($completed, $localGroup);
+        }
+
+        usort(
+            $completed,
+            fn (array $left, array $right): int => ((int) ($left['index'] ?? 0))
+                <=> ((int) ($right['index'] ?? 0)),
+        );
+        $merged['completed_groups'] = $completed;
+
+        return $merged;
+    }
+
+    /**
+     * @param  array<string, mixed>  $remote
+     * @param  list<int|string>  $mediaIds
+     * @param  array<string, mixed>|null  $expectedPayload
+     */
+    private function assertReconciledPost(
+        array $remote,
+        PostsyncerConfig $config,
+        PublishGroup $group,
+        array $mediaIds,
+        int|string $postsyncerPostId,
+        bool $allowFailed = false,
+        ?array $expectedPayload = null,
+    ): void {
+        if ((string) ($remote['id'] ?? '') !== (string) $postsyncerPostId) {
+            throw new PostsyncerException('The supplied PostSyncer post id was not found.');
+        }
+
+        $remoteWorkspaceId = $remote['workspace_id'] ?? data_get($remote, 'workspace.id');
+        if ($remoteWorkspaceId === null
+            || (string) $remoteWorkspaceId !== (string) $group->workspaceId) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post belongs to a different workspace.'
+            );
+        }
+
+        $expected = $expectedPayload ?? $this->buildPostBody($config, $group, $mediaIds);
+        $expectedContent = $expected['content'] ?? null;
+        if (! is_array($expectedContent)) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer payload snapshot has no content to verify.'
+            );
+        }
+        $remoteContent = $remote['content'] ?? null;
+
+        if (! is_array($remoteContent) || count($remoteContent) !== count($expectedContent)) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post does not match the current publish group.'
+            );
+        }
+
+        foreach ($expectedContent as $index => $expectedItem) {
+            if (! is_array($expectedItem)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer payload snapshot has invalid content details.'
+                );
+            }
+
+            $remoteItem = $remoteContent[$index] ?? null;
+
+            $expectedMedia = is_array($expectedItem['media'] ?? null)
+                ? $expectedItem['media']
+                : [];
+
+            if (! is_array($remoteItem)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post does not match the current publish group.'
+                );
+            }
+
+            $remoteMedia = $remoteItem['media'] ?? [];
+            if (($remoteItem['text'] ?? null) !== ($expectedItem['text'] ?? null)
+                || ! is_array($remoteMedia)
+                || count($remoteMedia) !== count($expectedMedia)
+                || $this->responseMediaIds($remoteMedia)
+                    !== array_map('strval', $expectedMedia)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post does not match the current publish group.'
+                );
+            }
+
+            if ((bool) ($remoteItem['is_first_comment'] ?? false)
+                !== (bool) ($expectedItem['is_first_comment'] ?? false)
+                || (int) ($remoteItem['first_comment_delay'] ?? 0)
+                    !== (int) ($expectedItem['first_comment_delay'] ?? 0)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post does not match the current publish group.'
+                );
+            }
+        }
+
+        $remotePlatforms = $remote['platforms'] ?? null;
+        if (! is_array($remotePlatforms)) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post has no platform details to verify.'
+            );
+        }
+
+        $actualPlatforms = [];
+        foreach ($remotePlatforms as $platform) {
+            if (is_array($platform) && is_string($platform['platform'] ?? null)) {
+                $actualPlatforms[] = strtolower($platform['platform']);
+            }
+        }
+
+        $expectedPlatforms = array_map('strtolower', $group->platforms);
+        if (count($actualPlatforms) !== count($remotePlatforms)) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post does not match the current publish group.'
+            );
+        }
+        sort($actualPlatforms);
+        sort($expectedPlatforms);
+
+        if ($actualPlatforms !== $expectedPlatforms) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post does not match the current publish group.'
+            );
+        }
+
+        $expectedAccounts = $expectedPayload !== null
+            ? ($expectedPayload['accounts'] ?? null)
+            : $this->buildAccounts(
+                $config->language($group->language)['platforms'],
+                $group,
+                is_array($group->threadTweets) && $group->threadTweets !== [],
+            );
+
+        if (! is_array($expectedAccounts) || count($expectedAccounts) !== count($group->platforms)) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post does not contain verifiable account details.'
+            );
+        }
+
+        foreach ($group->platforms as $platform) {
+            $remotePlatform = null;
+            foreach ($remotePlatforms as $candidate) {
+                if (is_array($candidate)
+                    && strtolower((string) ($candidate['platform'] ?? '')) === strtolower($platform)) {
+                    $remotePlatform = $candidate;
+
+                    break;
+                }
+            }
+
+            if (! is_array($remotePlatform)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post does not match the current publish group.'
+                );
+            }
+
+            $expectedIndex = array_search($platform, $group->platforms, true);
+            $expectedAccount = is_int($expectedIndex)
+                ? ($expectedAccounts[$expectedIndex] ?? null)
+                : null;
+            $expectedAccountId = is_array($expectedAccount)
+                ? ($expectedAccount['id'] ?? null)
+                : null;
+            $remoteAccountId = $remotePlatform['account_id'] ?? data_get($remotePlatform, 'account.id');
+            if (! $this->hasExistingPostId($remoteAccountId)
+                || (string) $remoteAccountId !== (string) $expectedAccountId) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post targets a different account.'
+                );
+            }
+
+            $expectedSettings = is_array($expectedAccount)
+                ? ($expectedAccount['settings'] ?? [])
+                : [];
+            $remoteSettings = $remotePlatform['settings'] ?? null;
+            if ($expectedSettings !== []) {
+                if (! is_array($remoteSettings)) {
+                    throw new PostsyncerException(
+                        'The supplied PostSyncer post has no platform settings to verify.'
+                    );
+                }
+
+                foreach ($expectedSettings as $setting => $value) {
+                    if (! array_key_exists($setting, $remoteSettings)
+                        || $remoteSettings[$setting] !== $value) {
+                        throw new PostsyncerException(
+                            'The supplied PostSyncer post does not match the current platform settings.'
+                        );
+                    }
+                }
+            }
+        }
+
+        $remoteStatus = strtoupper((string) ($remote['status'] ?? ''));
+        if (! ($allowFailed && $remoteStatus === 'FAILED')) {
+            $this->assertPublishableStatus(
+                $remote['status'] ?? null,
+                $group,
+                'The supplied PostSyncer post',
+            );
+        }
+
+        if (! $group->publishNow) {
+            $scheduledAt = $remote['scheduled_at'] ?? null;
+
+            if (! is_string($scheduledAt) || trim($scheduledAt) === '' || $group->when === null) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post has no verifiable schedule.'
+                );
+            }
+
+            try {
+                $remoteWhen = CarbonImmutable::parse($scheduledAt, $group->when->timezone);
+            } catch (Throwable) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post has an invalid schedule.'
+                );
+            }
+
+            if ($remoteWhen->format('Y-m-d H:i') !== $group->when->format('Y-m-d H:i')) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post does not match the requested schedule.'
+                );
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $response
+     * @return array<string, mixed>
+     */
+    private function normalizePostResponse(array $response): array
+    {
+        return ! array_key_exists('id', $response) && is_array($response['data'] ?? null)
+            ? $response['data']
+            : $response;
+    }
+
+    /**
+     * Rebuild only the metadata needed to validate a stored payload snapshot.
+     * The current planner is intentionally not used for this group because
+     * this command exists to recover from a changed plan.
+     *
+     * @param  array<string, mixed>  $completed
+     * @param  array<string, mixed>  $expectedPayload
+     */
+    private function publishGroupFromSnapshot(
+        array $completed,
+        array $expectedPayload,
+    ): PublishGroup {
+        $workspaceId = $expectedPayload['workspace_id'] ?? null;
+        $platforms = $completed['platforms'] ?? null;
+        $language = $completed['language'] ?? null;
+        $scheduleType = $expectedPayload['schedule_type'] ?? null;
+
+        if ((! is_int($workspaceId) && ! is_string($workspaceId))
+            || (string) $workspaceId === ''
+            || ! is_string($language)
+            || trim($language) === ''
+            || ! is_array($platforms)
+            || $platforms === []
+            || ! is_string($scheduleType)) {
+            throw new PostsyncerException(
+                'The stored PostSyncer payload is not sufficient for plan-drift recovery.'
+            );
+        }
+
+        $publishNow = $scheduleType === 'publish_now';
+        if (! $publishNow && $scheduleType !== 'schedule') {
+            throw new PostsyncerException(
+                'The stored PostSyncer payload has an invalid schedule type.'
+            );
+        }
+
+        $when = null;
+        if (! $publishNow) {
+            $scheduleFor = $expectedPayload['schedule_for'] ?? null;
+            $date = is_array($scheduleFor) ? ($scheduleFor['date'] ?? null) : null;
+            $time = is_array($scheduleFor) ? ($scheduleFor['time'] ?? null) : null;
+            $timezone = is_array($scheduleFor) ? ($scheduleFor['timezone'] ?? null) : null;
+
+            if (! is_string($date) || ! is_string($time) || ! is_string($timezone)
+                || trim($date) === '' || trim($time) === '' || trim($timezone) === '') {
+                throw new PostsyncerException(
+                    'The stored PostSyncer payload has no verifiable schedule.'
+                );
+            }
+
+            try {
+                $when = CarbonImmutable::parse($date.' '.$time, $timezone);
+            } catch (Throwable) {
+                throw new PostsyncerException(
+                    'The stored PostSyncer payload has an invalid schedule.'
+                );
+            }
+        }
+
+        return new PublishGroup(
+            language: $language,
+            workspaceId: $workspaceId,
+            platforms: array_values(array_map('strval', $platforms)),
+            mediaUrls: [],
+            captions: [],
+            when: $when,
+            publishNow: $publishNow,
+        );
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function responseMediaIds(mixed $media): array
+    {
+        if (! is_array($media)) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($media as $item) {
+            $id = is_array($item) ? ($item['id'] ?? null) : $item;
+            if ($this->hasExistingPostId($id)) {
+                $ids[] = (string) $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * @param  list<int|string>  $mediaIds
+     * @return list<string>
+     */
+    private function normalizeMediaIds(array $mediaIds): array
+    {
+        $normalized = [];
+
+        foreach ($mediaIds as $mediaId) {
+            if (! $this->hasNumericPostId($mediaId)) {
+                throw new PostsyncerException('Every reconciled PostSyncer media id must be a positive integer.');
+            }
+
+            $normalized[] = (string) $mediaId;
+        }
+
+        if (count($normalized) !== count(array_unique($normalized))) {
+            throw new PostsyncerException('Reconciled PostSyncer media ids must be unique.');
+        }
+
+        return $normalized;
     }
 
     /**
@@ -1600,6 +1314,738 @@ class PublishPostAction
         return false;
     }
 
+    /**
+     * @param  list<PublishGroup>  $groups
+     * @param  array<string, mixed>  $options
+     * @return array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}
+     */
+    private function planMetadata(PostsyncerConfig $config, array $groups, array $options): array
+    {
+        $plannedGroups = [];
+
+        foreach ($groups as $index => $group) {
+            $plannedGroups[] = [
+                'index' => $index,
+                'group_key' => $this->groupKey($config, $group),
+            ];
+        }
+
+        $normalizedOptions = $this->normalizeOptions($options);
+        $hash = hash('sha256', $this->canonicalJson([
+            'options' => $normalizedOptions,
+            'groups' => $plannedGroups,
+        ]));
+
+        return [
+            'hash' => $hash,
+            'groups' => $plannedGroups,
+            'options' => $normalizedOptions,
+        ];
+    }
+
+    /**
+     * A publish plan is a snapshot. Refuse to create another group if the post
+     * was changed outside the normal mutation guard while this job ran.
+     *
+     * @param  array<string, mixed>  $options
+     * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     */
+    private function assertPlanUnchanged(
+        Post $post,
+        array $options,
+        array $plan,
+        string $runToken,
+    ): bool {
+        $post->refresh();
+        if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+            return false;
+        }
+
+        $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
+        $currentPlan = $this->planMetadata(
+            $config,
+            $this->planner->plan($post, $config, $options),
+            $options,
+        );
+
+        if ($currentPlan['hash'] !== $plan['hash']
+            || $currentPlan['groups'] !== $plan['groups']) {
+            throw new PostsyncerException(
+                'The post changed while the PostSyncer publish was running. '
+                .'Retry requires a new publish plan.'
+            );
+        }
+
+        $post->refresh();
+
+        return $this->runTokenMatches($post->publish_progress, $runToken);
+    }
+
+    private function startRun(Post $post, string $runToken): bool
+    {
+        return DB::transaction(function () use ($post, $runToken): bool {
+            Workspace::query()
+                ->whereKey($post->workspace_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedPost === null) {
+                return false;
+            }
+
+            if ($lockedPost->publish_state === 'succeeded') {
+                return false;
+            }
+
+            $progress = $lockedPost->publish_progress;
+            if ($this->hasRunToken($progress)
+                && ! $this->runTokenMatches($progress, $runToken)) {
+                return false;
+            }
+
+            if (is_array($progress)) {
+                $progress['run_token'] = $runToken;
+            }
+
+            $lockedPost->forceFill([
+                'publish_state' => 'running',
+                'publish_error' => null,
+                'publish_progress' => $progress,
+            ])->save();
+
+            return true;
+        });
+    }
+
+    /**
+     * Persist a progress checkpoint only while this worker still owns the
+     * current run. The row lock makes the token check and write indivisible
+     * from a manual retry.
+     *
+     * @param  array<string, mixed>  $progress
+     */
+    private function saveProgressForRun(Post $post, array $progress, string $runToken): bool
+    {
+        return DB::transaction(function () use ($post, $progress, $runToken): bool {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedPost === null
+                || (! $this->runTokenMatches($lockedPost->publish_progress, $runToken)
+                    && ! ($lockedPost->publish_progress === null
+                        && $lockedPost->publish_state === 'running'))) {
+                return false;
+            }
+
+            $lockedPost->update(['publish_progress' => $progress]);
+
+            return true;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $localProgress
+     * @return bool|null True/false is whether the failure has an uncertain
+     *                   outcome; null means the worker no longer owns the run.
+     */
+    private function recordFailureForRun(
+        Post $post,
+        string $runToken,
+        string $originalStatus,
+        ?array $localProgress,
+        Throwable $exception,
+    ): ?bool {
+        return DB::transaction(function () use (
+            $post,
+            $runToken,
+            $originalStatus,
+            $localProgress,
+            $exception,
+        ): ?bool {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedPost === null
+                || (! $this->runTokenMatches($lockedPost->publish_progress, $runToken)
+                    && ! ($lockedPost->publish_progress === null
+                        && $lockedPost->publish_state === 'running'))) {
+                return null;
+            }
+
+            if ($lockedPost->publish_state === 'succeeded'
+                && $this->hasExistingPublicGroup($lockedPost)) {
+                return null;
+            }
+
+            $latestProgress = $lockedPost->publish_progress;
+            $failedProgress = $this->failureProgress(
+                $localProgress,
+                is_array($latestProgress) ? $latestProgress : null,
+            );
+
+            // A definitive create rejection is safe to retry, but the media
+            // registration is not. Keep its ids so the next attempt creates
+            // with the already-registered media instead of uploading again.
+            if ($this->hasDefinitiveResponse($exception) && is_array($failedProgress)) {
+                $current = $failedProgress['current'] ?? null;
+
+                if (is_array($current)
+                    && ($current['phase'] ?? null) === 'creating'
+                    && ($current['media_ids'] ?? []) !== []) {
+                    $current['phase'] = 'retryable';
+                    $failedProgress['current'] = $current;
+                } elseif (! is_array($current)
+                    || ($current['phase'] ?? null) !== 'uploading'
+                    || ($exception instanceof PostsyncerException && $exception->safeToRetry)) {
+                    $failedProgress['current'] = null;
+                }
+            }
+
+            $unknownOutcome = false;
+            if (is_array($failedProgress)) {
+                $unknownOutcome = $this->hasUnknownCurrent($failedProgress)
+                    || ($failedProgress['state'] ?? null) === 'uncertain';
+                $failedProgress['state'] = $unknownOutcome ? 'uncertain' : 'failed';
+            }
+
+            $error = $exception->getMessage();
+            if ($unknownOutcome) {
+                $phase = is_array($failedProgress['current'] ?? null)
+                    ? ($failedProgress['current']['phase'] ?? null)
+                    : null;
+                $message = $phase === 'uploading'
+                    ? 'PostSyncer media upload outcome is uncertain. Inspect and clean up PostSyncer media before retrying. '
+                    : 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. ';
+                $error = $message.$error;
+            }
+
+            $lockedPost->forceFill([
+                'status' => $originalStatus,
+                'publish_state' => 'failed',
+                'publish_error' => $error,
+                'publish_progress' => $failedProgress,
+            ])->save();
+
+            return $unknownOutcome;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $progress
+     */
+    private function hasRunToken(?array $progress): bool
+    {
+        return is_string($progress['run_token'] ?? null)
+            && trim($progress['run_token']) !== '';
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $progress
+     */
+    private function runTokenMatches(?array $progress, string $runToken): bool
+    {
+        return $this->hasRunToken($progress)
+            && hash_equals((string) $progress['run_token'], $runToken);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $existing
+     * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     * @return array<string, mixed>|null
+     */
+    private function prepareProgress(
+        Post $post,
+        ?array $existing,
+        array $plan,
+        string $runToken,
+    ): ?array {
+        if ($existing === null) {
+            $progress = [
+                'version' => 1,
+                'operation_id' => (string) Str::uuid(),
+                'run_token' => $runToken,
+                'options' => $plan['options'],
+                'plan_hash' => $plan['hash'],
+                'planned_groups' => $plan['groups'],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'running',
+            ];
+
+            if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                return null;
+            }
+
+            return $progress;
+        }
+
+        $this->assertProgressShape($existing);
+
+        if ($this->hasUnknownCurrent($existing)
+            || ($existing['state'] ?? null) === 'uncertain') {
+            throw new PostsyncerException(
+                'A PostSyncer media upload or create has an unknown outcome. Resolve it before retrying.'
+            );
+        }
+
+        $storedOptions = $existing['options'] ?? null;
+        if (! is_array($storedOptions)
+            || $this->canonicalJson($this->normalizeOptions($storedOptions))
+                !== $this->canonicalJson($plan['options'])) {
+            throw new PostsyncerException(
+                'The publish options changed since this operation started. '
+                .'Reconcile the existing PostSyncer posts before retrying.'
+            );
+        }
+
+        $storedHash = $existing['plan_hash'] ?? null;
+        $storedGroups = $existing['planned_groups'] ?? null;
+
+        if ($storedHash === null) {
+            if ($storedGroups !== [] || $this->completedGroups($existing) !== []) {
+                throw new PostsyncerException(
+                    'PostSyncer publish progress has no plan metadata. Reconcile it before retrying.'
+                );
+            }
+
+            $existing['plan_hash'] = $plan['hash'];
+            $existing['planned_groups'] = $plan['groups'];
+        } elseif (! is_string($storedHash)
+            || $storedHash !== $plan['hash']
+            || $storedGroups !== $plan['groups']) {
+            if ($this->completedGroups($existing) === []
+                && ($existing['current'] ?? null) === null) {
+                $existing['plan_hash'] = $plan['hash'];
+                $existing['planned_groups'] = $plan['groups'];
+            } else {
+                throw new PostsyncerException(
+                    'The publish plan changed since this operation started. '
+                    .'Reconcile the existing PostSyncer posts before retrying.'
+                );
+            }
+        }
+
+        $this->assertCompletedGroupsBelongToPlan($existing, $plan['groups']);
+
+        $existing['run_token'] = $runToken;
+        $existing['options'] = $plan['options'];
+        $existing['state'] = 'running';
+        if (! $this->saveProgressForRun($post, $existing, $runToken)) {
+            return null;
+        }
+
+        return $existing;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function assertProgressShape(array $progress): void
+    {
+        $state = $progress['state'] ?? null;
+        $plannedGroups = $progress['planned_groups'] ?? null;
+        $completedGroups = $progress['completed_groups'] ?? null;
+
+        if (($progress['version'] ?? null) !== 1
+            || ! is_string($progress['operation_id'] ?? null)
+            || trim($progress['operation_id']) === ''
+            || ! in_array($state, ['queued', 'running', 'failed', 'succeeded', 'uncertain'], true)
+            || ! is_array($progress['options'] ?? null)
+            || ! is_array($plannedGroups)
+            || ! is_array($completedGroups)) {
+            throw new PostsyncerException(
+                'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+            );
+        }
+
+        if (array_key_exists('run_token', $progress)
+            && (! is_string($progress['run_token']) || trim($progress['run_token']) === '')) {
+            throw new PostsyncerException(
+                'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+            );
+        }
+
+        foreach ($plannedGroups as $planned) {
+            if (! is_array($planned)
+                || ! is_int($planned['index'] ?? null)
+                || ! is_string($planned['group_key'] ?? null)
+                || trim($planned['group_key']) === '') {
+                throw new PostsyncerException(
+                    'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+                );
+            }
+        }
+
+        foreach ($completedGroups as $completed) {
+            if (! is_array($completed)
+                || ! is_int($completed['index'] ?? null)
+                || ! is_string($completed['group_key'] ?? null)
+                || ! $this->hasExistingPostId($completed['post_id'] ?? null)
+                || (array_key_exists('expected_payload', $completed)
+                    && ! is_array($completed['expected_payload']))) {
+                throw new PostsyncerException(
+                    'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+                );
+            }
+        }
+
+        $current = $progress['current'] ?? null;
+        if ($current !== null
+            && (! is_array($current)
+                || ! is_int($current['index'] ?? null)
+                || ! is_string($current['group_key'] ?? null)
+                || ! is_string($current['idempotency_key'] ?? null)
+                || trim($current['idempotency_key']) === ''
+                || ! in_array(($current['phase'] ?? null), ['uploading', 'creating', 'retryable'], true)
+                || ! is_array($current['media_ids'] ?? null)
+                || (array_key_exists('media_urls', $current)
+                    && ! is_array($current['media_urls']))
+                || (array_key_exists('expected_payload', $current)
+                    && ! is_array($current['expected_payload'])))) {
+            throw new PostsyncerException(
+                'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+            );
+        }
+
+        if (is_array($current) && ($current['phase'] ?? null) === 'uploading'
+            && (! is_array($current['media_urls'] ?? null) || $current['media_urls'] === [])) {
+            throw new PostsyncerException(
+                'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+            );
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     * @return list<array<string, mixed>>
+     */
+    private function completedGroups(array $progress): array
+    {
+        $groups = $progress['completed_groups'] ?? [];
+
+        return is_array($groups)
+            ? array_values(array_filter($groups, static fn (mixed $group): bool => is_array($group)))
+            : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     * @param  list<array{index: int, group_key: string}>  $plannedGroups
+     */
+    private function assertCompletedGroupsBelongToPlan(array $progress, array $plannedGroups): void
+    {
+        $seen = [];
+
+        foreach ($this->completedGroups($progress) as $completed) {
+            $index = $completed['index'] ?? null;
+            $key = $completed['group_key'] ?? null;
+            $planned = is_int($index) ? ($plannedGroups[$index] ?? null) : null;
+
+            if (! is_int($index)
+                || ! is_string($key)
+                || isset($seen[$index])
+                || ! is_array($planned)
+                || $planned['group_key'] !== $key) {
+                throw new PostsyncerException(
+                    'Existing PostSyncer progress does not match this publish plan. '
+                    .'Reconcile it before retrying.'
+                );
+            }
+
+            $seen[$index] = true;
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $groups
+     * @return array<string, mixed>|null
+     */
+    private function completedGroup(array $groups, int $index, string $groupKey): ?array
+    {
+        foreach ($groups as $group) {
+            if (($group['index'] ?? null) === $index
+                && ($group['group_key'] ?? null) === $groupKey) {
+                return $group;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $groups
+     * @param  array<string, mixed>  $replacement
+     * @return list<array<string, mixed>>
+     */
+    private function upsertCompletedGroup(array $groups, array $replacement): array
+    {
+        $upserted = false;
+        $deduplicated = [];
+
+        foreach ($groups as $group) {
+            if (($group['index'] ?? null) === ($replacement['index'] ?? null)
+                && ($group['group_key'] ?? null) === ($replacement['group_key'] ?? null)) {
+                if (! $upserted) {
+                    $deduplicated[] = $replacement;
+                    $upserted = true;
+                }
+
+                continue;
+            }
+
+            $deduplicated[] = $group;
+        }
+
+        if (! $upserted) {
+            $deduplicated[] = $replacement;
+        }
+
+        return $deduplicated;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function allPlannedGroupsCompleted(array $progress): bool
+    {
+        $plannedGroups = $progress['planned_groups'] ?? null;
+
+        if (! is_array($plannedGroups) || ($progress['current'] ?? null) !== null) {
+            return false;
+        }
+
+        $completedGroups = $this->completedGroups($progress);
+
+        foreach ($plannedGroups as $planned) {
+            if (! is_array($planned)
+                || ! is_int($planned['index'] ?? null)
+                || ! is_string($planned['group_key'] ?? null)
+                || $this->completedGroup(
+                    $completedGroups,
+                    $planned['index'],
+                    $planned['group_key'],
+                ) === null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Return media ids cached after a definitive create rejection.
+     *
+     * @param  array<string, mixed>  $progress
+     * @return list<int|string>|null
+     */
+    private function reconciledMediaIdsForGroup(
+        array $progress,
+        int $index,
+        string $groupKey,
+    ): ?array {
+        $current = $progress['current'] ?? null;
+
+        if (! is_array($current)
+            || ($current['phase'] ?? null) !== 'retryable'
+            || ($current['index'] ?? null) !== $index
+            || ($current['group_key'] ?? null) !== $groupKey
+            || ! is_array($current['media_ids'] ?? null)) {
+            return null;
+        }
+
+        return array_values($current['media_ids']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    private function normalizeOptions(array $options): array
+    {
+        $normalized = [
+            'when' => array_key_exists('when', $options) && $options['when'] !== null
+                ? (string) $options['when']
+                : null,
+            'confirm_ask' => (bool) ($options['confirm_ask'] ?? false),
+        ];
+
+        if (array_key_exists('platforms', $options)) {
+            $platforms = is_array($options['platforms'])
+                ? array_values(array_map(
+                    fn (mixed $platform): string => strtolower((string) $platform),
+                    $options['platforms'],
+                ))
+                : [];
+            sort($platforms);
+            $normalized['platforms'] = $platforms;
+        }
+
+        ksort($normalized);
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $value
+     */
+    private function canonicalJson(array $value): string
+    {
+        return json_encode($this->canonicalValue($value), JSON_THROW_ON_ERROR);
+    }
+
+    private function canonicalValue(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if (array_is_list($value)) {
+            return array_map(
+                fn (mixed $item): mixed => $this->canonicalValue($item),
+                $value,
+            );
+        }
+
+        $canonical = [];
+        foreach ($value as $key => $item) {
+            $canonical[(string) $key] = $this->canonicalValue($item);
+        }
+        ksort($canonical);
+
+        return $canonical;
+    }
+
+    /**
+     * A current group means the external create may have happened without a
+     * response being persisted. Replaying it would be unsafe.
+     *
+     * @param  array<string, mixed>  $progress
+     */
+    private function hasUnknownCurrent(array $progress): bool
+    {
+        if (! array_key_exists('current', $progress) || $progress['current'] === null) {
+            return false;
+        }
+
+        return ! is_array($progress['current'])
+            || ($progress['current']['phase'] ?? null) !== 'retryable';
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $groups
+     */
+    private function hasScheduledCompletedGroup(array $groups): bool
+    {
+        foreach ($groups as $group) {
+            if (strtoupper((string) ($group['status'] ?? '')) === 'SCHEDULED'
+                || filled($group['scheduled_at'] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function idempotencyKey(string $operationId, int $index, string $groupKey): string
+    {
+        return hash('sha256', $operationId.'|'.$index.'|'.$groupKey);
+    }
+
+    private function groupKey(PostsyncerConfig $config, PublishGroup $group): string
+    {
+        $langConfig = $config->language($group->language);
+        $platformAccounts = $langConfig['platforms'];
+        $accounts = [];
+        $platforms = $group->platforms;
+        sort($platforms);
+
+        foreach ($platforms as $platform) {
+            $platformConfig = is_array($platformAccounts[$platform] ?? null)
+                ? $platformAccounts[$platform]
+                : [];
+            $accounts[$platform] = $platformConfig['account_id'] ?? null;
+        }
+
+        ksort($accounts);
+
+        return hash('sha256', $this->canonicalJson([
+            'language' => $group->language,
+            'workspace_id' => (string) $group->workspaceId,
+            'platforms' => $platforms,
+            'accounts' => $accounts,
+            'media_urls' => array_map(
+                fn (string $url): string => $this->stableMediaUrl($url),
+                $group->mediaUrls,
+            ),
+            'captions' => $group->captions,
+            'thread_tweets' => $group->threadTweets,
+            'first_comment' => $group->firstComment,
+            'when' => $group->when?->toIso8601String(),
+            'publish_now' => $group->publishNow,
+        ]));
+    }
+
+    private function stableMediaUrl(string $url): string
+    {
+        $parts = parse_url($url);
+
+        if (! is_array($parts)) {
+            return $url;
+        }
+
+        $query = [];
+        if (is_string($parts['query'] ?? null)) {
+            parse_str($parts['query'], $query);
+        }
+
+        $transientKeys = [
+            'expires',
+            'signature',
+            'x-amz-algorithm',
+            'x-amz-credential',
+            'x-amz-date',
+            'x-amz-expires',
+            'x-amz-signedheaders',
+            'x-amz-signature',
+            'x-amz-security-token',
+        ];
+
+        foreach (array_keys($query) as $key) {
+            if (in_array(strtolower((string) $key), $transientKeys, true)) {
+                unset($query[$key]);
+            }
+        }
+
+        ksort($query);
+
+        $canonical = '';
+        if (isset($parts['scheme'])) {
+            $canonical .= $parts['scheme'].'://';
+        }
+        if (isset($parts['host'])) {
+            $canonical .= $parts['host'];
+        }
+        if (isset($parts['port'])) {
+            $canonical .= ':'.$parts['port'];
+        }
+        $canonical .= $parts['path'] ?? '';
+        if ($query !== []) {
+            $canonical .= '?'.http_build_query($query);
+        }
+
+        return $canonical !== '' ? $canonical : $url;
+    }
+
     private function hasExistingPostId(mixed $postId): bool
     {
         if (is_int($postId) || is_float($postId)) {
@@ -1618,33 +2064,37 @@ class PublishPostAction
 
     /**
      * @param  array<string, mixed>  $result
-     * @return array{index: int, group_key: string, post_id: string, status: string, scheduled_at: string|null, platforms: list<string>, language: string}
+     * @param  array<string, mixed>|null  $expectedPayload
+     * @return array<string, mixed>
      */
     private function formatProgressGroup(
         PublishGroup $group,
         array $result,
         int $index,
         string $groupKey,
+        bool $operatorConfirmedFailed = false,
+        ?array $expectedPayload = null,
     ): array {
-        $result = $this->normalizePostResponse($result);
         $postId = $result['id'] ?? null;
 
         if (! $this->hasNumericPostId($postId)) {
             throw new PostsyncerException('PostSyncer returned no post id after creating a group.');
         }
 
-        $status = $this->assertPublishableStatus(
-            $result['status'] ?? null,
-            $group,
-            'PostSyncer create response',
-        );
+        $remoteStatus = strtoupper((string) ($result['status'] ?? ''));
+        $status = $operatorConfirmedFailed && $remoteStatus === 'FAILED'
+            ? 'FAILED'
+            : $this->assertPublishableStatus(
+                $result['status'] ?? null,
+                $group,
+                'PostSyncer create response',
+            );
         $scheduledAt = $result['scheduled_at'] ?? null;
 
         if (! $group->publishNow) {
             if (! is_string($scheduledAt)
                 || trim($scheduledAt) === ''
-                || $group->when === null
-            ) {
+                || $group->when === null) {
                 throw new PostsyncerException(
                     'PostSyncer create response has no verifiable schedule.'
                 );
@@ -1665,7 +2115,7 @@ class PublishPostAction
             }
         }
 
-        return [
+        $formatted = [
             'index' => $index,
             'group_key' => $groupKey,
             'post_id' => (string) $postId,
@@ -1674,6 +2124,67 @@ class PublishPostAction
             'platforms' => $group->platforms,
             'language' => $group->language,
         ];
+
+        if ($operatorConfirmedFailed) {
+            $formatted['remote_status'] = $remoteStatus;
+            $formatted['operator_confirmed'] = true;
+        }
+
+        if ($expectedPayload !== null) {
+            $formatted['expected_payload'] = $expectedPayload;
+        }
+
+        return $formatted;
+    }
+
+    private function assertPublishableStatus(
+        mixed $status,
+        PublishGroup $group,
+        string $context,
+    ): string {
+        if (! is_string($status) || trim($status) === '') {
+            throw new PostsyncerException("{$context} has no valid lifecycle status.");
+        }
+
+        $normalized = strtoupper(trim($status));
+        $acceptable = $group->publishNow
+            ? ['PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED']
+            : ['SCHEDULED', 'PUBLISHED', 'IN_QUEUE', 'PENDING', 'QUEUED'];
+
+        if (! in_array($normalized, $acceptable, true)) {
+            throw new PostsyncerException("{$context} is not in a publishable state.");
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progressGroup
+     * @return array{post_id: string, status: string, scheduled_at: string|null, platforms: list<string>, language: string}
+     */
+    private function publicGroup(array $progressGroup): array
+    {
+        $public = [
+            'post_id' => (string) $progressGroup['post_id'],
+            'status' => (string) $progressGroup['status'],
+            'scheduled_at' => isset($progressGroup['scheduled_at'])
+                ? (string) $progressGroup['scheduled_at']
+                : null,
+            'platforms' => is_array($progressGroup['platforms'] ?? null)
+                ? array_values(array_map('strval', $progressGroup['platforms']))
+                : [],
+            'language' => (string) $progressGroup['language'],
+        ];
+
+        if (isset($progressGroup['remote_status'])) {
+            $public['remote_status'] = (string) $progressGroup['remote_status'];
+        }
+
+        if (($progressGroup['operator_confirmed'] ?? false) === true) {
+            $public['operator_confirmed'] = true;
+        }
+
+        return $public;
     }
 
     private function assertPublishableStatus(

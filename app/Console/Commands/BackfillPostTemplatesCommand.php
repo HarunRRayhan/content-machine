@@ -28,6 +28,7 @@ class BackfillPostTemplatesCommand extends Command
         'P-30' => 'B',
         'P-43' => 'B',
         'P-44' => 'B',
+        'P-45' => 'B',
         'P-54' => 'B',
         'P-56' => 'B',
         'P-60' => 'B',

@@ -1,5 +1,8 @@
-import { Form, router } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
+import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
+import PublishDialog from '@/components/content/publish-dialog';
+import TemplatePreview from '@/components/media/template-preview';
 import {
     PlatformChipRow,
     WorkspacePlatformChips,
@@ -12,6 +15,7 @@ import type {
 } from '@/components/studio/workspace-schedule';
 import { studioPostStatus } from '@/lib/platform-meta';
 import type { HandleDirectory } from '@/lib/studio-workspaces';
+import { show as showTemplate } from '@/routes/media/templates';
 
 const POST_PIPELINE = [
     { key: 'draft', label: 'Draft' },
@@ -27,21 +31,18 @@ type Props = {
     status: string;
     platforms: string[];
     language?: string | null;
+    templateMeta: {
+        letter: string;
+        name: string;
+        label: string;
+        preview_url: string;
+        visual_identity: string;
+    } | null;
     workspaces?: WorkspaceBucket[];
     publishUrl: string;
     postsyncerReady: boolean;
     publishState: string;
-    publishProgress: {
-        state?: string;
-        current?: {
-            index?: number;
-            group_key?: string;
-            phase?: string;
-        } | null;
-    } | null;
-    reconcileUrl: string;
-    approvalState: string;
-    timezone: string;
+    publishRetryable: boolean;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     handles?: HandleDirectory;
@@ -201,40 +202,18 @@ function earliestWhen(
     return formatWhen(bestRaw, timezone);
 }
 
-function datetimeLocalNowInTimezone(
-    timezone: string,
-    date = new Date(),
-): string {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        hourCycle: 'h23',
-    }).formatToParts(date);
-
-    const get = (type: Intl.DateTimeFormatPartTypes): string =>
-        parts.find((part) => part.type === type)?.value ?? '';
-
-    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
-}
-
 export default function PostOverview({
     postId,
     title,
     status,
     platforms,
     language,
+    templateMeta,
     workspaces,
     publishUrl,
     postsyncerReady,
     publishState,
-    publishProgress,
-    reconcileUrl,
-    approvalState,
-    timezone,
+    publishRetryable,
     needsConfirmAsk,
     postsyncer,
     handles,
@@ -249,10 +228,6 @@ export default function PostOverview({
               POST_PIPELINE.findIndex((step) => step.key === studioStatus),
           );
     const [busy, setBusy] = useState(false);
-    const [confirmAskChecked, setConfirmAskChecked] = useState(false);
-    const [minWhen] = useState(() =>
-        datetimeLocalNowInTimezone(effectiveTimezone),
-    );
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
     const workspaceBuckets = hasGroups
@@ -260,39 +235,26 @@ export default function PostOverview({
         : (workspaces ?? []);
     const hasWorkspaceBuckets = workspaceBuckets.length > 0;
     const publishBusy = ['queued', 'running'].includes(publishState);
-    const publishUncertain = Boolean(
-        publishProgress?.state === 'uncertain' ||
-        (publishProgress?.current !== null &&
-            publishProgress?.current !== undefined &&
-            publishProgress.current.phase !== 'uploading'),
-    );
-    const awaitingApproval = approvalState === 'pending';
-    const retryableFailure =
-        publishState === 'failed' &&
-        !publishUncertain &&
-        !awaitingApproval &&
-        !archived &&
-        studioStatus !== 'posted' &&
-        studioStatus !== 'scheduled' &&
-        !hasGroups;
-    const showScheduleForm =
+    const showPublishControls =
         !archived &&
         studioStatus !== 'posted' &&
         studioStatus !== 'scheduled' &&
         !hasGroups &&
-        !publishUncertain &&
-        !retryableFailure &&
-        studioStatus === 'draft' &&
-        !awaitingApproval;
-    const canSchedule =
+        (studioStatus === 'draft' || publishState === 'failed');
+    const canPublish =
         postsyncerReady &&
         !publishBusy &&
-        !awaitingApproval &&
-        studioStatus === 'draft' &&
-        !hasGroups;
-    const scheduleDisabled =
-        !canSchedule || (needsConfirmAsk && !confirmAskChecked);
-    const scheduledAt = earliestWhen(groups, effectiveTimezone);
+        !hasGroups &&
+        (studioStatus === 'draft' ||
+            (publishState === 'failed' && publishRetryable));
+    const publishDisabledReason = publishBusy
+        ? 'A publish job is already queued or running.'
+        : publishState === 'failed' && !publishRetryable
+          ? 'Reconcile the uncertain PostSyncer create before retrying.'
+          : !postsyncerReady
+            ? 'Configure PostSyncer in Settings before publishing.'
+            : null;
+    const scheduledAt = earliestWhen(groups);
 
     function advanceStatus(nextStatus: 'archived' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {
@@ -458,103 +420,17 @@ export default function PostOverview({
                                     🗄️ Archive
                                 </button>
                             </>
-                        ) : retryableFailure ? (
-                            <Form action={publishUrl} method="post">
-                                {({ processing, errors }) => (
-                                    <>
-                                        <button
-                                            type="submit"
-                                            className="advance"
-                                            disabled={processing}
-                                        >
-                                            Retry publish
-                                        </button>
-                                        {errors.publish && (
-                                            <p className="schedule-it-error">
-                                                {errors.publish}
-                                            </p>
-                                        )}
-                                    </>
-                                )}
-                            </Form>
-                        ) : showScheduleForm ? (
-                            <Form
-                                action={publishUrl}
-                                method="post"
-                                className="schedule-it"
-                            >
-                                {({ processing, errors }) => (
-                                    <>
-                                        <label className="schedule-it-label">
-                                            <span className="schedule-it-label-row">
-                                                Schedule it
-                                                <span className="schedule-it-tz">
-                                                    {effectiveTimezone}
-                                                </span>
-                                            </span>
-                                            <input
-                                                name="when"
-                                                type="datetime-local"
-                                                required
-                                                min={minWhen}
-                                                disabled={!canSchedule}
-                                            />
-                                        </label>
-                                        {needsConfirmAsk && (
-                                            <label className="schedule-it-confirm">
-                                                <input
-                                                    type="checkbox"
-                                                    name="confirm_ask"
-                                                    value="1"
-                                                    checked={confirmAskChecked}
-                                                    onChange={(event) =>
-                                                        setConfirmAskChecked(
-                                                            event.target
-                                                                .checked,
-                                                        )
-                                                    }
-                                                />
-                                                Confirm ask-gated platforms
-                                            </label>
-                                        )}
-                                        <button
-                                            type="submit"
-                                            className="advance"
-                                            disabled={
-                                                processing || scheduleDisabled
-                                            }
-                                        >
-                                            🗓️ Schedule it
-                                        </button>
-                                        {errors.when && (
-                                            <p className="schedule-it-error">
-                                                {errors.when}
-                                            </p>
-                                        )}
-                                        {errors.publish && (
-                                            <p className="schedule-it-error">
-                                                {errors.publish}
-                                            </p>
-                                        )}
-                                        {!postsyncerReady && (
-                                            <p className="schedule-it-hint">
-                                                Configure PostSyncer in Settings
-                                                before scheduling.
-                                            </p>
-                                        )}
-                                        {publishBusy && (
-                                            <p className="schedule-it-hint">
-                                                A publish job is already queued
-                                                or running.
-                                            </p>
-                                        )}
-                                    </>
-                                )}
-                            </Form>
-                        ) : awaitingApproval ? (
-                            <span className="badge">
-                                Review and approve the draft before scheduling
-                            </span>
+                        ) : showPublishControls ? (
+                            <PublishDialog
+                                disabled={!canPublish}
+                                disabledReason={publishDisabledReason}
+                                publishState={publishState}
+                                publishUrl={publishUrl}
+                                entityLabel="post"
+                                needsConfirmAsk={needsConfirmAsk}
+                                retryOnly={publishState === 'failed'}
+                                showStatus={false}
+                            />
                         ) : (
                             <span className="badge">
                                 🗓️ Scheduled
@@ -585,6 +461,44 @@ export default function PostOverview({
                     />
                 </div>
             </section>
+            {templateMeta && (
+                <section className="pane">
+                    <div className="pane-head">
+                        <span className="k">Template</span>
+                    </div>
+                    <Link
+                        href={showTemplate.url(templateMeta.letter)}
+                        aria-label={`Open ${templateMeta.label} details`}
+                        className="group m-4 flex items-center overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg3)] text-left no-underline transition hover:-translate-y-0.5 hover:border-[var(--line-strong)] hover:shadow-[var(--shadow)]"
+                    >
+                        <TemplatePreview
+                            src={templateMeta.preview_url}
+                            alt={`${templateMeta.label} preview`}
+                            letter={templateMeta.letter}
+                            className="size-20 shrink-0"
+                        />
+                        <span className="min-w-0 flex-1 px-3 py-2.5">
+                            <span className="flex items-center gap-1 text-[11px] font-medium tracking-wide text-[var(--ink-faint)] uppercase">
+                                Template reference
+                                <ArrowUpRight className="size-3.5" />
+                            </span>
+                            <span className="mt-0.5 block truncate text-sm font-semibold text-[var(--ink)]">
+                                {templateMeta.label}
+                                <span className="font-normal text-[var(--ink-soft)]">
+                                    {' · '}
+                                    {templateMeta.name}
+                                </span>
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-[var(--ink-soft)]">
+                                <span className="font-medium text-[var(--ink)]">
+                                    Type:
+                                </span>{' '}
+                                {templateMeta.visual_identity}
+                            </span>
+                        </span>
+                    </Link>
+                </section>
+            )}
         </div>
     );
 }
