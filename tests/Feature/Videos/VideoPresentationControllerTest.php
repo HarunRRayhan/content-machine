@@ -67,6 +67,19 @@ class VideoPresentationControllerTest extends TestCase
         $this->get(route('videos.presentation', $video))->assertNotFound();
     }
 
+    public function test_show_404s_when_the_deck_manifest_has_no_registered_renderer(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $video = Video::factory()->for($workspace)->create([
+            'deck_manifest' => [
+                'deck_key' => 'test-deck',
+                'js' => '1',
+            ],
+        ]);
+
+        $this->get(route('videos.presentation', $video))->assertNotFound();
+    }
+
     public function test_show_404s_for_a_video_in_a_different_workspace(): void
     {
         $this->actingAsWorkspaceMember();

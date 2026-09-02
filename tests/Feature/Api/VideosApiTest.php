@@ -63,7 +63,8 @@ class VideosApiTest extends TestCase
             'captions' => ['facebook' => 'long caption'],
             'deck_manifest' => [
                 'engine' => 'reveal',
-                'js' => str_repeat('x', 5000),
+                'deck_key' => 'v-63',
+                'js' => "window.PRESENTATIONS['v-63']={steps:[{cue:'line'}],slidesHtml:function(){return '<section></section>';}};".str_repeat('x', 5000),
                 'css' => 'body{}',
             ],
         ]);
@@ -107,6 +108,36 @@ class VideosApiTest extends TestCase
             ->assertJsonPath('data.0.script_markdown', '# spoken')
             ->assertJsonPath('data.0.captions.tiktok', 'cap')
             ->assertJsonPath('data.0.deck_manifest.engine', 'reveal');
+    }
+
+    public function test_store_rejects_a_non_renderable_deck_manifest(): void
+    {
+        $this->acting()->postJson('/api/v1/videos', [
+            'title' => 'Broken deck',
+            'deck_manifest' => [
+                'deck_key' => 'v-99',
+                'js' => '1',
+            ],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('deck_manifest');
+    }
+
+    public function test_patch_rejects_a_non_renderable_deck_manifest(): void
+    {
+        $video = Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-99',
+            'number' => 99,
+        ]);
+
+        $this->acting()->patchJson('/api/v1/videos/BV-99', [
+            'deck_manifest' => [
+                'deck_key' => 'v-99',
+                'js' => '1',
+            ],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('deck_manifest');
     }
 
     public function test_show_still_returns_full_video_payload(): void

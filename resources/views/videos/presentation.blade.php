@@ -200,7 +200,7 @@
                 const step = steps[presStep] || {};
                 cueEl.textContent = step.cue || step.note || ('Slide ' + (presStep + 1));
                 if (cueEditBtn) {
-                    cueEditBtn.hidden = typeof step.cue !== 'string' || step.cue.trim() === '';
+                    cueEditBtn.hidden = step.editable === false || typeof step.cue !== 'string' || step.cue.trim() === '';
                 }
                 stepNoEl.textContent = 'Step ' + presStep + ' / ' + Math.max(steps.length - 1, 0);
                 dotsEl.querySelectorAll('.pres-dot').forEach(function (dot, i) {

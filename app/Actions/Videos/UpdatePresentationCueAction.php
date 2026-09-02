@@ -37,11 +37,17 @@ final class UpdatePresentationCueAction
             }
 
             $deckCues = $this->deckCueLiterals($deckJs);
+            $deckCue = $deckCues[$data->step] ?? null;
+            if ($deckCue === null || ($deckCue['editable'] ?? true) === false) {
+                throw new InvalidArgumentException('This presentation step is not linked to an editable script line.');
+            }
+
             $scriptLine = $this->lineForStep(
                 $this->spokenLines($markdown),
                 $data->step,
                 $currentCue,
                 count($deckCues),
+                $deckCue['scriptLine'] ?? null,
             );
             $updatedMarkdown = substr_replace(
                 $markdown,
@@ -62,8 +68,22 @@ final class UpdatePresentationCueAction
      * @param  list<array{text: string, cue: string, offset: int, length: int}>  $lines
      * @return array{text: string, cue: string, offset: int, length: int}
      */
-    private function lineForStep(array $lines, int $step, string $currentCue, int $deckCueCount): array
-    {
+    private function lineForStep(
+        array $lines,
+        int $step,
+        string $currentCue,
+        int $deckCueCount,
+        ?int $scriptLineIndex = null,
+    ): array {
+        if ($scriptLineIndex !== null) {
+            $mappedLine = $lines[$scriptLineIndex] ?? null;
+            if ($mappedLine !== null) {
+                return $mappedLine;
+            }
+
+            throw new InvalidArgumentException('Presentation step no longer matches its script line. Reload and try again.');
+        }
+
         $line = $lines[$step] ?? null;
         if ($line !== null && $line['cue'] === $currentCue) {
             return $line;
@@ -175,7 +195,7 @@ final class UpdatePresentationCueAction
     }
 
     /**
-     * @return list<array{literal: string, offset: int}|null>
+     * @return list<array{literal: string, offset: int, scriptLine?: int, editable?: bool}|null>
      */
     private function deckCueLiterals(string $js): array
     {
@@ -216,10 +236,19 @@ final class UpdatePresentationCueAction
             );
 
             if (isset($match[1])) {
-                $steps[] = [
+                $step = [
                     'literal' => (string) $match[1][0],
                     'offset' => $element['offset'] + (int) $match[1][1],
                 ];
+
+                if (preg_match('/\bscriptLine\s*:\s*(\d+)/', $element['body'], $scriptLineMatch) === 1) {
+                    $step['scriptLine'] = (int) $scriptLineMatch[1];
+                }
+                if (preg_match('/\beditable\s*:\s*(true|false)\b/', $element['body'], $editableMatch) === 1) {
+                    $step['editable'] = $editableMatch[1] === 'true';
+                }
+
+                $steps[] = $step;
 
                 continue;
             }
@@ -228,7 +257,15 @@ final class UpdatePresentationCueAction
             if (isset($trimmed[0]) && ($trimmed[0] === "'" || $trimmed[0] === '"')) {
                 $literals = $this->stringLiterals($element['body'], $element['offset']);
                 if (count($literals) === 1) {
-                    $steps[] = $literals[0];
+                    $step = $literals[0];
+                    if (preg_match('/\bscriptLine\s*:\s*(\d+)/', $element['body'], $scriptLineMatch) === 1) {
+                        $step['scriptLine'] = (int) $scriptLineMatch[1];
+                    }
+                    if (preg_match('/\beditable\s*:\s*(true|false)\b/', $element['body'], $editableMatch) === 1) {
+                        $step['editable'] = $editableMatch[1] === 'true';
+                    }
+
+                    $steps[] = $step;
 
                     continue;
                 }

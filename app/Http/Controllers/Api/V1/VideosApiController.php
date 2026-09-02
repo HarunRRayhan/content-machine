@@ -11,6 +11,7 @@ use App\Http\Resources\V1\VideoResource;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Rules\AccessibleDriveUrl;
+use App\Rules\RenderablePresentationManifest;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use Illuminate\Http\JsonResponse;
@@ -88,7 +89,7 @@ class VideosApiController extends Controller
             'body' => ['nullable', 'string'],
             'script_markdown' => ['nullable', 'string'],
             'captions' => ['nullable', 'array'],
-            'deck_manifest' => ['nullable', 'array'],
+            'deck_manifest' => ['nullable', 'array', new RenderablePresentationManifest],
             'video_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['nullable', 'string', Rule::in(Video::STATUSES)],
@@ -113,7 +114,7 @@ class VideosApiController extends Controller
             'body' => ['sometimes', 'nullable', 'string'],
             'script_markdown' => ['sometimes', 'nullable', 'string'],
             'captions' => ['sometimes', 'nullable', 'array'],
-            'deck_manifest' => ['sometimes', 'nullable', 'array'],
+            'deck_manifest' => ['sometimes', 'nullable', 'array', new RenderablePresentationManifest],
             'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],

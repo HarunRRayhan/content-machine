@@ -105,6 +105,56 @@ it('rejects positional fallback when script and deck lengths differ', function (
     )))->toThrow(InvalidArgumentException::class, 'Presentation step no longer matches its script line.');
 });
 
+it('uses an explicit legacy script line mapping when cue counts differ', function (): void {
+    $script = '```
+First spoken line
+Second spoken line
+Third spoken line
+```';
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1}]};",
+        ],
+    ]);
+
+    (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Second paraphrase',
+        cue: 'Updated second line',
+    ));
+
+    $video->refresh();
+
+    expect($video->script_markdown)
+        ->toContain("First spoken line\nUpdated second line\nThird spoken line")
+        ->not->toContain('Second spoken line');
+    expect($video->deck_manifest['js'])->toContain("cue:'Updated second line'");
+});
+
+it('does not offer a legacy visual-only step for editing', function (): void {
+    $script = '```
+First spoken line
+```';
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Visual-only recap',editable:false}]};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Visual-only recap',
+        cue: 'Updated line',
+    )))->toThrow(InvalidArgumentException::class, 'not linked to an editable script line');
+
+    $this->assertDatabaseHas('videos', [
+        'id' => $video->id,
+        'script_markdown' => $script,
+    ]);
+});
+
 it('does not discard speech around an inline direction', function (): void {
     $script = "```\nBefore [on-screen: card] after\n```";
     $video = Video::factory()->create([
