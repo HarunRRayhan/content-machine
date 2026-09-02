@@ -73,6 +73,7 @@ class PostsApiTest extends TestCase
         Post::factory()->for($this->workspace)->create([
             'human_id' => 'P-57',
             'number' => 57,
+            'approval_state' => 'pending',
             'body' => str_repeat('paragraph ', 80),
             'captions' => ['facebook' => str_repeat('caption ', 40)],
             'template' => 'C',
@@ -284,6 +285,26 @@ class PostsApiTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_an_unattached_asset_in_the_same_workspace_is_not_found(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-5',
+            'number' => 5,
+            'title' => 'Mine',
+        ])->assertCreated();
+
+        $asset = MediaAsset::factory()->for($this->workspace)->create([
+            'disk' => 'scratchpad',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($asset->path, 'bytes');
+
+        $this->acting()->get("/api/v1/posts/P-5/media/{$asset->id}")
+            ->assertNotFound();
+    }
+
     public function test_upload_pdf_attaches_a_linkedin_document_and_streams_it_back(): void
     {
         Storage::fake('scratchpad');
@@ -336,7 +357,6 @@ class PostsApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.human_id', 'CM-TEST-1')
             ->assertJsonPath('data.publish_state', 'queued')
-            ->assertJsonMissingPath('data.publish_progress')
             ->assertJsonPath('data.publish_error', null);
 
         $post = Post::query()->where('human_id', 'CM-TEST-1')->sole();
@@ -470,7 +490,10 @@ class PostsApiTest extends TestCase
                     'text' => 'Reconcile this caption',
                     'media' => [],
                 ]],
-                'platforms' => [['platform' => 'facebook']],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'POST',
+                    'caption' => 'Reconcile this caption',
+                ]]],
                 'status' => 'SCHEDULED',
                 'scheduled_at' => '2099-09-03T09:00:00+06:00',
             ], 200),

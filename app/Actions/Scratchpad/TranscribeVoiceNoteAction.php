@@ -96,6 +96,13 @@ class TranscribeVoiceNoteAction
         $lastError = 'No provider attempt was made.';
 
         foreach ($credentials as $credential) {
+            if ($workRequestId !== null
+                && $workLeaseId !== null
+                && ! $this->renewPostWork($workRequestId, $workLeaseId)
+            ) {
+                return;
+            }
+
             $result = $this->client->transcribe($credential, $audioContents, $filename, $mediaAsset->mime);
 
             if (! $result->successful) {
@@ -104,17 +111,29 @@ class TranscribeVoiceNoteAction
                 continue;
             }
 
-            DB::transaction(function () use ($transcription, $result, $workRequestId, $workLeaseId): void {
+            $cancelledRequest = false;
+
+            DB::transaction(function () use ($transcription, $result, $workRequestId, $workLeaseId, &$cancelledRequest): void {
                 if ($workRequestId !== null) {
                     $lockedRequest = TelegramPostRequest::query()
                         ->whereKey($workRequestId)
                         ->lockForUpdate()
                         ->first();
 
-                    if ($lockedRequest === null
-                        || $lockedRequest->state !== TelegramPostRequest::GENERATING
-                        || ! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)
+                    if ($lockedRequest === null) {
+                        return;
+                    }
+
+                    if ($lockedRequest->state === TelegramPostRequest::GENERATING) {
+                        if (! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)) {
+                            return;
+                        }
+                    } elseif ($lockedRequest->state === TelegramPostRequest::CANCELLED
+                        && $workLeaseId !== null
+                        && $lockedRequest->work_lease_id === $workLeaseId
                     ) {
+                        $cancelledRequest = true;
+                    } else {
                         return;
                     }
                 }
@@ -149,7 +168,9 @@ class TranscribeVoiceNoteAction
                     $entry->update(['language' => $result->language]);
                 }
 
-                $this->replyOnTelegram($lockedTranscription, $entry, (string) $result->text);
+                if (! $cancelledRequest) {
+                    $this->replyOnTelegram($lockedTranscription, $entry, (string) $result->text);
+                }
                 $this->queueTelegramPostRequests($entry, $workRequestId, $workLeaseId);
             });
 
@@ -232,6 +253,8 @@ class TranscribeVoiceNoteAction
         ?int $workRequestId = null,
         ?string $workLeaseId = null,
     ): void {
+        $cancelledRequest = false;
+
         DB::transaction(function () use (
             $transcription,
             $errorCode,
@@ -240,6 +263,7 @@ class TranscribeVoiceNoteAction
             $telegramMessage,
             $workRequestId,
             $workLeaseId,
+            &$cancelledRequest,
         ): void {
             if ($workRequestId !== null) {
                 $lockedRequest = TelegramPostRequest::query()
@@ -247,10 +271,20 @@ class TranscribeVoiceNoteAction
                     ->lockForUpdate()
                     ->first();
 
-                if ($lockedRequest === null
-                    || $lockedRequest->state !== TelegramPostRequest::GENERATING
-                    || ! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)
+                if ($lockedRequest === null) {
+                    return;
+                }
+
+                if ($lockedRequest->state === TelegramPostRequest::GENERATING) {
+                    if (! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)) {
+                        return;
+                    }
+                } elseif ($lockedRequest->state === TelegramPostRequest::CANCELLED
+                    && $workLeaseId !== null
+                    && $lockedRequest->work_lease_id === $workLeaseId
                 ) {
+                    $cancelledRequest = true;
+                } else {
                     return;
                 }
             }
@@ -273,13 +307,20 @@ class TranscribeVoiceNoteAction
                 'error_message' => $errorMessage,
             ])->save();
 
-            $this->failTelegramPostRequests(
-                $lockedTranscription->scratchpadEntry ?? $entry,
-                $telegramMessage,
-                $workRequestId,
-                $workLeaseId,
-            );
+            if (! $cancelledRequest) {
+                $this->failTelegramPostRequests(
+                    $lockedTranscription->scratchpadEntry ?? $entry,
+                    $telegramMessage,
+                    $workRequestId,
+                    $workLeaseId,
+                );
+            }
         });
+    }
+
+    private function renewPostWork(int $requestId, string $workLeaseId): bool
+    {
+        return (new ClaimTelegramPostWorkAction)->renew($requestId, $workLeaseId);
     }
 
     private function failTelegramPostRequests(

@@ -127,21 +127,87 @@ class UpdatePostAction
             return true;
         }
 
-        return DB::transaction(function () use ($post, $attributes): Post {
-            $lockedPost = Post::query()
-                ->whereKey($post->getKey())
-                ->lockForUpdate()
-                ->firstOrFail();
+        if ($data->hasBody && $post->body !== $data->body) {
+            return true;
+        }
 
-            if ($lockedPost->isPublishInProgress() || $lockedPost->hasUncertainPublish()) {
-                throw ValidationException::withMessages([
-                    'publish' => __('A post cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
-                ]);
+        if ($data->hasCaptions && $post->captions !== $data->captions) {
+            return true;
+        }
+
+        if ($data->hasImageDriveUrls && $post->image_drive_urls !== $data->imageDriveUrls) {
+            return true;
+        }
+
+        if ($data->replaceExtended && $post->language !== $data->language) {
+            return true;
+        }
+
+        if ($data->replaceExtended && $post->slug !== $data->slug) {
+            return true;
+        }
+
+        return $data->replaceExtended && $post->platforms !== $data->platforms;
+    }
+
+    private function changesPublishMetadata(Post $post, UpdatePostData $data): bool
+    {
+        return ($data->hasPostsyncer && $data->postsyncer !== $post->postsyncer)
+            || ($data->hasPublishState && $data->publishState !== $post->publish_state)
+            || ($data->hasPublishError && $data->publishError !== $post->publish_error);
+    }
+
+    private function hasCheckpointedPublishAttempt(Post $post): bool
+    {
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            return false;
+        }
+
+        return ($progress['current'] ?? null) !== null
+            || ($progress['state'] ?? null) === 'uncertain'
+            || (is_array($progress['completed_groups'] ?? null)
+                && $progress['completed_groups'] !== []);
+    }
+
+    private function hasPublishedGroups(Post $post): bool
+    {
+        $groups = $post->postsyncer['groups'] ?? null;
+
+        if (! is_array($groups)) {
+            return false;
+        }
+
+        foreach ($groups as $group) {
+            if (! is_array($group)) {
+                continue;
             }
 
-            $lockedPost->forceFill($attributes)->save();
+            $postId = $group['post_id'] ?? null;
+            if (is_int($postId) || is_float($postId)) {
+                if ($postId > 0) {
+                    return true;
+                }
+            } elseif (is_string($postId) && trim($postId) !== '') {
+                return true;
+            }
+        }
 
-            return $lockedPost;
-        });
+        return false;
+    }
+
+    private function isSafePublishedStatusTransition(Post $post, ?string $nextStatus): bool
+    {
+        return ($post->status === 'posted' && $nextStatus === 'archived')
+            || (in_array($post->status, ['archived', 'dropped'], true)
+                && $nextStatus === 'posted');
+    }
+
+    private function shouldResetFailedPublish(Post $post, bool $contentChanged, bool $publishLocked): bool
+    {
+        return $contentChanged
+            && $post->publish_state === 'failed'
+            && ! $publishLocked;
     }
 }

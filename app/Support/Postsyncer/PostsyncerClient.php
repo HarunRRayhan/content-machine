@@ -211,7 +211,9 @@ class PostsyncerClient
         $url = rtrim($this->config->apiBase(), '/').$path;
 
         $pending = Http::withToken($apiKey)
-            ->timeout(30)
+            // Multi-platform PostSyncer creates can take several minutes.
+            // Keep the client below the queue worker's 900-second timeout.
+            ->timeout(300)
             ->acceptJson()
             ->withOptions(['allow_redirects' => false])
             ->withHeaders($headers);

@@ -53,6 +53,16 @@ type PostDetail = {
     publish_state: string;
     publish_error: string | null;
     publish_retryable: boolean;
+    publish_progress: {
+        state?: string;
+        current?: {
+            index?: number;
+            group_key?: string;
+            phase?: string;
+        } | null;
+    } | null;
+    approval_state: string;
+    timezone: string;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
@@ -157,6 +167,10 @@ export default function PostShow({ post }: PageProps) {
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
                         publishRetryable={post.publish_retryable}
+                        publishProgress={post.publish_progress}
+                        reconcileUrl={`/posts/${post.id}/reconcile`}
+                        approvalState={post.approval_state}
+                        timezone={post.timezone}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
                         handles={post.handles}

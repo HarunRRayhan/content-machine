@@ -11,7 +11,7 @@ use Throwable;
 
 class DispatchPendingTelegramOutboundMessagesCommand extends Command
 {
-    protected $signature = 'telegram:dispatch-pending-outbound-messages {--limit=100 : Maximum pending messages to enqueue} {--retry-failed : Reopen terminal failed messages}';
+    protected $signature = 'telegram:dispatch-pending-outbound-messages {--limit=100 : Maximum pending messages to enqueue} {--retry-failed : Reopen terminal failed messages} {--retry-uncertain : Reopen messages after verifying Telegram did not receive them}';
 
     protected $description = 'Enqueue Telegram replies that have not finished sending';
 
@@ -19,15 +19,56 @@ class DispatchPendingTelegramOutboundMessagesCommand extends Command
     {
         $limit = max(1, (int) $this->option('limit'));
         $dispatched = 0;
+        $staleAt = now()->subSeconds(SendTelegramOutboundMessageJob::DISPATCH_LEASE_SECONDS);
 
+        $staleSendingIds = TelegramOutboundMessage::query()
+            ->where('status', TelegramOutboundMessage::SENDING)
+            ->where(function ($query) use ($staleAt): void {
+                $query->whereNull('dispatch_claimed_at')
+                    ->orWhere('dispatch_claimed_at', '<=', $staleAt);
+            })
+            ->orderBy('id')
+            ->limit($limit)
+            ->pluck('id');
+
+        if ($staleSendingIds->isNotEmpty()) {
+            TelegramOutboundMessage::query()
+                ->whereIn('id', $staleSendingIds)
+                ->where('status', TelegramOutboundMessage::SENDING)
+                ->update([
+                    'status' => TelegramOutboundMessage::UNCERTAIN,
+                    'failed_at' => now(),
+                    'last_error' => 'Telegram delivery outcome is uncertain after the worker stopped. Verify the chat before retrying.',
+                    'dispatch_claimed_at' => null,
+                    'dispatch_lease_id' => null,
+                    'next_attempt_at' => null,
+                    'updated_at' => now(),
+                ]);
+
+            $this->warn("Marked {$staleSendingIds->count()} Telegram outbound message(s) uncertain after an interrupted send.");
+        }
+
+        $retryStatuses = [];
         if ($this->option('retry-failed')) {
-            $failedIds = TelegramOutboundMessage::query()
-                ->where('status', TelegramOutboundMessage::FAILED)
+            $retryStatuses[] = TelegramOutboundMessage::FAILED;
+        }
+        if ($this->option('retry-uncertain')) {
+            $retryStatuses[] = TelegramOutboundMessage::UNCERTAIN;
+        }
+
+        if ($retryStatuses !== []) {
+            $retryIds = TelegramOutboundMessage::query()
+                ->whereIn('status', $retryStatuses)
+                ->when(
+                    $this->option('retry-uncertain') && $staleSendingIds->isNotEmpty(),
+                    fn ($query) => $query->whereNotIn('id', $staleSendingIds),
+                )
+                ->orderBy('id')
                 ->limit($limit)
                 ->pluck('id');
 
             TelegramOutboundMessage::query()
-                ->whereIn('id', $failedIds)
+                ->whereIn('id', $retryIds)
                 ->update([
                     'status' => TelegramOutboundMessage::PENDING,
                     'failed_at' => null,

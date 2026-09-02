@@ -103,8 +103,6 @@ class ConnectTelegramBotAction
                         'state' => TelegramPostRequest::CANCELLED,
                         'cancelled_at' => now(),
                         'error_message' => 'The Telegram bot connection changed before this draft was generated.',
-                        'work_claimed_at' => null,
-                        'work_lease_id' => null,
                         'updated_at' => now(),
                     ]);
 

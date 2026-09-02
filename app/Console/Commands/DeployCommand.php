@@ -19,19 +19,77 @@ use Illuminate\Support\Facades\Storage;
  */
 class DeployCommand extends Command
 {
+    /**
+     * These migrations change Telegram idempotency scope and therefore belong
+     * to the separately verified old-fleet cutover, not a rolling deploy.
+     *
+     * @var list<string>
+     */
+    private const TELEGRAM_CUTOVER_MIGRATIONS = [
+        '2026_09_02_000005_scope_telegram_outbound_logical_keys_to_generation.php',
+        '2026_09_02_000006_drop_legacy_telegram_update_unique_index.php',
+    ];
+
     protected $signature = 'cm:deploy';
 
     protected $description = 'Run pending migrations and ensure the admin user exists (preDeployCommand entry point)';
 
     public function handle(): int
     {
-        $this->ensureScratchpadUploadsDirectory();
-        $this->call('migrate', ['--force' => true]);
-        $this->call('cm:sync-presentation-library');
-        $this->call('posts:backfill-templates');
-        $this->call('cm:ensure-admin');
+        if (! $this->ensureScratchpadUploadsDirectory()) {
+            return self::FAILURE;
+        }
+
+        if ($this->call('migrate', $this->migrationOptions()) !== self::SUCCESS) {
+            return self::FAILURE;
+        }
+
+        // A fresh install has no workspace yet, so presentation sync is a
+        // no-op until the admin command creates one.
+        if (Workspace::query()->exists()
+            && $this->call('cm:sync-presentation-library') !== self::SUCCESS
+        ) {
+            return self::FAILURE;
+        }
+
+        foreach (['posts:backfill-templates', 'cm:ensure-admin'] as $command) {
+            if ($this->call($command) !== self::SUCCESS) {
+                return self::FAILURE;
+            }
+        }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Keep the contract migrations pending until the operator has drained the
+     * old web fleet and reconciled legacy Telegram rows.
+     *
+     * @return array<string, mixed>
+     */
+    private function migrationOptions(): array
+    {
+        $options = [
+            '--force' => true,
+            '--isolated' => true,
+        ];
+
+        if (! app()->environment('production') || config('app.telegram_cutover_ready')) {
+            return $options;
+        }
+
+        $paths = glob(database_path('migrations/*.php')) ?: [];
+        $paths = array_values(array_filter(
+            $paths,
+            fn (string $path): bool => ! in_array(basename($path), self::TELEGRAM_CUTOVER_MIGRATIONS, true),
+        ));
+
+        $options['--path'] = $paths;
+        $options['--realpath'] = true;
+
+        $this->warn('Telegram generation cutover migrations are deferred until CM_TELEGRAM_CUTOVER_READY=true.');
+
+        return $options;
     }
 
     /**

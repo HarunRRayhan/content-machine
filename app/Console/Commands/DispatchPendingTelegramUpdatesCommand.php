@@ -11,7 +11,7 @@ use Throwable;
 
 class DispatchPendingTelegramUpdatesCommand extends Command
 {
-    protected $signature = 'telegram:dispatch-pending-updates {--limit=100 : Maximum pending updates to enqueue}';
+    protected $signature = 'telegram:dispatch-pending-updates {--limit=100 : Maximum pending updates to enqueue} {--retry-failed : Reopen terminal failed updates}';
 
     protected $description = 'Enqueue Telegram webhook updates that have not finished processing';
 
@@ -19,6 +19,27 @@ class DispatchPendingTelegramUpdatesCommand extends Command
     {
         $limit = max(1, (int) $this->option('limit'));
         $dispatched = 0;
+
+        if ($this->option('retry-failed')) {
+            $failedIds = TelegramUpdate::query()
+                ->whereNull('processed_at')
+                ->whereNull('discarded_at')
+                ->whereNotNull('failed_at')
+                ->whereNotNull('payload')
+                ->orderBy('id')
+                ->limit($limit)
+                ->pluck('id');
+
+            TelegramUpdate::query()
+                ->whereIn('id', $failedIds)
+                ->update([
+                    'failed_at' => null,
+                    'last_error' => null,
+                    'dispatch_claimed_at' => null,
+                    'dispatch_lease_id' => null,
+                    'updated_at' => now(),
+                ]);
+        }
 
         /** @var list<array{id: int, config_id: int, payload: array<string, mixed>, generation: string|null, lease_id: string}> $claims */
         $claims = DB::transaction(function () use ($limit): array {

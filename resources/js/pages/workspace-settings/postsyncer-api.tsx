@@ -99,6 +99,11 @@ export default function PostsyncerApiSettings({
                                     </div>
                                 </div>
 
+                                <input
+                                    type="hidden"
+                                    name="publish_enabled"
+                                    value="0"
+                                />
                                 <label className="flex items-center gap-2 text-sm">
                                     <input
                                         type="checkbox"

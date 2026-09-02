@@ -6,6 +6,7 @@ use App\Actions\Scratchpad\TranscribeVoiceNoteAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Models\AiProviderCredential;
 use App\Models\MediaAsset;
+use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramOutboundMessage;
@@ -78,6 +79,67 @@ class TranscribeVoiceNoteActionTest extends TestCase
 
         $entry->refresh();
         $this->assertSame('bengali', $entry->language);
+    }
+
+    public function test_cancellation_during_provider_work_finishes_transcription_without_creating_a_post(): void
+    {
+        Queue::fake();
+        Storage::fake('scratchpad');
+        Storage::disk('scratchpad')->put('audio/note.ogg', 'raw-bytes');
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'voice',
+            'source' => 'telegram',
+            'meta' => ['telegram_chat_id' => 555],
+        ]);
+        $mediaAsset = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'audio',
+            'disk' => 'scratchpad',
+            'path' => 'audio/note.ogg',
+            'mime' => 'audio/ogg',
+            'original_filename' => 'note.ogg',
+        ]);
+        $transcription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $entry->id,
+            'media_asset_id' => $mediaAsset->id,
+        ]);
+        AiProviderCredential::factory()->openai()->create(['workspace_id' => $workspace->id]);
+        $leaseId = '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22';
+        $request = TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'webhook_generation' => $config->webhook_generation,
+            'state' => TelegramPostRequest::GENERATING,
+            'work_claimed_at' => now(),
+            'work_lease_id' => $leaseId,
+        ]);
+
+        $client = new class($request) implements AiTranscriptionClientContract
+        {
+            public function __construct(private TelegramPostRequest $request) {}
+
+            public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
+            {
+                $this->request->update(['state' => TelegramPostRequest::CANCELLED]);
+
+                return AiTranscriptionResult::success(text: 'transcribed after cancellation', language: 'bn');
+            }
+        };
+
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle(
+            $transcription,
+            $request->id,
+            $leaseId,
+        );
+
+        $this->assertSame('done', $transcription->refresh()->status);
+        $this->assertSame(TelegramPostRequest::CANCELLED, $request->refresh()->state);
+        $this->assertSame(0, Post::query()->count());
+        $this->assertSame(0, TelegramOutboundMessage::query()->count());
     }
 
     public function test_it_does_not_overwrite_an_entry_language_that_was_already_set()

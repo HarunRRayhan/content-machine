@@ -160,10 +160,10 @@ class TelegramWebhookControllerTest extends TestCase
 
         $this->postJson($url, $this->payload(update: 7), $headers)->assertNoContent();
 
-        $this->assertSame(1, TelegramUpdate::where('telegram_bot_config_id', $config->id)
+        $this->assertSame(2, TelegramUpdate::where('telegram_bot_config_id', $config->id)
             ->where('update_id', 7)
             ->count());
-        Queue::assertPushed(ProcessTelegramUpdateJob::class, 1);
+        Queue::assertPushed(ProcessTelegramUpdateJob::class, 2);
     }
 
     public function test_an_update_without_a_valid_update_id_is_rejected(): void

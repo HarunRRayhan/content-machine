@@ -80,6 +80,29 @@ class SendTelegramOutboundMessageJobTest extends TestCase
         }
     }
 
+    public function test_a_transport_failure_marks_the_message_uncertain_instead_of_retrying_automatically(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $message = TelegramOutboundMessage::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+        ]);
+        $client = (new FakeTelegramClient)->willSendMessage(TelegramApiResult::failure(
+            'Could not reach Telegram to send the reply.',
+            outcomeUnknown: true,
+        ));
+        $this->app->instance(TelegramClientContract::class, $client);
+
+        (new SendTelegramOutboundMessageJob($message->id))->handle(app(SendTelegramOutboundMessageAction::class));
+
+        $message->refresh();
+        $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $message->status);
+        $this->assertNull($message->next_attempt_at);
+        $this->assertStringContainsString('outcome is uncertain', $message->last_error);
+        Queue::assertNothingPushed();
+    }
+
     public function test_stale_generation_is_discarded_without_sending(): void
     {
         Queue::fake();
@@ -100,7 +123,9 @@ class SendTelegramOutboundMessageJobTest extends TestCase
     public function test_a_message_created_during_disconnect_is_discarded_without_retrying_forever(): void
     {
         Queue::fake();
-        $config = TelegramBotConfig::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'bot_token' => null,
+        ]);
         $message = TelegramOutboundMessage::factory()->create([
             'telegram_bot_config_id' => $config->id,
             'webhook_generation' => $config->webhook_generation,

@@ -233,8 +233,9 @@ class PostsApiController extends Controller
     {
         $workspace = $this->currentWorkspace();
 
-        $this->resolvePost($humanId);
+        $post = $this->resolvePost($humanId);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+        abort_if(! $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,

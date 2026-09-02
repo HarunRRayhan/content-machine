@@ -6,6 +6,7 @@ use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\Video;
 use App\Support\GoogleDrive\GoogleDriveLink;
+use App\Support\LinkResolution\PublicUrlGuard;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use InvalidArgumentException;
@@ -13,6 +14,10 @@ use InvalidArgumentException;
 class MediaUrlResolver
 {
     private const SIGNED_URL_TTL_HOURS = 3;
+
+    public function __construct(
+        private readonly ?PublicUrlGuard $publicUrlGuard = null,
+    ) {}
 
     /**
      * @return list<string>
@@ -29,7 +34,7 @@ class MediaUrlResolver
         }
 
         return array_map(
-            fn (string $url): string => GoogleDriveLink::toFetchUrl($url),
+            fn (string $url): string => $this->safeRemoteUrl($url),
             array_values($post->image_drive_urls ?? []),
         );
     }
@@ -56,7 +61,7 @@ class MediaUrlResolver
             }
 
             if (str_starts_with($image, 'http://') || str_starts_with($image, 'https://')) {
-                $urls[] = GoogleDriveLink::toFetchUrl($image);
+                $urls[] = $this->safeRemoteUrl($image);
 
                 continue;
             }
@@ -104,8 +109,8 @@ class MediaUrlResolver
         $cover = $video->cover_drive_url;
 
         return [
-            'video' => GoogleDriveLink::toFetchUrl($video->video_drive_url),
-            'cover' => is_string($cover) && $cover !== '' ? GoogleDriveLink::toFetchUrl($cover) : null,
+            'video' => $this->safeRemoteUrl($video->video_drive_url),
+            'cover' => is_string($cover) && $cover !== '' ? $this->safeRemoteUrl($cover) : null,
         ];
     }
 
@@ -173,6 +178,18 @@ class MediaUrlResolver
             ['post' => $post->id, 'mediaAsset' => $media->id],
             absolute: true,
         );
+    }
+
+    private function safeRemoteUrl(string $url): string
+    {
+        $fetchUrl = GoogleDriveLink::toFetchUrl(trim($url));
+        $guard = $this->publicUrlGuard ?? new PublicUrlGuard;
+
+        if (! $guard->isSafe($fetchUrl)) {
+            throw new InvalidArgumentException('Media URL must resolve to a public HTTP(S) address.');
+        }
+
+        return $fetchUrl;
     }
 
     private function attachmentIsReadable(MediaAsset $media): bool

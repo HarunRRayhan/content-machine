@@ -19,6 +19,8 @@ class ReconcileVideoPublishCommandTest extends TestCase
         $workspace = Workspace::factory()->create();
         PostsyncerConfig::write($workspace, [
             'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'languages' => [
                 'bangla' => [
                     'workspace_id' => '15211',
@@ -139,6 +141,8 @@ class ReconcileVideoPublishCommandTest extends TestCase
         $workspace = Workspace::factory()->create();
         PostsyncerConfig::write($workspace, [
             'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'languages' => [
                 'bangla' => [
                     'workspace_id' => '15211',

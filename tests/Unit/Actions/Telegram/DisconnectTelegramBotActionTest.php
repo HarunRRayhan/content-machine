@@ -58,6 +58,8 @@ class DisconnectTelegramBotActionTest extends TestCase
             'telegram_bot_config_id' => $config->id,
             'state' => TelegramPostRequest::GENERATING,
             'webhook_generation' => $generation,
+            'work_claimed_at' => now(),
+            'work_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
         ]);
         $outbound = TelegramOutboundMessage::factory()->create([
             'telegram_bot_config_id' => $config->id,
@@ -69,6 +71,7 @@ class DisconnectTelegramBotActionTest extends TestCase
         $this->assertNotSame($generation, $config->refresh()->webhook_generation);
         $this->assertNotNull($update->refresh()->discarded_at);
         $this->assertSame(TelegramPostRequest::CANCELLED, $request->refresh()->state);
+        $this->assertSame('72d9c4a1-58b0-4be7-95c0-a1d2227d2f22', $request->work_lease_id);
         $this->assertSame(TelegramOutboundMessage::DISCARDED, $outbound->refresh()->status);
     }
 

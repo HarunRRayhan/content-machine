@@ -17,6 +17,11 @@ class MediaAssetResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        return (new PresentMediaAsset)->summary($this->resource);
+        return [
+            ...(new PresentMediaAsset)->summary($this->resource),
+            'preview_url' => route('api.v1.media.file', [
+                'mediaAsset' => $this->resource->public_id,
+            ]),
+        ];
     }
 }

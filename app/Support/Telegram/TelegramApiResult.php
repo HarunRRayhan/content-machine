@@ -7,7 +7,9 @@ namespace App\Support\Telegram;
  * where getMe's extra $username field (TelegramGetMeResult) isn't needed.
  * $error is a message safe to show back to the user, null on success. Telegram
  * rate-limit responses carry retry_after so the outbox can remain pending
- * until Telegram allows the next attempt.
+ * until Telegram allows the next attempt. A transport failure has an unknown
+ * delivery outcome because Telegram may have accepted the request before the
+ * connection broke.
  */
 final readonly class TelegramApiResult
 {
@@ -16,6 +18,7 @@ final readonly class TelegramApiResult
         public ?string $error = null,
         public ?int $retryAfterSeconds = null,
         public ?int $status = null,
+        public bool $outcomeUnknown = false,
     ) {}
 
     public static function success(): self
@@ -23,13 +26,18 @@ final readonly class TelegramApiResult
         return new self(successful: true);
     }
 
-    public static function failure(string $error, ?int $retryAfterSeconds = null, ?int $status = null): self
-    {
+    public static function failure(
+        string $error,
+        ?int $retryAfterSeconds = null,
+        ?int $status = null,
+        bool $outcomeUnknown = false,
+    ): self {
         return new self(
             successful: false,
             error: $error,
             retryAfterSeconds: $retryAfterSeconds,
             status: $status,
+            outcomeUnknown: $outcomeUnknown,
         );
     }
 }

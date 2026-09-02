@@ -51,18 +51,6 @@ return [
             'driver' => 'database',
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
-            // Database queue rows do not persist their connection name, so
-            // this queue name keeps publish jobs isolated from default jobs.
-            'queue' => env('POSTSYNCER_QUEUE', 'postsyncer'),
-            // PublishPostJob allows 900 seconds for external API calls.
-            'retry_after' => (int) env('POSTSYNCER_QUEUE_RETRY_AFTER', 960),
-            'after_commit' => false,
-        ],
-
-        'postsyncer' => [
-            'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION'),
-            'table' => env('DB_QUEUE_TABLE', 'jobs'),
             // Queue names are isolated because the database driver does not
             // persist a connection name on each job row.
             'queue' => env('POSTSYNCER_QUEUE', 'postsyncer'),

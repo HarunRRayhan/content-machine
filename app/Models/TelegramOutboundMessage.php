@@ -40,9 +40,13 @@ class TelegramOutboundMessage extends Model
 
     public const PENDING = 'pending';
 
+    public const SENDING = 'sending';
+
     public const SENT = 'sent';
 
     public const FAILED = 'failed';
+
+    public const UNCERTAIN = 'uncertain';
 
     public const DISCARDED = 'discarded';
 

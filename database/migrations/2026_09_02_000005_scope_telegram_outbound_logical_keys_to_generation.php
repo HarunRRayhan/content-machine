@@ -9,6 +9,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (app()->environment('production')
+            && ! config('app.telegram_cutover_ready')
+        ) {
+            throw new RuntimeException(
+                'Telegram generation cutover is blocked. Set CM_TELEGRAM_CUTOVER_READY=true only after the old web fleet is drained and legacy outbound rows are reconciled.',
+            );
+        }
+
         $nullCount = DB::table('telegram_outbound_messages')
             ->whereNull('webhook_generation')
             ->count();
@@ -37,16 +45,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('telegram_outbound_messages', function (Blueprint $table): void {
-            $table->dropUnique('telegram_outbound_generation_logical_key_unique');
-        });
-
-        DB::statement(
-            'ALTER TABLE telegram_outbound_messages ALTER COLUMN webhook_generation DROP NOT NULL',
+        throw new RuntimeException(
+            'Telegram outbound generation cutover is forward-only; restore from a database backup instead of rolling it back.',
         );
-
-        Schema::table('telegram_outbound_messages', function (Blueprint $table): void {
-            $table->unique(['telegram_bot_config_id', 'logical_key']);
-        });
     }
 };

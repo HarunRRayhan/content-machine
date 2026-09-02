@@ -53,4 +53,59 @@ class DispatchPendingTelegramOutboundMessagesCommandTest extends TestCase
         $this->assertNotNull($failed->dispatch_lease_id);
         Queue::assertPushed(SendTelegramOutboundMessageJob::class);
     }
+
+    public function test_an_interrupted_send_is_marked_uncertain_and_never_requeued_implicitly(): void
+    {
+        Queue::fake();
+        $message = TelegramOutboundMessage::factory()->create([
+            'status' => TelegramOutboundMessage::SENDING,
+            'dispatch_claimed_at' => now()->subSeconds(SendTelegramOutboundMessageJob::DISPATCH_LEASE_SECONDS + 1),
+            'dispatch_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages')
+            ->assertSuccessful();
+
+        $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $message->refresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_uncertain_messages_require_an_explicit_retry_option(): void
+    {
+        Queue::fake();
+        $message = TelegramOutboundMessage::factory()->create([
+            'status' => TelegramOutboundMessage::UNCERTAIN,
+            'failed_at' => now(),
+            'last_error' => 'uncertain',
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages')
+            ->assertSuccessful();
+        $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $message->refresh()->status);
+        Queue::assertNothingPushed();
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages', ['--retry-uncertain' => true])
+            ->assertSuccessful();
+        $this->assertSame(TelegramOutboundMessage::PENDING, $message->refresh()->status);
+        Queue::assertPushed(SendTelegramOutboundMessageJob::class);
+    }
+
+    public function test_a_stale_send_is_not_retried_in_the_same_uncertain_recovery_run(): void
+    {
+        Queue::fake();
+        $stale = TelegramOutboundMessage::factory()->create([
+            'status' => TelegramOutboundMessage::SENDING,
+            'dispatch_claimed_at' => now()->subSeconds(SendTelegramOutboundMessageJob::DISPATCH_LEASE_SECONDS + 1),
+            'dispatch_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages', [
+            '--retry-uncertain' => true,
+        ])
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 0 pending Telegram outbound message(s).');
+
+        $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $stale->refresh()->status);
+        Queue::assertNothingPushed();
+    }
 }

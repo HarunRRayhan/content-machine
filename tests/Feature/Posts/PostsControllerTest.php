@@ -860,7 +860,10 @@ class PostsControllerTest extends TestCase
                 'id' => 99,
                 'workspace_id' => 15211,
                 'content' => [['text' => 'Reconcile this post', 'media' => []]],
-                'platforms' => [['platform' => 'facebook']],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'POST',
+                    'caption' => 'Reconcile this post',
+                ]]],
                 'status' => 'SCHEDULED',
                 'scheduled_at' => '2099-09-03T09:00:00+06:00',
             ], 200),

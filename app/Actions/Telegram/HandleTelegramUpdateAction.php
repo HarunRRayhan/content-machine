@@ -14,6 +14,7 @@ use App\Models\TelegramBotLink;
 use App\Models\TelegramPostRequest;
 use App\Models\TelegramUpdate;
 use App\Models\Video;
+use App\Models\Workspace;
 use App\Support\Telegram\TelegramClientContract;
 use App\Support\Telegram\TelegramUpdateKey;
 use Carbon\CarbonImmutable;
@@ -113,6 +114,11 @@ class HandleTelegramUpdateAction
             return;
         }
 
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+            return;
+        }
+
         $chatId = $message['chat']['id'] ?? null;
         $fromUserId = $message['from']['id'] ?? null;
         $fromUsername = $message['from']['username'] ?? null;
@@ -129,6 +135,12 @@ class HandleTelegramUpdateAction
 
         $messageId = $message['message_id'] ?? null;
         $this->acknowledge($config, $chatId, is_int($messageId) ? $messageId : null);
+
+        if ($dispatchLeaseId !== null
+            && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
+        ) {
+            return;
+        }
 
         $text = $this->messageText($message);
 
@@ -149,7 +161,12 @@ class HandleTelegramUpdateAction
         $pendingRequest = $this->pendingInputRequest($config, $fromUserId, $chatId);
 
         if ($pendingRequest !== null) {
-            DB::transaction(function () use ($config, $link, $chatId, $fromUserId, $update, $pendingRequest): void {
+            DB::transaction(function () use ($config, $link, $chatId, $fromUserId, $update, $pendingRequest, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $request = $this->startPostAction()->handle(
                     $config,
                     $link,
@@ -168,6 +185,13 @@ class HandleTelegramUpdateAction
 
         if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)) {
             $this->keepTyping($config, $chatId);
+
+            if ($dispatchLeaseId !== null
+                && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
+            ) {
+                return;
+            }
+
             $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
 
             if ($intent !== null) {
@@ -177,21 +201,48 @@ class HandleTelegramUpdateAction
                     return;
                 }
 
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
 
                 return;
             }
 
             $this->keepTyping($config, $chatId);
+
+            if ($dispatchLeaseId !== null
+                && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
+            ) {
+                return;
+            }
+
             $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
 
             if ($chatReply !== null) {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $this->reply($config, $chatId, $chatReply);
 
                 return;
             }
 
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                return;
+            }
+
             $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
+        }
+
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+            return;
         }
 
         $this->captureTelegramMessageAction->handle($config, $update, true, true, $telegramUpdateKey);
@@ -274,7 +325,7 @@ class HandleTelegramUpdateAction
         }
 
         if ($command === '/link') {
-            $this->handleLink($config, $chatId, $fromUserId, $fromUsername, $args);
+            $this->handleLink($config, $chatId, $fromUserId, $fromUsername, $args, $update, $dispatchLeaseId);
 
             return;
         }
@@ -298,12 +349,12 @@ class HandleTelegramUpdateAction
             '/videos' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'videos')),
             '/posts' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'posts')),
             '/notes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'notes')),
-            '/note' => $this->handleNote($config, $chatId, $args, $telegramUpdateKey),
-            '/post' => $this->handlePost($config, $link, $chatId, $fromUserId, $args, $update),
-            '/approve' => $this->handleApprove($config, $link, $chatId, $fromUserId, $args),
-            '/post_now' => $this->handlePostNow($config, $link, $chatId, $fromUserId, $args),
-            '/schedule' => $this->handleSchedule($config, $link, $chatId, $fromUserId, $args),
-            '/cancel' => $this->handleCancel($config, $chatId, $fromUserId, $args),
+            '/note' => $this->handleNote($config, $chatId, $args, $telegramUpdateKey, $update, $dispatchLeaseId),
+            '/post' => $this->handlePost($config, $link, $chatId, $fromUserId, $args, $update, $dispatchLeaseId),
+            '/approve' => $this->handleApprove($config, $link, $chatId, $fromUserId, $args, $update, $dispatchLeaseId),
+            '/post_now' => $this->handlePostNow($config, $link, $chatId, $fromUserId, $args, $update, $dispatchLeaseId),
+            '/schedule' => $this->handleSchedule($config, $link, $chatId, $fromUserId, $args, $update, $dispatchLeaseId),
+            '/cancel' => $this->handleCancel($config, $chatId, $fromUserId, $args, $update, $dispatchLeaseId),
             '/clearnotes' => $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId),
             default => $this->reply($config, $chatId, 'Unknown command. Try /help.'),
         };
@@ -333,8 +384,18 @@ class HandleTelegramUpdateAction
         };
     }
 
-    private function handleLink(TelegramBotConfig $config, int $chatId, int $fromUserId, ?string $fromUsername, string $args): void
-    {
+    /**
+     * @param  array<string, mixed>  $update
+     */
+    private function handleLink(
+        TelegramBotConfig $config,
+        int $chatId,
+        int $fromUserId,
+        ?string $fromUsername,
+        string $args,
+        array $update,
+        ?string $dispatchLeaseId = null,
+    ): void {
         $code = trim($args);
 
         if ($code === '') {
@@ -344,7 +405,12 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            DB::transaction(function () use ($config, $chatId, $fromUserId, $fromUsername, $code): void {
+            DB::transaction(function () use ($config, $chatId, $fromUserId, $fromUsername, $code, $update, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $link = $this->linkTelegramAccountAction->handle($config, $code, $fromUserId, $fromUsername);
 
                 $this->reply($config, $chatId, "✅ Linked as {$link->user->name}. Send /help to see what I can do.");
@@ -356,13 +422,27 @@ class HandleTelegramUpdateAction
         }
     }
 
-    private function handleNote(TelegramBotConfig $config, int $chatId, string $args, ?string $telegramUpdateKey): void
-    {
+    /**
+     * @param  array<string, mixed>  $update
+     */
+    private function handleNote(
+        TelegramBotConfig $config,
+        int $chatId,
+        string $args,
+        ?string $telegramUpdateKey,
+        array $update,
+        ?string $dispatchLeaseId = null,
+    ): void {
         $body = trim($args);
 
         if ($body === '') {
             $this->reply($config, $chatId, 'Send /note followed by the text to capture, e.g. /note remember to renew the domain.');
 
+            return;
+        }
+
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
             return;
         }
 
@@ -375,7 +455,12 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            DB::transaction(function () use ($config, $chatId, $body, $telegramUpdateKey): void {
+            DB::transaction(function () use ($config, $chatId, $body, $telegramUpdateKey, $update, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 if ($telegramUpdateKey !== null
                     && ScratchpadEntry::query()
                         ->where('telegram_update_key', $telegramUpdateKey)
@@ -452,11 +537,17 @@ class HandleTelegramUpdateAction
         int $telegramUserId,
         string $args,
         array $update,
+        ?string $dispatchLeaseId = null,
     ): void {
         // An empty string deliberately clears `/post` from a media caption or
         // text message before capture. With no media/text left, Start creates
         // the durable awaiting-input request instead.
-        DB::transaction(function () use ($config, $link, $chatId, $telegramUserId, $update, $args): void {
+        DB::transaction(function () use ($config, $link, $chatId, $telegramUserId, $update, $args, $dispatchLeaseId): void {
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                return;
+            }
+
             $request = $this->startPostAction()->handle(
                 $config,
                 $link,
@@ -483,12 +574,17 @@ class HandleTelegramUpdateAction
         return 'I could not capture that as a post source. Send text, a photo, a voice note, or an audio file.';
     }
 
+    /**
+     * @param  array<string, mixed>  $update
+     */
     private function handleApprove(
         TelegramBotConfig $config,
         TelegramBotLink $link,
         int $chatId,
         int $telegramUserId,
         string $args,
+        array $update,
+        ?string $dispatchLeaseId = null,
     ): void {
         try {
             $request = $this->postTarget($config, $chatId, $telegramUserId, $args, [TelegramPostRequest::AWAITING_APPROVAL]);
@@ -506,8 +602,18 @@ class HandleTelegramUpdateAction
 
         $post = $request->post;
 
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+            return;
+        }
+
         try {
-            DB::transaction(function () use ($post, $link, $request, $config, $telegramUserId, $chatId): void {
+            DB::transaction(function () use ($post, $link, $request, $config, $telegramUserId, $chatId, $update, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $approved = $this->approvePostAction()->handle(
                     $post,
                     $link->user,
@@ -526,12 +632,17 @@ class HandleTelegramUpdateAction
         }
     }
 
+    /**
+     * @param  array<string, mixed>  $update
+     */
     private function handlePostNow(
         TelegramBotConfig $config,
         TelegramBotLink $link,
         int $chatId,
         int $telegramUserId,
         string $args,
+        array $update,
+        ?string $dispatchLeaseId = null,
     ): void {
         try {
             $request = $this->postTarget($config, $chatId, $telegramUserId, $args, [
@@ -553,7 +664,12 @@ class HandleTelegramUpdateAction
         $post = $request->post;
 
         try {
-            DB::transaction(function () use ($post, $config, $request, $chatId): void {
+            DB::transaction(function () use ($post, $config, $request, $chatId, $update, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
                     'confirm_ask' => true,
                     'telegram_request_id' => $request->id,
@@ -573,12 +689,17 @@ class HandleTelegramUpdateAction
 
     }
 
+    /**
+     * @param  array<string, mixed>  $update
+     */
     private function handleSchedule(
         TelegramBotConfig $config,
         TelegramBotLink $link,
         int $chatId,
         int $telegramUserId,
         string $args,
+        array $update,
+        ?string $dispatchLeaseId = null,
     ): void {
         [$identifier, $whenText] = $this->scheduleArguments($args);
         try {
@@ -600,6 +721,11 @@ class HandleTelegramUpdateAction
 
         $post = $request->post;
 
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+            return;
+        }
+
         $when = $this->parseScheduleWhen($config, $whenText);
 
         if ($when === null) {
@@ -609,7 +735,12 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            DB::transaction(function () use ($post, $config, $request, $chatId, $when): void {
+            DB::transaction(function () use ($post, $config, $request, $chatId, $when, $update, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
                     'when' => $when,
                     'confirm_ask' => true,
@@ -630,8 +761,17 @@ class HandleTelegramUpdateAction
 
     }
 
-    private function handleCancel(TelegramBotConfig $config, int $chatId, int $telegramUserId, string $args): void
-    {
+    /**
+     * @param  array<string, mixed>  $update
+     */
+    private function handleCancel(
+        TelegramBotConfig $config,
+        int $chatId,
+        int $telegramUserId,
+        string $args,
+        array $update,
+        ?string $dispatchLeaseId = null,
+    ): void {
         try {
             $request = $this->postTarget(
                 $config,
@@ -653,8 +793,18 @@ class HandleTelegramUpdateAction
             return;
         }
 
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+            return;
+        }
+
         try {
-            DB::transaction(function () use ($request, $config, $telegramUserId, $chatId): void {
+            DB::transaction(function () use ($request, $config, $telegramUserId, $chatId, $update, $dispatchLeaseId): void {
+                if ($dispatchLeaseId !== null
+                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                    return;
+                }
+
                 $cancelled = $this->cancelPostRequestAction()->handle(
                     $request,
                     $config,
@@ -879,6 +1029,11 @@ class HandleTelegramUpdateAction
         ?string $dispatchLeaseId = null,
     ): void {
         DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId): void {
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update ?? [], $dispatchLeaseId)) {
+                return;
+            }
+
             $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
             $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
 
@@ -935,6 +1090,114 @@ class HandleTelegramUpdateAction
             'dispatch_lease_id' => null,
             'updated_at' => now(),
         ]);
+    }
+
+    /**
+     * Re-check the bot identity immediately before any update side effect.
+     * Disconnect/rotation invalidates the lease and generation under the same
+     * config lock, so a stale worker cannot clear notes or enqueue publishing.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function ownsDispatchLease(
+        TelegramBotConfig $config,
+        array $update,
+        string $dispatchLeaseId,
+    ): bool {
+        $updateId = $update['update_id'] ?? null;
+
+        if (! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId))) {
+            return false;
+        }
+
+        return DB::transaction(function () use ($config, $updateId, $dispatchLeaseId): bool {
+            Workspace::query()
+                ->whereKey($config->workspace_id)
+                ->lockForUpdate()
+                ->first();
+
+            $lockedConfig = TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedConfig === null
+                || ! $lockedConfig->isConnected()
+                || $lockedConfig->webhook_generation !== $config->webhook_generation
+            ) {
+                return false;
+            }
+
+            $record = TelegramUpdate::query()
+                ->where('telegram_bot_config_id', $lockedConfig->id)
+                ->where('webhook_generation', $lockedConfig->webhook_generation)
+                ->where('update_id', (int) $updateId)
+                ->whereNull('processed_at')
+                ->whereNull('failed_at')
+                ->whereNull('discarded_at')
+                ->lockForUpdate()
+                ->first();
+
+            return $record !== null
+                && $record->dispatch_lease_id === $dispatchLeaseId
+                && $record->dispatch_claimed_at !== null
+                && $record->dispatch_claimed_at->greaterThan(now()->subSeconds(1020));
+        });
+    }
+
+    /**
+     * Extend a live update lease while the worker is inside an AI/provider
+     * call. Rotation and disconnect hold the same config lock before changing
+     * the generation, so a stale worker cannot renew its old identity.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function renewDispatchLease(
+        TelegramBotConfig $config,
+        array $update,
+        string $dispatchLeaseId,
+    ): bool {
+        $updateId = $update['update_id'] ?? null;
+
+        if (! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId))) {
+            return false;
+        }
+
+        return DB::transaction(function () use ($config, $updateId, $dispatchLeaseId): bool {
+            Workspace::query()
+                ->whereKey($config->workspace_id)
+                ->lockForUpdate()
+                ->first();
+
+            $lockedConfig = TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedConfig === null
+                || ! $lockedConfig->isConnected()
+                || $lockedConfig->webhook_generation !== $config->webhook_generation
+            ) {
+                return false;
+            }
+
+            $now = now();
+
+            return TelegramUpdate::query()
+                ->where('telegram_bot_config_id', $lockedConfig->id)
+                ->where('webhook_generation', $lockedConfig->webhook_generation)
+                ->where('update_id', (int) $updateId)
+                ->whereNull('processed_at')
+                ->whereNull('failed_at')
+                ->whereNull('discarded_at')
+                ->where('dispatch_lease_id', $dispatchLeaseId)
+                ->whereNotNull('dispatch_claimed_at')
+                ->where('dispatch_claimed_at', '>', $now->copy()->subSeconds(1020))
+                ->update([
+                    'dispatch_claimed_at' => $now,
+                    'updated_at' => $now,
+                ]) === 1;
+        });
     }
 
     private function helpText(TelegramBotConfig $config): string

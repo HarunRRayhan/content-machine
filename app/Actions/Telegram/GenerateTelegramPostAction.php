@@ -94,8 +94,8 @@ class GenerateTelegramPostAction
         }
 
         $result = $entry->kind === 'photo'
-            ? $this->completeFromPhoto($request, $sourceText)
-            : $this->completeFromText($request, $sourceText);
+            ? $this->completeFromPhoto($request, $sourceText, $workLeaseId)
+            : $this->completeFromText($request, $sourceText, $workLeaseId);
 
         if (! $result->successful || $result->text === null) {
             return $this->fail($request, 'I could not create the draft right now. Check the AI model settings and try again.', $workLeaseId);
@@ -117,6 +117,10 @@ class GenerateTelegramPostAction
         $image = $this->sourceImage($entry);
         $imageName = $image?->original_filename ?: ($image === null ? null : basename($image->path));
         $captions = $this->captions($draft, $imageName);
+
+        if ($workLeaseId !== null && ! $this->renewPostWork($request->id, $workLeaseId)) {
+            return null;
+        }
 
         /** @var array{request: TelegramPostRequest, post: Post}|null $generated */
         $generated = DB::transaction(function () use ($request, $draft, $captions, $image, $workLeaseId): ?array {
@@ -177,11 +181,18 @@ class GenerateTelegramPostAction
         return $generated['post'];
     }
 
-    private function completeFromText(TelegramPostRequest $request, string $sourceText): AiCompletionResult
-    {
+    private function completeFromText(
+        TelegramPostRequest $request,
+        string $sourceText,
+        ?string $workLeaseId = null,
+    ): AiCompletionResult {
         $userContent = "Source language hint: {$this->languageForRequest($request)}\n\nSource material:\n{$sourceText}";
 
         foreach ($this->resolver->textChain($request->workspace) as $model) {
+            if ($workLeaseId !== null && ! $this->renewPostWork($request->id, $workLeaseId)) {
+                return AiCompletionResult::failure('The Telegram post-generation lease expired.');
+            }
+
             $result = $this->completionClient->complete($model, self::SYSTEM_PROMPT, $userContent);
 
             if ($result->successful) {
@@ -192,8 +203,11 @@ class GenerateTelegramPostAction
         return AiCompletionResult::failure('No text model completed the draft.');
     }
 
-    private function completeFromPhoto(TelegramPostRequest $request, string $sourceText): AiCompletionResult
-    {
+    private function completeFromPhoto(
+        TelegramPostRequest $request,
+        string $sourceText,
+        ?string $workLeaseId = null,
+    ): AiCompletionResult {
         $image = $this->sourceImage($request->sourceEntry);
 
         if ($image === null) {
@@ -209,6 +223,10 @@ class GenerateTelegramPostAction
         $userContent = "Source language hint: {$this->languageForRequest($request)}\n\nPhoto caption or instruction:\n{$sourceText}";
 
         foreach ($this->resolver->chain($request->workspace, 'vision') as $model) {
+            if ($workLeaseId !== null && ! $this->renewPostWork($request->id, $workLeaseId)) {
+                return AiCompletionResult::failure('The Telegram post-generation lease expired.');
+            }
+
             $result = $this->visionClient->completeWithImage(
                 $model,
                 self::SYSTEM_PROMPT,
@@ -448,6 +466,11 @@ class GenerateTelegramPostAction
         return $request->work_lease_id === $workLeaseId
             && $request->work_claimed_at !== null
             && $request->work_claimed_at->isAfter(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS));
+    }
+
+    private function renewPostWork(int $requestId, string $workLeaseId): bool
+    {
+        return (new ClaimTelegramPostWorkAction)->renew($requestId, $workLeaseId);
     }
 
     private function facebookCaption(Post $post): string

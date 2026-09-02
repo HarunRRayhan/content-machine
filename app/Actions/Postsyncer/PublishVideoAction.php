@@ -51,7 +51,12 @@ class PublishVideoAction
         $progress = $video->publish_progress;
 
         try {
+            $video->loadMissing('workspace');
             $this->assertFirstPublish($video);
+            $config = PostsyncerConfig::fromWorkspace($video->workspace);
+            if (! $config->publishEnabled() || ! $config->videoPublishEnabled()) {
+                throw new PostsyncerException(PostsyncerConfig::VIDEO_PUBLISH_DISABLED_MESSAGE);
+            }
             $client = new PostsyncerClient($config);
             $groups = $this->planner->plan($video, $config, $options);
 
@@ -75,6 +80,11 @@ class PublishVideoAction
                         return;
                     }
                     $groupKey = $this->groupKey($config, $group);
+                    $idempotencyKey = $this->idempotencyKey(
+                        (string) $progress['operation_id'],
+                        $index,
+                        $groupKey,
+                    );
 
                     if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
                         continue;
@@ -88,11 +98,7 @@ class PublishVideoAction
                             'index' => $index,
                             'group_key' => $groupKey,
                             'phase' => $group->mediaUrls !== [] ? 'uploading' : 'creating',
-                            'idempotency_key' => $this->idempotencyKey(
-                                (string) $progress['operation_id'],
-                                $index,
-                                $groupKey,
-                            ),
+                            'idempotency_key' => $idempotencyKey,
                             'media_ids' => [],
                             'media_urls' => $group->mediaUrls,
                         ];
@@ -101,7 +107,11 @@ class PublishVideoAction
                         }
 
                         if ($group->mediaUrls !== []) {
-                            $mediaIds = $client->uploadFromUrls($group->workspaceId, $group->mediaUrls);
+                            $mediaIds = $client->uploadFromUrls(
+                                $group->workspaceId,
+                                $group->mediaUrls,
+                                $idempotencyKey.':media',
+                            );
 
                             if ($mediaIds === []) {
                                 throw new PostsyncerException(
@@ -129,11 +139,7 @@ class PublishVideoAction
                         'index' => $index,
                         'group_key' => $groupKey,
                         'phase' => 'creating',
-                        'idempotency_key' => $this->idempotencyKey(
-                            (string) $progress['operation_id'],
-                            $index,
-                            $groupKey,
-                        ),
+                        'idempotency_key' => $idempotencyKey,
                         'media_ids' => $mediaIds,
                         'media_urls' => $group->mediaUrls,
                         'expected_payload' => $body,
@@ -142,7 +148,7 @@ class PublishVideoAction
                         return;
                     }
 
-                    $result = $client->createPost($body);
+                    $result = $client->createPost($body, $idempotencyKey.':post');
                     $video->refresh();
                     if (! $this->runTokenMatches($video->publish_progress, $runToken)) {
                         return;
@@ -868,6 +874,10 @@ class PublishVideoAction
         }
 
         if ($exception instanceof PostsyncerException) {
+            if (! $exception->responseReceived && $exception->getPrevious() instanceof ConnectionException) {
+                return true;
+            }
+
             $code = (int) $exception->getCode();
 
             if (in_array($code, [404, 408, 425, 429], true) || $code >= 500) {

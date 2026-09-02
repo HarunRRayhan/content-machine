@@ -68,6 +68,10 @@ class ClaimTelegramPostWorkAction
                     return null;
                 }
 
+                $request->forceFill([
+                    'work_claimed_at' => now(),
+                ])->save();
+
                 return $leaseId;
             }
 
@@ -95,6 +99,22 @@ class ClaimTelegramPostWorkAction
                 'work_lease_id' => null,
                 'updated_at' => now(),
             ]);
+    }
+
+    public function renew(int $requestId, string $leaseId): bool
+    {
+        $now = now();
+
+        return TelegramPostRequest::query()
+            ->whereKey($requestId)
+            ->where('state', TelegramPostRequest::GENERATING)
+            ->where('work_lease_id', $leaseId)
+            ->whereNotNull('work_claimed_at')
+            ->where('work_claimed_at', '>', $now->copy()->subSeconds(self::LEASE_SECONDS))
+            ->update([
+                'work_claimed_at' => $now,
+                'updated_at' => $now,
+            ]) === 1;
     }
 
     public function clear(int $requestId, ?string $leaseId = null): void

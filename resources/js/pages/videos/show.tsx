@@ -55,6 +55,7 @@ type VideoDetail = {
     publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
+    video_publish_enabled: boolean;
     needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;

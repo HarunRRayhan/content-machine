@@ -152,4 +152,8 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('media', [MediaApiController::class, 'index'])
         ->middleware('auth.workspace-token:media:read')
         ->name('media.index');
+
+    Route::get('media/{mediaAsset:public_id}/file', [MediaApiController::class, 'file'])
+        ->middleware('auth.workspace-token:media:read')
+        ->name('media.file');
 });

@@ -154,4 +154,6 @@ return [
 
     'admin_name' => env('ADMIN_NAME', 'Admin'),
 
+    'telegram_cutover_ready' => (bool) env('CM_TELEGRAM_CUTOVER_READY', false),
+
 ];

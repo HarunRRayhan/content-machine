@@ -80,6 +80,13 @@ class ResolveScratchpadLinkJob implements ShouldQueue
 
         $action->handle($this->entry);
 
+        if ($requestId !== null
+            && $this->workLeaseId !== null
+            && ! (new ClaimTelegramPostWorkAction)->renew($requestId, $this->workLeaseId)
+        ) {
+            return;
+        }
+
         if (($this->entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
             SummarizeCaptureJob::dispatch($this->entry);
             $this->queueGeneration($requestId, $this->workLeaseId);

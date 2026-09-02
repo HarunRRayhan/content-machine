@@ -16,7 +16,7 @@ class DispatchPendingPostPublishesCommand extends Command
     {
         $limit = max(1, (int) $this->option('limit'));
         $dispatched = 0;
-        $staleAt = now()->subSeconds(PublishPostJob::TIMEOUT_SECONDS);
+        $staleAt = now()->subSeconds(PublishPostJob::LEASE_SECONDS);
 
         Post::query()
             ->where(function ($query) use ($staleAt): void {
@@ -46,9 +46,14 @@ class DispatchPendingPostPublishesCommand extends Command
                     ? $progress['operation_id']
                     : null;
 
-                $leaseId = is_string($post->publish_lease_id) ? $post->publish_lease_id : null;
+                $runToken = is_string($progress['run_token'] ?? null)
+                    ? $progress['run_token']
+                    : null;
+                $leaseId = is_string($post->publish_lease_id)
+                    ? $post->publish_lease_id
+                    : null;
 
-                PublishPostJob::dispatch($post, $options, $operationId, $leaseId);
+                PublishPostJob::dispatch($post, $options, $runToken, $operationId, $leaseId);
                 $dispatched++;
             });
 

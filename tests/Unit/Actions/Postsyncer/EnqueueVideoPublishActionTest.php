@@ -26,6 +26,7 @@ class EnqueueVideoPublishActionTest extends TestCase
     {
         PostsyncerConfig::write($workspace, [
             'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'api_key' => 'test-api-key',
             'default_language' => 'bangla',
             'languages' => [

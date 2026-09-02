@@ -80,7 +80,10 @@ final class HttpTelegramClient implements TelegramClientContract
                     'text' => $chunk,
                 ]);
             } catch (Throwable) {
-                $result = TelegramApiResult::failure('Could not reach Telegram to send the reply.');
+                $result = TelegramApiResult::failure(
+                    'Could not reach Telegram to send the reply.',
+                    outcomeUnknown: true,
+                );
                 $this->logMessageFailure($chatId, $result->error);
 
                 return $result;

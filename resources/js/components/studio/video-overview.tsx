@@ -336,7 +336,11 @@ export default function VideoOverview({
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
     const canRetry =
-        postsyncerReady && !publishBusy && hasVideoDriveUrl && publishRetryable;
+        videoPublishingEnabled &&
+        postsyncerReady &&
+        !publishBusy &&
+        hasVideoDriveUrl &&
+        publishRetryable;
     const retryDisabled = !canRetry || (needsConfirmAsk && !confirmAskChecked);
     const scheduledAt = earliestWhen(groups);
 

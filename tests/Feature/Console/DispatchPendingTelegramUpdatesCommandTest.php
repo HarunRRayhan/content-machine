@@ -66,4 +66,39 @@ class DispatchPendingTelegramUpdatesCommandTest extends TestCase
             'last_error' => 'The stored Telegram update payload has no valid update id.',
         ]);
     }
+
+    public function test_failed_updates_are_reopened_only_with_the_explicit_option(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $failed = TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'update_id' => 101,
+            'payload' => [
+                'update_id' => 101,
+                'message' => [
+                    'chat' => ['id' => 555],
+                    'from' => ['id' => 42],
+                    'text' => 'retry me',
+                ],
+            ],
+            'failed_at' => now(),
+            'last_error' => 'temporary failure',
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-updates')
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 0 pending Telegram update(s).');
+        $this->assertNotNull($failed->refresh()->failed_at);
+        Queue::assertNothingPushed();
+
+        $this->artisan('telegram:dispatch-pending-updates', ['--retry-failed' => true])
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 1 pending Telegram update(s).');
+
+        $failed->refresh();
+        $this->assertNull($failed->failed_at);
+        $this->assertNotNull($failed->dispatch_lease_id);
+        Queue::assertPushed(ProcessTelegramUpdateJob::class);
+    }
 }

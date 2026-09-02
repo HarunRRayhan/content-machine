@@ -344,6 +344,10 @@ class PostsController extends Controller
             ))->forPreview();
         }
 
+        $timezone = $workspace !== null && trim($workspace->timezone) !== ''
+            ? $workspace->timezone
+            : 'Asia/Dhaka';
+
         $publishOptions = is_array($post->publish_progress)
             && is_array($post->publish_progress['options'] ?? null)
             ? $post->publish_progress['options']
@@ -378,6 +382,9 @@ class PostsController extends Controller
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
             'publish_retryable' => $post->canRetryPublish(),
+            'publish_progress' => $post->publish_progress,
+            'approval_state' => $post->approval_state ?? 'approved',
+            'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'needs_confirm_ask' => $needsConfirmAsk,

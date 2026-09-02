@@ -8,6 +8,7 @@ use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -16,11 +17,13 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
-class TranscribeVoiceNoteJob implements ShouldQueue
+class TranscribeVoiceNoteJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
+
+    public const UNIQUE_FOR_SECONDS = 3600;
 
     /**
      * Old queued payloads do not contain the optional Telegram post-work
@@ -60,11 +63,26 @@ class TranscribeVoiceNoteJob implements ShouldQueue
         if ($requestId !== null) {
             $leaseId = (new ClaimTelegramPostWorkAction)->acquire($requestId, $this->workLeaseId);
             if ($leaseId === null) {
-                return;
-            }
+                $request = TelegramPostRequest::query()->whereKey($requestId)->first();
 
-            $this->workRequestId = $requestId;
-            $this->workLeaseId = $leaseId;
+                if ($request?->state !== TelegramPostRequest::CANCELLED) {
+                    return;
+                }
+
+                // Cancellation deliberately leaves the original lease in
+                // place so an already-running transcription can finish. If
+                // the queued job starts after cancellation, finish the source
+                // enrichment independently of the abandoned post request.
+                if ($this->workLeaseId !== null) {
+                    (new ClaimTelegramPostWorkAction)->clear($requestId, $this->workLeaseId);
+                }
+                $requestId = null;
+                $this->workRequestId = null;
+                $this->workLeaseId = null;
+            } else {
+                $this->workRequestId = $requestId;
+                $this->workLeaseId = $leaseId;
+            }
         }
 
         $action->handle($this->transcription, $requestId, $leaseId);
@@ -77,6 +95,11 @@ class TranscribeVoiceNoteJob implements ShouldQueue
     public function uniqueId(): string
     {
         return 'voice-transcription:'.$this->transcription->getKey();
+    }
+
+    public function uniqueFor(): int
+    {
+        return self::UNIQUE_FOR_SECONDS;
     }
 
     /**
@@ -118,15 +141,19 @@ class TranscribeVoiceNoteJob implements ShouldQueue
                     ->lockForUpdate()
                     ->first();
 
-                if ($request === null
-                    || $request->state !== TelegramPostRequest::GENERATING
-                    || ($this->workLeaseId !== null
-                        && ($request->work_lease_id !== $this->workLeaseId
-                            || $request->work_claimed_at === null
-                            || $request->work_claimed_at->isBefore(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS)))
-                    )
-                    || ($this->workLeaseId === null && $request->work_lease_id !== null)
-                ) {
+                $ownsGeneratingRequest = $request !== null
+                    && $request->state === TelegramPostRequest::GENERATING
+                    && ($this->workLeaseId !== null
+                        ? ($request->work_lease_id === $this->workLeaseId
+                            && $request->work_claimed_at !== null
+                            && $request->work_claimed_at->isAfter(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS)))
+                        : $request->work_lease_id === null);
+                $ownsCancelledRequest = $request !== null
+                    && $request->state === TelegramPostRequest::CANCELLED
+                    && $this->workLeaseId !== null
+                    && $request->work_lease_id === $this->workLeaseId;
+
+                if (! $ownsGeneratingRequest && ! $ownsCancelledRequest) {
                     return;
                 }
             } elseif ($transcription->scratchpad_entry_id !== null

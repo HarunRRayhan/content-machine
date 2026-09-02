@@ -1,4 +1,4 @@
-import { Link, router } from '@inertiajs/react';
+import { Form, Link, router } from '@inertiajs/react';
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import PublishDialog from '@/components/content/publish-dialog';
@@ -43,6 +43,17 @@ type Props = {
     postsyncerReady: boolean;
     publishState: string;
     publishRetryable: boolean;
+    publishProgress: {
+        state?: string;
+        current?: {
+            index?: number;
+            group_key?: string;
+            phase?: string;
+        } | null;
+    } | null;
+    reconcileUrl: string;
+    approvalState: string;
+    timezone: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     handles?: HandleDirectory;
@@ -214,6 +225,10 @@ export default function PostOverview({
     postsyncerReady,
     publishState,
     publishRetryable,
+    publishProgress,
+    reconcileUrl,
+    approvalState,
+    timezone,
     needsConfirmAsk,
     postsyncer,
     handles,
@@ -254,7 +269,15 @@ export default function PostOverview({
           : !postsyncerReady
             ? 'Configure PostSyncer in Settings before publishing.'
             : null;
-    const scheduledAt = earliestWhen(groups);
+    const publishUncertain = Boolean(
+        publishState === 'failed' &&
+        publishProgress?.state === 'uncertain' &&
+        publishProgress.current !== null &&
+        publishProgress.current !== undefined &&
+        publishProgress.current.phase !== 'uploading',
+    );
+    const awaitingApproval = approvalState === 'pending';
+    const scheduledAt = earliestWhen(groups, effectiveTimezone);
 
     function advanceStatus(nextStatus: 'archived' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {

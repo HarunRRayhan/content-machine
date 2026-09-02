@@ -8,6 +8,7 @@ use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Jobs\TranscribeVoiceNoteJob;
 use App\Models\TelegramPostRequest;
+use App\Models\Transcription;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -94,6 +95,35 @@ class DispatchPendingTelegramPostWorkCommand extends Command
                 } catch (Throwable $exception) {
                     report($exception);
                     $claimAction->release($request->id, $leaseId);
+                }
+            });
+
+        Transcription::query()
+            ->whereIn('status', ['pending', 'processing'])
+            ->whereHas('scratchpadEntry', fn ($query) => $query
+                ->where('source', 'telegram')
+                ->where('kind', 'voice'))
+            ->with('scratchpadEntry')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get()
+            ->each(function (Transcription $transcription) use (&$dispatched): void {
+                $entryId = $transcription->scratchpad_entry_id;
+
+                if ($entryId === null
+                    || TelegramPostRequest::query()
+                        ->where('source_scratchpad_entry_id', $entryId)
+                        ->where('state', TelegramPostRequest::GENERATING)
+                        ->exists()
+                ) {
+                    return;
+                }
+
+                try {
+                    TranscribeVoiceNoteJob::dispatch($transcription);
+                    $dispatched++;
+                } catch (Throwable $exception) {
+                    report($exception);
                 }
             });
 

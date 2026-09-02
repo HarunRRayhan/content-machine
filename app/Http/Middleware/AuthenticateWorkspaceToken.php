@@ -37,6 +37,13 @@ class AuthenticateWorkspaceToken
 
     public function handle(Request $request, Closure $next, string ...$abilities): Response
     {
+        // API requests can share a long-lived application process. Clear any
+        // previous token/workspace before authenticating this request, and
+        // clear them again after the controller has finished.
+        $this->currentApiToken->set(null);
+        $this->currentWorkspace->set(null);
+        Auth::forgetGuards();
+
         $plaintext = $request->bearerToken();
 
         $token = is_string($plaintext) && str_starts_with($plaintext, 'cm_')
@@ -56,16 +63,22 @@ class AuthenticateWorkspaceToken
         $this->currentApiToken->set($token);
         $this->currentWorkspace->set($token->workspace);
 
-        if (($user = $token->createdBy) !== null) {
-            Auth::setUser($user);
-            $request->setUserResolver(fn () => $user);
-        }
+        try {
+            if (($user = $token->createdBy) !== null) {
+                Auth::setUser($user);
+                $request->setUserResolver(fn () => $user);
+            }
 
-        if ($this->shouldStampLastUsed($token)) {
-            $token->forceFill(['last_used_at' => now()])->save();
-        }
+            if ($this->shouldStampLastUsed($token)) {
+                $token->forceFill(['last_used_at' => now()])->save();
+            }
 
-        return $next($request);
+            return $next($request);
+        } finally {
+            $this->currentApiToken->set(null);
+            $this->currentWorkspace->set(null);
+            Auth::forgetGuards();
+        }
     }
 
     private function shouldStampLastUsed(WorkspaceApiToken $token): bool

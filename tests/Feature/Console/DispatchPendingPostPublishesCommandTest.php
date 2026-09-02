@@ -66,7 +66,7 @@ class DispatchPendingPostPublishesCommandTest extends TestCase
         $leaseId = '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22';
         $post = Post::factory()->for(Workspace::factory())->create([
             'publish_state' => 'running',
-            'publish_claimed_at' => now()->subSeconds(PublishPostJob::TIMEOUT_SECONDS + 1),
+            'publish_claimed_at' => now()->subSeconds(PublishPostJob::LEASE_SECONDS + 1),
             'publish_lease_id' => $leaseId,
             'publish_progress' => [
                 'version' => 1,

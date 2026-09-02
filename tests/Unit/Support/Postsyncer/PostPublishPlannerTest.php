@@ -11,6 +11,7 @@ use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class PostPublishPlannerTest extends TestCase
@@ -197,6 +198,25 @@ class PostPublishPlannerTest extends TestCase
         $this->assertInstanceOf(CarbonImmutable::class, $group->when);
         $this->assertSame($when, $group->when->format('Y-m-d H:i:s'));
         $this->assertSame('Asia/Dhaka', $group->when->timezoneName);
+    }
+
+    public function test_invalid_when_is_reported_as_a_validation_error(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Later'],
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('The publish time is invalid.');
+
+        $this->planner->plan($post, $config, [
+            'when' => 'not-a-date',
+            'confirm_ask' => false,
+        ]);
     }
 
     public function test_naive_when_is_parsed_in_workspace_timezone(): void

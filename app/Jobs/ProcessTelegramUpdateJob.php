@@ -12,7 +12,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -119,9 +118,7 @@ class ProcessTelegramUpdateJob implements ShouldQueue
                 return null;
             }
 
-            if ($this->dispatchLeaseId === null) {
-                $this->dispatchLeaseId = (string) Str::uuid();
-            }
+            $this->dispatchLeaseId ??= $this->stableDispatchLeaseId();
 
             if ($config === null || ! $config->isConnected()) {
                 $this->markDiscarded($record, 'The Telegram bot connection is no longer available.');
@@ -214,7 +211,11 @@ class ProcessTelegramUpdateJob implements ShouldQueue
             if ($this->dispatchLeaseId !== null) {
                 $query->where('dispatch_lease_id', $this->dispatchLeaseId);
             } else {
-                $query->whereNull('dispatch_lease_id');
+                $query->where(function ($leaseQuery): void {
+                    $leaseQuery
+                        ->whereNull('dispatch_lease_id')
+                        ->orWhere('dispatch_lease_id', $this->stableDispatchLeaseId());
+                });
             }
 
             $query->update([
@@ -262,5 +263,16 @@ class ProcessTelegramUpdateJob implements ShouldQueue
             'dispatch_claimed_at' => null,
             'dispatch_lease_id' => null,
         ])->save();
+    }
+
+    private function stableDispatchLeaseId(): string
+    {
+        $hash = hash('sha256', 'telegram-update-dispatch:'.$this->uniqueId());
+
+        return substr($hash, 0, 8).'-'
+            .substr($hash, 8, 4).'-'
+            .substr($hash, 12, 4).'-'
+            .substr($hash, 16, 4).'-'
+            .substr($hash, 20, 12);
     }
 }

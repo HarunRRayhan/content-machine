@@ -149,6 +149,7 @@ class VideosController extends Controller
 
         abort_if($video->workspace_id !== $workspace->id, 404);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+        abort_if(! $video->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,
@@ -305,6 +306,7 @@ class VideosController extends Controller
             'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
+            'video_publish_enabled' => $postsyncerConfig?->videoPublishEnabled() ?? false,
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),

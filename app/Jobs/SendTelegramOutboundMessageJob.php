@@ -66,14 +66,13 @@ class SendTelegramOutboundMessageJob implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        if ($exception !== null) {
-            report($exception);
-        }
-
-        DB::transaction(function (): void {
+        $recorded = DB::transaction(function (): bool {
             $query = TelegramOutboundMessage::query()
                 ->whereKey($this->telegramOutboundMessageId)
-                ->where('status', TelegramOutboundMessage::PENDING)
+                ->whereIn('status', [
+                    TelegramOutboundMessage::PENDING,
+                    TelegramOutboundMessage::SENDING,
+                ])
                 ->whereNull('discarded_at');
 
             if ($this->dispatchLeaseId === null) {
@@ -82,13 +81,30 @@ class SendTelegramOutboundMessageJob implements ShouldQueue
                 $query->where('dispatch_lease_id', $this->dispatchLeaseId);
             }
 
-            $query->update([
-                'status' => TelegramOutboundMessage::FAILED,
+            $message = $query->lockForUpdate()->first();
+
+            if ($message === null) {
+                return false;
+            }
+
+            $message->forceFill([
+                'status' => $message->status === TelegramOutboundMessage::SENDING
+                    ? TelegramOutboundMessage::UNCERTAIN
+                    : TelegramOutboundMessage::FAILED,
                 'failed_at' => now(),
+                'last_error' => $message->status === TelegramOutboundMessage::SENDING
+                    ? 'Telegram delivery outcome is uncertain. Verify the chat before retrying.'
+                    : $message->last_error,
                 'dispatch_claimed_at' => null,
                 'dispatch_lease_id' => null,
                 'updated_at' => now(),
-            ]);
+            ])->save();
+
+            return true;
         });
+
+        if ($recorded && $exception !== null) {
+            report($exception);
+        }
     }
 }
