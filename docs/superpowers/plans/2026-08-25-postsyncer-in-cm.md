@@ -25,7 +25,7 @@
 | Path | Responsibility |
 |---|---|
 | `database/migrations/*_add_postsyncer_publish_columns.php` | Post/Video Drive URL + publish columns |
-| `database/migrations/*_add_publish_progress_to_posts_table.php` | Private resumable post-publish checkpoint |
+| `database/migrations/*_add_publish_progress_to_posts_table.php` / `*_to_videos_table.php` | Private resumable publish checkpoint |
 | `app/Support/Postsyncer/PostsyncerConfig.php` | Read/write/encrypt workspace settings |
 | `app/Support/Postsyncer/PostsyncerClient.php` | HTTP: accounts, uploadUrl, createPost |
 | `app/Support/Postsyncer/PublishGroup.php` | DTO for one PostSyncer call |
@@ -334,9 +334,16 @@ Use `Http::fake` for success and failure paths.
 **Files:**
 - Create: `app/Actions/Postsyncer/PublishVideoAction.php`
 - Create: `app/Jobs/PublishVideoJob.php`
+- Create: `app/Console/Commands/ReconcileVideoPublishCommand.php`
+- Create: `database/migrations/*_add_publish_progress_to_videos_table.php`
 - Test: `tests/Unit/Actions/Postsyncer/PublishVideoActionTest.php`
+- Test: `tests/Unit/Jobs/PublishVideoJobTest.php`
+- Test: `tests/Feature/Console/ReconcileVideoPublishCommandTest.php`
 
-Mirror Task 8 for videos (require `video_drive_url`).
+Mirror Task 8 for videos (require `video_drive_url`). The video job owns an
+operation fence, uses a shared per-video overlap lock, and checkpoints the
+current group before create. `postsyncer:reconcile-video` verifies workspace,
+media, cover, accounts, platforms, and schedule before recording an id.
 
 - [ ] **Step 1–5:** TDD; commit `feat: queueable video publish via PostSyncer`
 

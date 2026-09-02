@@ -131,6 +131,18 @@ class PostsyncerClient
             return [];
         }
 
+        // A successful response that stored nothing is a definitive upload
+        // rejection. Unlike a timeout or a partial response, it is safe to
+        // retry because PostSyncer returned no media ids at all.
+        if ($countStored === 0) {
+            throw new PostsyncerException(
+                'PostSyncer returned an incomplete media upload response. '
+                .'Refusing to publish with missing media.',
+                safeToRetry: true,
+                responseReceived: true,
+            );
+        }
+
         if ($countStored < count($urls)) {
             throw new PostsyncerException(
                 'PostSyncer returned an incomplete media upload response. '

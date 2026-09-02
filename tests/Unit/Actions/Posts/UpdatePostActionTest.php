@@ -70,6 +70,25 @@ class UpdatePostActionTest extends TestCase
         ));
     }
 
+    public function test_it_rejects_edits_when_the_postsyncer_outcome_is_uncertain(): void
+    {
+        $post = Post::factory()->create([
+            'title' => 'Original title',
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'state' => 'uncertain',
+                'current' => ['index' => 0],
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, new UpdatePostData(
+            title: 'Changed title',
+            body: 'Changed body.',
+        ));
+    }
+
     public function test_title_and_status_patch_keeps_existing_image_drive_urls(): void
     {
         $post = Post::factory()->create([

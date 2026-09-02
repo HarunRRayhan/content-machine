@@ -200,6 +200,42 @@ class SyncScheduledPostsActionTest extends TestCase
         $this->assertSame('FAILED', $post->postsyncer['groups'][0]['status']);
     }
 
+    public function test_operator_confirmed_failed_group_stays_raw_but_counts_as_delivered(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [[
+                    'post_id' => '132732',
+                    'status' => 'FAILED',
+                    'operator_confirmed' => true,
+                    'remote_status' => 'FAILED',
+                    'platforms' => ['instagram'],
+                    'language' => 'english',
+                ]],
+            ],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/132732' => Http::response([
+                'id' => 132732,
+                'status' => 'FAILED',
+            ], 200),
+        ]);
+
+        $marked = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(1, $marked['posts']);
+        $post->refresh();
+        $this->assertSame('posted', $post->status);
+        $this->assertSame('FAILED', $post->postsyncer['groups'][0]['status']);
+        $this->assertSame('FAILED', $post->postsyncer['groups'][0]['remote_status']);
+        $this->assertTrue($post->postsyncer['groups'][0]['operator_confirmed']);
+    }
+
     public function test_it_skips_a_group_when_the_live_lookup_fails(): void
     {
         $workspace = Workspace::factory()->create(['settings' => []]);

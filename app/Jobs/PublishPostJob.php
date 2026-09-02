@@ -11,6 +11,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Throwable;
 
 class PublishPostJob implements ShouldBeUnique, ShouldQueue
@@ -38,6 +40,7 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
     public function __construct(
         public readonly Post $post,
         public readonly array $options = [],
+        public readonly ?string $runToken = null,
     ) {
         // Post covers live on the scratchpad uploads volume, mounted only on
         // cm-web. cm-worker's default queue cannot see those files, so
@@ -47,6 +50,8 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
             (string) config('queue.connections.postsyncer.queue', 'postsyncer'),
         );
     }
+
+    private ?string $effectiveRunToken = null;
 
     /**
      * Keep a duplicate dispatch or a visibility-timeout redelivery from
@@ -67,7 +72,7 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
     public function uniqueId(): string
     {
-        return 'post:'.$this->post->getKey();
+        return 'post:'.$this->post->getKey().':run:'.($this->runTokenOrNull() ?? 'legacy');
     }
 
     public function uniqueFor(): int
@@ -77,40 +82,93 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        if ($exception !== null) {
+        $recorded = DB::transaction(function () use ($exception): bool {
+            $post = Post::query()
+                ->whereKey($this->post->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            $runToken = $this->effectiveRunTokenOrNull() ?? $this->runTokenOrNull();
+
+            if ($post === null
+                || ! $this->isCurrentRun($post, $runToken)
+                || $post->publish_state === 'succeeded') {
+                return false;
+            }
+
+            $progress = $post->publish_progress;
+            $unknownOutcome = false;
+            if (is_array($progress)) {
+                $current = $progress['current'] ?? null;
+                $unknownOutcome = $current !== null || ($progress['state'] ?? null) === 'uncertain';
+                $progress['state'] = $unknownOutcome ? 'uncertain' : 'failed';
+            }
+
+            $error = $exception?->getMessage()
+                ?? 'The PostSyncer publish job failed.';
+            if ($unknownOutcome) {
+                $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. '
+                    .$error;
+            }
+
+            $post->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => $error,
+                'publish_progress' => $progress,
+            ])->save();
+
+            return true;
+        });
+
+        if ($recorded && $exception !== null) {
             report($exception);
         }
-
-        $post = $this->post->fresh();
-
-        if ($post === null || $post->publish_state === 'succeeded') {
-            return;
-        }
-
-        $progress = $post->publish_progress;
-        $unknownOutcome = false;
-        if (is_array($progress)) {
-            $current = $progress['current'] ?? null;
-            $unknownOutcome = $current !== null || ($progress['state'] ?? null) === 'uncertain';
-            $progress['state'] = $unknownOutcome ? 'uncertain' : 'failed';
-        }
-
-        $error = $exception?->getMessage()
-            ?? 'The PostSyncer publish job failed.';
-        if ($unknownOutcome) {
-            $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. '
-                .$error;
-        }
-
-        $post->forceFill([
-            'publish_state' => 'failed',
-            'publish_error' => $error,
-            'publish_progress' => $progress,
-        ])->save();
     }
 
     public function handle(PublishPostAction $action): void
     {
-        $action->handle($this->post, $this->options);
+        $post = $this->post->fresh();
+        $runToken = $this->runTokenOrNull() ?? $this->effectiveRunTokenOrNull();
+
+        if ($runToken === null && $post !== null) {
+            $storedToken = is_array($post->publish_progress)
+                ? ($post->publish_progress['run_token'] ?? null)
+                : null;
+            $runToken = is_string($storedToken) && trim($storedToken) !== ''
+                ? $storedToken
+                : null;
+        }
+
+        if ($post !== null && ! $this->isCurrentRun($post, $runToken)) {
+            return;
+        }
+
+        $runToken ??= (string) Str::uuid();
+        $this->effectiveRunToken = $runToken;
+
+        $action->handle($this->post, $this->options, $runToken);
+    }
+
+    private function isCurrentRun(Post $post, ?string $runToken = null): bool
+    {
+        $progress = $post->publish_progress;
+        $storedToken = is_array($progress) ? ($progress['run_token'] ?? null) : null;
+        $runToken ??= $this->runTokenOrNull();
+
+        if ($runToken === null) {
+            return ! is_string($storedToken) || trim($storedToken) === '';
+        }
+
+        return is_string($storedToken) && hash_equals($storedToken, $runToken);
+    }
+
+    private function runTokenOrNull(): ?string
+    {
+        return isset($this->runToken) ? $this->runToken : null;
+    }
+
+    private function effectiveRunTokenOrNull(): ?string
+    {
+        return isset($this->effectiveRunToken) ? $this->effectiveRunToken : null;
     }
 }

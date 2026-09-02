@@ -93,4 +93,25 @@ class AttachPostImageActionTest extends TestCase
             new AttachPostImageData(file: UploadedFile::fake()->image('cover.png')),
         );
     }
+
+    public function test_it_rejects_an_upload_when_the_postsyncer_outcome_is_uncertain(): void
+    {
+        Storage::fake('scratchpad');
+
+        $post = Post::factory()->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'state' => 'uncertain',
+                'current' => ['index' => 0],
+            ],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new AttachPostImageAction)->handle(
+            $post,
+            null,
+            new AttachPostImageData(file: UploadedFile::fake()->image('cover.png')),
+        );
+    }
 }

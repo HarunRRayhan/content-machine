@@ -33,6 +33,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $video_drive_url
  * @property string|null $cover_drive_url
  * @property array<string, mixed>|null $postsyncer
+ * @property array<string, mixed>|null $publish_progress
  * @property string $publish_state
  * @property string|null $publish_error
  * @property string $status
@@ -82,6 +83,7 @@ class Video extends Model
         'video_drive_url',
         'cover_drive_url',
         'postsyncer',
+        'publish_progress',
         'publish_state',
         'publish_error',
         'status',
@@ -97,7 +99,49 @@ class Video extends Model
             'captions' => 'array',
             'deck_manifest' => 'array',
             'postsyncer' => 'array',
+            'publish_progress' => 'array',
         ];
+    }
+
+    public function isPublishInProgress(): bool
+    {
+        return in_array($this->publish_state, ['queued', 'running'], true);
+    }
+
+    public function hasUncertainPublish(): bool
+    {
+        $progress = $this->publish_progress;
+
+        return is_array($progress)
+            && (($progress['state'] ?? null) === 'uncertain'
+                || ($progress['current'] ?? null) !== null);
+    }
+
+    public function canRetryPublish(): bool
+    {
+        if ($this->publish_state !== 'failed') {
+            return false;
+        }
+
+        $groups = $this->postsyncer['groups'] ?? null;
+        if (is_array($groups)) {
+            foreach ($groups as $group) {
+                if (is_array($group) && filled($group['post_id'] ?? null)) {
+                    return false;
+                }
+            }
+        }
+
+        $progress = $this->publish_progress;
+
+        if (! is_array($progress) || ($progress['state'] ?? null) !== 'failed') {
+            return false;
+        }
+
+        $current = $progress['current'] ?? null;
+
+        return $current === null
+            || (is_array($current) && ($current['phase'] ?? null) === 'retryable');
     }
 
     /**

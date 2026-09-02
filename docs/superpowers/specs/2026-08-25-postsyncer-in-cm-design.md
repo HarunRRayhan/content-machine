@@ -87,6 +87,7 @@ postsyncer:
 | `video_drive_url` | string nullable | Required before schedule/publish |
 | `cover_drive_url` | string nullable | Optional |
 | `postsyncer` | jsonb nullable | See shape below |
+| `publish_progress` | jsonb nullable | Private resumable operation checkpoint; not part of the API resource |
 | `publish_state` | string | `idle` \| `queued` \| `running` \| `succeeded` \| `failed` |
 | `publish_error` | text nullable | Last failure message |
 
@@ -186,9 +187,10 @@ Post and video **show** pages: **Schedule** and **Publish now**. Hidden or disab
 UI: banner on detail + list badge while queued/running; error + Retry after
 failure when the checkpoint has no unknown external create. An `uncertain`
 checkpoint is a manual reconciliation state, not an automatic retry. An
-operator verifies the remote post and runs
-`php artisan postsyncer:reconcile-post WORKSPACE_ID HUMAN_ID POSTSYNCER_ID`;
-the command checkpoints the verified group before the normal Retry continues.
+operator verifies the remote post or video and runs
+`php artisan postsyncer:reconcile-post WORKSPACE_ID HUMAN_ID POSTSYNCER_ID`
+or `php artisan postsyncer:reconcile-video WORKSPACE_ID HUMAN_ID POSTSYNCER_ID`.
+The command checkpoints the verified group before the normal Retry continues.
 
 Post publishes use the dedicated `postsyncer` database connection and queue on
 `cm-web`. The queue name is separate from the default `scratchpad` queue because

@@ -2,19 +2,19 @@
 
 namespace Tests\Feature\Console;
 
-use App\Actions\Postsyncer\PublishPostAction;
-use App\Models\Post;
+use App\Actions\Postsyncer\PublishVideoAction;
+use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
-class ReconcilePostPublishCommandTest extends TestCase
+class ReconcileVideoPublishCommandTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_verifies_and_checkpoints_an_uncertain_post(): void
+    public function test_it_verifies_and_checkpoints_an_uncertain_video(): void
     {
         $workspace = Workspace::factory()->create();
         PostsyncerConfig::write($workspace, [
@@ -29,17 +29,17 @@ class ReconcilePostPublishCommandTest extends TestCase
             ],
             'post_types' => [
                 'platforms' => [
-                    'facebook' => ['text' => 'on'],
+                    'facebook' => ['reel' => 'on'],
                 ],
                 'overrides' => [],
             ],
         ]);
 
-        $post = Post::factory()->for($workspace)->create([
-            'human_id' => 'P-RECONCILE',
-            'status' => 'ready',
+        $video = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-RECONCILE',
+            'status' => 'recorded',
             'language' => 'bn',
-            'platforms' => ['facebook'],
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
             'captions' => ['facebook' => 'Scheduled caption'],
         ]);
         $options = [
@@ -48,11 +48,15 @@ class ReconcilePostPublishCommandTest extends TestCase
         ];
 
         Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'message' => 'gateway timeout',
             ], 500),
         ]);
-        app(PublishPostAction::class)->handle($post, $options);
+        app(PublishVideoAction::class)->handle($video, $options);
 
         Http::fake([
             'postsyncer.com/api/v1/posts/99' => Http::response([
@@ -60,35 +64,41 @@ class ReconcilePostPublishCommandTest extends TestCase
                 'workspace_id' => 15211,
                 'content' => [[
                     'text' => 'Scheduled caption',
-                    'media' => [],
+                    'media' => [['id' => 915]],
                 ]],
-                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
-                    'post_type' => 'POST', 'caption' => 'Scheduled caption',
-                ]]],
+                'platforms' => [[
+                    'platform' => 'facebook',
+                    'account_id' => 100,
+                    'settings' => [
+                        'post_type' => 'REELS',
+                        'caption' => 'Scheduled caption',
+                    ],
+                ]],
                 'status' => 'SCHEDULED',
                 'scheduled_at' => '2026-08-26T09:12:00+06:00',
             ], 200),
         ]);
 
-        $this->artisan('postsyncer:reconcile-post', [
+        $this->artisan('postsyncer:reconcile-video', [
             'workspace_id' => $workspace->id,
-            'post' => $post->human_id,
+            'video' => $video->human_id,
             'postsyncer_id' => '99',
         ])
             ->expectsOutputToContain('was verified')
             ->assertExitCode(0);
 
-        $post->refresh();
-        $this->assertNull($post->publish_progress['current']);
-        $this->assertSame('99', $post->publish_progress['completed_groups'][0]['post_id']);
+        $video->refresh();
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertSame('99', $video->publish_progress['completed_groups'][0]['post_id']);
+        $this->assertIsArray($video->publish_progress['completed_groups'][0]['expected_payload']);
     }
 
     public function test_it_checkpoints_reconciled_media_ids(): void
     {
         $workspace = Workspace::factory()->create();
-        $post = Post::factory()->for($workspace)->create([
-            'human_id' => 'P-MEDIA-RECONCILE',
-            'status' => 'ready',
+        $video = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-MEDIA-RECONCILE',
+            'status' => 'recorded',
             'publish_state' => 'failed',
             'publish_progress' => [
                 'version' => 1,
@@ -104,27 +114,27 @@ class ReconcilePostPublishCommandTest extends TestCase
                     'phase' => 'uploading',
                     'idempotency_key' => 'request-1',
                     'media_ids' => [],
-                    'media_urls' => ['https://example.com/image.png'],
+                    'media_urls' => ['https://example.com/video.mp4'],
                 ],
                 'state' => 'uncertain',
             ],
         ]);
 
-        $this->artisan('postsyncer:reconcile-post-media', [
+        $this->artisan('postsyncer:reconcile-video-media', [
             'workspace_id' => $workspace->id,
-            'post' => $post->human_id,
+            'video' => $video->human_id,
             'media_ids' => '915',
         ])
             ->expectsOutputToContain('checkpointed')
             ->assertExitCode(0);
 
-        $post->refresh();
-        $this->assertSame('failed', $post->publish_state);
-        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
-        $this->assertSame(['915'], $post->publish_progress['current']['media_ids']);
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame('retryable', $video->publish_progress['current']['phase']);
+        $this->assertSame(['915'], $video->publish_progress['current']['media_ids']);
     }
 
-    public function test_it_recovers_a_drifted_post_from_its_stored_payload(): void
+    public function test_it_recovers_a_drifted_video_from_its_stored_payload(): void
     {
         $workspace = Workspace::factory()->create();
         PostsyncerConfig::write($workspace, [
@@ -138,19 +148,23 @@ class ReconcilePostPublishCommandTest extends TestCase
                 ],
             ],
             'post_types' => [
-                'platforms' => ['facebook' => ['text' => 'on']],
+                'platforms' => ['facebook' => ['reel' => 'on']],
                 'overrides' => [],
             ],
         ]);
-        $post = Post::factory()->for($workspace)->create([
-            'human_id' => 'P-DRIFT-RECOVER',
-            'status' => 'ready',
+        $video = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-DRIFT-RECOVER',
+            'status' => 'recorded',
             'language' => 'bn',
-            'platforms' => ['facebook'],
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
             'captions' => ['facebook' => 'Original caption'],
         ]);
 
         Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,
                 'status' => 'published',
@@ -158,17 +172,17 @@ class ReconcilePostPublishCommandTest extends TestCase
             'postsyncer.com/api/v1/posts/99' => Http::response([
                 'id' => 99,
                 'workspace_id' => 15211,
-                'content' => [['text' => 'Original caption', 'media' => []]],
+                'content' => [['text' => 'Original caption', 'media' => [['id' => 915]]]],
                 'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
-                    'post_type' => 'POST', 'caption' => 'Original caption',
+                    'post_type' => 'REELS', 'caption' => 'Original caption',
                 ]]],
                 'status' => 'PUBLISHED',
             ], 200),
         ]);
 
-        app(PublishPostAction::class)->handle($post, ['confirm_ask' => false]);
-        $progress = $post->fresh()->publish_progress;
-        $post->forceFill([
+        app(PublishVideoAction::class)->handle($video, ['confirm_ask' => false]);
+        $progress = $video->fresh()->publish_progress;
+        $video->forceFill([
             'captions' => ['facebook' => 'Changed caption'],
             'postsyncer' => null,
             'publish_state' => 'failed',
@@ -176,15 +190,15 @@ class ReconcilePostPublishCommandTest extends TestCase
             'publish_progress' => array_merge($progress, ['state' => 'failed']),
         ])->save();
 
-        $this->artisan('postsyncer:recover-post-plan-drift', [
+        $this->artisan('postsyncer:recover-video-plan-drift', [
             'workspace_id' => $workspace->id,
-            'post' => $post->human_id,
+            'video' => $video->human_id,
         ])
             ->expectsOutputToContain('recovered')
             ->assertExitCode(0);
 
-        $post->refresh();
-        $this->assertSame('succeeded', $post->publish_state);
-        $this->assertSame('99', $post->postsyncer['groups'][0]['post_id']);
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('99', $video->postsyncer['groups'][0]['post_id']);
     }
 }

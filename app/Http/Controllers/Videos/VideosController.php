@@ -272,6 +272,17 @@ class VideosController extends Controller
         $postsyncerConfig = $workspace !== null
             ? PostsyncerConfig::fromWorkspace($workspace)
             : null;
+        $publishOptions = is_array($video->publish_progress)
+            && is_array($video->publish_progress['options'] ?? null)
+            ? $video->publish_progress['options']
+            : [];
+        $needsConfirmAsk = $postsyncerConfig !== null
+            && app(VideoPublishPlanner::class)->needsConfirmAsk(
+                $video,
+                $postsyncerConfig,
+                $publishOptions,
+            )
+            && ! (bool) ($publishOptions['confirm_ask'] ?? false);
 
         return [
             'id' => $video->id,
@@ -291,10 +302,10 @@ class VideosController extends Controller
             'status' => $video->status,
             'publish_state' => $video->publish_state,
             'publish_error' => $video->publish_error,
+            'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
-            'needs_confirm_ask' => $postsyncerConfig !== null
-                && app(VideoPublishPlanner::class)->needsConfirmAsk($video, $postsyncerConfig),
+            'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),
