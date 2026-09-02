@@ -4,6 +4,7 @@ namespace App\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
 use App\Models\AiProviderCredentialModel;
+use App\Support\LinkResolution\PublicUrlGuard;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -31,6 +32,10 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
     private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
     private const MAX_TOKENS = 300;
+
+    public function __construct(
+        private readonly ?PublicUrlGuard $urlGuard = null,
+    ) {}
 
     public function complete(AiProviderCredentialModel $entry, string $systemPrompt, string $userContent): AiCompletionResult
     {
@@ -126,12 +131,15 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
 
     private function completeAnthropic(AiProviderCredential $credential, string $model, string $systemPrompt, string $userContent): Response
     {
-        $baseUrl = rtrim($credential->base_url ?? self::ANTHROPIC_DEFAULT_BASE_URL, '/');
+        $endpoint = $this->baseUrl()->resolve($credential->base_url, self::ANTHROPIC_DEFAULT_BASE_URL);
 
         return Http::withHeaders([
             'x-api-key' => $credential->api_key,
             'anthropic-version' => self::ANTHROPIC_VERSION,
-        ])->timeout(30)->post("{$baseUrl}/v1/messages", [
+        ])->timeout(30)->withOptions([
+            'allow_redirects' => false,
+            ...$endpoint['options'],
+        ])->post($endpoint['url'].'/v1/messages', [
             'model' => $model,
             'max_tokens' => self::MAX_TOKENS,
             'system' => $systemPrompt,
@@ -145,11 +153,15 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
     {
         // See HttpAiProviderVerifier::verifyOpenAi() for why this is a bare
         // "/chat/completions": the base URL already carries the version.
-        $baseUrl = rtrim($credential->base_url ?? self::OPENAI_DEFAULT_BASE_URL, '/');
+        $endpoint = $this->baseUrl()->resolve($credential->base_url, self::OPENAI_DEFAULT_BASE_URL);
 
         return Http::withToken($credential->api_key)
             ->timeout(30)
-            ->post("{$baseUrl}/chat/completions", [
+            ->withOptions([
+                'allow_redirects' => false,
+                ...$endpoint['options'],
+            ])
+            ->post($endpoint['url'].'/chat/completions', [
                 'model' => $model,
                 'max_tokens' => self::MAX_TOKENS,
                 'messages' => [
@@ -167,12 +179,15 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
         string $mimeType,
         string $imageContents,
     ): Response {
-        $baseUrl = rtrim($credential->base_url ?? self::ANTHROPIC_DEFAULT_BASE_URL, '/');
+        $endpoint = $this->baseUrl()->resolve($credential->base_url, self::ANTHROPIC_DEFAULT_BASE_URL);
 
         return Http::withHeaders([
             'x-api-key' => $credential->api_key,
             'anthropic-version' => self::ANTHROPIC_VERSION,
-        ])->timeout(30)->post("{$baseUrl}/v1/messages", [
+        ])->timeout(30)->withOptions([
+            'allow_redirects' => false,
+            ...$endpoint['options'],
+        ])->post($endpoint['url'].'/v1/messages', [
             'model' => $model,
             'max_tokens' => 1000,
             'system' => $systemPrompt,
@@ -201,11 +216,15 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
         string $mimeType,
         string $imageContents,
     ): Response {
-        $baseUrl = rtrim($credential->base_url ?? self::OPENAI_DEFAULT_BASE_URL, '/');
+        $endpoint = $this->baseUrl()->resolve($credential->base_url, self::OPENAI_DEFAULT_BASE_URL);
 
         return Http::withToken($credential->api_key)
             ->timeout(30)
-            ->post("{$baseUrl}/chat/completions", [
+            ->withOptions([
+                'allow_redirects' => false,
+                ...$endpoint['options'],
+            ])
+            ->post($endpoint['url'].'/chat/completions', [
                 'model' => $model,
                 'max_tokens' => 1000,
                 'messages' => [
@@ -224,5 +243,10 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
                     ],
                 ],
             ]);
+    }
+
+    private function baseUrl(): AiProviderBaseUrl
+    {
+        return new AiProviderBaseUrl($this->urlGuard);
     }
 }

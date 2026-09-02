@@ -107,7 +107,11 @@ class PostsApiController extends Controller
             'image_drive_urls' => ['nullable', 'array'],
             'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['nullable', 'string', Rule::in(Post::STATUSES)],
-            'idea_id' => ['nullable', 'integer'],
+            'idea_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('ideas', 'id')->where('workspace_id', $workspace->id),
+            ],
         ]);
 
         $post = $action->handle($workspace, $payload);

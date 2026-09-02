@@ -84,7 +84,10 @@ class DispatchPendingTelegramOutboundMessagesCommandTest extends TestCase
         $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $message->refresh()->status);
         Queue::assertNothingPushed();
 
-        $this->artisan('telegram:dispatch-pending-outbound-messages', ['--retry-uncertain' => true])
+        $this->artisan('telegram:dispatch-pending-outbound-messages', [
+            '--retry-uncertain' => true,
+            '--verified-not-delivered-id' => [$message->id],
+        ])
             ->assertSuccessful();
         $this->assertSame(TelegramOutboundMessage::PENDING, $message->refresh()->status);
         Queue::assertPushed(SendTelegramOutboundMessageJob::class);
@@ -101,11 +104,29 @@ class DispatchPendingTelegramOutboundMessagesCommandTest extends TestCase
 
         $this->artisan('telegram:dispatch-pending-outbound-messages', [
             '--retry-uncertain' => true,
+            '--verified-not-delivered-id' => [$stale->id],
         ])
             ->assertSuccessful()
             ->expectsOutput('Dispatched 0 pending Telegram outbound message(s).');
 
         $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $stale->refresh()->status);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_uncertain_retry_without_specific_verified_ids_is_rejected(): void
+    {
+        Queue::fake();
+        $message = TelegramOutboundMessage::factory()->create([
+            'status' => TelegramOutboundMessage::UNCERTAIN,
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages', [
+            '--retry-uncertain' => true,
+        ])
+            ->assertFailed()
+            ->expectsOutput('Pass --verified-not-delivered-id for every uncertain row before retrying it.');
+
+        $this->assertSame(TelegramOutboundMessage::UNCERTAIN, $message->refresh()->status);
         Queue::assertNothingPushed();
     }
 
@@ -121,6 +142,7 @@ class DispatchPendingTelegramOutboundMessagesCommandTest extends TestCase
 
         $this->artisan('telegram:dispatch-pending-outbound-messages', [
             '--retry-uncertain' => true,
+            '--verified-not-delivered-id' => [$message->id],
         ])
             ->assertSuccessful()
             ->expectsOutput('Dispatched 0 pending Telegram outbound message(s).');

@@ -4,6 +4,8 @@ namespace App\Actions\Teams;
 
 use App\Models\TeamInvitation;
 use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
@@ -19,22 +21,33 @@ class AcceptTeamInvitationAction
      */
     public function handle(TeamInvitation $invitation, User $user): void
     {
-        if ($invitation->isAccepted()) {
-            throw new RuntimeException('This invitation has already been accepted.');
-        }
+        DB::transaction(function () use ($invitation, $user): void {
+            $lockedInvitation = TeamInvitation::query()
+                ->whereKey($invitation->id)
+                ->lockForUpdate()
+                ->first();
 
-        if ($invitation->isExpired()) {
-            throw new RuntimeException('This invitation has expired.');
-        }
+            if ($lockedInvitation === null || $lockedInvitation->isAccepted()) {
+                throw new RuntimeException('This invitation has already been accepted.');
+            }
 
-        if (! $user->teams()->whereKey($invitation->team_id)->exists()) {
-            $user->teams()->attach($invitation->team_id, ['role' => $invitation->role]);
-        }
+            if ($lockedInvitation->isExpired()) {
+                throw new RuntimeException('This invitation has expired.');
+            }
 
-        $invitation->forceFill(['accepted_at' => now()])->save();
+            if (strcasecmp(trim($lockedInvitation->email), trim($user->email)) !== 0) {
+                throw new AuthorizationException('This invitation is for a different email address.');
+            }
 
-        if ($user->current_team_id === null) {
-            $user->forceFill(['current_team_id' => $invitation->team_id])->save();
-        }
+            if (! $user->teams()->whereKey($lockedInvitation->team_id)->exists()) {
+                $user->teams()->attach($lockedInvitation->team_id, ['role' => $lockedInvitation->role]);
+            }
+
+            $lockedInvitation->forceFill(['accepted_at' => now()])->save();
+
+            if ($user->current_team_id === null) {
+                $user->forceFill(['current_team_id' => $lockedInvitation->team_id])->save();
+            }
+        });
     }
 }

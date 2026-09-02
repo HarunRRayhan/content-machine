@@ -69,6 +69,8 @@ USER root
 # below rather than trusted blindly off the network.
 ARG YTDLP_VERSION=2026.07.04
 ARG YTDLP_SHA256=6bbb3d314cde4febe36e5fa1d55462e29c974f63444e707871834f6d8cc210ae
+ARG YTDLP_AARCH64_SHA256=b6ce97646773070d7a7ffd6bbbdcaecb47c48483909c54c915bf08a7a9b5e0b1
+ARG TARGETARCH
 
 # ffmpeg + yt-dlp: not used yet, baked in now for the Telegram bot's media
 # pipeline (a later phase) so this Dockerfile doesn't need revisiting then.
@@ -80,8 +82,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         supervisor \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_linux" \
-    && echo "${YTDLP_SHA256}  /tmp/yt-dlp" | sha256sum -c - \
+    && case "${TARGETARCH:-amd64}" in \
+        amd64) YTDLP_ASSET=yt-dlp_linux; YTDLP_EXPECTED_SHA256="${YTDLP_SHA256}" ;; \
+        arm64) YTDLP_ASSET=yt-dlp_linux_aarch64; YTDLP_EXPECTED_SHA256="${YTDLP_AARCH64_SHA256}" ;; \
+        *) echo "Unsupported yt-dlp architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${YTDLP_ASSET}" \
+    && echo "${YTDLP_EXPECTED_SHA256}  /tmp/yt-dlp" | sha256sum -c - \
     && install -m 0755 /tmp/yt-dlp /usr/local/bin/yt-dlp \
     && rm /tmp/yt-dlp
 

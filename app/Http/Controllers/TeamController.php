@@ -21,7 +21,11 @@ class TeamController extends Controller
      */
     public function index(Request $request): Response
     {
-        $team = $this->currentTeam($this->currentUser($request));
+        $user = $this->currentUser($request);
+        $team = $this->currentTeam($user);
+        $member = $team->members()->whereKey($user->id)->first();
+        $role = $member?->pivot->role;
+        $canManageInvitations = in_array($role, ['owner', 'admin'], true);
 
         return Inertia::render('dashboard/team', [
             'team' => [
@@ -47,9 +51,11 @@ class TeamController extends Controller
                     'email' => $invitation->email,
                     'role' => $invitation->role,
                     'expired' => $invitation->isExpired(),
-                    'url' => route('invitations.show', $invitation->token),
+                    'url' => $canManageInvitations ? route('invitations.show', $invitation->token) : null,
                 ])
                 ->values(),
+            'canManageInvitations' => $canManageInvitations,
+            'canInviteOwners' => $role === 'owner',
         ]);
     }
 

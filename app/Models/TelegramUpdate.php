@@ -44,6 +44,23 @@ class TelegramUpdate extends Model
         'dispatch_lease_id',
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $update): void {
+            if ($update->webhook_generation !== null) {
+                return;
+            }
+
+            $generation = TelegramBotConfig::query()
+                ->whereKey($update->telegram_bot_config_id)
+                ->value('webhook_generation');
+
+            if (is_string($generation)) {
+                $update->webhook_generation = $generation;
+            }
+        });
+    }
+
     /**
      * @return array<string, string>
      */

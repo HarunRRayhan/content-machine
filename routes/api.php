@@ -90,7 +90,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->name('ideas.show');
 
     Route::post('media-urls/check', [MediaUrlsApiController::class, 'check'])
-        ->middleware('auth.workspace-token')
+        ->middleware('auth.workspace-token:media:read')
         ->name('media-urls.check');
 
     Route::get('videos', [VideosApiController::class, 'index'])

@@ -6,6 +6,7 @@ use App\Actions\Teams\AcceptTeamInvitationAction;
 use App\Models\Team;
 use App\Models\TeamInvitation;
 use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\TestCase;
@@ -17,8 +18,11 @@ class AcceptTeamInvitationActionTest extends TestCase
     public function test_it_adds_the_user_to_the_team_and_marks_the_invitation_accepted()
     {
         $team = Team::factory()->create();
-        $invitation = TeamInvitation::factory()->for($team)->create(['role' => 'admin']);
         $user = User::factory()->create(['current_team_id' => null]);
+        $invitation = TeamInvitation::factory()->for($team)->create([
+            'email' => $user->email,
+            'role' => 'admin',
+        ]);
 
         (new AcceptTeamInvitationAction)->handle($invitation, $user);
 
@@ -34,8 +38,8 @@ class AcceptTeamInvitationActionTest extends TestCase
     {
         $existingTeam = Team::factory()->create();
         $invitedTeam = Team::factory()->create();
-        $invitation = TeamInvitation::factory()->for($invitedTeam)->create();
         $user = User::factory()->create(['current_team_id' => $existingTeam->id]);
+        $invitation = TeamInvitation::factory()->for($invitedTeam)->create(['email' => $user->email]);
 
         (new AcceptTeamInvitationAction)->handle($invitation, $user);
 
@@ -45,8 +49,8 @@ class AcceptTeamInvitationActionTest extends TestCase
     public function test_it_sets_current_team_when_the_user_had_none(): void
     {
         $team = Team::factory()->create();
-        $invitation = TeamInvitation::factory()->for($team)->create();
         $user = User::factory()->create(['current_team_id' => null]);
+        $invitation = TeamInvitation::factory()->for($team)->create(['email' => $user->email]);
 
         (new AcceptTeamInvitationAction)->handle($invitation, $user);
 
@@ -69,6 +73,16 @@ class AcceptTeamInvitationActionTest extends TestCase
         $user = User::factory()->create();
 
         $this->expectException(RuntimeException::class);
+
+        (new AcceptTeamInvitationAction)->handle($invitation, $user);
+    }
+
+    public function test_it_rejects_an_invitation_for_a_different_email(): void
+    {
+        $invitation = TeamInvitation::factory()->create(['email' => 'invited@example.com']);
+        $user = User::factory()->create(['email' => 'other@example.com']);
+
+        $this->expectException(AuthorizationException::class);
 
         (new AcceptTeamInvitationAction)->handle($invitation, $user);
     }

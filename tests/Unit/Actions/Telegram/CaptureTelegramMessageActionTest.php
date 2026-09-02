@@ -45,7 +45,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         return [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => $chatId],
+                'chat' => ['id' => $chatId, 'type' => 'private'],
                 'from' => ['id' => $fromId],
                 'text' => $text,
             ],
@@ -90,6 +90,17 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'Captured.']], $this->outboundMessages());
     }
 
+    public function test_a_non_private_chat_is_ignored(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+        $update = $this->textUpdate(42, 'A group message.');
+        $update['message']['chat']['type'] = 'group';
+
+        $this->assertNull($this->action()->handle($config, $update));
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertSame([], $this->outboundMessages());
+    }
+
     public function test_a_message_that_is_only_a_url_is_captured_as_a_link()
     {
         Queue::fake();
@@ -111,7 +122,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'document' => ['file_id' => 'abc'],
             ],
@@ -151,7 +162,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'caption' => 'From the roof',
                 // Telegram lists PhotoSize entries smallest to largest; the
@@ -182,7 +193,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'photo' => [['file_id' => 'x', 'width' => 10, 'height' => 10]],
             ],
@@ -205,7 +216,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'voice' => ['file_id' => 'v1', 'duration' => 4, 'mime_type' => 'audio/ogg'],
             ],
@@ -233,7 +244,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'caption' => 'Turn this recording into a post later',
                 'audio' => [
@@ -263,7 +274,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'voice' => ['file_id' => 'v1', 'duration' => 4, 'mime_type' => 'audio/ogg'],
             ],

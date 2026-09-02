@@ -5,6 +5,7 @@ namespace App\Actions\Telegram;
 use App\Jobs\SendTelegramOutboundMessageJob;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramOutboundMessage;
+use App\Support\Telegram\TelegramBotIdentityLock;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -19,105 +20,126 @@ class SendTelegramOutboundMessageAction
 
     public function handle(int $messageId, ?string $dispatchLeaseId = null): void
     {
-        // The job middleware serializes queue deliveries. The row status and
-        // dispatch lease are the fence for direct calls and recovery races.
         $this->sendChunks($messageId, $dispatchLeaseId);
     }
 
     private function sendChunks(int $messageId, ?string $dispatchLeaseId): void
     {
-        $claim = $this->claimChunk($messageId, $dispatchLeaseId);
+        $reference = TelegramOutboundMessage::query()
+            ->whereKey($messageId)
+            ->first(['telegram_bot_config_id']);
 
-        if ($claim === null) {
+        if ($reference === null) {
+            return;
+        }
+
+        $workspaceId = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->value('workspace_id');
+
+        if (! is_int($workspaceId) && ! (is_string($workspaceId) && ctype_digit($workspaceId))) {
+            return;
+        }
+
+        $identityLock = TelegramBotIdentityLock::forWorkspace((int) $workspaceId);
+
+        // A recovery-dispatched job already owns a short-lived outbox lease.
+        // Do not spend the whole job timeout waiting behind a connection
+        // operation. The scheduler will retry after the lease is released.
+        if (! $identityLock->get()) {
+            $this->releaseDispatchLease($messageId, $dispatchLeaseId);
+
             return;
         }
 
         try {
-            $result = $this->client->sendMessage(
-                $claim['bot_token'],
-                $claim['chat_id'],
-                $claim['text'],
-            );
-        } catch (Throwable $exception) {
-            $this->markUncertain(
-                $messageId,
-                $dispatchLeaseId,
-                $exception->getMessage() !== ''
-                    ? $exception->getMessage()
-                    : 'Could not reach Telegram to send the reply.',
-            );
+            // The sending marker is committed before Telegram is called. If
+            // the process dies after Telegram accepts the request, the stale
+            // row remains distinguishable and recovery can fail closed.
+            $claim = $this->claimChunk($messageId, $dispatchLeaseId);
 
-            throw $exception;
-        }
-
-        if (! $result->successful) {
-            $error = $result->error ?? 'Telegram rejected the message.';
-
-            if ($result->outcomeUnknown) {
-                $this->markUncertain($messageId, $dispatchLeaseId, $error);
-
+            if ($claim === null) {
                 return;
             }
 
-            $rateLimited = $result->status === 429 || $result->retryAfterSeconds !== null;
-            $retryAfter = $rateLimited ? max(1, $result->retryAfterSeconds ?? 60) : null;
-            $this->markRetryableFailure($messageId, $dispatchLeaseId, $error, $retryAfter);
-
-            if ($retryAfter !== null) {
-                return;
-            }
-
-            throw new RuntimeException($error);
-        }
-
-        $outcome = $this->completeChunk($messageId, $dispatchLeaseId);
-
-        if ($outcome !== null
-            && $outcome['next_message_id'] !== null
-            && $outcome['next_lease_id'] !== null
-        ) {
             try {
-                SendTelegramOutboundMessageJob::dispatch(
-                    $outcome['next_message_id'],
-                    $outcome['next_lease_id'],
-                )->afterCommit();
+                $result = $this->client->sendMessage(
+                    $claim['bot_token'],
+                    $claim['chat_id'],
+                    $claim['text'],
+                );
             } catch (Throwable $exception) {
-                // The progress checkpoint is already committed. The scheduled
-                // outbox drain can enqueue the next chunk if this dispatch is
-                // unavailable.
-                report($exception);
+                $this->markUncertain(
+                    $messageId,
+                    $dispatchLeaseId,
+                    $exception->getMessage() !== ''
+                        ? $exception->getMessage()
+                        : 'Could not reach Telegram to send the reply.',
+                );
+
+                throw $exception;
             }
+
+            if (! $result->successful) {
+                $error = $result->error ?? 'Telegram rejected the message.';
+
+                if ($result->outcomeUnknown) {
+                    $this->markUncertain($messageId, $dispatchLeaseId, $error);
+
+                    return;
+                }
+
+                $rateLimited = $result->status === 429 || $result->retryAfterSeconds !== null;
+                $retryAfter = $rateLimited ? max(1, $result->retryAfterSeconds ?? 60) : null;
+                $this->markRetryableFailure($messageId, $dispatchLeaseId, $error, $retryAfter);
+
+                if ($retryAfter !== null) {
+                    return;
+                }
+
+                throw new RuntimeException($error);
+            }
+
+            $outcome = $this->completeChunk($messageId, $dispatchLeaseId);
+
+            if ($outcome !== null
+                && $outcome['next_message_id'] !== null
+                && $outcome['next_lease_id'] !== null
+            ) {
+                try {
+                    SendTelegramOutboundMessageJob::dispatch(
+                        $outcome['next_message_id'],
+                        $outcome['next_lease_id'],
+                    );
+                } catch (Throwable $exception) {
+                    // The progress checkpoint is already committed. The
+                    // scheduled outbox drain can enqueue the next chunk if
+                    // this dispatch is unavailable.
+                    report($exception);
+                }
+            }
+        } finally {
+            $identityLock->release();
         }
     }
 
     /**
-     * Move one chunk to `sending` before calling Telegram. If the process dies
-     * after Telegram accepts the request, the durable state is then
-     * distinguishable from a pending message and recovery can fail closed.
+     * Move one chunk to `sending` in a short transaction before calling
+     * Telegram. The identity lock serializes this commit with rotation and
+     * disconnect without keeping a database transaction open over I/O.
      *
      * @return array{bot_token: string, chat_id: int, text: string}|null
      */
     private function claimChunk(int $messageId, ?string $dispatchLeaseId): ?array
     {
         return DB::transaction(function () use ($messageId, $dispatchLeaseId): ?array {
-            $messageReference = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->first(['telegram_bot_config_id']);
-
-            if ($messageReference === null) {
+            $context = $this->lockedMessageContext($messageId);
+            if ($context === null) {
                 return null;
             }
 
-            // Rotation and disconnect lock the config before changing any
-            // outbound row. Acquire the same lock order here.
-            $config = TelegramBotConfig::query()
-                ->whereKey($messageReference->telegram_bot_config_id)
-                ->lockForUpdate()
-                ->first();
-            $message = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->lockForUpdate()
-                ->first();
+            $config = $context['config'];
+            $message = $context['message'];
 
             if ($message === null || $message->status !== TelegramOutboundMessage::PENDING) {
                 return null;
@@ -148,13 +170,7 @@ class SendTelegramOutboundMessageAction
             }
 
             if ($config === null) {
-                $message->forceFill([
-                    'status' => TelegramOutboundMessage::DISCARDED,
-                    'discarded_at' => now(),
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                    'last_error' => 'The Telegram bot configuration no longer exists.',
-                ])->save();
+                $this->discard($message, 'The Telegram bot configuration no longer exists.');
 
                 return null;
             }
@@ -162,62 +178,40 @@ class SendTelegramOutboundMessageAction
             if ($message->webhook_generation !== null
                 && $config->webhook_generation !== $message->webhook_generation
             ) {
-                $message->forceFill([
-                    'status' => TelegramOutboundMessage::DISCARDED,
-                    'discarded_at' => now(),
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                    'last_error' => 'The Telegram bot connection changed before this message was sent.',
-                ])->save();
+                $this->discard($message, 'The Telegram bot connection changed before this message was sent.');
 
                 return null;
             }
 
             if ($message->webhook_generation === null && $config->webhook_generation !== null) {
                 // Rows created before generation tracking are adopted only
-                // while the config lock is held.
-                $message->forceFill([
-                    'webhook_generation' => $config->webhook_generation,
-                ])->save();
+                // while the config identity lock is held.
+                $message->webhook_generation = $config->webhook_generation;
             }
 
             if ($dispatchLeaseId === null && $message->dispatch_lease_id !== null) {
-                // An old direct-dispatch payload may arrive after a recovery
-                // claim expired. Adopt the row under the message lock instead
-                // of leaving a stale lease that cannot be finalized by this
-                // payload.
-                $message->forceFill([
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                ])->save();
+                // An old queued payload may arrive after its recovery lease
+                // expired. Adopt it only after taking the message lock.
+                $message->dispatch_claimed_at = null;
+                $message->dispatch_lease_id = null;
             }
 
-            /** @var mixed $chunksValue */
-            $chunksValue = $message->chunks;
-            $chunks = $chunksValue;
+            /** @var mixed $chunks */
+            $chunks = $message->getAttribute('chunks');
             $index = $message->next_chunk;
 
-            if (! is_array($chunks) || $chunks === [] || ! isset($chunks[$index]) || ! is_string($chunks[$index])) {
-                $message->forceFill([
-                    'status' => TelegramOutboundMessage::FAILED,
-                    'failed_at' => now(),
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                    'last_error' => 'The stored Telegram message chunks are invalid.',
-                ])->save();
+            if (! is_array($chunks)
+                || $chunks === []
+                || ! isset($chunks[$index])
+                || ! is_string($chunks[$index])
+            ) {
+                $this->markInvalidMessage($message);
 
                 return null;
             }
 
             if ($config->bot_token === null) {
-                $message->forceFill([
-                    'status' => TelegramOutboundMessage::DISCARDED,
-                    'discarded_at' => now(),
-                    'last_error' => 'The Telegram bot was disconnected before this message was sent.',
-                    'next_attempt_at' => null,
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                ])->save();
+                $this->discard($message, 'The Telegram bot was disconnected before this message was sent.');
 
                 return null;
             }
@@ -240,28 +234,54 @@ class SendTelegramOutboundMessageAction
     }
 
     /**
+     * @return array{config: TelegramBotConfig|null, message: TelegramOutboundMessage|null}|null
+     */
+    private function lockedMessageContext(int $messageId): ?array
+    {
+        $reference = TelegramOutboundMessage::query()
+            ->whereKey($messageId)
+            ->first(['telegram_bot_config_id']);
+
+        if ($reference === null) {
+            return null;
+        }
+
+        $configReference = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->first(['workspace_id']);
+
+        if ($configReference !== null) {
+            DB::table('workspaces')
+                ->where('id', $configReference->workspace_id)
+                ->lockForUpdate()
+                ->first();
+        }
+
+        $config = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->lockForUpdate()
+            ->first();
+        $message = TelegramOutboundMessage::query()
+            ->whereKey($messageId)
+            ->lockForUpdate()
+            ->first();
+
+        return ['config' => $config, 'message' => $message];
+    }
+
+    /**
      * @return array{next_message_id: int|null, next_lease_id: string|null}|null
      */
     private function completeChunk(int $messageId, ?string $dispatchLeaseId): ?array
     {
         return DB::transaction(function () use ($messageId, $dispatchLeaseId): ?array {
-            $messageReference = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->first(['telegram_bot_config_id']);
-
-            if ($messageReference === null) {
+            $context = $this->lockedMessageContext($messageId);
+            if ($context === null) {
                 return null;
             }
 
-            $config = TelegramBotConfig::query()
-                ->whereKey($messageReference->telegram_bot_config_id)
-                ->lockForUpdate()
-                ->first();
-
-            $message = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->lockForUpdate()
-                ->first();
+            $config = $context['config'];
+            $message = $context['message'];
 
             if ($message === null
                 || $message->status !== TelegramOutboundMessage::SENDING
@@ -274,22 +294,24 @@ class SendTelegramOutboundMessageAction
                 || $message->webhook_generation !== $config->webhook_generation
                 || $config->bot_token === null
             ) {
-                $message->forceFill([
-                    'status' => TelegramOutboundMessage::UNCERTAIN,
-                    'failed_at' => now(),
-                    'last_error' => 'Telegram delivery outcome is uncertain because the bot connection changed during sending.',
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                    'next_attempt_at' => null,
-                ])->save();
+                $this->markUncertainRecord(
+                    $message,
+                    'Telegram delivery outcome is uncertain because the bot connection changed during sending.',
+                );
 
                 return null;
             }
 
-            $nextChunk = $message->next_chunk + 1;
             /** @var mixed $chunks */
-            $chunks = $message->chunks;
-            if (! is_array($chunks) || $nextChunk > count($chunks)) {
+            $chunks = $message->getAttribute('chunks');
+            $nextChunk = $message->next_chunk + 1;
+
+            if (! is_array($chunks)
+                || $chunks === []
+                || $nextChunk > count($chunks)
+                || ! isset($chunks[$nextChunk - 1])
+                || ! is_string($chunks[$nextChunk - 1])
+            ) {
                 $this->markInvalidMessage($message);
 
                 return null;
@@ -302,6 +324,7 @@ class SendTelegramOutboundMessageAction
                 'attempts' => 0,
                 'last_error' => null,
                 'next_attempt_at' => null,
+                'failed_at' => null,
                 'status' => $complete ? TelegramOutboundMessage::SENT : TelegramOutboundMessage::PENDING,
                 'sent_at' => $complete ? now() : null,
                 'dispatch_claimed_at' => $complete ? null : now(),
@@ -322,11 +345,12 @@ class SendTelegramOutboundMessageAction
         ?int $retryAfter,
     ): void {
         DB::transaction(function () use ($messageId, $dispatchLeaseId, $error, $retryAfter): void {
-            $message = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->lockForUpdate()
-                ->first();
+            $context = $this->lockedMessageContext($messageId);
+            if ($context === null) {
+                return;
+            }
 
+            $message = $context['message'];
             if ($message === null
                 || $message->status !== TelegramOutboundMessage::SENDING
                 || ! $this->ownsDispatchClaim($message, $dispatchLeaseId)
@@ -338,8 +362,8 @@ class SendTelegramOutboundMessageAction
                 'status' => TelegramOutboundMessage::PENDING,
                 'last_error' => $error,
                 'next_attempt_at' => now()->addSeconds($retryAfter ?? 60),
-                'dispatch_claimed_at' => $retryAfter === null ? $message->dispatch_claimed_at : null,
-                'dispatch_lease_id' => $retryAfter === null ? $message->dispatch_lease_id : null,
+                'dispatch_claimed_at' => null,
+                'dispatch_lease_id' => null,
             ])->save();
         });
     }
@@ -347,24 +371,12 @@ class SendTelegramOutboundMessageAction
     private function markUncertain(int $messageId, ?string $dispatchLeaseId, string $error): void
     {
         DB::transaction(function () use ($messageId, $dispatchLeaseId, $error): void {
-            $messageReference = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->first(['telegram_bot_config_id']);
-
-            if ($messageReference === null) {
+            $context = $this->lockedMessageContext($messageId);
+            if ($context === null) {
                 return;
             }
 
-            TelegramBotConfig::query()
-                ->whereKey($messageReference->telegram_bot_config_id)
-                ->lockForUpdate()
-                ->first();
-
-            $message = TelegramOutboundMessage::query()
-                ->whereKey($messageId)
-                ->lockForUpdate()
-                ->first();
-
+            $message = $context['message'];
             if ($message === null
                 || $message->status !== TelegramOutboundMessage::SENDING
                 || ! $this->ownsDispatchClaim($message, $dispatchLeaseId)
@@ -372,22 +384,35 @@ class SendTelegramOutboundMessageAction
                 return;
             }
 
-            $message->forceFill([
-                'status' => TelegramOutboundMessage::UNCERTAIN,
-                'failed_at' => now(),
-                'last_error' => 'Telegram delivery outcome is uncertain. Verify the chat before retrying. '.$error,
-                'dispatch_claimed_at' => null,
-                'dispatch_lease_id' => null,
-                'next_attempt_at' => null,
-            ])->save();
+            $this->markUncertainRecord(
+                $message,
+                'Telegram delivery outcome is uncertain. Verify the chat before retrying. '.$error,
+            );
         });
     }
 
-    private function ownsDispatchClaim(TelegramOutboundMessage $message, ?string $dispatchLeaseId): bool
+    private function markUncertainRecord(TelegramOutboundMessage $message, string $error): void
     {
-        return $dispatchLeaseId === null
-            ? $message->dispatch_lease_id === null
-            : $message->dispatch_lease_id === $dispatchLeaseId;
+        $message->forceFill([
+            'status' => TelegramOutboundMessage::UNCERTAIN,
+            'failed_at' => now(),
+            'last_error' => $error,
+            'dispatch_claimed_at' => null,
+            'dispatch_lease_id' => null,
+            'next_attempt_at' => null,
+        ])->save();
+    }
+
+    private function discard(TelegramOutboundMessage $message, string $reason): void
+    {
+        $message->forceFill([
+            'status' => TelegramOutboundMessage::DISCARDED,
+            'discarded_at' => now(),
+            'dispatch_claimed_at' => null,
+            'dispatch_lease_id' => null,
+            'next_attempt_at' => null,
+            'last_error' => $reason,
+        ])->save();
     }
 
     private function markInvalidMessage(TelegramOutboundMessage $message): void
@@ -399,5 +424,29 @@ class SendTelegramOutboundMessageAction
             'dispatch_lease_id' => null,
             'last_error' => 'The stored Telegram message chunks are invalid.',
         ])->save();
+    }
+
+    private function releaseDispatchLease(int $messageId, ?string $dispatchLeaseId): void
+    {
+        if ($dispatchLeaseId === null) {
+            return;
+        }
+
+        TelegramOutboundMessage::query()
+            ->whereKey($messageId)
+            ->where('status', TelegramOutboundMessage::PENDING)
+            ->where('dispatch_lease_id', $dispatchLeaseId)
+            ->update([
+                'dispatch_claimed_at' => null,
+                'dispatch_lease_id' => null,
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function ownsDispatchClaim(TelegramOutboundMessage $message, ?string $dispatchLeaseId): bool
+    {
+        return $dispatchLeaseId === null
+            ? $message->dispatch_lease_id === null
+            : $message->dispatch_lease_id === $dispatchLeaseId;
     }
 }

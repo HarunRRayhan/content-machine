@@ -3,6 +3,7 @@
 namespace App\Support\LinkResolution;
 
 use Closure;
+use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
  * Rejects URLs that could make a worker call loopback, link-local, private, or
@@ -11,6 +12,19 @@ use Closure;
  */
 final class PublicUrlGuard
 {
+    /**
+     * IpUtils covers the private, reserved, documentation, benchmark, and
+     * tunneling ranges. These additional ranges are not in its list but must
+     * not be contacted by an application URL fetcher either.
+     *
+     * @var list<string>
+     */
+    private const ADDITIONAL_NON_PUBLIC_SUBNETS = [
+        '192.88.99.0/24', // Deprecated 6to4 relay anycast
+        '224.0.0.0/4',    // IPv4 multicast
+        'ff00::/8',       // IPv6 multicast
+    ];
+
     /**
      * yt-dlp is only needed for known media platforms. Ordinary public pages
      * still use the metadata rung, but arbitrary hosts never reach a process
@@ -44,62 +58,51 @@ final class PublicUrlGuard
 
     public function isSafe(string $url): bool
     {
-        if ($url === '' || preg_match('/[\x00-\x20\x7f]/', $url) === 1) {
+        $parts = $this->safeParts($url);
+
+        if ($parts === null) {
             return false;
         }
 
-        try {
-            $parts = parse_url($url);
-        } catch (\ValueError) {
-            return false;
+        if ($parts['ip'] !== null) {
+            return $this->isPublicIp($parts['ip']);
         }
 
-        if (! is_array($parts)
-            || ! in_array(strtolower((string) ($parts['scheme'] ?? '')), ['http', 'https'], true)
-            || ! is_string($parts['host'] ?? null)
-            || ($parts['user'] ?? null) !== null
-            || ($parts['pass'] ?? null) !== null
-        ) {
-            return false;
+        return $this->publicRecordIps($this->dnsRecords($parts['dns_host'])) !== null;
+    }
+
+    /**
+     * Return cURL's DNS pinning options for a URL that passed the same public
+     * address check. The hostname remains in the URL for HTTP Host/SNI, while
+     * the connection is forced to the addresses checked here.
+     *
+     * @return array{curl: array<int, list<string>>}|array{}|null null means unsafe
+     */
+    public function curlResolveOptions(string $url): ?array
+    {
+        $parts = $this->safeParts($url);
+
+        if ($parts === null) {
+            return null;
         }
 
-        $port = $parts['port'] ?? null;
-        if ($port !== null && ! in_array($port, [80, 443], true)) {
-            return false;
+        if ($parts['ip'] !== null) {
+            return $this->isPublicIp($parts['ip']) ? [] : null;
         }
 
-        $host = strtolower(rtrim($parts['host'], '.'));
+        $ips = $this->publicRecordIps($this->dnsRecords($parts['dns_host']));
 
-        if ($host === '' || strlen($host) > 253) {
-            return false;
+        if ($ips === null || ! defined('CURLOPT_RESOLVE')) {
+            return null;
         }
 
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return $this->isPublicIp($host);
-        }
+        $resolve = array_map(
+            fn (string $ip): string => $parts['host'].':'.$parts['port'].':'
+                .(filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '['.$ip.']' : $ip),
+            $ips,
+        );
 
-        // Numeric hostnames can be interpreted as legacy integer IPv4 forms
-        // by different network libraries. Treat them as unsafe instead.
-        if (preg_match('/^\d+$/', $host) === 1
-            || filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false
-        ) {
-            return false;
-        }
-
-        $records = $this->dnsRecords($host);
-        if ($records === []) {
-            return false;
-        }
-
-        foreach ($records as $record) {
-            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
-
-            if (! is_string($ip) || ! $this->isPublicIp($ip)) {
-                return false;
-            }
-        }
-
-        return true;
+        return ['curl' => [CURLOPT_RESOLVE => $resolve]];
     }
 
     public function isAllowedForYtDlp(string $url): bool
@@ -131,11 +134,108 @@ final class PublicUrlGuard
 
     private function isPublicIp(string $ip): bool
     {
-        return filter_var(
+        if (filter_var(
             $ip,
             FILTER_VALIDATE_IP,
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
-        ) !== false;
+        ) === false) {
+            return false;
+        }
+
+        try {
+            return ! IpUtils::checkIp($ip, [
+                ...IpUtils::PRIVATE_SUBNETS,
+                ...self::ADDITIONAL_NON_PUBLIC_SUBNETS,
+            ]);
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @return array{host: string, dns_host: string, port: int, ip: string|null}|null
+     */
+    private function safeParts(string $url): ?array
+    {
+        if ($url === '' || preg_match('/[\x00-\x20\x7f]/', $url) === 1) {
+            return null;
+        }
+
+        try {
+            $parts = parse_url($url);
+        } catch (\ValueError) {
+            return null;
+        }
+
+        if (! is_array($parts)
+            || ! is_string($parts['host'] ?? null)
+            || ($parts['user'] ?? null) !== null
+            || ($parts['pass'] ?? null) !== null
+        ) {
+            return null;
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+
+        $port = $parts['port'] ?? ($scheme === 'https' ? 443 : 80);
+        if (! in_array($port, [80, 443], true)) {
+            return null;
+        }
+
+        $host = strtolower($parts['host']);
+        $dnsHost = rtrim($host, '.');
+
+        if ($dnsHost === '' || strlen($dnsHost) > 253) {
+            return null;
+        }
+
+        $ip = filter_var($dnsHost, FILTER_VALIDATE_IP);
+        if ($ip !== false) {
+            return ['host' => $host, 'dns_host' => $dnsHost, 'port' => $port, 'ip' => $ip];
+        }
+
+        // Numeric hostnames can be interpreted as legacy integer IPv4 forms
+        // by different network libraries. Treat them as unsafe instead.
+        if ($this->looksLikeNumericIp($dnsHost)
+            || filter_var($dnsHost, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false
+        ) {
+            return null;
+        }
+
+        return ['host' => $host, 'dns_host' => $dnsHost, 'port' => $port, 'ip' => null];
+    }
+
+    private function looksLikeNumericIp(string $host): bool
+    {
+        return preg_match('/^(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}$/i', $host) === 1;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $records
+     * @return list<string>|null
+     */
+    private function publicRecordIps(array $records): ?array
+    {
+        if ($records === []) {
+            return null;
+        }
+
+        $ips = [];
+
+        foreach ($records as $record) {
+            $ip = $record['ip'] ?? $record['ipv6'] ?? null;
+
+            if (! is_string($ip) || ! $this->isPublicIp($ip)) {
+                return null;
+            }
+
+            $ips[] = $ip;
+        }
+
+        return array_values(array_unique($ips));
     }
 
     /**

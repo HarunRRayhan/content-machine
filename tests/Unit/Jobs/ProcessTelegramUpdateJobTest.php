@@ -24,6 +24,7 @@ use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
@@ -71,7 +72,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 1],
+                'chat' => ['id' => 1, 'type' => 'private'],
                 'from' => ['id' => 1],
                 'text' => 'A captured note.',
             ],
@@ -101,7 +102,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
 
         $update = [
             'update_id' => 1,
-            'message' => ['chat' => ['id' => 1], 'from' => ['id' => 1], 'text' => 'hi'],
+            'message' => ['chat' => ['id' => 1, 'type' => 'private'], 'from' => ['id' => 1], 'text' => 'hi'],
         ];
 
         (new ProcessTelegramUpdateJob($config->id, $update))->handle($this->action());
@@ -114,7 +115,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $job = new ProcessTelegramUpdateJob(1, [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 1],
+                'chat' => ['id' => 1, 'type' => 'private'],
                 'from' => ['id' => 1],
                 'audio' => ['file_id' => 'audio-id'],
             ],
@@ -145,7 +146,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $payload = [
             'update_id' => 42,
             'message' => [
-                'chat' => ['id' => 1],
+                'chat' => ['id' => 1, 'type' => 'private'],
                 'from' => ['id' => 1],
                 'text' => 'Process once.',
             ],
@@ -166,6 +167,113 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $this->assertNotNull(TelegramUpdate::query()->sole()->processed_at);
     }
 
+    public function test_a_legacy_job_can_process_an_update_backfilled_to_the_current_generation(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 44,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Backfilled update.',
+            ],
+        ];
+
+        DB::table('telegram_updates')->insert([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 44,
+            'payload' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $record = TelegramUpdate::query()->sole();
+        $this->assertEquals($payload, $record->payload);
+        $this->assertNotNull($record->processed_at);
+    }
+
+    public function test_a_legacy_job_can_recover_an_update_marked_processed_by_the_payload_migration(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 45,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Migration recovery.',
+            ],
+        ];
+
+        DB::table('telegram_updates')->insert([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 45,
+            'payload' => null,
+            'processed_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $record = TelegramUpdate::query()->sole();
+        $this->assertEquals($payload, $record->payload);
+        $this->assertNotNull($record->processed_at);
+        $this->assertNull($record->failed_at);
+    }
+
+    public function test_a_legacy_job_can_recover_an_update_marked_unreplayable_when_it_has_the_payload(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 46,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Retry recovery.',
+            ],
+        ];
+
+        TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 46,
+            'failed_at' => now(),
+            'last_error' => ProcessTelegramUpdateJob::MISSING_PAYLOAD_ERROR,
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $record = TelegramUpdate::query()->sole();
+        $this->assertEquals($payload, $record->payload);
+        $this->assertNotNull($record->processed_at);
+        $this->assertNull($record->failed_at);
+    }
+
     public function test_clearnotes_is_replay_safe_when_processing_restarts_after_the_delete(): void
     {
         $config = TelegramBotConfig::factory()->connected()->create();
@@ -179,7 +287,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $payload = [
             'update_id' => 43,
             'message' => [
-                'chat' => ['id' => 1],
+                'chat' => ['id' => 1, 'type' => 'private'],
                 'from' => ['id' => 1],
                 'text' => '/clearnotes',
             ],
@@ -212,7 +320,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $payload = [
             'update_id' => 55,
             'message' => [
-                'chat' => ['id' => 1],
+                'chat' => ['id' => 1, 'type' => 'private'],
                 'from' => ['id' => 1],
                 'text' => 'stale update',
             ],

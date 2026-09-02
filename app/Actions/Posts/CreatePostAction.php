@@ -37,6 +37,7 @@ class CreatePostAction
                 $number = isset($attributes['number'])
                     ? (int) $attributes['number']
                     : $this->numberFromHumanId($humanId);
+                $this->reserveContentIdAction->advancePast($workspace, 'post', $number);
             } else {
                 $contentId = $this->reserveContentIdAction->handle($workspace, 'post');
                 $humanId = $contentId->human_id;

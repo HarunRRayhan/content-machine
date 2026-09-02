@@ -7,7 +7,9 @@ use App\Actions\Posts\CreatePostAction;
 use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
+use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
+use App\Models\Workspace;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
@@ -69,7 +71,14 @@ class GenerateTelegramPostAction
 
         if ($request->post !== null) {
             if ($request->state === TelegramPostRequest::AWAITING_APPROVAL) {
-                $this->sendPreview($request, $request->post, $this->facebookCaption($request->post));
+                DB::transaction(function () use ($request): void {
+                    $lockedRequest = $this->lockCurrentRequest($request->id);
+                    if ($lockedRequest === null || $lockedRequest->state !== TelegramPostRequest::AWAITING_APPROVAL) {
+                        return;
+                    }
+
+                    $this->sendPreview($lockedRequest, $request->post, $this->facebookCaption($request->post));
+                });
             }
 
             return $request->post;
@@ -128,11 +137,7 @@ class GenerateTelegramPostAction
             // row first, no post is created; if this transaction acquired it
             // first, cancellation waits until the request is linked to the
             // draft and can cancel it without leaving an orphan behind.
-            $lockedRequest = TelegramPostRequest::query()
-                ->with(['workspace', 'telegramBotConfig'])
-                ->whereKey($request->id)
-                ->lockForUpdate()
-                ->first();
+            $lockedRequest = $this->lockCurrentRequest($request->id);
 
             if ($lockedRequest === null
                 || $lockedRequest->state !== TelegramPostRequest::GENERATING
@@ -403,11 +408,7 @@ class GenerateTelegramPostAction
     private function fail(TelegramPostRequest $request, string $message, ?string $workLeaseId = null): null
     {
         DB::transaction(function () use ($request, $message, $workLeaseId): void {
-            $lockedRequest = TelegramPostRequest::query()
-                ->with('telegramBotConfig')
-                ->whereKey($request->id)
-                ->lockForUpdate()
-                ->first();
+            $lockedRequest = $this->lockCurrentRequest($request->id);
 
             if ($lockedRequest === null
                 || $lockedRequest->state !== TelegramPostRequest::GENERATING
@@ -473,6 +474,60 @@ class GenerateTelegramPostAction
     private function renewPostWork(int $requestId, string $workLeaseId): bool
     {
         return (new ClaimTelegramPostWorkAction)->renew($requestId, $workLeaseId);
+    }
+
+    private function lockCurrentRequest(int $requestId): ?TelegramPostRequest
+    {
+        $reference = TelegramPostRequest::query()
+            ->whereKey($requestId)
+            ->first(['telegram_bot_config_id']);
+
+        if ($reference === null) {
+            return null;
+        }
+
+        $configReference = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->first(['workspace_id']);
+
+        if ($configReference === null) {
+            return null;
+        }
+
+        Workspace::query()
+            ->whereKey($configReference->workspace_id)
+            ->lockForUpdate()
+            ->first();
+
+        $config = TelegramBotConfig::query()
+            ->whereKey($reference->telegram_bot_config_id)
+            ->lockForUpdate()
+            ->first();
+        $lockedRequest = TelegramPostRequest::query()
+            ->with('workspace')
+            ->whereKey($requestId)
+            ->lockForUpdate()
+            ->first();
+
+        if ($config === null
+            || $lockedRequest === null
+            || $lockedRequest->telegram_bot_config_id !== $config->id
+            || ! $config->isConnected()
+        ) {
+            return null;
+        }
+
+        if ($lockedRequest->webhook_generation === null && $config->webhook_generation !== null) {
+            $lockedRequest->forceFill([
+                'webhook_generation' => $config->webhook_generation,
+            ])->save();
+        } elseif ($lockedRequest->webhook_generation !== $config->webhook_generation) {
+            return null;
+        }
+
+        $lockedRequest->setRelation('telegramBotConfig', $config);
+
+        return $lockedRequest;
     }
 
     private function facebookCaption(Post $post): string

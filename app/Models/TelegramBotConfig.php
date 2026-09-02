@@ -8,6 +8,7 @@ use Database\Factories\TelegramBotConfigFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 /**
  * A workspace's Telegram bot connection: at most one row per workspace
@@ -28,6 +29,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $bot_username
  * @property bool $ai_chat_enabled
  * @property CarbonImmutable|null $connected_at
+ * @property string|null $connection_operation
+ * @property string|null $connection_operation_id
+ * @property string|null $connection_operation_token
+ * @property string|null $connection_operation_username
+ * @property string|null $connection_operation_secret
+ * @property string|null $connection_operation_slug
+ * @property string|null $connection_operation_generation
+ * @property string|null $connection_cleanup_token
+ * @property string|null $connection_operation_error
+ * @property CarbonImmutable|null $connection_operation_started_at
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  */
@@ -35,6 +46,12 @@ class TelegramBotConfig extends Model
 {
     /** @use HasFactory<TelegramBotConfigFactory> */
     use BelongsToWorkspace, HasFactory;
+
+    public const CONNECTING = 'connecting';
+
+    public const CLEANING_UP = 'cleaning_up';
+
+    public const DISCONNECTING = 'disconnecting';
 
     /**
      * The attributes that are mass assignable.
@@ -50,7 +67,24 @@ class TelegramBotConfig extends Model
         'bot_username',
         'ai_chat_enabled',
         'connected_at',
+        'connection_operation',
+        'connection_operation_id',
+        'connection_operation_token',
+        'connection_operation_username',
+        'connection_operation_secret',
+        'connection_operation_slug',
+        'connection_operation_generation',
+        'connection_cleanup_token',
+        'connection_operation_error',
+        'connection_operation_started_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $config): void {
+            $config->webhook_generation ??= (string) Str::uuid();
+        });
+    }
 
     /**
      * The attributes that should be cast.
@@ -62,8 +96,12 @@ class TelegramBotConfig extends Model
         return [
             'bot_token' => 'encrypted',
             'webhook_secret' => 'encrypted',
+            'connection_operation_token' => 'encrypted',
+            'connection_operation_secret' => 'encrypted',
+            'connection_cleanup_token' => 'encrypted',
             'ai_chat_enabled' => 'boolean',
             'connected_at' => 'datetime',
+            'connection_operation_started_at' => 'datetime',
         ];
     }
 

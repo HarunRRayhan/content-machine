@@ -23,6 +23,8 @@ interface TelegramClientContract
      */
     public function deleteWebhook(string $botToken): TelegramApiResult;
 
+    public function getWebhookInfo(string $botToken): TelegramWebhookInfoResult;
+
     public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult;
 
     /**

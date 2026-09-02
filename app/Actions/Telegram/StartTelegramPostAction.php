@@ -10,6 +10,7 @@ use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
+use App\Models\Workspace;
 use App\Support\Telegram\TelegramUpdateKey;
 use Illuminate\Support\Facades\DB;
 
@@ -36,6 +37,14 @@ class StartTelegramPostAction
         ?string $instruction = null,
         ?TelegramPostRequest $pendingRequest = null,
     ): TelegramPostRequest {
+        $message = $update['message'] ?? null;
+        if (! is_array($message)
+            || ! is_array($message['chat'] ?? null)
+            || ($message['chat']['type'] ?? null) !== 'private'
+        ) {
+            throw new \RuntimeException('Telegram post commands are available in private chats only.');
+        }
+
         if ($link->telegram_bot_config_id !== $config->id || $link->telegram_user_id !== $telegramUserId) {
             throw new \RuntimeException('This Telegram account is not linked to this bot.');
         }
@@ -54,6 +63,11 @@ class StartTelegramPostAction
             // Serialize one Telegram bot's post prompts. This prevents two
             // concurrent bare /post commands from stranding prompts or
             // capturing a second message before the first request is linked.
+            Workspace::query()
+                ->whereKey($config->workspace_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $lockedConfig = TelegramBotConfig::query()
                 ->whereKey($config->id)
                 ->lockForUpdate()

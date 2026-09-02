@@ -5,6 +5,7 @@ namespace App\Actions\Telegram;
 use App\Jobs\SendTelegramOutboundMessageJob;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramOutboundMessage;
+use App\Models\Workspace;
 use App\Support\Telegram\TelegramMessageChunker;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -44,6 +45,19 @@ class QueueTelegramMessageAction
 
         /** @var array{message: TelegramOutboundMessage, created: bool} $result */
         $result = DB::transaction(function () use ($config, $chatId, $logicalKey, $generation, $encodedChunks, $chunks): array {
+            // Match the sender and connection changes: identity-sensitive
+            // writers lock workspace, then config, before the outbound row.
+            // This makes legacy-row adoption safe during the expand phase.
+            Workspace::query()
+                ->whereKey($config->workspace_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $messageQuery = TelegramOutboundMessage::query()
                 ->where('telegram_bot_config_id', $config->id)
                 ->where('logical_key', $logicalKey);
@@ -93,7 +107,62 @@ class QueueTelegramMessageAction
                 $messageQuery->where('webhook_generation', $generation);
             }
 
-            $message = $messageQuery->lockForUpdate()->firstOrFail();
+            $message = $messageQuery->lockForUpdate()->first();
+
+            if ($message === null && $inserted === 0) {
+                // During the expand phase the legacy global logical-key index
+                // can reject a new-generation insert. Reuse that row until
+                // the generation-scoped index replaces it; after cutover the
+                // insert succeeds and this branch is never reached.
+                $legacyQuery = TelegramOutboundMessage::query()
+                    ->where('telegram_bot_config_id', $config->id)
+                    ->where('logical_key', $logicalKey)
+                    ->lockForUpdate();
+
+                if ($generation === null) {
+                    $legacyQuery->whereNotNull('webhook_generation');
+                } else {
+                    $legacyQuery->where(function ($query) use ($generation): void {
+                        $query
+                            ->whereNull('webhook_generation')
+                            ->orWhere('webhook_generation', '<>', $generation);
+                    });
+                }
+
+                $message = $legacyQuery->first();
+                if ($message !== null) {
+                    // A row may already have crossed Telegram's boundary.
+                    // Preserve its evidence and let reconciliation handle it.
+                    if ($message->status === TelegramOutboundMessage::SENDING
+                        || $message->status === TelegramOutboundMessage::UNCERTAIN
+                        || $message->dispatch_claimed_at !== null
+                        || $message->dispatch_lease_id !== null
+                    ) {
+                        return ['message' => $message, 'created' => false];
+                    }
+
+                    $message->forceFill([
+                        'webhook_generation' => $generation,
+                        'chat_id' => $chatId,
+                        'chunks' => $chunks,
+                        'next_chunk' => 0,
+                        'attempts' => 0,
+                        'status' => TelegramOutboundMessage::PENDING,
+                        'last_error' => null,
+                        'next_attempt_at' => null,
+                        'last_attempt_at' => null,
+                        'sent_at' => null,
+                        'failed_at' => null,
+                        'discarded_at' => null,
+                        'dispatch_claimed_at' => null,
+                        'dispatch_lease_id' => null,
+                    ])->save();
+
+                    return ['message' => $message, 'created' => true];
+                }
+            }
+
+            $message ??= $messageQuery->lockForUpdate()->firstOrFail();
 
             return ['message' => $message, 'created' => $inserted > 0];
         });

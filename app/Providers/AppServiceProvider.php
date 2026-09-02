@@ -19,6 +19,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Auth\Middleware\RedirectIfAuthenticated;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -64,6 +65,16 @@ class AppServiceProvider extends ServiceProvider
         // 2026-08-20: this is exactly what locked Harun out after his first
         // successful login.
         RedirectIfAuthenticated::redirectUsing(fn () => route('dashboard.home'));
+
+        // Railway terminates TLS before the app container. Pin absolute URL
+        // generation to the operator-controlled APP_URL instead of trusting
+        // spoofable forwarded host, port, or scheme headers from any proxy.
+        if (app()->environment('production', 'prod')) {
+            $appUrl = rtrim((string) config('app.url'), '/');
+
+            URL::forceRootUrl($appUrl);
+            URL::forceScheme(parse_url($appUrl, PHP_URL_SCHEME) ?: 'https');
+        }
     }
 
     /**

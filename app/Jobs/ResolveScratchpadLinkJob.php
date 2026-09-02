@@ -6,7 +6,9 @@ use App\Actions\Scratchpad\ResolveScratchpadLinkAction;
 use App\Actions\Telegram\ClaimTelegramPostWorkAction;
 use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Models\ScratchpadEntry;
+use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
+use App\Models\Workspace;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -93,7 +95,17 @@ class ResolveScratchpadLinkJob implements ShouldQueue
             }
         }
 
-        $action->handle($this->entry);
+        $entry = $this->entry->fresh() ?? $this->entry;
+        if (! is_string($entry->meta['resolved_kind'] ?? null)) {
+            $action->handle($entry);
+            $entry = $entry->fresh() ?? $entry;
+        }
+
+        // A stale Telegram generation is intentionally not enriched. Do not
+        // let that no-op fall through into summarization or post generation.
+        if (! is_string($entry->meta['resolved_kind'] ?? null)) {
+            return;
+        }
 
         if ($requestId !== null
             && $this->workLeaseId !== null
@@ -113,13 +125,15 @@ class ResolveScratchpadLinkJob implements ShouldQueue
             $this->workLeaseId = null;
         }
 
-        if (($this->entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
-            try {
-                SummarizeCaptureJob::dispatch($this->entry);
-            } catch (Throwable $exception) {
-                // Summarization is optional. Generation has its own durable
-                // recovery path and must not depend on this enqueue.
-                report($exception);
+        if (($entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
+            if (! isset($entry->meta['summarized_at'])) {
+                try {
+                    SummarizeCaptureJob::dispatch($entry);
+                } catch (Throwable $exception) {
+                    // Summarization is optional. Generation has its own durable
+                    // recovery path and must not depend on this enqueue.
+                    report($exception);
+                }
             }
             $this->queueGeneration($requestId, $this->workLeaseId);
 
@@ -163,6 +177,14 @@ class ResolveScratchpadLinkJob implements ShouldQueue
     public function failed(Throwable $exception): void
     {
         report($exception);
+
+        if ($this->entry->source === 'telegram') {
+            $this->failTelegramResolution(
+                'I could not resolve that link, so I could not create the post draft.',
+            );
+
+            return;
+        }
 
         DB::transaction(function (): void {
             // Lock every request sharing this capture before changing the
@@ -208,25 +230,143 @@ class ResolveScratchpadLinkJob implements ShouldQueue
         });
     }
 
+    private function failTelegramResolution(string $message): void
+    {
+        DB::transaction(function () use ($message): void {
+            $entryReference = ScratchpadEntry::query()
+                ->whereKey($this->entry->id)
+                ->first(['workspace_id', 'webhook_generation']);
+
+            if ($entryReference === null) {
+                return;
+            }
+
+            Workspace::query()
+                ->whereKey($entryReference->workspace_id)
+                ->lockForUpdate()
+                ->first();
+
+            $config = TelegramBotConfig::query()
+                ->where('workspace_id', $entryReference->workspace_id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($config === null || ! $config->isConnected()) {
+                return;
+            }
+
+            $entry = ScratchpadEntry::query()
+                ->whereKey($this->entry->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($entry === null) {
+                return;
+            }
+
+            if ($entry->webhook_generation === null && $config->webhook_generation !== null) {
+                $entry->webhook_generation = $config->webhook_generation;
+            } elseif ($entry->webhook_generation !== $config->webhook_generation) {
+                return;
+            }
+
+            $requests = TelegramPostRequest::query()
+                ->where('source_scratchpad_entry_id', $entry->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->lockForUpdate()
+                ->get();
+
+            if ($this->workRequestId !== null) {
+                if ($this->workLeaseId === null) {
+                    return;
+                }
+
+                $requests = $requests->filter(fn (TelegramPostRequest $request): bool => $request->id === $this->workRequestId && $this->ownsPostWork($request)
+                );
+            } elseif ($requests->contains(fn (TelegramPostRequest $request): bool => $request->work_lease_id !== null)) {
+                return;
+            }
+
+            $entry->forceFill([
+                'meta' => [
+                    ...$entry->meta,
+                    'resolved_via' => 'metadata only (resolution failed)',
+                    'resolved_kind' => 'unresolved',
+                ],
+            ])->save();
+
+            foreach ($requests as $request) {
+                $request->forceFill([
+                    'state' => TelegramPostRequest::FAILED,
+                    'error_message' => $message,
+                    'work_claimed_at' => null,
+                    'work_lease_id' => null,
+                ])->save();
+
+                if ($config->bot_token !== null) {
+                    (new QueueTelegramMessageAction)->handle(
+                        $config,
+                        $request->telegram_chat_id,
+                        "❌ {$message}",
+                        'telegram:post-request:'.$request->id.':link-failure',
+                        $request->webhook_generation,
+                    );
+                }
+            }
+        });
+    }
+
     private function failTelegramPostRequests(string $message): void
     {
         $requests = TelegramPostRequest::query()
             ->where('source_scratchpad_entry_id', $this->entry->id)
             ->where('state', TelegramPostRequest::GENERATING)
-            ->with('telegramBotConfig')
-            ->get();
+            ->when($this->workRequestId !== null, fn ($query) => $query->whereKey($this->workRequestId))
+            ->get(['id']);
 
         foreach ($requests as $request) {
             DB::transaction(function () use ($request, $message): void {
+                $reference = TelegramPostRequest::query()
+                    ->whereKey($request->id)
+                    ->first(['telegram_bot_config_id']);
+
+                if ($reference === null) {
+                    return;
+                }
+
+                $configReference = TelegramBotConfig::query()
+                    ->whereKey($reference->telegram_bot_config_id)
+                    ->first(['workspace_id']);
+
+                if ($configReference === null) {
+                    return;
+                }
+
+                Workspace::query()
+                    ->whereKey($configReference->workspace_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                $config = TelegramBotConfig::query()
+                    ->whereKey($reference->telegram_bot_config_id)
+                    ->lockForUpdate()
+                    ->first();
                 $lockedRequest = TelegramPostRequest::query()
-                    ->with('telegramBotConfig')
                     ->whereKey($request->id)
                     ->lockForUpdate()
                     ->first();
 
                 if ($lockedRequest === null
                     || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                    || $config === null
+                    || ! $config->isConnected()
                 ) {
+                    return;
+                }
+
+                if ($lockedRequest->webhook_generation === null && $config->webhook_generation !== null) {
+                    $lockedRequest->webhook_generation = $config->webhook_generation;
+                } elseif ($lockedRequest->webhook_generation !== $config->webhook_generation) {
                     return;
                 }
 
@@ -241,8 +381,7 @@ class ResolveScratchpadLinkJob implements ShouldQueue
                     'work_lease_id' => null,
                 ])->save();
 
-                $config = $lockedRequest->telegramBotConfig;
-                if ($config !== null && $config->bot_token !== null) {
+                if ($config->bot_token !== null) {
                     (new QueueTelegramMessageAction)->handle(
                         $config,
                         $lockedRequest->telegram_chat_id,

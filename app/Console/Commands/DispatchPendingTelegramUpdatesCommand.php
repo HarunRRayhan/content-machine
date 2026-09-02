@@ -21,24 +21,26 @@ class DispatchPendingTelegramUpdatesCommand extends Command
         $dispatched = 0;
 
         if ($this->option('retry-failed')) {
-            $failedIds = TelegramUpdate::query()
-                ->whereNull('processed_at')
-                ->whereNull('discarded_at')
-                ->whereNotNull('failed_at')
-                ->whereNotNull('payload')
-                ->orderBy('id')
-                ->limit($limit)
-                ->pluck('id');
-
-            TelegramUpdate::query()
-                ->whereIn('id', $failedIds)
-                ->update([
-                    'failed_at' => null,
-                    'last_error' => null,
-                    'dispatch_claimed_at' => null,
-                    'dispatch_lease_id' => null,
-                    'updated_at' => now(),
-                ]);
+            DB::transaction(function () use ($limit): void {
+                TelegramUpdate::query()
+                    ->whereNull('processed_at')
+                    ->whereNull('discarded_at')
+                    ->whereNotNull('failed_at')
+                    ->whereNotNull('payload')
+                    ->orderBy('id')
+                    ->limit($limit)
+                    ->lock('FOR UPDATE SKIP LOCKED')
+                    ->get()
+                    ->each(function (TelegramUpdate $update): void {
+                        $update->forceFill([
+                            'failed_at' => null,
+                            'last_error' => null,
+                            'dispatch_claimed_at' => null,
+                            'dispatch_lease_id' => null,
+                            'updated_at' => now(),
+                        ])->save();
+                    });
+            });
         }
 
         /** @var list<array{id: int, config_id: int, payload: array<string, mixed>, generation: string|null, lease_id: string}> $claims */
@@ -50,7 +52,6 @@ class DispatchPendingTelegramUpdatesCommand extends Command
                 ->whereNull('processed_at')
                 ->whereNull('failed_at')
                 ->whereNull('discarded_at')
-                ->whereNotNull('payload')
                 ->where(function ($query) use ($staleAt): void {
                     $query->whereNull('dispatch_claimed_at')
                         ->orWhere('dispatch_claimed_at', '<=', $staleAt);
@@ -60,7 +61,22 @@ class DispatchPendingTelegramUpdatesCommand extends Command
                 ->lock('FOR UPDATE SKIP LOCKED')
                 ->get()
                 ->each(function (TelegramUpdate $update) use (&$claims): void {
-                    if (! is_array($update->payload)) {
+                    /** @var mixed $payload */
+                    $payload = $update->getAttribute('payload');
+
+                    if ($payload === null) {
+                        $update->forceFill([
+                            'failed_at' => now(),
+                            'last_error' => ProcessTelegramUpdateJob::MISSING_PAYLOAD_ERROR,
+                            'dispatch_claimed_at' => null,
+                            'dispatch_lease_id' => null,
+                            'updated_at' => now(),
+                        ])->save();
+
+                        return;
+                    }
+
+                    if (! is_array($payload)) {
                         $update->forceFill([
                             'failed_at' => now(),
                             'last_error' => 'The stored Telegram update payload is invalid.',
@@ -72,7 +88,7 @@ class DispatchPendingTelegramUpdatesCommand extends Command
                         return;
                     }
 
-                    $updateId = $update->payload['update_id'] ?? null;
+                    $updateId = $payload['update_id'] ?? null;
                     if ((! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId)))
                         || (int) $updateId < 0
                         || (int) $updateId !== $update->update_id
@@ -97,7 +113,7 @@ class DispatchPendingTelegramUpdatesCommand extends Command
                     $claims[] = [
                         'id' => $update->id,
                         'config_id' => $update->telegram_bot_config_id,
-                        'payload' => $update->payload,
+                        'payload' => $payload,
                         'generation' => $update->webhook_generation,
                         'lease_id' => $leaseId,
                     ];

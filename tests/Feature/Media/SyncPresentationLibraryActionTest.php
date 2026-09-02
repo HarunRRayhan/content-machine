@@ -62,6 +62,26 @@ class SyncPresentationLibraryActionTest extends TestCase
         $this->assertSame(0, $second);
     }
 
+    public function test_sync_recreates_an_asset_file_missing_from_the_volume(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $action = new SyncPresentationLibraryAction;
+        $action->handle($workspace);
+
+        $asset = MediaAsset::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('meta->asset_key', 'icon-wifi')
+            ->firstOrFail();
+        Storage::disk('scratchpad')->delete($asset->path);
+
+        $synced = $action->handle($workspace);
+
+        $this->assertSame(1, $synced);
+        $this->assertTrue(Storage::disk('scratchpad')->exists($asset->path));
+    }
+
     public function test_images_tab_lists_presentation_library_assets(): void
     {
         Storage::fake('scratchpad');

@@ -108,4 +108,23 @@ class ConnectTelegramBotActionTest extends TestCase
             $this->assertSame(0, TelegramBotConfig::where('workspace_id', $workspace->id)->count());
         }
     }
+
+    public function test_a_rotation_stays_connected_when_old_webhook_cleanup_needs_recovery(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $existing = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $client = (new FakeTelegramClient)
+            ->willGetMe(TelegramGetMeResult::success('replacement_bot'))
+            ->willDeleteWebhook(TelegramApiResult::failure('Telegram did not confirm cleanup.'));
+
+        $config = (new ConnectTelegramBotAction($client))->handle(
+            $workspace,
+            new ConnectTelegramBotData('999:new-token'),
+        );
+
+        $this->assertTrue($config->isConnected());
+        $this->assertSame(TelegramBotConfig::CLEANING_UP, $config->connection_operation);
+        $this->assertSame('999:new-token', $config->bot_token);
+        $this->assertSame($existing->bot_token, $config->connection_cleanup_token);
+    }
 }

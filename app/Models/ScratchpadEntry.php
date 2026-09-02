@@ -89,6 +89,18 @@ class ScratchpadEntry extends Model
     {
         static::creating(function (self $entry) {
             $entry->public_id ??= (string) Str::ulid();
+
+            if ($entry->source !== 'telegram' || $entry->webhook_generation !== null) {
+                return;
+            }
+
+            $generation = TelegramBotConfig::query()
+                ->where('workspace_id', $entry->workspace_id)
+                ->value('webhook_generation');
+
+            $entry->webhook_generation = is_string($generation)
+                ? $generation
+                : (string) Str::uuid();
         });
     }
 

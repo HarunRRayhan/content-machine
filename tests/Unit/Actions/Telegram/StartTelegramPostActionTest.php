@@ -49,7 +49,7 @@ class StartTelegramPostActionTest extends TestCase
         return [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => $chatId],
+                'chat' => ['id' => $chatId, 'type' => 'private'],
                 'from' => ['id' => $userId],
                 'text' => $text,
             ],
@@ -163,7 +163,7 @@ class StartTelegramPostActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'caption' => '/post write a concise post about this image',
                 'photo' => [['file_id' => 'photo-id', 'width' => 20, 'height' => 10]],

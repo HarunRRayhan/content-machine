@@ -15,9 +15,8 @@ use Illuminate\Auth\Events\Login;
  * too, so listening here covers both) and completes the join without
  * making them click a second "accept" button.
  *
- * An email mismatch is left alone here; the visitor can still accept
- * manually from the invite page once authenticated
- * (TeamInvitationController::accept).
+ * An email mismatch is left alone here; only the account using the
+ * invited address can complete the invitation.
  */
 class AcceptPendingTeamInvitationOnLogin
 {

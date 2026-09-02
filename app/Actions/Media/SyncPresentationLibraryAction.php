@@ -4,8 +4,10 @@ namespace App\Actions\Media;
 
 use App\Models\MediaAsset;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 class SyncPresentationLibraryAction
 {
@@ -20,15 +22,24 @@ class SyncPresentationLibraryAction
             return 0;
         }
 
-        $synced = 0;
-
-        foreach (glob($libraryPath.'/*.svg') ?: [] as $filePath) {
-            if ($this->syncFile($workspace, $filePath)) {
-                $synced++;
+        return DB::transaction(function () use ($workspace, $libraryPath): int {
+            // Web instances can start together after a deploy. Serialize the
+            // per-workspace lookup/create sequence so the checksum unique
+            // index cannot turn the losing sync into a failed boot.
+            if (DB::getDriverName() === 'pgsql') {
+                DB::select('SELECT pg_advisory_xact_lock(?)', [$workspace->id]);
             }
-        }
 
-        return $synced;
+            $synced = 0;
+
+            foreach (glob($libraryPath.'/*.svg') ?: [] as $filePath) {
+                if ($this->syncFile($workspace, $filePath)) {
+                    $synced++;
+                }
+            }
+
+            return $synced;
+        });
     }
 
     private function syncFile(Workspace $workspace, string $filePath): bool
@@ -42,6 +53,7 @@ class SyncPresentationLibraryAction
 
         $checksum = hash('sha256', $contents);
         $relativePath = $workspace->id.'/presentation-library/'.$assetKey.'.svg';
+        $disk = Storage::disk('scratchpad');
 
         $existing = MediaAsset::query()
             ->where('workspace_id', $workspace->id)
@@ -50,10 +62,18 @@ class SyncPresentationLibraryAction
             ->first();
 
         if ($existing !== null && $existing->checksum_sha256 === $checksum) {
-            return false;
+            try {
+                if ($disk->exists($relativePath)
+                    && hash('sha256', $disk->get($relativePath)) === $checksum
+                ) {
+                    return false;
+                }
+            } catch (Throwable) {
+                // Recreate a missing or unreadable volume file below.
+            }
         }
 
-        Storage::disk('scratchpad')->put($relativePath, $contents);
+        $disk->put($relativePath, $contents);
 
         $attributes = [
             'kind' => 'image',

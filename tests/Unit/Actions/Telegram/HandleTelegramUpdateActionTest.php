@@ -81,7 +81,7 @@ class HandleTelegramUpdateActionTest extends TestCase
             'update_id' => ++$this->nextUpdateId,
             'message' => [
                 'message_id' => 42,
-                'chat' => ['id' => $chatId],
+                'chat' => ['id' => $chatId, 'type' => 'private'],
                 'from' => ['id' => $fromId, 'username' => 'sender'],
                 'text' => $text,
             ],
@@ -130,6 +130,26 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::count());
         $this->assertStringContainsString('/link', $this->lastReply());
+    }
+
+    public function test_a_group_message_cannot_reach_private_commands_or_captures(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $update = $this->update(1, '/notes');
+        $update['message']['chat']['type'] = 'group';
+
+        $this->action()->handle($config, $update);
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertSame([], $this->outboundMessages());
+        $this->assertSame([], $this->client->reactionsSet);
+        $this->assertSame([], $this->client->chatActionsSent);
     }
 
     public function test_an_unlinked_sender_can_still_use_start_and_help()
@@ -564,7 +584,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 1, 'username' => 'sender'],
                 'text' => 'hey',
             ],

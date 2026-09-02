@@ -81,6 +81,23 @@ class TelegramPostRequest extends Model
         'cancelled_at',
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $request): void {
+            if ($request->webhook_generation !== null) {
+                return;
+            }
+
+            $generation = TelegramBotConfig::query()
+                ->whereKey($request->telegram_bot_config_id)
+                ->value('webhook_generation');
+
+            if (is_string($generation)) {
+                $request->webhook_generation = $generation;
+            }
+        });
+    }
+
     /**
      * @return array<string, string>
      */

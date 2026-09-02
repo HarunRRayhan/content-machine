@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Workspace;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -40,19 +40,21 @@ class DeployCommand extends Command
             return self::FAILURE;
         }
 
-        if ($this->call('migrate', $this->migrationOptions()) !== self::SUCCESS) {
+        if (app()->environment('production', 'prod') && config('app.telegram_cutover_ready')) {
+            if ($this->call('migrate', $this->migrationOptionsWithoutCutover()) !== self::SUCCESS
+                || $this->call('telegram:cutover-preflight', [
+                    '--require-fleet-drained' => true,
+                    '--verify-remote-webhooks' => true,
+                ]) !== self::SUCCESS
+                || $this->call('migrate', $this->cutoverMigrationOptions()) !== self::SUCCESS
+            ) {
+                return self::FAILURE;
+            }
+        } elseif ($this->call('migrate', $this->migrationOptions()) !== self::SUCCESS) {
             return self::FAILURE;
         }
 
-        // A fresh install has no workspace yet, so presentation sync is a
-        // no-op until the admin command creates one.
-        if (Workspace::query()->exists()
-            && $this->call('cm:sync-presentation-library') !== self::SUCCESS
-        ) {
-            return self::FAILURE;
-        }
-
-        foreach (['posts:backfill-templates', 'cm:ensure-admin'] as $command) {
+        foreach (['cm:requeue-legacy-media-jobs', 'posts:backfill-templates', 'cm:ensure-admin'] as $command) {
             if ($this->call($command) !== self::SUCCESS) {
                 return self::FAILURE;
             }
@@ -69,27 +71,77 @@ class DeployCommand extends Command
      */
     private function migrationOptions(): array
     {
-        $options = [
-            '--force' => true,
-            '--isolated' => true,
-        ];
+        $options = ['--force' => true];
 
-        if (! app()->environment('production') || config('app.telegram_cutover_ready')) {
+        if ($this->canIsolateMigrations()) {
+            $options['--isolated'] = true;
+        }
+
+        if (! app()->environment('production', 'prod') || config('app.telegram_cutover_ready')) {
             return $options;
         }
 
+        $options = $this->migrationOptionsWithoutCutover();
+
+        $this->warn('Telegram generation cutover migrations are deferred until CM_TELEGRAM_CUTOVER_READY=true.');
+
+        return $options;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function migrationOptionsWithoutCutover(): array
+    {
         $paths = glob(database_path('migrations/*.php')) ?: [];
         $paths = array_values(array_filter(
             $paths,
             fn (string $path): bool => ! in_array(basename($path), self::TELEGRAM_CUTOVER_MIGRATIONS, true),
         ));
 
-        $options['--path'] = $paths;
-        $options['--realpath'] = true;
+        $options = [
+            '--force' => true,
+            '--path' => $paths,
+            '--realpath' => true,
+        ];
 
-        $this->warn('Telegram generation cutover migrations are deferred until CM_TELEGRAM_CUTOVER_READY=true.');
+        if ($this->canIsolateMigrations()) {
+            $options['--isolated'] = true;
+        }
 
         return $options;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cutoverMigrationOptions(): array
+    {
+        $options = [
+            '--force' => true,
+            '--path' => array_map(
+                fn (string $migration): string => database_path('migrations/'.$migration),
+                self::TELEGRAM_CUTOVER_MIGRATIONS,
+            ),
+            '--realpath' => true,
+        ];
+
+        if ($this->canIsolateMigrations()) {
+            $options['--isolated'] = true;
+        }
+
+        return $options;
+    }
+
+    private function canIsolateMigrations(): bool
+    {
+        if (config('cache.default') !== 'database') {
+            return true;
+        }
+
+        $lockTable = config('cache.stores.database.lock_table') ?: 'cache_locks';
+
+        return Schema::hasTable((string) $lockTable);
     }
 
     /**

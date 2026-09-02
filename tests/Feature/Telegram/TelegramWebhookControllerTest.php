@@ -5,9 +5,13 @@ namespace Tests\Feature\Telegram;
 use App\Jobs\ProcessTelegramUpdateJob;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramUpdate;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery\MockInterface;
+use RuntimeException;
 use Tests\TestCase;
 
 class TelegramWebhookControllerTest extends TestCase
@@ -19,7 +23,7 @@ class TelegramWebhookControllerTest extends TestCase
         return [
             'update_id' => $update,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 42],
                 'text' => 'hello',
             ],
@@ -94,6 +98,78 @@ class TelegramWebhookControllerTest extends TestCase
             && $job->queue === 'scratchpad');
     }
 
+    public function test_a_group_message_is_ignored_before_it_is_persisted_or_queued(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $payload = $this->payload(update: 103);
+        $payload['message']['chat']['type'] = 'supergroup';
+
+        $this->postJson(
+            route('telegram.webhook', ['slug' => $config->webhook_slug]),
+            $payload,
+            ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
+        )->assertNoContent();
+
+        Queue::assertNothingPushed();
+        $this->assertDatabaseMissing('telegram_updates', [
+            'telegram_bot_config_id' => $config->id,
+            'update_id' => 103,
+        ]);
+    }
+
+    public function test_a_queue_failure_does_not_make_telegram_retry_the_webhook(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $this->mock(Dispatcher::class, function (MockInterface $dispatcher): void {
+            $dispatcher->shouldReceive('dispatch')
+                ->once()
+                ->andThrow(new RuntimeException('queue unavailable'));
+        });
+
+        $response = $this->postJson(
+            route('telegram.webhook', ['slug' => $config->webhook_slug]),
+            $this->payload(update: 104),
+            ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
+        );
+
+        $response->assertNoContent();
+        $this->assertDatabaseHas('telegram_updates', [
+            'telegram_bot_config_id' => $config->id,
+            'update_id' => 104,
+            'processed_at' => null,
+            'failed_at' => null,
+        ]);
+    }
+
+    public function test_a_retry_reopens_a_missing_payload_failure_and_dispatches_the_update(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $payload = $this->payload(update: 105);
+        $update = TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 105,
+            'failed_at' => now(),
+            'last_error' => ProcessTelegramUpdateJob::MISSING_PAYLOAD_ERROR,
+        ]);
+
+        $this->postJson(
+            route('telegram.webhook', ['slug' => $config->webhook_slug]),
+            $payload,
+            ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
+        )->assertNoContent();
+
+        $update->refresh();
+        $this->assertEquals($payload, $update->payload);
+        $this->assertNull($update->failed_at);
+        $this->assertNull($update->last_error);
+        Queue::assertPushed(ProcessTelegramUpdateJob::class, fn (ProcessTelegramUpdateJob $job): bool => $job->telegramBotConfigId === $config->id
+            && $job->update['update_id'] === 105
+            && $job->webhookGeneration === $config->webhook_generation);
+    }
+
     public function test_a_voice_update_uses_the_scratchpad_queue()
     {
         Queue::fake();
@@ -164,6 +240,67 @@ class TelegramWebhookControllerTest extends TestCase
             ->where('update_id', 7)
             ->count());
         Queue::assertPushed(ProcessTelegramUpdateJob::class, 2);
+    }
+
+    public function test_a_rotated_update_reuses_the_legacy_row_before_the_global_fence_is_removed(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $headers = ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret];
+        $url = route('telegram.webhook', ['slug' => $config->webhook_slug]);
+        $legacyIndex = 'telegram_updates_legacy_fence_test_unique';
+
+        $this->postJson($url, $this->payload(update: 8), $headers)->assertNoContent();
+        $config->update(['webhook_generation' => (string) Str::uuid()]);
+        DB::statement("CREATE UNIQUE INDEX {$legacyIndex} ON telegram_updates (telegram_bot_config_id, update_id)");
+
+        try {
+            $this->postJson($url, $this->payload(update: 8), $headers)->assertNoContent();
+        } finally {
+            DB::statement("DROP INDEX IF EXISTS {$legacyIndex}");
+        }
+
+        $this->assertSame(1, TelegramUpdate::where('telegram_bot_config_id', $config->id)
+            ->where('update_id', 8)
+            ->count());
+        $this->assertSame($config->fresh()->webhook_generation, TelegramUpdate::query()->sole()->webhook_generation);
+        Queue::assertPushed(ProcessTelegramUpdateJob::class, 2);
+    }
+
+    public function test_a_terminal_legacy_row_is_not_replayed_before_the_global_fence_is_removed(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $headers = ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret];
+        $url = route('telegram.webhook', ['slug' => $config->webhook_slug]);
+        $payload = $this->payload(update: 9);
+        $legacyIndex = 'telegram_updates_terminal_legacy_fence_test_unique';
+        $terminalAt = now();
+        $oldGeneration = $config->webhook_generation;
+        $config->update(['webhook_generation' => (string) Str::uuid()]);
+
+        DB::table('telegram_updates')->insert([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $oldGeneration,
+            'update_id' => 9,
+            'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+            'processed_at' => $terminalAt,
+            'created_at' => $terminalAt,
+            'updated_at' => $terminalAt,
+        ]);
+        DB::statement("CREATE UNIQUE INDEX {$legacyIndex} ON telegram_updates (telegram_bot_config_id, update_id)");
+
+        try {
+            $this->postJson($url, $payload, $headers)->assertNoContent();
+        } finally {
+            DB::statement("DROP INDEX IF EXISTS {$legacyIndex}");
+        }
+
+        $this->assertSame(1, TelegramUpdate::where('telegram_bot_config_id', $config->id)->count());
+        $row = TelegramUpdate::query()->sole();
+        $this->assertSame($oldGeneration, $row->webhook_generation);
+        $this->assertNotNull($row->processed_at);
+        Queue::assertNothingPushed();
     }
 
     public function test_an_update_without_a_valid_update_id_is_rejected(): void
