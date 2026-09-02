@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Post;
+use App\Models\TelegramPostRequest;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -23,6 +24,8 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
     public const UNIQUE_FOR_SECONDS = 3600;
 
+    public const LEASE_SECONDS = 1020;
+
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 1020;
 
     public int $timeout = self::TIMEOUT_SECONDS;
@@ -35,13 +38,25 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
     public array $backoff = [10, 60, 300];
 
     /**
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
+     * These fields were added after publish jobs could already be persisted in
+     * the queue. Explicit defaults let old serialized jobs deserialize safely.
+     */
+    public ?string $operationId = null;
+
+    public ?string $leaseId = null;
+
+    /**
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options
      */
     public function __construct(
         public readonly Post $post,
         public readonly array $options = [],
         public readonly ?string $runToken = null,
+        ?string $operationId = null,
+        ?string $leaseId = null,
     ) {
+        $this->operationId = $operationId;
+        $this->leaseId = $leaseId;
         // Post covers live on the scratchpad uploads volume, mounted only on
         // cm-web. cm-worker's default queue cannot see those files, so
         // MediaUrlResolver skipped attachments and published text-only (P-57).
@@ -91,16 +106,34 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
             $runToken = $this->effectiveRunTokenOrNull() ?? $this->runTokenOrNull();
 
             if ($post === null
-                || ! $this->isCurrentRun($post, $runToken)
-                || $post->publish_state === 'succeeded') {
+                || $post->publish_state === 'succeeded'
+                || ($this->leaseId === null && ! $this->isCurrentRun($post, $runToken))) {
                 return false;
             }
 
             $progress = $post->publish_progress;
+            if ($this->operationId !== null
+                && (! is_array($progress) || ($progress['operation_id'] ?? null) !== $this->operationId)
+            ) {
+                return false;
+            }
+
+            if ($this->leaseId !== null && $post->publish_lease_id !== $this->leaseId) {
+                return false;
+            }
+
+            if ($this->leaseId !== null
+                && ($post->publish_claimed_at === null
+                    || $post->publish_claimed_at->isBefore(now()->subSeconds(self::LEASE_SECONDS)))) {
+                return false;
+            }
+
             $unknownOutcome = false;
             if (is_array($progress)) {
                 $current = $progress['current'] ?? null;
-                $unknownOutcome = $current !== null || ($progress['state'] ?? null) === 'uncertain';
+                $unknownOutcome = ($progress['state'] ?? null) === 'uncertain'
+                    || ($current !== null
+                        && (! is_array($current) || ($current['phase'] ?? null) !== 'retryable'));
                 $progress['state'] = $unknownOutcome ? 'uncertain' : 'failed';
             }
 
@@ -115,7 +148,25 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
                 'publish_state' => 'failed',
                 'publish_error' => $error,
                 'publish_progress' => $progress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
             ])->save();
+
+            /** @var mixed $requestId */
+            $requestId = $this->options['telegram_request_id'] ?? null;
+            if (is_int($requestId) || (is_string($requestId) && ctype_digit($requestId))) {
+                TelegramPostRequest::query()
+                    ->whereKey((int) $requestId)
+                    ->where('post_id', $post->id)
+                    ->whereIn('state', [
+                        TelegramPostRequest::APPROVED,
+                        TelegramPostRequest::FAILED,
+                    ])
+                    ->update([
+                        'state' => TelegramPostRequest::FAILED,
+                        'error_message' => $error,
+                    ]);
+            }
 
             return true;
         });
@@ -146,7 +197,19 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
         $runToken ??= (string) Str::uuid();
         $this->effectiveRunToken = $runToken;
 
-        $action->handle($this->post, $this->options, $runToken);
+        if ($this->operationId === null && $this->leaseId === null) {
+            $action->handle($this->post, $this->options, $runToken);
+
+            return;
+        }
+
+        $action->handle(
+            $this->post,
+            $this->options,
+            $runToken,
+            $this->operationId,
+            $this->leaseId,
+        );
     }
 
     private function isCurrentRun(Post $post, ?string $runToken = null): bool

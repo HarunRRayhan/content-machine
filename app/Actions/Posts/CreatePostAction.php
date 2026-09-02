@@ -4,6 +4,7 @@ namespace App\Actions\Posts;
 
 use App\Actions\Ids\ReserveContentIdAction;
 use App\Models\Post;
+use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -18,9 +19,9 @@ class CreatePostAction
     /**
      * @param  array<string, mixed>  $attributes
      */
-    public function handle(Workspace $workspace, array $attributes): Post
+    public function handle(Workspace $workspace, array $attributes, ?User $createdBy = null): Post
     {
-        return DB::transaction(function () use ($workspace, $attributes) {
+        return DB::transaction(function () use ($workspace, $attributes, $createdBy) {
             $humanId = isset($attributes['human_id']) ? (string) $attributes['human_id'] : null;
 
             if ($humanId !== null) {
@@ -62,8 +63,13 @@ class CreatePostAction
                 'captions' => $attributes['captions'] ?? null,
                 'platforms' => $attributes['platforms'] ?? null,
                 'image_drive_urls' => $attributes['image_drive_urls'] ?? null,
+                'approval_state' => $attributes['approval_state'] ?? 'approved',
+                'approved_at' => ($attributes['approval_state'] ?? 'approved') === 'approved' ? now() : null,
+                'approved_by_user_id' => ($attributes['approval_state'] ?? 'approved') === 'approved'
+                    ? ($createdBy !== null ? $createdBy->id : Auth::id())
+                    : null,
                 'status' => $status,
-                'created_by_user_id' => Auth::id(),
+                'created_by_user_id' => $createdBy !== null ? $createdBy->id : Auth::id(),
             ]);
 
             if (isset($contentId)) {

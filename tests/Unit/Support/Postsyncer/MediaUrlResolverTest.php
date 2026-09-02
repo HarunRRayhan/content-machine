@@ -190,4 +190,28 @@ class MediaUrlResolverTest extends TestCase
 
         $this->resolver->forVideo($video);
     }
+
+    public function test_for_post_rejects_private_direct_media_urls(): void
+    {
+        $post = Post::factory()->create([
+            'image_drive_urls' => ['http://127.0.0.1/internal.png'],
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('public HTTP(S) address');
+
+        $this->resolver->forPost($post);
+    }
+
+    public function test_for_video_rejects_private_media_urls(): void
+    {
+        $video = Video::factory()->create([
+            'video_drive_url' => 'http://169.254.169.254/latest/meta-data',
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('public HTTP(S) address');
+
+        $this->resolver->forVideo($video);
+    }
 }

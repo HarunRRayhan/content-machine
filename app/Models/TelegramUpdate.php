@@ -7,13 +7,20 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * One Telegram update_id already seen for a given bot, purely as an
- * idempotency guard (see the migration's docblock). Nothing here is ever
- * read back for its own sake.
+ * One Telegram update per bot. The payload is a small outbox record: webhook
+ * delivery can be retried until its queued processing is durably completed.
  *
  * @property int $id
  * @property int $telegram_bot_config_id
  * @property int $update_id
+ * @property string|null $webhook_generation
+ * @property array<string, mixed>|null $payload
+ * @property CarbonImmutable|null $processed_at
+ * @property CarbonImmutable|null $failed_at
+ * @property CarbonImmutable|null $discarded_at
+ * @property string|null $last_error
+ * @property CarbonImmutable|null $dispatch_claimed_at
+ * @property string|null $dispatch_lease_id
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  */
@@ -27,7 +34,29 @@ class TelegramUpdate extends Model
     protected $fillable = [
         'telegram_bot_config_id',
         'update_id',
+        'webhook_generation',
+        'payload',
+        'processed_at',
+        'failed_at',
+        'discarded_at',
+        'last_error',
+        'dispatch_claimed_at',
+        'dispatch_lease_id',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'payload' => 'array',
+            'processed_at' => 'datetime',
+            'failed_at' => 'datetime',
+            'discarded_at' => 'datetime',
+            'dispatch_claimed_at' => 'datetime',
+        ];
+    }
 
     /**
      * @return BelongsTo<TelegramBotConfig, $this>

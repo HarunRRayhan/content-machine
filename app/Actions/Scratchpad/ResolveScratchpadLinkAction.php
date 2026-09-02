@@ -22,14 +22,16 @@ class ResolveScratchpadLinkAction
         $url = $entry->meta['url'] ?? $entry->body;
 
         $resolved = $this->resolver->resolve((string) $url);
+        $resolvedBody = $resolved->description ?? $entry->body;
 
         $entry->update([
             'title' => $resolved->title,
-            'body' => $resolved->description ?? $entry->body,
+            'body' => $resolvedBody,
             'meta' => [
                 ...$entry->meta,
                 'resolved_via' => $resolved->resolvedVia,
                 'resolved_kind' => $resolved->kind,
+                'resolved_description' => $resolvedBody,
                 'thumbnail_url' => $resolved->thumbnailUrl,
                 'resolved_at' => now()->toIso8601String(),
             ],

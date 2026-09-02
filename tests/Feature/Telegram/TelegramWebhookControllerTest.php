@@ -7,6 +7,7 @@ use App\Models\TelegramBotConfig;
 use App\Models\TelegramUpdate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class TelegramWebhookControllerTest extends TestCase
@@ -66,6 +67,7 @@ class TelegramWebhookControllerTest extends TestCase
         $response->assertNoContent();
         Queue::assertPushed(ProcessTelegramUpdateJob::class, fn (ProcessTelegramUpdateJob $job) => $job->telegramBotConfigId === $config->id
             && $job->update['update_id'] === 100
+            && $job->webhookGeneration === $config->webhook_generation
             && $job->queue === 'default');
         $this->assertDatabaseHas('telegram_updates', [
             'telegram_bot_config_id' => $config->id,
@@ -142,5 +144,43 @@ class TelegramWebhookControllerTest extends TestCase
 
         Queue::assertPushed(ProcessTelegramUpdateJob::class, 1);
         $this->assertSame(1, TelegramUpdate::where('update_id', 7)->count());
+    }
+
+    public function test_an_update_id_remains_fenced_until_the_bot_connection_is_rotated(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $headers = ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret];
+        $url = route('telegram.webhook', ['slug' => $config->webhook_slug]);
+
+        $this->postJson($url, $this->payload(update: 7), $headers)->assertNoContent();
+
+        $config->update(['webhook_generation' => (string) Str::uuid()]);
+        $config->refresh();
+
+        $this->postJson($url, $this->payload(update: 7), $headers)->assertNoContent();
+
+        $this->assertSame(2, TelegramUpdate::where('telegram_bot_config_id', $config->id)
+            ->where('update_id', 7)
+            ->count());
+        Queue::assertPushed(ProcessTelegramUpdateJob::class, 2);
+    }
+
+    public function test_an_update_without_a_valid_update_id_is_rejected(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+
+        $payload = $this->payload();
+        unset($payload['update_id']);
+
+        $this->postJson(
+            route('telegram.webhook', ['slug' => $config->webhook_slug]),
+            $payload,
+            ['X-Telegram-Bot-Api-Secret-Token' => $config->webhook_secret],
+        )->assertUnprocessable();
+
+        Queue::assertNothingPushed();
+        $this->assertSame(0, TelegramUpdate::count());
     }
 }

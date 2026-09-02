@@ -10,6 +10,8 @@ use App\Actions\Telegram\CaptureTelegramMessageAction;
 use App\Models\Attachment;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
+use App\Support\Telegram\TelegramClientContract;
 use App\Support\Telegram\TelegramFileDownloadResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -27,6 +29,7 @@ class CaptureTelegramMessageActionTest extends TestCase
     private function action(): CaptureTelegramMessageAction
     {
         $this->client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $this->client);
 
         return new CaptureTelegramMessageAction(
             new CaptureTextNoteAction,
@@ -49,6 +52,31 @@ class CaptureTelegramMessageActionTest extends TestCase
         ];
     }
 
+    /**
+     * Outbox delivery is deferred until the test transaction commits.
+     *
+     * @return list<array{botToken: string|null, chatId: int, text: string}>
+     */
+    private function outboundMessages(): array
+    {
+        $messages = [];
+
+        foreach (TelegramOutboundMessage::query()->with('telegramBotConfig')->orderBy('id')->get() as $message) {
+            $chunk = $message->chunks[0] ?? null;
+            if (! is_string($chunk)) {
+                continue;
+            }
+
+            $messages[] = [
+                'botToken' => $message->telegramBotConfig?->bot_token,
+                'chatId' => $message->chat_id,
+                'text' => $chunk,
+            ];
+        }
+
+        return $messages;
+    }
+
     public function test_a_text_message_is_captured_as_a_note()
     {
         $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
@@ -59,7 +87,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('text', $entry->kind);
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('A thought worth keeping.', $entry->body);
-        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'Captured.']], $this->client->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => 'Captured.']], $this->outboundMessages());
     }
 
     public function test_a_message_that_is_only_a_url_is_captured_as_a_link()
@@ -73,7 +101,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('link', $entry->kind);
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('https://example.com/article', $entry->meta['url']);
-        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🔗 Link captured.']], $this->client->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🔗 Link captured.']], $this->outboundMessages());
     }
 
     public function test_a_message_with_none_of_the_supported_content_gets_an_honest_not_yet_reply()
@@ -92,8 +120,9 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->action()->handle($config, $update);
 
         $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertCount(1, $this->client->sentMessages);
-        $this->assertStringContainsString('text, links, photos, and voice notes', $this->client->sentMessages[0]['text']);
+        $messages = $this->outboundMessages();
+        $this->assertCount(1, $messages);
+        $this->assertStringContainsString('text, links, photos, voice notes, and audio files', $messages[0]['text']);
     }
 
     public function test_an_update_with_no_message_key_is_ignored()
@@ -103,7 +132,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->action()->handle($config, ['update_id' => 1, 'edited_message' => ['text' => 'edited']]);
 
         $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertSame([], $this->client->sentMessages);
+        $this->assertSame([], $this->outboundMessages());
     }
 
     public function test_a_photo_is_downloaded_and_captured_with_its_caption()
@@ -141,7 +170,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame('telegram', $entry->source);
         $this->assertSame('From the roof', $entry->body);
         $this->assertSame(1, Attachment::count());
-        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '📷 Photo captured.']], $this->client->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '📷 Photo captured.']], $this->outboundMessages());
     }
 
     public function test_a_photo_download_failure_replies_honestly_and_captures_nothing()
@@ -162,7 +191,7 @@ class CaptureTelegramMessageActionTest extends TestCase
         $action->handle($config, $update);
 
         $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertStringContainsString('file is too big', $this->client->sentMessages[0]['text']);
+        $this->assertStringContainsString('file is too big', $this->outboundMessages()[0]['text']);
     }
 
     public function test_a_voice_note_is_downloaded_and_captured()
@@ -190,7 +219,39 @@ class CaptureTelegramMessageActionTest extends TestCase
         $this->assertSame(555, $entry->meta['telegram_chat_id']);
         $mediaAsset = Attachment::sole()->mediaAsset;
         $this->assertSame('audio/ogg', $mediaAsset->mime);
-        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🎙️ Voice note captured.']], $this->client->sentMessages);
+        $this->assertSame([['botToken' => '123:tok', 'chatId' => 555, 'text' => '🎙️ Voice note captured.']], $this->outboundMessages());
+    }
+
+    public function test_an_audio_file_is_captured_as_voice_with_its_caption()
+    {
+        Storage::fake('scratchpad');
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_token' => '123:tok']);
+        $action = $this->action();
+        $this->client->willDownloadFile(TelegramFileDownloadResult::success('not-really-audio-but-thats-fine'));
+
+        $update = [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 555],
+                'from' => ['id' => 42],
+                'caption' => 'Turn this recording into a post later',
+                'audio' => [
+                    'file_id' => 'audio-id',
+                    'duration' => 4,
+                    'mime_type' => 'audio/mpeg',
+                    'file_name' => 'recording.mp3',
+                ],
+            ],
+        ];
+
+        $action->handle($config, $update);
+
+        $entry = ScratchpadEntry::sole();
+        $this->assertSame('voice', $entry->kind);
+        $this->assertSame('Turn this recording into a post later', $entry->body);
+        $this->assertSame('recording.mp3', Attachment::sole()->mediaAsset->original_filename);
+        $this->assertSame('audio/mpeg', Attachment::sole()->mediaAsset->mime);
     }
 
     public function test_a_voice_download_failure_replies_honestly_and_captures_nothing()
@@ -211,6 +272,6 @@ class CaptureTelegramMessageActionTest extends TestCase
         $action->handle($config, $update);
 
         $this->assertSame(0, ScratchpadEntry::count());
-        $this->assertStringContainsString('Telegram could not find that file.', $this->client->sentMessages[0]['text']);
+        $this->assertStringContainsString('Telegram could not find that file.', $this->outboundMessages()[0]['text']);
     }
 }

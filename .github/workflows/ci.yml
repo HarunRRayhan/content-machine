@@ -84,7 +84,9 @@ jobs:
         run: php artisan migrate --force
 
       - name: Run tests
-        run: ./vendor/bin/pest --parallel
+        # The suite uses one PostgreSQL schema and RefreshDatabase transactions;
+        # parallel workers race migrations and cannot safely share that schema.
+        run: ./vendor/bin/pest
 
   static:
     runs-on: ubuntu-latest

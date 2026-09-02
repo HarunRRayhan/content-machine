@@ -18,11 +18,17 @@ class SetCurrentWorkspaceTest extends TestCase
         $workspace = Workspace::factory()->create();
         $team = $workspace->team;
         $user = User::factory()->create(['current_team_id' => $team->id]);
+        $seen = null;
 
         $middleware = new SetCurrentWorkspace(app(CurrentWorkspace::class));
-        $middleware->handle($this->requestAs($user), fn () => response('ok'));
+        $middleware->handle($this->requestAs($user), function () use (&$seen) {
+            $seen = Workspace::current();
 
-        $this->assertTrue(Workspace::current()?->is($workspace));
+            return response('ok');
+        });
+
+        $this->assertTrue($seen?->is($workspace));
+        $this->assertNull(Workspace::current());
     }
 
     public function test_it_leaves_no_workspace_bound_for_a_user_with_no_team()

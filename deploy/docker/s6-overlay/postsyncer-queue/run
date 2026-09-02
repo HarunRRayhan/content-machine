@@ -1,3 +1,5 @@
 #!/command/with-contenv sh
 
+/usr/local/bin/cm-wait-for-migrations
+
 exec s6-setuidgid www-data php /var/www/html/artisan queue:work postsyncer --queue="${POSTSYNCER_QUEUE:-postsyncer}" --tries=3 --backoff=10,60,300 --timeout=900 --max-time=3600 --sleep=1 --rest=0.5

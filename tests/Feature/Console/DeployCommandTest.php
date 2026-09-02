@@ -32,6 +32,14 @@ class DeployCommandTest extends TestCase
         $this->assertSame(1, User::where('email', 'admin@example.com')->count());
     }
 
+    public function test_worker_migration_readiness_check_passes_after_deploy(): void
+    {
+        config(['app.admin_email' => 'admin@example.com', 'app.admin_name' => 'Admin']);
+
+        $this->artisan('cm:deploy')->assertExitCode(0);
+        $this->artisan('cm:assert-migrations-ready')->assertExitCode(0);
+    }
+
     public function test_it_backfills_known_post_templates(): void
     {
         config(['app.admin_email' => 'admin@example.com', 'app.admin_name' => 'Admin']);

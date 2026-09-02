@@ -4,12 +4,15 @@ namespace Tests\Unit\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
 use App\Support\AiProviders\HttpAiProviderVerifier;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class HttpAiProviderVerifierTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_anthropic_success_hits_the_default_base_url_with_the_right_headers()
     {
         Http::fake(['api.anthropic.com/*' => Http::response(['data' => []], 200)]);

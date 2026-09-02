@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiProviderVerifierContract;
 use App\Support\AiProviders\AiTranscriptionClientContract;
+use App\Support\AiProviders\AiVisionCompletionClientContract;
 use App\Support\AiProviders\HttpAiCompletionClient;
 use App\Support\AiProviders\HttpAiProviderVerifier;
 use App\Support\AiProviders\OpenAiTranscriptionClient;
@@ -34,6 +35,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AiProviderVerifierContract::class, HttpAiProviderVerifier::class);
         $this->app->bind(AiTranscriptionClientContract::class, OpenAiTranscriptionClient::class);
         $this->app->bind(AiCompletionClientContract::class, HttpAiCompletionClient::class);
+        $this->app->bind(AiVisionCompletionClientContract::class, HttpAiCompletionClient::class);
         $this->app->bind(TelegramClientContract::class, HttpTelegramClient::class);
     }
 

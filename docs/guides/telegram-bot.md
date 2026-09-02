@@ -1,7 +1,7 @@
 # Telegram bot
 
 The Telegram bot is a shared capture inbox for a workspace: forward a link, a
-photo, or a voice note, or just type, and it lands in that workspace's
+photo, a voice note, or an audio file, or just type, and it lands in that workspace's
 Scratch Pad. One bot per workspace, shared by every team member who links
 their own Telegram account to it.
 
@@ -44,11 +44,27 @@ can actually reach you.
 | `/link CODE` | Links your Telegram account using a code from the dashboard. |
 | `/videos` | Your workspace's most recent videos. |
 | `/posts` | Your workspace's most recent posts. |
-| `/notes` | Your workspace's most recent Scratch Pad captures (text, links, photos, voice). |
+| `/notes` | Your workspace's most recent Scratch Pad captures (text, links, photos, voice, audio). |
 | `/note <text>` | Saves a Scratch Pad text note. |
+| `/post <text>` | Creates a post draft from the text. A photo, voice note, or audio file can be sent after a bare `/post`. |
+| `/approve P-123` | Approves a generated draft for publishing. |
+| `/post_now P-123` or `/post-now P-123` | Publishes an approved draft now. |
+| `/schedule P-123 YYYY-MM-DD HH:MM` | Schedules an approved draft in the workspace timezone. |
+| `/cancel` | Cancels the active post request without deleting its source or draft. |
 
 Commands work the same for every linked member, with or without an AI
 provider configured.
+
+## Drafting a post
+
+`/post <text>` captures the source and creates a draft in the background. For a
+photo, voice note, or audio file, send `/post` first, then send the media. A caption starting
+with `/post` also works, for example `/post write a short post about this` on a
+photo.
+
+The bot sends a preview when the draft is ready. It never publishes from the
+generation step. Review the draft in Content Machine, then send `/approve P-123`
+before `/post_now P-123` or `/schedule P-123 2026-09-03 09:00`.
 
 ## Capturing without a command
 
@@ -58,6 +74,7 @@ Anything that isn't a command is captured straight to the Scratch Pad:
 - A photo (with an optional caption) is captured as a photo.
 - A voice note is captured, then transcribed in the background. The
   transcript arrives as a follow-up message once it's ready.
+- An audio file is captured and transcribed the same way as a voice note.
 - Any other text is captured as a note (unless **AI chat** is on, see below).
 
 Every message gets a real reply: capture confirmation, or an honest error
@@ -70,7 +87,7 @@ Off by default. When a workspace has an AI provider configured (see
 it on changes what a plain text message does: instead of being captured as
 a note, it gets a conversational reply.
 
-Everything else is unaffected: a link, a photo, and a voice note still
+Everything else is unaffected: a link, a photo, a voice note, and an audio file still
 always capture, and `/note <text>` still always saves a note even with AI
 chat on.
 

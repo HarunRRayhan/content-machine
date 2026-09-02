@@ -22,12 +22,21 @@ class SetCurrentWorkspace
 
     public function handle(Request $request, Closure $next): Response
     {
+        // These bindings live in the container, which may outlive one request
+        // under a long-lived PHP runtime. Never inherit another request's
+        // workspace when this user has no current team.
+        $this->currentWorkspace->set(null);
+
         $team = $request->user()?->currentTeam;
 
         if ($team !== null) {
             $this->currentWorkspace->set($team->workspaces()->oldest('id')->first());
         }
 
-        return $next($request);
+        try {
+            return $next($request);
+        } finally {
+            $this->currentWorkspace->set(null);
+        }
     }
 }

@@ -11,14 +11,16 @@ use Illuminate\Support\Facades\Crypt;
  */
 class PostsyncerConfig
 {
-    private const DEFAULT_API_BASE = 'https://postsyncer.com/api/v1';
+    public const API_BASE = 'https://postsyncer.com/api/v1';
 
-    private const DEFAULT_UPLOAD_BASE = 'https://upload.postsyncer.com/api/v1';
+    public const UPLOAD_BASE = 'https://upload.postsyncer.com/api/v1';
 
     /** @var list<string> */
     public const LANGUAGES = ['english', 'bangla'];
 
     public const DEFAULT_LANGUAGE = 'english';
+
+    public const VIDEO_PUBLISH_DISABLED_MESSAGE = 'Video publishing is temporarily disabled until safe retries and reconciliation are available.';
 
     /**
      * @param  array<string, mixed>  $data
@@ -52,16 +54,12 @@ class PostsyncerConfig
 
     public function apiBase(): string
     {
-        $base = $this->data['api_base'] ?? null;
-
-        return is_string($base) && $base !== '' ? $base : self::DEFAULT_API_BASE;
+        return self::API_BASE;
     }
 
     public function uploadBase(): string
     {
-        $base = $this->data['upload_base'] ?? null;
-
-        return is_string($base) && $base !== '' ? $base : self::DEFAULT_UPLOAD_BASE;
+        return self::UPLOAD_BASE;
     }
 
     /**
@@ -95,6 +93,11 @@ class PostsyncerConfig
     public function publishEnabled(): bool
     {
         return (bool) ($this->data['publish_enabled'] ?? false);
+    }
+
+    public function videoPublishEnabled(): bool
+    {
+        return (bool) ($this->data['video_publish_enabled'] ?? false);
     }
 
     public function defaultLanguage(): string

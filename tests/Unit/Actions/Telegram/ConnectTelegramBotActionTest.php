@@ -5,6 +5,9 @@ namespace Tests\Unit\Actions\Telegram;
 use App\Actions\Telegram\ConnectTelegramBotAction;
 use App\Data\Telegram\ConnectTelegramBotData;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
+use App\Models\TelegramUpdate;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramApiResult;
 use App\Support\Telegram\TelegramGetMeResult;
@@ -33,19 +36,45 @@ class ConnectTelegramBotActionTest extends TestCase
         $this->assertSame('123:abc', $client->setMyCommandsCalledWith[0]['botToken']);
     }
 
-    public function test_reconnecting_keeps_the_same_webhook_secret_and_slug()
+    public function test_rotating_the_bot_token_rotates_the_webhook_identity()
     {
         $workspace = Workspace::factory()->create();
         $existing = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $update = TelegramUpdate::create([
+            'telegram_bot_config_id' => $existing->id,
+            'webhook_generation' => $existing->webhook_generation,
+            'update_id' => 123,
+            'payload' => ['update_id' => 123],
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $existing->id,
+            'state' => TelegramPostRequest::GENERATING,
+            'webhook_generation' => $existing->webhook_generation,
+            'work_claimed_at' => now(),
+            'work_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+        ]);
+        $outbound = TelegramOutboundMessage::factory()->create([
+            'telegram_bot_config_id' => $existing->id,
+            'webhook_generation' => $existing->webhook_generation,
+        ]);
+        $originalToken = $existing->bot_token;
         $originalSecret = $existing->webhook_secret;
         $originalSlug = $existing->webhook_slug;
+        $originalGeneration = $existing->webhook_generation;
 
         $client = (new FakeTelegramClient)->willGetMe(TelegramGetMeResult::success('a_new_username'));
         $config = (new ConnectTelegramBotAction($client))->handle($workspace, new ConnectTelegramBotData('999:new-token'));
 
-        $this->assertSame($originalSecret, $config->webhook_secret);
-        $this->assertSame($originalSlug, $config->webhook_slug);
+        $this->assertNotSame($originalSecret, $config->webhook_secret);
+        $this->assertNotSame($originalSlug, $config->webhook_slug);
+        $this->assertNotSame($originalGeneration, $config->webhook_generation);
         $this->assertSame('a_new_username', $config->bot_username);
+        $this->assertSame([$originalToken], $client->deleteWebhookCalledWith);
+        $this->assertNotNull($update->refresh()->discarded_at);
+        $this->assertSame(TelegramPostRequest::CANCELLED, $request->refresh()->state);
+        $this->assertSame('72d9c4a1-58b0-4be7-95c0-a1d2227d2f22', $request->work_lease_id);
+        $this->assertSame(TelegramOutboundMessage::DISCARDED, $outbound->refresh()->status);
     }
 
     public function test_a_failed_getme_check_throws_and_stores_nothing()

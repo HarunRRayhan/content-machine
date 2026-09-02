@@ -47,7 +47,7 @@ class TelegramBotLinkController extends Controller
             return to_route('settings.telegram.edit');
         }
 
-        Inertia::flash('toast', ['type' => 'success', 'message' => __('Test message sent, check Telegram.')]);
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Test message queued, check Telegram.')]);
 
         return to_route('settings.telegram.edit');
     }

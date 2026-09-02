@@ -5,7 +5,7 @@ namespace App\Actions\Telegram;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\User;
-use App\Support\Telegram\TelegramClientContract;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -18,10 +18,6 @@ use RuntimeException;
  */
 class SendTelegramTestMessageAction
 {
-    public function __construct(
-        private readonly TelegramClientContract $client,
-    ) {}
-
     public function handle(TelegramBotConfig $config, User $user): void
     {
         if ($config->bot_token === null) {
@@ -37,10 +33,12 @@ class SendTelegramTestMessageAction
             throw new RuntimeException('Link your own Telegram account first, then send a test message.');
         }
 
-        $result = $this->client->sendMessage($config->bot_token, $link->telegram_user_id, "✅ Test message from Content Machine. If you're reading this, delivery works.");
-
-        if (! $result->successful) {
-            throw new RuntimeException((string) $result->error);
-        }
+        (new QueueTelegramMessageAction)->handle(
+            $config,
+            $link->telegram_user_id,
+            "✅ Test message from Content Machine. If you're reading this, delivery works.",
+            'telegram:test:'.$config->id.':'.Str::uuid(),
+            $config->webhook_generation,
+        );
     }
 }

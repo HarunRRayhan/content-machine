@@ -7,6 +7,7 @@ use App\Actions\Posts\AttachPostImageAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
+use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\UpdatePostData;
@@ -21,12 +22,14 @@ use App\Models\Workspace;
 use App\Rules\AccessibleDriveUrl;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -65,6 +68,8 @@ class PostsApiController extends Controller
                 'postsyncer',
                 'publish_state',
                 'publish_error',
+                'publish_progress',
+                'approval_state',
                 'status',
                 'created_at',
                 'updated_at',
@@ -127,10 +132,9 @@ class PostsApiController extends Controller
             'image_drive_urls' => ['sometimes', 'nullable', 'array'],
             'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
-            'postsyncer' => ['sometimes', 'nullable', 'array'],
-            'postsyncer.groups' => ['sometimes', 'array'],
-            'publish_state' => ['sometimes', 'nullable', 'string', Rule::in(Post::PUBLISH_STATES)],
-            'publish_error' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'postsyncer' => ['prohibited'],
+            'publish_state' => ['prohibited'],
+            'publish_error' => ['prohibited'],
         ]);
 
         $action->handle($post, UpdatePostData::fromApiPayload($payload, $post));
@@ -202,6 +206,25 @@ class PostsApiController extends Controller
         return new PostResource($post->load(['attachments.mediaAsset']));
     }
 
+    public function reconcile(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'postsyncer_id' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $action->reconcile($post, $payload['postsyncer_id']);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'postsyncer_id' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     /**
      * Stream a post image. Token-guarded; a media asset from another
      * workspace 404s rather than streaming.
@@ -210,8 +233,9 @@ class PostsApiController extends Controller
     {
         $workspace = $this->currentWorkspace();
 
-        $this->resolvePost($humanId);
+        $post = $this->resolvePost($humanId);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+        abort_if(! $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,

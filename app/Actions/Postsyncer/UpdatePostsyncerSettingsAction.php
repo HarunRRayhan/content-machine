@@ -22,7 +22,8 @@ class UpdatePostsyncerSettingsAction
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($this->hasPublishProgress($lockedWorkspace)) {
+            if ($this->hasPublishProgress($lockedWorkspace)
+                && ! $this->isDisablingPublishing($lockedWorkspace, $input)) {
                 throw ValidationException::withMessages([
                     'postsyncer' => __('PostSyncer settings cannot change while a publish operation has external progress. Retry or reconcile it first.'),
                 ]);
@@ -57,5 +58,18 @@ class UpdatePostsyncerSettingsAction
         }
 
         return false;
+    }
+
+    /**
+     * Turning the global switch off is the emergency stop for queued work. It
+     * must remain available even while a worker is waiting to call PostSyncer.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    private function isDisablingPublishing(Workspace $workspace, array $input): bool
+    {
+        return array_key_exists('publish_enabled', $input)
+            && filter_var($input['publish_enabled'], FILTER_VALIDATE_BOOLEAN) === false
+            && PostsyncerConfig::fromWorkspace($workspace)->publishEnabled();
     }
 }

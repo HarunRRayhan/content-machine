@@ -214,7 +214,7 @@ class VideosApiTest extends TestCase
         ]);
     }
 
-    public function test_update_can_record_postsyncer_groups(): void
+    public function test_update_cannot_forge_postsyncer_groups(): void
     {
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-12',
@@ -235,9 +235,10 @@ class VideosApiTest extends TestCase
                 ]],
             ],
         ])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'scheduled')
-            ->assertJsonPath('data.postsyncer.groups.0.post_id', '132195');
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer');
+
+        $this->assertNull(Video::query()->where('human_id', 'BV-12')->value('postsyncer'));
     }
 
     public function test_patch_rejects_a_private_drive_url(): void
@@ -280,7 +281,7 @@ class VideosApiTest extends TestCase
         $this->acting()->getJson('/api/v1/videos/BV-1')->assertNotFound();
     }
 
-    public function test_update_can_clear_stale_publish_error(): void
+    public function test_update_cannot_forge_publish_state_or_error(): void
     {
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-57',
@@ -295,9 +296,10 @@ class VideosApiTest extends TestCase
             'publish_state' => 'succeeded',
             'publish_error' => null,
         ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'succeeded')
-            ->assertJsonPath('data.publish_error', null);
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish_state');
+
+        $this->assertSame('failed', Video::query()->where('human_id', 'BV-57')->value('publish_state'));
     }
 
     public function test_publish_dispatches_job_and_returns_queued_state(): void
@@ -305,6 +307,7 @@ class VideosApiTest extends TestCase
         Queue::fake();
         PostsyncerConfig::write($this->workspace, [
             'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'api_key' => 'test-api-key',
             'languages' => [
                 'english' => ['workspace_id' => '853', 'platforms' => []],

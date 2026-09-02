@@ -19,6 +19,7 @@ class ReconcilePostPublishCommandTest extends TestCase
         $workspace = Workspace::factory()->create();
         PostsyncerConfig::write($workspace, [
             'api_key' => 'test-api-key',
+            'publish_enabled' => true,
             'languages' => [
                 'bangla' => [
                     'workspace_id' => '15211',
@@ -129,6 +130,7 @@ class ReconcilePostPublishCommandTest extends TestCase
         $workspace = Workspace::factory()->create();
         PostsyncerConfig::write($workspace, [
             'api_key' => 'test-api-key',
+            'publish_enabled' => true,
             'languages' => [
                 'bangla' => [
                     'workspace_id' => '15211',

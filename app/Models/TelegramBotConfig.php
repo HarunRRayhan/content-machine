@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $bot_token
  * @property string|null $webhook_secret
  * @property string|null $webhook_slug
+ * @property string|null $webhook_generation
  * @property string|null $bot_username
  * @property bool $ai_chat_enabled
  * @property CarbonImmutable|null $connected_at
@@ -45,6 +46,7 @@ class TelegramBotConfig extends Model
         'bot_token',
         'webhook_secret',
         'webhook_slug',
+        'webhook_generation',
         'bot_username',
         'ai_chat_enabled',
         'connected_at',

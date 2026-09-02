@@ -3,6 +3,7 @@
 namespace Tests\Feature\Api;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
+use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishPostJob;
 use App\Models\Attachment;
@@ -11,8 +12,10 @@ use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -70,6 +73,7 @@ class PostsApiTest extends TestCase
         Post::factory()->for($this->workspace)->create([
             'human_id' => 'P-57',
             'number' => 57,
+            'approval_state' => 'pending',
             'body' => str_repeat('paragraph ', 80),
             'captions' => ['facebook' => str_repeat('caption ', 40)],
             'template' => 'C',
@@ -78,6 +82,7 @@ class PostsApiTest extends TestCase
         $this->acting()->getJson('/api/v1/posts')
             ->assertOk()
             ->assertJsonPath('data.0.human_id', 'P-57')
+            ->assertJsonPath('data.0.approval_state', 'pending')
             ->assertJsonPath('data.0.has_body', true)
             ->assertJsonPath('data.0.has_captions', true)
             ->assertJsonPath('data.0.template', 'C')
@@ -100,7 +105,21 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.0.captions.instagram', 'full cap');
     }
 
-    public function test_update_can_record_postsyncer_groups(): void
+    public function test_index_exposes_publish_progress_for_reconciliation(): void
+    {
+        Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-59',
+            'number' => 59,
+            'publish_state' => 'failed',
+            'publish_progress' => ['state' => 'uncertain'],
+        ]);
+
+        $this->acting()->getJson('/api/v1/posts')
+            ->assertOk()
+            ->assertJsonPath('data.0.publish_progress.state', 'uncertain');
+    }
+
+    public function test_update_cannot_forge_postsyncer_groups(): void
     {
         $this->acting()->postJson('/api/v1/posts', [
             'human_id' => 'P-51',
@@ -120,12 +139,13 @@ class PostsApiTest extends TestCase
                 ]],
             ],
         ])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'scheduled')
-            ->assertJsonPath('data.postsyncer.groups.0.post_id', '132531');
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer');
+
+        $this->assertNull(Post::query()->where('human_id', 'P-51')->value('postsyncer'));
     }
 
-    public function test_update_can_clear_stale_publish_error(): void
+    public function test_update_cannot_forge_publish_state_or_error(): void
     {
         $this->acting()->postJson('/api/v1/posts', [
             'human_id' => 'P-57',
@@ -143,9 +163,10 @@ class PostsApiTest extends TestCase
             'publish_state' => 'succeeded',
             'publish_error' => null,
         ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'succeeded')
-            ->assertJsonPath('data.publish_error', null);
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish_state');
+
+        $this->assertSame('failed', Post::query()->where('human_id', 'P-57')->value('publish_state'));
     }
 
     public function test_patch_accepts_image_drive_urls(): void
@@ -264,6 +285,26 @@ class PostsApiTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_an_unattached_asset_in_the_same_workspace_is_not_found(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-5',
+            'number' => 5,
+            'title' => 'Mine',
+        ])->assertCreated();
+
+        $asset = MediaAsset::factory()->for($this->workspace)->create([
+            'disk' => 'scratchpad',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($asset->path, 'bytes');
+
+        $this->acting()->get("/api/v1/posts/P-5/media/{$asset->id}")
+            ->assertNotFound();
+    }
+
     public function test_upload_pdf_attaches_a_linkedin_document_and_streams_it_back(): void
     {
         Storage::fake('scratchpad');
@@ -316,7 +357,6 @@ class PostsApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.human_id', 'CM-TEST-1')
             ->assertJsonPath('data.publish_state', 'queued')
-            ->assertJsonMissingPath('data.publish_progress')
             ->assertJsonPath('data.publish_error', null);
 
         $post = Post::query()->where('human_id', 'CM-TEST-1')->sole();
@@ -367,6 +407,103 @@ class PostsApiTest extends TestCase
             ->assertJsonValidationErrors('publish');
 
         Queue::assertNothingPushed();
+    }
+
+    public function test_patch_cannot_reset_a_checkpointed_publish(): void
+    {
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-60',
+            'number' => 60,
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'options' => [],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [['index' => 0, 'group_key' => 'group-1']],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'creating',
+                    'idempotency_key' => 'idempotency-1',
+                    'media_ids' => [],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $this->acting()->patchJson('/api/v1/posts/'.$post->human_id, [
+            'publish_state' => 'idle',
+            'publish_error' => null,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish_state');
+
+        $this->assertSame('failed', $post->refresh()->publish_state);
+    }
+
+    public function test_reconcile_endpoint_checkpoints_a_verified_postsyncer_post(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['text' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-61',
+            'number' => 61,
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Reconcile this caption'],
+            'status' => 'ready',
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
+        ]);
+
+        try {
+            app(PublishPostAction::class)->handle($post, [
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+        } catch (PostsyncerException) {
+            // The failed create is the state this endpoint repairs.
+        }
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'Reconcile this caption',
+                    'media' => [],
+                ]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'POST',
+                    'caption' => 'Reconcile this caption',
+                ]]],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2099-09-03T09:00:00+06:00',
+            ], 200),
+        ]);
+
+        $this->acting()->postJson('/api/v1/posts/P-61/reconcile', [
+            'postsyncer_id' => '99',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '99');
     }
 
     private function configurePostsyncer(): void
