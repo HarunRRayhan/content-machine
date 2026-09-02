@@ -86,4 +86,102 @@ class DispatchPendingTelegramPostWorkCommandTest extends TestCase
 
         Queue::assertPushed(TranscribeVoiceNoteJob::class, fn (TranscribeVoiceNoteJob $job): bool => $job->transcription->is($transcription));
     }
+
+    public function test_a_live_request_lease_does_not_starve_a_later_request(): void
+    {
+        Queue::fake();
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $firstEntry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'text',
+            'source' => 'telegram',
+        ]);
+        $secondEntry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'text',
+            'source' => 'telegram',
+        ]);
+        TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $firstEntry->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 1,
+            'state' => TelegramPostRequest::GENERATING,
+            'work_claimed_at' => now(),
+            'work_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+        ]);
+        $laterRequest = TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $secondEntry->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 1,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-post-work', ['--limit' => 1])
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 1 pending Telegram post work item(s).');
+
+        Queue::assertPushed(GenerateTelegramPostJob::class, fn (GenerateTelegramPostJob $job): bool => $job->telegramPostRequestId === $laterRequest->id);
+    }
+
+    public function test_it_recovers_a_standalone_telegram_link_without_a_post_request(): void
+    {
+        Queue::fake();
+        $workspace = Workspace::factory()->create();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'link',
+            'source' => 'telegram',
+            'body' => 'https://example.com',
+            'meta' => ['url' => 'https://example.com'],
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-post-work')
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 1 pending Telegram post work item(s).');
+
+        Queue::assertPushed(ResolveScratchpadLinkJob::class, fn (ResolveScratchpadLinkJob $job): bool => $job->entry->is($entry));
+    }
+
+    public function test_an_active_post_request_does_not_starve_a_standalone_transcription(): void
+    {
+        Queue::fake();
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $activeEntry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'voice',
+            'source' => 'telegram',
+        ]);
+        $laterEntry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'voice',
+            'source' => 'telegram',
+        ]);
+        $activeMedia = MediaAsset::factory()->for($workspace)->create(['kind' => 'audio']);
+        $laterMedia = MediaAsset::factory()->for($workspace)->create(['kind' => 'audio']);
+        $activeTranscription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $activeEntry->id,
+            'media_asset_id' => $activeMedia->id,
+            'status' => 'pending',
+        ]);
+        $laterTranscription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $laterEntry->id,
+            'media_asset_id' => $laterMedia->id,
+            'status' => 'pending',
+        ]);
+        TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $activeEntry->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 1,
+            'state' => TelegramPostRequest::GENERATING,
+            'work_claimed_at' => now(),
+            'work_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+        ]);
+
+        $this->artisan('telegram:dispatch-pending-post-work', ['--limit' => 1])
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 1 pending Telegram post work item(s).');
+
+        Queue::assertPushed(TranscribeVoiceNoteJob::class, fn (TranscribeVoiceNoteJob $job): bool => $job->transcription->is($laterTranscription));
+        Queue::assertNotPushed(TranscribeVoiceNoteJob::class, fn (TranscribeVoiceNoteJob $job): bool => $job->transcription->is($activeTranscription));
+    }
 }

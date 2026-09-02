@@ -90,6 +90,52 @@ class GenerateTelegramPostActionTest extends TestCase
         $this->assertStringContainsString('/approve', $message->chunks[0]);
     }
 
+    public function test_a_link_generation_uses_the_resolution_snapshot_not_a_later_summary(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'source' => 'telegram',
+            'body' => 'Later AI summary.',
+            'meta' => [
+                'url' => 'https://example.com/article',
+                'resolved_kind' => 'webpage',
+                'resolved_description' => 'Original page description.',
+            ],
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $completion = new FakePostCompletionClient(json_encode([
+            'title' => 'A linked idea',
+            'body' => 'Post body.',
+            'language' => 'bn',
+            'captions' => [
+                'facebook' => ['caption' => 'Facebook caption', 'first_comment' => ''],
+                'instagram' => ['caption' => 'Instagram caption', 'first_comment' => ''],
+            ],
+        ], JSON_THROW_ON_ERROR));
+
+        (new GenerateTelegramPostAction(
+            app(CreatePostAction::class),
+            new AttachExistingPostMediaAction,
+            $completion,
+            $completion,
+            new AiProviderCredentialResolver,
+        ))->handle($request->id);
+
+        $this->assertStringContainsString('Original page description.', $completion->lastUserContent);
+        $this->assertStringNotContainsString('Later AI summary.', $completion->lastUserContent);
+    }
+
     public function test_a_photo_uses_the_vision_chain_and_attaches_the_source_image(): void
     {
         Queue::fake();
@@ -252,10 +298,14 @@ final class FakePostCompletionClient implements AiCompletionClientContract, AiVi
 {
     public bool $visionCalled = false;
 
+    public string $lastUserContent = '';
+
     public function __construct(private readonly string $response) {}
 
     public function complete(AiProviderCredentialModel $entry, string $systemPrompt, string $userContent): AiCompletionResult
     {
+        $this->lastUserContent = $userContent;
+
         return AiCompletionResult::success($this->response);
     }
 

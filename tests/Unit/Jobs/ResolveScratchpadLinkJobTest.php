@@ -107,6 +107,45 @@ class ResolveScratchpadLinkJobTest extends TestCase
         Queue::assertPushed(GenerateTelegramPostJob::class, fn (GenerateTelegramPostJob $job): bool => $job->telegramPostRequestId === $request->id);
     }
 
+    public function test_a_queued_link_job_finishes_source_enrichment_after_request_cancellation(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'body' => 'https://example.com/post',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+        $leaseId = '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22';
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::CANCELLED,
+            'work_claimed_at' => now(),
+            'work_lease_id' => $leaseId,
+        ]);
+        $resolver = new class implements LinkResolverContract
+        {
+            public function resolve(string $url): ResolvedLink
+            {
+                return new ResolvedLink(kind: 'webpage', resolvedVia: 'page metadata', title: 'Resolved Title');
+            }
+        };
+
+        (new ResolveScratchpadLinkJob($entry, $request->id, $leaseId))->handle(new ResolveScratchpadLinkAction($resolver));
+
+        $this->assertSame('Resolved Title', $entry->refresh()->title);
+        $this->assertNull($request->refresh()->work_lease_id);
+        Queue::assertPushed(SummarizeCaptureJob::class);
+        Queue::assertNotPushed(GenerateTelegramPostJob::class);
+    }
+
     public function test_an_unresolved_link_does_not_dispatch_the_summarizer()
     {
         Queue::fake();

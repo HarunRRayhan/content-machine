@@ -8,7 +8,6 @@ use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -17,13 +16,11 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
-class TranscribeVoiceNoteJob implements ShouldBeUnique, ShouldQueue
+class TranscribeVoiceNoteJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
-
-    public const UNIQUE_FOR_SECONDS = 3600;
 
     /**
      * Old queued payloads do not contain the optional Telegram post-work
@@ -90,16 +87,6 @@ class TranscribeVoiceNoteJob implements ShouldBeUnique, ShouldQueue
         if ($requestId !== null) {
             (new ClaimTelegramPostWorkAction)->clear($requestId, $leaseId);
         }
-    }
-
-    public function uniqueId(): string
-    {
-        return 'voice-transcription:'.$this->transcription->getKey();
-    }
-
-    public function uniqueFor(): int
-    {
-        return self::UNIQUE_FOR_SECONDS;
     }
 
     /**

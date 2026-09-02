@@ -256,7 +256,9 @@ class GenerateTelegramPostAction
             ])));
         }
 
-        $body = trim((string) ($entry->body ?? $request->instruction ?? ''));
+        $body = array_key_exists('resolved_description', $entry->meta)
+            ? trim((string) ($entry->meta['resolved_description'] ?? ''))
+            : trim((string) ($entry->body ?? $request->instruction ?? ''));
 
         if ($entry->kind === 'photo') {
             return $body !== '' ? $body : 'Create a post based on what is visible in this photo.';

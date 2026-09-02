@@ -72,10 +72,25 @@ class ResolveScratchpadLinkJob implements ShouldQueue
         } else {
             $leaseId = (new ClaimTelegramPostWorkAction)->acquire($requestId, $this->workLeaseId);
             if ($leaseId === null) {
-                return;
+                $request = TelegramPostRequest::query()->whereKey($requestId)->first();
+
+                if ($request?->state !== TelegramPostRequest::CANCELLED) {
+                    return;
+                }
+
+                // A queued contextual job can start after /cancel. Finish
+                // enriching the source capture without reviving the request.
+                if ($this->workLeaseId !== null) {
+                    (new ClaimTelegramPostWorkAction)->clear($requestId, $this->workLeaseId);
+                }
+                $requestId = null;
+                $this->workRequestId = null;
+                $this->workLeaseId = null;
             }
 
-            $this->workLeaseId = $leaseId;
+            if ($requestId !== null) {
+                $this->workLeaseId = $leaseId;
+            }
         }
 
         $action->handle($this->entry);
@@ -84,11 +99,28 @@ class ResolveScratchpadLinkJob implements ShouldQueue
             && $this->workLeaseId !== null
             && ! (new ClaimTelegramPostWorkAction)->renew($requestId, $this->workLeaseId)
         ) {
-            return;
+            $request = TelegramPostRequest::query()->whereKey($requestId)->first();
+
+            if ($request?->state !== TelegramPostRequest::CANCELLED) {
+                return;
+            }
+
+            // Resolution completed, but cancellation won the post-work race.
+            // Continue with source-only enrichment and never queue generation.
+            (new ClaimTelegramPostWorkAction)->clear($requestId, $this->workLeaseId);
+            $requestId = null;
+            $this->workRequestId = null;
+            $this->workLeaseId = null;
         }
 
         if (($this->entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
-            SummarizeCaptureJob::dispatch($this->entry);
+            try {
+                SummarizeCaptureJob::dispatch($this->entry);
+            } catch (Throwable $exception) {
+                // Summarization is optional. Generation has its own durable
+                // recovery path and must not depend on this enqueue.
+                report($exception);
+            }
             $this->queueGeneration($requestId, $this->workLeaseId);
 
             return;

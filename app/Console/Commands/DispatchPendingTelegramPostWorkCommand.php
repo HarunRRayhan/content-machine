@@ -7,6 +7,7 @@ use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Jobs\TranscribeVoiceNoteJob;
+use App\Models\ScratchpadEntry;
 use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use Illuminate\Console\Command;
@@ -24,18 +25,30 @@ class DispatchPendingTelegramPostWorkCommand extends Command
         $limit = max(1, (int) $this->option('limit'));
         $dispatched = 0;
         $claimAction = new ClaimTelegramPostWorkAction;
+        $staleAt = now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS);
+        $claimedRequests = 0;
 
         TelegramPostRequest::query()
             ->where('state', TelegramPostRequest::GENERATING)
             ->whereNotNull('source_scratchpad_entry_id')
-            ->orderBy('id')
-            ->limit($limit)
-            ->get()
-            ->each(function (TelegramPostRequest $candidate) use (&$dispatched, $claimAction): void {
+            ->where(function ($query) use ($staleAt): void {
+                $query
+                    ->whereNull('work_lease_id')
+                    ->orWhereNull('work_claimed_at')
+                    ->orWhere('work_claimed_at', '<=', $staleAt);
+            })
+            ->lazyById()
+            ->each(function (TelegramPostRequest $candidate) use (&$dispatched, &$claimedRequests, $claimAction, $limit) {
+                if ($claimedRequests >= $limit) {
+                    return false;
+                }
+
                 $leaseId = $claimAction->claim($candidate->id);
                 if ($leaseId === null) {
                     return;
                 }
+
+                $claimedRequests++;
 
                 $request = TelegramPostRequest::query()
                     ->with('sourceEntry.transcriptions')
@@ -103,24 +116,53 @@ class DispatchPendingTelegramPostWorkCommand extends Command
             ->whereHas('scratchpadEntry', fn ($query) => $query
                 ->where('source', 'telegram')
                 ->where('kind', 'voice'))
+            ->whereNotExists(function ($query): void {
+                $query
+                    ->selectRaw('1')
+                    ->from('telegram_post_requests')
+                    ->whereColumn(
+                        'telegram_post_requests.source_scratchpad_entry_id',
+                        'transcriptions.scratchpad_entry_id',
+                    )
+                    ->where('telegram_post_requests.state', TelegramPostRequest::GENERATING);
+            })
             ->with('scratchpadEntry')
-            ->orderBy('id')
             ->limit($limit)
-            ->get()
+            ->lazyById()
             ->each(function (Transcription $transcription) use (&$dispatched): void {
                 $entryId = $transcription->scratchpad_entry_id;
 
-                if ($entryId === null
-                    || TelegramPostRequest::query()
-                        ->where('source_scratchpad_entry_id', $entryId)
-                        ->where('state', TelegramPostRequest::GENERATING)
-                        ->exists()
-                ) {
+                if ($entryId === null) {
                     return;
                 }
 
                 try {
                     TranscribeVoiceNoteJob::dispatch($transcription);
+                    $dispatched++;
+                } catch (Throwable $exception) {
+                    report($exception);
+                }
+            });
+
+        ScratchpadEntry::query()
+            ->where('source', 'telegram')
+            ->where('kind', 'link')
+            ->whereNull('meta->resolved_kind')
+            ->whereNotExists(function ($query): void {
+                $query
+                    ->selectRaw('1')
+                    ->from('telegram_post_requests')
+                    ->whereColumn(
+                        'telegram_post_requests.source_scratchpad_entry_id',
+                        'scratchpad_entries.id',
+                    )
+                    ->where('telegram_post_requests.state', TelegramPostRequest::GENERATING);
+            })
+            ->limit($limit)
+            ->lazyById()
+            ->each(function (ScratchpadEntry $entry) use (&$dispatched): void {
+                try {
+                    ResolveScratchpadLinkJob::dispatch($entry);
                     $dispatched++;
                 } catch (Throwable $exception) {
                     report($exception);

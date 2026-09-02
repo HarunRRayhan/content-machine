@@ -11,6 +11,7 @@ use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramClientContract;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
@@ -37,15 +38,15 @@ class TranscribeVoiceNoteJobTest extends TestCase
         (new TranscribeVoiceNoteJob($transcription))->handle($action);
     }
 
-    public function test_duplicate_recovery_jobs_share_a_unique_key(): void
+    public function test_recovery_jobs_use_the_shared_overlap_lock_instead_of_a_unique_dispatch_lock(): void
     {
         $mediaAsset = MediaAsset::factory()->create();
         $transcription = Transcription::factory()->create(['media_asset_id' => $mediaAsset->id]);
 
         $job = new TranscribeVoiceNoteJob($transcription);
 
-        $this->assertSame('voice-transcription:'.$transcription->id, $job->uniqueId());
-        $this->assertSame(TranscribeVoiceNoteJob::UNIQUE_FOR_SECONDS, $job->uniqueFor());
+        $this->assertNotInstanceOf(ShouldBeUnique::class, $job);
+        $this->assertCount(1, $job->middleware());
     }
 
     public function test_failed_marks_a_telegram_post_request_as_failed(): void
