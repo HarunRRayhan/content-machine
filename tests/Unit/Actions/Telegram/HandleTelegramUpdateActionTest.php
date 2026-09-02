@@ -22,6 +22,7 @@ use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\TelegramLinkCode;
+use App\Models\TelegramOutboundMessage;
 use App\Models\TelegramPostRequest;
 use App\Models\User;
 use App\Models\Video;
@@ -29,6 +30,7 @@ use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
@@ -41,9 +43,12 @@ class HandleTelegramUpdateActionTest extends TestCase
 
     private FakeTelegramClient $client;
 
+    private int $nextUpdateId = 0;
+
     private function action(?AiCompletionClientContract $completionClient = null): HandleTelegramUpdateAction
     {
         $this->client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $this->client);
 
         $completionClient ??= new class implements AiCompletionClientContract
         {
@@ -73,7 +78,7 @@ class HandleTelegramUpdateActionTest extends TestCase
     private function update(int $fromId, string $text, int $chatId = 555): array
     {
         return [
-            'update_id' => 1,
+            'update_id' => ++$this->nextUpdateId,
             'message' => [
                 'message_id' => 42,
                 'chat' => ['id' => $chatId],
@@ -85,7 +90,36 @@ class HandleTelegramUpdateActionTest extends TestCase
 
     private function lastReply(): string
     {
-        return $this->client->sentMessages[count($this->client->sentMessages) - 1]['text'];
+        $messages = $this->outboundMessages();
+
+        return $messages[count($messages) - 1]['text'];
+    }
+
+    /**
+     * The test database wraps each test in a transaction, so after-commit
+     * delivery jobs are intentionally not run here. Read the committed
+     * outbox rows instead of pretending Telegram was called inline.
+     *
+     * @return list<array{botToken: string|null, chatId: int, text: string}>
+     */
+    private function outboundMessages(): array
+    {
+        $messages = [];
+
+        foreach (TelegramOutboundMessage::query()->with('telegramBotConfig')->orderBy('id')->get() as $message) {
+            $chunk = $message->chunks[0] ?? null;
+            if (! is_string($chunk)) {
+                continue;
+            }
+
+            $messages[] = [
+                'botToken' => $message->telegramBotConfig?->bot_token,
+                'chatId' => $message->chat_id,
+                'text' => $chunk,
+            ];
+        }
+
+        return $messages;
     }
 
     public function test_an_unlinked_sender_sending_plain_text_is_asked_to_link_and_nothing_is_captured()
@@ -321,7 +355,7 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->action()->handle($config, $this->update(1, '/posts@other_bot'));
 
-        $this->assertSame([], $this->client->sentMessages);
+        $this->assertSame([], $this->outboundMessages());
     }
 
     public function test_a_command_suffix_matching_this_bot_is_routed(): void
@@ -477,7 +511,7 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->action($completionClient)->handle($config, $this->update(1, 'got any ideas?'));
 
-        $messages = array_column($this->client->sentMessages, 'text');
+        $messages = array_column($this->outboundMessages(), 'text');
         $this->assertContains("Couldn't generate a chat reply right now, so I saved this as a note instead.", $messages);
         $this->assertSame('Captured.', end($messages));
 

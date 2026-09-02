@@ -99,8 +99,16 @@ class StartTelegramPostAction
                     || $request->telegram_bot_config_id !== $lockedConfig->id
                     || $request->telegram_user_id !== $telegramUserId
                     || $request->telegram_chat_id !== $chatId
+                    || ($request->webhook_generation !== null
+                        && $request->webhook_generation !== $lockedConfig->webhook_generation)
                 ) {
                     throw new \RuntimeException('This Telegram post request is no longer awaiting input.');
+                }
+
+                if ($request->webhook_generation === null && $lockedConfig->webhook_generation !== null) {
+                    $request->forceFill([
+                        'webhook_generation' => $lockedConfig->webhook_generation,
+                    ])->save();
                 }
             } else {
                 TelegramPostRequest::query()
@@ -157,6 +165,7 @@ class StartTelegramPostAction
                 'telegram_user_id' => $telegramUserId,
                 'telegram_chat_id' => $chatId,
                 'telegram_update_key' => $telegramUpdateKey,
+                'webhook_generation' => $lockedConfig->webhook_generation,
                 'state' => TelegramPostRequest::AWAITING_INPUT,
                 'instruction' => null,
             ]);
@@ -172,6 +181,7 @@ class StartTelegramPostAction
                     'source_scratchpad_entry_id' => $entry->id,
                     'state' => TelegramPostRequest::GENERATING,
                     'instruction' => $instruction !== null && $instruction !== '' ? $instruction : null,
+                    'webhook_generation' => $lockedConfig->webhook_generation,
                     'error_message' => null,
                     'cancelled_at' => null,
                 ]);
@@ -265,8 +275,14 @@ class StartTelegramPostAction
 
     private function queueSourceWork(ScratchpadEntry $entry, TelegramPostRequest $request): void
     {
+        $leaseId = (new ClaimTelegramPostWorkAction)->claim($request->id);
+
+        if ($leaseId === null) {
+            return;
+        }
+
         if ($entry->kind === 'link') {
-            ResolveScratchpadLinkJob::dispatch($entry)->afterCommit();
+            ResolveScratchpadLinkJob::dispatch($entry, $request->id, $leaseId)->afterCommit();
 
             return;
         }
@@ -278,13 +294,15 @@ class StartTelegramPostAction
                 throw new \RuntimeException('The audio transcription record is missing.');
             }
 
-            TranscribeVoiceNoteJob::dispatch($transcription)->afterCommit();
+            TranscribeVoiceNoteJob::dispatch($transcription, $request->id, $leaseId)->afterCommit();
 
             return;
         }
 
         if ($this->canGenerateNow($entry)) {
-            GenerateTelegramPostJob::dispatch($request->id)->afterCommit();
+            GenerateTelegramPostJob::dispatch($request->id, $leaseId)->afterCommit();
+        } else {
+            (new ClaimTelegramPostWorkAction)->release($request->id, $leaseId);
         }
     }
 }

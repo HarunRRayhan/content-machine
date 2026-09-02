@@ -36,6 +36,7 @@ class PublishVideoActionTest extends TestCase
     {
         PostsyncerConfig::write($workspace, [
             'api_key' => 'test-api-key',
+            'video_publish_enabled' => true,
             'languages' => [
                 'bangla' => [
                     'workspace_id' => '15211',

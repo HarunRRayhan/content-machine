@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Workspace;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 
@@ -24,10 +25,27 @@ class DeployCommand extends Command
 
     public function handle(): int
     {
-        $this->ensureScratchpadUploadsDirectory();
-        $this->call('migrate', ['--force' => true]);
-        $this->call('cm:sync-presentation-library');
-        $this->call('cm:ensure-admin');
+        if (! $this->ensureScratchpadUploadsDirectory()) {
+            return self::FAILURE;
+        }
+
+        if ($this->call('migrate', ['--force' => true]) !== self::SUCCESS) {
+            return self::FAILURE;
+        }
+
+        // EnsureAdminUser creates the first workspace on a fresh install;
+        // presentation sync must run after that workspace exists.
+        if ($this->call('cm:ensure-admin') !== self::SUCCESS) {
+            return self::FAILURE;
+        }
+
+        // A fresh instance without ADMIN_EMAIL has no workspace yet. There
+        // is nothing to sync, and that must not make the deploy fail.
+        if (Workspace::query()->exists()
+            && $this->call('cm:sync-presentation-library') !== self::SUCCESS
+        ) {
+            return self::FAILURE;
+        }
 
         return self::SUCCESS;
     }
@@ -39,19 +57,21 @@ class DeployCommand extends Command
      * the first photo/post-image write does not have to mkdir under a
      * root-owned mount as www-data.
      */
-    private function ensureScratchpadUploadsDirectory(): void
+    private function ensureScratchpadUploadsDirectory(): bool
     {
         $root = Storage::disk('scratchpad')->path('');
 
         if (! is_dir($root) && ! mkdir($root, 0775, true) && ! is_dir($root)) {
             $this->warn("Could not create scratchpad uploads directory at {$root}");
 
-            return;
+            return false;
         }
 
         if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
             @chown($root, 'www-data');
             @chgrp($root, 'www-data');
         }
+
+        return is_dir($root) && is_writable($root);
     }
 }

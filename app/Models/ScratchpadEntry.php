@@ -26,6 +26,7 @@ use Illuminate\Support\Str;
  * @property CarbonImmutable $captured_at
  * @property string $source
  * @property string|null $telegram_update_key
+ * @property string|null $webhook_generation
  * @property string|null $language
  * @property string|null $title
  * @property string|null $body
@@ -55,6 +56,7 @@ class ScratchpadEntry extends Model
         'captured_at',
         'source',
         'telegram_update_key',
+        'webhook_generation',
         'language',
         'title',
         'body',

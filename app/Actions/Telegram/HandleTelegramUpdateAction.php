@@ -57,6 +57,10 @@ use Throwable;
  */
 class HandleTelegramUpdateAction
 {
+    private ?string $replyContextKey = null;
+
+    private int $replySlot = 0;
+
     private const HELP_TEXT = <<<'TEXT'
         Here's what I can do:
 
@@ -68,7 +72,7 @@ class HandleTelegramUpdateAction
         /note <text>: save a Scratch Pad note
         /post <text>: create a draft, or send the next photo/voice/audio
         /approve P-123: approve a generated draft
-        /post_now P-123: publish an approved draft now
+        /post_now P-123 (or /post-now P-123): publish an approved draft now
         /schedule P-123 YYYY-MM-DD HH:MM: schedule an approved draft
         /cancel: cancel the pending draft request
         /clearnotes: delete your workspace's most recent untriaged Scratch Pad notes
@@ -95,12 +99,13 @@ class HandleTelegramUpdateAction
         private readonly ?ApprovePostAction $approvePostAction = null,
         private readonly ?EnqueuePostPublishAction $enqueuePostPublishAction = null,
         private readonly ?CancelTelegramPostRequestAction $cancelTelegramPostRequestAction = null,
+        private readonly ?QueueTelegramMessageAction $queueTelegramMessageAction = null,
     ) {}
 
     /**
      * @param  array<string, mixed>  $update
      */
-    public function handle(TelegramBotConfig $config, array $update): void
+    public function handle(TelegramBotConfig $config, array $update, ?string $dispatchLeaseId = null): void
     {
         $message = $update['message'] ?? null;
 
@@ -118,6 +123,9 @@ class HandleTelegramUpdateAction
         }
 
         $telegramUpdateKey = TelegramUpdateKey::from($config, $update);
+        $this->replyContextKey = $telegramUpdateKey
+            ?? hash('sha256', $config->id.':'.serialize($update));
+        $this->replySlot = 0;
 
         $messageId = $message['message_id'] ?? null;
         $this->acknowledge($config, $chatId, is_int($messageId) ? $messageId : null);
@@ -125,7 +133,7 @@ class HandleTelegramUpdateAction
         $text = $this->messageText($message);
 
         if ($text !== null && str_starts_with($text, '/')) {
-            $this->handleCommand($config, $chatId, $fromUserId, $fromUsername, $text, $update, $telegramUpdateKey);
+            $this->handleCommand($config, $chatId, $fromUserId, $fromUsername, $text, $update, $telegramUpdateKey, $dispatchLeaseId);
 
             return;
         }
@@ -141,17 +149,19 @@ class HandleTelegramUpdateAction
         $pendingRequest = $this->pendingInputRequest($config, $fromUserId, $chatId);
 
         if ($pendingRequest !== null) {
-            $request = $this->startPostAction()->handle(
-                $config,
-                $link,
-                $chatId,
-                $fromUserId,
-                $update,
-                null,
-                $pendingRequest,
-            );
+            DB::transaction(function () use ($config, $link, $chatId, $fromUserId, $update, $pendingRequest): void {
+                $request = $this->startPostAction()->handle(
+                    $config,
+                    $link,
+                    $chatId,
+                    $fromUserId,
+                    $update,
+                    null,
+                    $pendingRequest,
+                );
 
-            $this->reply($config, $chatId, $this->postStartReply($request));
+                $this->reply($config, $chatId, $this->postStartReply($request));
+            });
 
             return;
         }
@@ -161,7 +171,13 @@ class HandleTelegramUpdateAction
             $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
 
             if ($intent !== null) {
-                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent, $update));
+                if ($intent === 'clear_notes') {
+                    $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
+
+                    return;
+                }
+
+                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
 
                 return;
             }
@@ -237,6 +253,7 @@ class HandleTelegramUpdateAction
         string $text,
         array $update,
         ?string $telegramUpdateKey,
+        ?string $dispatchLeaseId,
     ): void {
         $parsed = $this->parseCommand($text, $config->bot_username);
 
@@ -287,7 +304,7 @@ class HandleTelegramUpdateAction
             '/post_now' => $this->handlePostNow($config, $link, $chatId, $fromUserId, $args),
             '/schedule' => $this->handleSchedule($config, $link, $chatId, $fromUserId, $args),
             '/cancel' => $this->handleCancel($config, $chatId, $fromUserId, $args),
-            '/clearnotes' => $this->reply($config, $chatId, $this->intentReply($config, $link, 'clear_notes', $update)),
+            '/clearnotes' => $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId),
             default => $this->reply($config, $chatId, 'Unknown command. Try /help.'),
         };
     }
@@ -298,25 +315,20 @@ class HandleTelegramUpdateAction
      * by typing that command or by ResolveTelegramIntentAction recognizing
      * the same request in plain language. $intent is always one of
      * ResolveTelegramIntentAction::KNOWN_INTENTS or the literal command
-     * names above, never model-chosen free text. Every branch but
-     * clear_notes is a pure lookup; clear_notes deletes, same as typing
-     * /clearnotes would.
-     */
-    /**
-     * @param  array<string, mixed>|null  $update
+     * names above, never model-chosen free text. Every branch is a pure
+     * lookup; the destructive clear_notes intent is handled separately so
+     * its deletion and reply commit together.
      */
     private function intentReply(
         TelegramBotConfig $config,
         TelegramBotLink $link,
         string $intent,
-        ?array $update = null,
     ): string {
         return match ($intent) {
             'me' => "You're linked as {$link->user->name} ({$link->user->email}).",
             'videos' => $this->recentVideos($config),
             'posts' => $this->recentPosts($config),
             'notes' => $this->recentNotes($config),
-            'clear_notes' => $this->clearNotes($config, $update),
             default => 'Unknown command. Try /help.',
         };
     }
@@ -332,14 +344,16 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            $link = $this->linkTelegramAccountAction->handle($config, $code, $fromUserId, $fromUsername);
+            DB::transaction(function () use ($config, $chatId, $fromUserId, $fromUsername, $code): void {
+                $link = $this->linkTelegramAccountAction->handle($config, $code, $fromUserId, $fromUsername);
+
+                $this->reply($config, $chatId, "✅ Linked as {$link->user->name}. Send /help to see what I can do.");
+            });
         } catch (RuntimeException $e) {
             $this->reply($config, $chatId, $e->getMessage());
 
             return;
         }
-
-        $this->reply($config, $chatId, "✅ Linked as {$link->user->name}. Send /help to see what I can do.");
     }
 
     private function handleNote(TelegramBotConfig $config, int $chatId, string $args, ?string $telegramUpdateKey): void
@@ -361,27 +375,30 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            if ($telegramUpdateKey !== null
-                && ScratchpadEntry::query()
-                    ->where('telegram_update_key', $telegramUpdateKey)
-                    ->exists()
-            ) {
+            DB::transaction(function () use ($config, $chatId, $body, $telegramUpdateKey): void {
+                if ($telegramUpdateKey !== null
+                    && ScratchpadEntry::query()
+                        ->where('telegram_update_key', $telegramUpdateKey)
+                        ->exists()
+                ) {
+                    $this->reply($config, $chatId, 'Captured.');
+
+                    return;
+                }
+
+                $this->captureTextNoteAction->handle(
+                    $config->workspace,
+                    null,
+                    CaptureTextNoteData::fromTelegram($body),
+                    $telegramUpdateKey,
+                    $config->webhook_generation,
+                );
+
                 $this->reply($config, $chatId, 'Captured.');
-
-                return;
-            }
-
-            $this->captureTextNoteAction->handle(
-                $config->workspace,
-                null,
-                CaptureTextNoteData::fromTelegram($body),
-                $telegramUpdateKey,
-            );
+            });
         } finally {
             $lock?->release();
         }
-
-        $this->reply($config, $chatId, 'Captured.');
     }
 
     /**
@@ -393,7 +410,7 @@ class HandleTelegramUpdateAction
         [$command, $args] = array_pad(preg_split('/\s+/', trim($text), 2) ?: [], 2, '');
         $matches = [];
 
-        if (preg_match('/^\/([a-z0-9_]{1,32})(?:@([a-z][a-z0-9_]{4,31}))?$/i', $command, $matches) !== 1) {
+        if (preg_match('/^\/([a-z0-9_-]{1,32})(?:@([a-z][a-z0-9_]{4,31}))?$/i', $command, $matches) !== 1) {
             return ['/invalid', trim($args)];
         }
 
@@ -406,7 +423,7 @@ class HandleTelegramUpdateAction
             }
         }
 
-        $command = '/'.strtolower($matches[1]);
+        $command = '/'.str_replace('-', '_', strtolower($matches[1]));
 
         return [$command, trim($args)];
     }
@@ -439,16 +456,18 @@ class HandleTelegramUpdateAction
         // An empty string deliberately clears `/post` from a media caption or
         // text message before capture. With no media/text left, Start creates
         // the durable awaiting-input request instead.
-        $request = $this->startPostAction()->handle(
-            $config,
-            $link,
-            $chatId,
-            $telegramUserId,
-            $update,
-            $args,
-        );
+        DB::transaction(function () use ($config, $link, $chatId, $telegramUserId, $update, $args): void {
+            $request = $this->startPostAction()->handle(
+                $config,
+                $link,
+                $chatId,
+                $telegramUserId,
+                $update,
+                $args,
+            );
 
-        $this->reply($config, $chatId, $this->postStartReply($request));
+            $this->reply($config, $chatId, $this->postStartReply($request));
+        });
     }
 
     private function postStartReply(TelegramPostRequest $request): string
@@ -488,21 +507,23 @@ class HandleTelegramUpdateAction
         $post = $request->post;
 
         try {
-            $approved = $this->approvePostAction()->handle(
-                $post,
-                $link->user,
-                $request,
-                $config,
-                $telegramUserId,
-                $chatId,
-            );
+            DB::transaction(function () use ($post, $link, $request, $config, $telegramUserId, $chatId): void {
+                $approved = $this->approvePostAction()->handle(
+                    $post,
+                    $link->user,
+                    $request,
+                    $config,
+                    $telegramUserId,
+                    $chatId,
+                );
+
+                $this->reply($config, $chatId, "✅ {$approved->human_id} approved. Send /post_now {$approved->human_id} or /schedule {$approved->human_id} YYYY-MM-DD HH:MM.");
+            });
         } catch (RuntimeException $exception) {
             $this->reply($config, $chatId, $exception->getMessage());
 
             return;
         }
-
-        $this->reply($config, $chatId, "✅ {$approved->human_id} approved. Send /post_now {$approved->human_id} or /schedule {$approved->human_id} YYYY-MM-DD HH:MM.");
     }
 
     private function handlePostNow(
@@ -532,10 +553,14 @@ class HandleTelegramUpdateAction
         $post = $request->post;
 
         try {
-            $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
-                'confirm_ask' => true,
-                'telegram_request_id' => $request->id,
-            ]);
+            DB::transaction(function () use ($post, $config, $request, $chatId): void {
+                $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
+                    'confirm_ask' => true,
+                    'telegram_request_id' => $request->id,
+                ]);
+
+                $this->reply($config, $chatId, "🚀 {$post->human_id} is queued for immediate publishing.");
+            });
         } catch (ValidationException $exception) {
             $this->reply($config, $chatId, $this->validationMessage($exception));
 
@@ -546,7 +571,6 @@ class HandleTelegramUpdateAction
             return;
         }
 
-        $this->reply($config, $chatId, "🚀 {$post->human_id} is queued for immediate publishing.");
     }
 
     private function handleSchedule(
@@ -585,11 +609,15 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
-                'when' => $when,
-                'confirm_ask' => true,
-                'telegram_request_id' => $request->id,
-            ]);
+            DB::transaction(function () use ($post, $config, $request, $chatId, $when): void {
+                $this->enqueuePostPublishAction()->handle($post, $config->workspace, [
+                    'when' => $when,
+                    'confirm_ask' => true,
+                    'telegram_request_id' => $request->id,
+                ]);
+
+                $this->reply($config, $chatId, "🗓️ {$post->human_id} is queued for {$when} ({$config->workspace->timezone}).");
+            });
         } catch (ValidationException $exception) {
             $this->reply($config, $chatId, $this->validationMessage($exception));
 
@@ -600,7 +628,6 @@ class HandleTelegramUpdateAction
             return;
         }
 
-        $this->reply($config, $chatId, "🗓️ {$post->human_id} is queued for {$when} ({$config->workspace->timezone}).");
     }
 
     private function handleCancel(TelegramBotConfig $config, int $chatId, int $telegramUserId, string $args): void
@@ -627,24 +654,27 @@ class HandleTelegramUpdateAction
         }
 
         try {
-            $cancelled = $this->cancelPostRequestAction()->handle(
-                $request,
-                $config,
-                $telegramUserId,
-                $chatId,
-            );
+            DB::transaction(function () use ($request, $config, $telegramUserId, $chatId): void {
+                $cancelled = $this->cancelPostRequestAction()->handle(
+                    $request,
+                    $config,
+                    $telegramUserId,
+                    $chatId,
+                );
+
+                $this->reply(
+                    $config,
+                    $chatId,
+                    $cancelled->state === TelegramPostRequest::CANCELLED
+                        ? 'Cancelled the pending Telegram post request. The source capture and any draft remain in Content Machine.'
+                        : 'That post is already being published, so I did not cancel it.',
+                );
+            });
         } catch (RuntimeException) {
             $this->reply($config, $chatId, 'There is no pending Telegram post request to cancel.');
 
             return;
         }
-        $this->reply(
-            $config,
-            $chatId,
-            $cancelled->state === TelegramPostRequest::CANCELLED
-                ? 'Cancelled the pending Telegram post request. The source capture and any draft remain in Content Machine.'
-                : 'That post is already being published, so I did not cancel it.',
-        );
     }
 
     /**
@@ -835,29 +865,29 @@ class HandleTelegramUpdateAction
     }
 
     /**
-     * Deletes the same set /notes just listed (the workspace's most recent
-     * untriaged captures) via DeleteRecentScratchpadEntriesAction. Being
-     * linked (TelegramBotLink, already checked before this runs) is the
-     * only permission gate this bot has for any command; there's no
-     * per-note ownership to check beyond that.
-     */
-    /**
+     * Delete the same set /notes just listed and queue its reply in the same
+     * transaction. Being linked is the only permission gate for this command.
+     * If processing dies after commit, the processed marker prevents a replay
+     * from deleting a newer batch of notes.
+     *
      * @param  array<string, mixed>|null  $update
      */
-    private function clearNotes(TelegramBotConfig $config, ?array $update = null): string
-    {
-        $deleted = DB::transaction(function () use ($config, $update): int {
+    private function handleClearNotes(
+        TelegramBotConfig $config,
+        int $chatId,
+        ?array $update = null,
+        ?string $dispatchLeaseId = null,
+    ): void {
+        DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId): void {
             $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
-            $this->markUpdateProcessed($config, $update);
+            $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
 
-            return $deleted;
+            $this->reply($config, $chatId, match (true) {
+                $deleted === 0 => 'No notes to delete.',
+                $deleted === 1 => 'Deleted 1 note.',
+                default => "Deleted {$deleted} notes.",
+            });
         });
-
-        return match (true) {
-            $deleted === 0 => 'No notes to delete.',
-            $deleted === 1 => 'Deleted 1 note.',
-            default => "Deleted {$deleted} notes.",
-        };
     }
 
     /**
@@ -867,8 +897,11 @@ class HandleTelegramUpdateAction
      *
      * @param  array<string, mixed>|null  $update
      */
-    private function markUpdateProcessed(TelegramBotConfig $config, ?array $update): void
-    {
+    private function markUpdateProcessed(
+        TelegramBotConfig $config,
+        ?array $update,
+        ?string $dispatchLeaseId = null,
+    ): void {
         $updateId = $update['update_id'] ?? null;
 
         if (! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId))) {
@@ -879,13 +912,29 @@ class HandleTelegramUpdateAction
             ->where('telegram_bot_config_id', $config->id)
             ->where('update_id', (int) $updateId);
 
+        $query
+            ->whereNull('processed_at')
+            ->whereNull('failed_at')
+            ->whereNull('discarded_at');
+
         if ($config->webhook_generation !== null) {
             $query->where('webhook_generation', $config->webhook_generation);
         } else {
             $query->whereNull('webhook_generation');
         }
 
-        $query->update(['processed_at' => now()]);
+        if ($dispatchLeaseId !== null) {
+            $query->where('dispatch_lease_id', $dispatchLeaseId);
+        } else {
+            $query->whereNull('dispatch_lease_id');
+        }
+
+        $query->update([
+            'processed_at' => now(),
+            'dispatch_claimed_at' => null,
+            'dispatch_lease_id' => null,
+            'updated_at' => now(),
+        ]);
     }
 
     private function helpText(TelegramBotConfig $config): string
@@ -901,7 +950,14 @@ class HandleTelegramUpdateAction
     private function reply(TelegramBotConfig $config, int $chatId, string $text): void
     {
         if ($config->bot_token !== null) {
-            $this->client->sendMessage($config->bot_token, $chatId, $text);
+            $slot = $this->replySlot++;
+            ($this->queueTelegramMessageAction ?? new QueueTelegramMessageAction)->handle(
+                $config,
+                $chatId,
+                $text,
+                'telegram:update:'.($this->replyContextKey ?? hash('sha256', $config->id.':'.$chatId)).':reply:'.$slot,
+                $config->webhook_generation,
+            );
         }
     }
 }

@@ -5,10 +5,12 @@ namespace Tests\Unit\Jobs;
 use App\Actions\Telegram\GenerateTelegramPostAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
 use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
@@ -28,6 +30,7 @@ class GenerateTelegramPostJobTest extends TestCase
 
     public function test_failed_marks_a_generating_request_as_failed(): void
     {
+        Queue::fake();
         $workspace = Workspace::factory()->create();
         $config = TelegramBotConfig::factory()->connected()->create([
             'workspace_id' => $workspace->id,
@@ -45,6 +48,7 @@ class GenerateTelegramPostJobTest extends TestCase
         (new GenerateTelegramPostJob($request->id))->failed(new RuntimeException('provider crashed'));
 
         $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
-        $this->assertStringContainsString('unexpected error', $client->sentMessages[0]['text']);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertStringContainsString('unexpected error', $message->chunks[0]);
     }
 }

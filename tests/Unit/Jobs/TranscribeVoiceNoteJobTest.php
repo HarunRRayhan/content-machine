@@ -27,9 +27,11 @@ class TranscribeVoiceNoteJobTest extends TestCase
         $transcription = Transcription::factory()->create(['media_asset_id' => $mediaAsset->id]);
 
         $action = Mockery::mock(TranscribeVoiceNoteAction::class);
-        $action->shouldReceive('handle')->once()->with(Mockery::on(
-            fn (Transcription $t) => $t->is($transcription)
-        ));
+        $action->shouldReceive('handle')->once()->with(
+            Mockery::on(fn (Transcription $t) => $t->is($transcription)),
+            null,
+            null,
+        );
 
         (new TranscribeVoiceNoteJob($transcription))->handle($action);
     }

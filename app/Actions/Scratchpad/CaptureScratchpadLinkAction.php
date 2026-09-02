@@ -27,13 +27,15 @@ class CaptureScratchpadLinkAction
         CaptureScratchpadLinkData $data,
         bool $queueResolution = true,
         ?string $telegramUpdateKey = null,
+        ?string $webhookGeneration = null,
     ): ScratchpadEntry {
-        return DB::transaction(function () use ($workspace, $data, $queueResolution, $telegramUpdateKey): ScratchpadEntry {
+        return DB::transaction(function () use ($workspace, $data, $queueResolution, $telegramUpdateKey, $webhookGeneration): ScratchpadEntry {
             $entry = ScratchpadEntry::create([
                 'workspace_id' => $workspace->id,
                 'kind' => 'link',
                 'source' => $data->source,
                 'telegram_update_key' => $telegramUpdateKey,
+                'webhook_generation' => $webhookGeneration,
                 'captured_at' => now(),
                 'body' => $data->url,
                 'language' => $data->language,

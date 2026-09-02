@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -35,6 +36,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
     private function action(): HandleTelegramUpdateAction
     {
         $client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $client);
         $completionClient = new class implements AiCompletionClientContract
         {
             public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
@@ -74,8 +76,14 @@ class ProcessTelegramUpdateJobTest extends TestCase
                 'text' => 'A captured note.',
             ],
         ];
+        TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 1,
+            'payload' => $update,
+        ]);
 
-        (new ProcessTelegramUpdateJob($config->id, $update))->handle($this->action());
+        (new ProcessTelegramUpdateJob($config->id, $update, $config->webhook_generation))->handle($this->action());
 
         $this->assertSame(1, ScratchpadEntry::count());
     }
@@ -144,11 +152,12 @@ class ProcessTelegramUpdateJobTest extends TestCase
         ];
         TelegramUpdate::create([
             'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
             'update_id' => 42,
             'payload' => $payload,
         ]);
 
-        $job = new ProcessTelegramUpdateJob($config->id, $payload);
+        $job = new ProcessTelegramUpdateJob($config->id, $payload, $config->webhook_generation);
         $action = $this->action();
         $job->handle($action);
         $job->handle($action);

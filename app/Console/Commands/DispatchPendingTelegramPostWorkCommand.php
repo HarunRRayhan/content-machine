@@ -2,12 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Actions\Telegram\ClaimTelegramPostWorkAction;
+use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Jobs\TranscribeVoiceNoteJob;
 use App\Models\TelegramPostRequest;
-use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class DispatchPendingTelegramPostWorkCommand extends Command
 {
@@ -19,58 +22,79 @@ class DispatchPendingTelegramPostWorkCommand extends Command
     {
         $limit = max(1, (int) $this->option('limit'));
         $dispatched = 0;
+        $claimAction = new ClaimTelegramPostWorkAction;
 
         TelegramPostRequest::query()
             ->where('state', TelegramPostRequest::GENERATING)
             ->whereNotNull('source_scratchpad_entry_id')
-            ->with('sourceEntry.transcriptions')
             ->orderBy('id')
             ->limit($limit)
             ->get()
-            ->each(function (TelegramPostRequest $request) use (&$dispatched): void {
-                $entry = $request->sourceEntry;
-                if ($entry === null) {
-                    $this->failRequest($request, 'The source capture for this post request is missing.');
+            ->each(function (TelegramPostRequest $candidate) use (&$dispatched, $claimAction): void {
+                $leaseId = $claimAction->claim($candidate->id);
+                if ($leaseId === null) {
+                    return;
+                }
+
+                $request = TelegramPostRequest::query()
+                    ->with('sourceEntry.transcriptions')
+                    ->whereKey($candidate->id)
+                    ->first();
+
+                if ($request === null) {
+                    $claimAction->release($candidate->id, $leaseId);
 
                     return;
                 }
 
-                if ($entry->kind === 'link') {
-                    $resolvedKind = $entry->meta['resolved_kind'] ?? null;
+                try {
+                    $entry = $request->sourceEntry;
+                    if ($entry === null) {
+                        $this->failRequest($request, 'The source capture for this post request is missing.', $leaseId);
 
-                    if ($resolvedKind === null) {
-                        ResolveScratchpadLinkJob::dispatch($entry);
-                        $dispatched++;
-                    } elseif ($resolvedKind === 'unresolved') {
-                        $this->failRequest($request, 'I could not resolve that link, so I could not create the post draft.');
-                    } else {
-                        GenerateTelegramPostJob::dispatch($request->id);
-                        $dispatched++;
+                        return;
                     }
 
-                    return;
-                }
+                    if ($entry->kind === 'link') {
+                        $resolvedKind = $entry->meta['resolved_kind'] ?? null;
 
-                if ($entry->kind === 'voice') {
-                    $transcription = $entry->transcriptions->first();
+                        if ($resolvedKind === null) {
+                            ResolveScratchpadLinkJob::dispatch($entry, $request->id, $leaseId);
+                            $dispatched++;
+                        } elseif ($resolvedKind === 'unresolved') {
+                            $this->failRequest($request, 'I could not resolve that link, so I could not create the post draft.', $leaseId);
+                        } else {
+                            GenerateTelegramPostJob::dispatch($request->id, $leaseId);
+                            $dispatched++;
+                        }
 
-                    if ($transcription === null) {
-                        $this->failRequest($request, 'The audio transcription record is missing.');
-                    } elseif (in_array($transcription->status, ['pending', 'processing'], true)) {
-                        TranscribeVoiceNoteJob::dispatch($transcription);
-                        $dispatched++;
-                    } elseif ($transcription->status === 'done') {
-                        GenerateTelegramPostJob::dispatch($request->id);
-                        $dispatched++;
-                    } else {
-                        $this->failRequest($request, 'I could not transcribe that audio, so I could not create the post draft.');
+                        return;
                     }
 
-                    return;
-                }
+                    if ($entry->kind === 'voice') {
+                        $transcription = $entry->transcriptions->first();
 
-                GenerateTelegramPostJob::dispatch($request->id);
-                $dispatched++;
+                        if ($transcription === null) {
+                            $this->failRequest($request, 'The audio transcription record is missing.', $leaseId);
+                        } elseif (in_array($transcription->status, ['pending', 'processing'], true)) {
+                            TranscribeVoiceNoteJob::dispatch($transcription, $request->id, $leaseId);
+                            $dispatched++;
+                        } elseif ($transcription->status === 'done') {
+                            GenerateTelegramPostJob::dispatch($request->id, $leaseId);
+                            $dispatched++;
+                        } else {
+                            $this->failRequest($request, 'I could not transcribe that audio, so I could not create the post draft.', $leaseId);
+                        }
+
+                        return;
+                    }
+
+                    GenerateTelegramPostJob::dispatch($request->id, $leaseId);
+                    $dispatched++;
+                } catch (Throwable $exception) {
+                    report($exception);
+                    $claimAction->release($request->id, $leaseId);
+                }
             });
 
         $this->info("Dispatched {$dispatched} pending Telegram post work item(s).");
@@ -78,27 +102,39 @@ class DispatchPendingTelegramPostWorkCommand extends Command
         return self::SUCCESS;
     }
 
-    private function failRequest(TelegramPostRequest $request, string $message): void
+    private function failRequest(TelegramPostRequest $request, string $message, string $leaseId): void
     {
-        $updated = TelegramPostRequest::query()
-            ->whereKey($request->id)
-            ->where('state', TelegramPostRequest::GENERATING)
-            ->update([
+        DB::transaction(function () use ($request, $message, $leaseId): void {
+            $lockedRequest = TelegramPostRequest::query()
+                ->with('telegramBotConfig')
+                ->whereKey($request->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedRequest === null
+                || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                || $lockedRequest->work_lease_id !== $leaseId
+            ) {
+                return;
+            }
+
+            $lockedRequest->forceFill([
                 'state' => TelegramPostRequest::FAILED,
                 'error_message' => $message,
-            ]);
+                'work_claimed_at' => null,
+                'work_lease_id' => null,
+            ])->save();
 
-        if ($updated === 0) {
-            return;
-        }
-
-        $config = $request->telegramBotConfig;
-        if ($config !== null && $config->bot_token !== null) {
-            app(TelegramClientContract::class)->sendMessage(
-                $config->bot_token,
-                $request->telegram_chat_id,
-                "❌ {$message}",
-            );
-        }
+            $config = $lockedRequest->telegramBotConfig;
+            if ($config !== null && $config->bot_token !== null) {
+                (new QueueTelegramMessageAction)->handle(
+                    $config,
+                    $lockedRequest->telegram_chat_id,
+                    "❌ {$message}",
+                    'telegram:post-request:'.$lockedRequest->id.':generation-failure',
+                    $lockedRequest->webhook_generation,
+                );
+            }
+        });
     }
 }

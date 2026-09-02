@@ -103,6 +103,7 @@ type Props = {
     coverDriveUrl: string | null;
     publishUrl: string;
     postsyncerReady: boolean;
+    videoPublishingEnabled: boolean;
     publishState: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
@@ -227,6 +228,7 @@ export default function VideoOverview({
     coverDriveUrl,
     publishUrl,
     postsyncerReady,
+    videoPublishingEnabled,
     publishState,
     needsConfirmAsk,
     postsyncer,
@@ -320,6 +322,7 @@ export default function VideoOverview({
     const missingVideoDriveUrl =
         !hasVideoDriveUrl && studioStatus === 'recorded';
     const canSchedule =
+        videoPublishingEnabled &&
         postsyncerReady &&
         !publishBusy &&
         hasVideoDriveUrl &&
@@ -601,6 +604,15 @@ export default function VideoOverview({
                                                 <p className="schedule-it-hint">
                                                     Configure PostSyncer in
                                                     Settings before scheduling.
+                                                </p>
+                                            )}
+                                            {!videoPublishingEnabled && (
+                                                <p className="schedule-it-hint">
+                                                    Video publishing is
+                                                    temporarily disabled while
+                                                    safe retry and
+                                                    reconciliation support is
+                                                    being completed.
                                                 </p>
                                             )}
                                             {missingVideoDriveUrl && (

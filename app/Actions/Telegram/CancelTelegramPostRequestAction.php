@@ -39,6 +39,8 @@ class CancelTelegramPostRequestAction
                 || $locked->workspace_id !== $config->workspace_id
                 || $locked->telegram_user_id !== $telegramUserId
                 || $locked->telegram_chat_id !== $telegramChatId
+                || ($locked->webhook_generation !== null
+                    && $locked->webhook_generation !== $config->webhook_generation)
                 || ! TelegramBotLink::query()
                     ->where('telegram_bot_config_id', $config->id)
                     ->where('telegram_user_id', $telegramUserId)
@@ -49,6 +51,12 @@ class CancelTelegramPostRequestAction
 
             if (! in_array($locked->state, TelegramPostRequest::ACTIVE_STATES, true)) {
                 return $locked;
+            }
+
+            if ($locked->webhook_generation === null && $config->webhook_generation !== null) {
+                $locked->forceFill([
+                    'webhook_generation' => $config->webhook_generation,
+                ])->save();
             }
 
             if ($post !== null && in_array($post->publish_state, ['queued', 'running'], true)) {

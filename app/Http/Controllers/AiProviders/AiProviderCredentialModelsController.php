@@ -8,11 +8,11 @@ use App\Actions\AiProviders\ReorderAiProviderCredentialModelsAction;
 use App\Data\AiProviders\AddAiProviderCredentialModelsData;
 use App\Data\AiProviders\ReorderAiProviderCredentialModelsData;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
 use App\Http\Requests\AiProviders\AddAiProviderCredentialModelsRequest;
 use App\Http\Requests\AiProviders\ReorderAiProviderCredentialModelsRequest;
 use App\Models\AiProviderCredential;
 use App\Models\AiProviderCredentialModel;
-use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -26,9 +26,12 @@ use RuntimeException;
  */
 class AiProviderCredentialModelsController extends Controller
 {
+    use AuthorizesWorkspaceSettings;
+
     public function store(AddAiProviderCredentialModelsRequest $request, AiProviderCredential $aiProviderCredential, AddAiProviderCredentialModelsAction $addAiProviderCredentialModelsAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
 
@@ -41,7 +44,8 @@ class AiProviderCredentialModelsController extends Controller
 
     public function destroy(Request $request, AiProviderCredentialModel $aiProviderCredentialModel, RemoveAiProviderCredentialModelAction $removeAiProviderCredentialModelAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         // AiProviderCredentialModel itself carries no workspace scope (it
         // has no workspace_id column of its own), so unlike
@@ -65,7 +69,8 @@ class AiProviderCredentialModelsController extends Controller
 
     public function reorder(ReorderAiProviderCredentialModelsRequest $request, ReorderAiProviderCredentialModelsAction $reorderAiProviderCredentialModelsAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         try {
             $reorderAiProviderCredentialModelsAction->handle($workspace, ReorderAiProviderCredentialModelsData::fromRequest($request));
@@ -74,14 +79,5 @@ class AiProviderCredentialModelsController extends Controller
         }
 
         return to_route('settings.ai-providers.index');
-    }
-
-    private function currentWorkspace(Request $request): Workspace
-    {
-        $workspace = Workspace::current();
-
-        abort_if($workspace === null, 404, 'No current workspace.');
-
-        return $workspace;
     }
 }

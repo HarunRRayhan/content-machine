@@ -11,6 +11,9 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * Text, link, and command updates use the supervised default queue. Photo,
@@ -23,6 +26,15 @@ class ProcessTelegramUpdateJob implements ShouldQueue
 
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
 
+    public const DISPATCH_LEASE_SECONDS = 1020;
+
+    public int $tries = 3;
+
+    /**
+     * @var list<int>
+     */
+    public array $backoff = [10, 60, 300];
+
     /**
      * Old queued payloads do not contain generation-aware webhook fields.
      * Keep the new field explicitly initialized so those payloads deserialize
@@ -31,14 +43,21 @@ class ProcessTelegramUpdateJob implements ShouldQueue
     public ?string $webhookGeneration = null;
 
     /**
+     * Old queued payloads do not contain the recovery dispatch lease.
+     */
+    public ?string $dispatchLeaseId = null;
+
+    /**
      * @param  array<string, mixed>  $update
      */
     public function __construct(
         public readonly int $telegramBotConfigId,
         public readonly array $update,
         ?string $webhookGeneration = null,
+        ?string $dispatchLeaseId = null,
     ) {
         $this->webhookGeneration = $webhookGeneration;
+        $this->dispatchLeaseId = $dispatchLeaseId;
         $this->onQueue('default');
 
         $message = $update['message'] ?? null;
@@ -54,11 +73,19 @@ class ProcessTelegramUpdateJob implements ShouldQueue
 
     public function handle(HandleTelegramUpdateAction $action): void
     {
-        $config = TelegramBotConfig::find($this->telegramBotConfigId);
-
         $updateId = $this->update['update_id'] ?? null;
-        $record = null;
-        if (is_int($updateId) || (is_string($updateId) && ctype_digit($updateId))) {
+        if (! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId))) {
+            return;
+        }
+        $updateId = (int) $updateId;
+
+        /** @var array{config: TelegramBotConfig|null, record: TelegramUpdate|null, payload: array<string, mixed>|null}|null $state */
+        $state = DB::transaction(function () use ($updateId): ?array {
+            $config = TelegramBotConfig::query()
+                ->whereKey($this->telegramBotConfigId)
+                ->lockForUpdate()
+                ->first();
+
             $recordQuery = TelegramUpdate::query()
                 ->where('telegram_bot_config_id', $this->telegramBotConfigId)
                 ->where('update_id', (int) $updateId);
@@ -67,31 +94,72 @@ class ProcessTelegramUpdateJob implements ShouldQueue
                 $recordQuery->where('webhook_generation', $this->webhookGeneration);
             }
 
-            $record = $recordQuery->first();
-        }
+            $record = $recordQuery->lockForUpdate()->first();
 
-        if ($record?->processed_at !== null) {
+            if ($record === null
+                || $record->processed_at !== null
+                || $record->failed_at !== null
+                || $record->discarded_at !== null
+            ) {
+                return null;
+            }
+
+            $staleAt = now()->subSeconds(self::DISPATCH_LEASE_SECONDS);
+            $claimExpired = $record->dispatch_claimed_at === null
+                || $record->dispatch_claimed_at->lessThanOrEqualTo($staleAt);
+
+            if ($this->dispatchLeaseId !== null) {
+                if ($record->dispatch_lease_id !== $this->dispatchLeaseId
+                    || $record->dispatch_claimed_at === null
+                    || $claimExpired
+                ) {
+                    return null;
+                }
+            } elseif ($record->dispatch_lease_id !== null && ! $claimExpired) {
+                return null;
+            }
+
+            if ($this->dispatchLeaseId === null) {
+                $this->dispatchLeaseId = (string) Str::uuid();
+            }
+
+            if ($config === null || ! $config->isConnected()) {
+                $this->markDiscarded($record, 'The Telegram bot connection is no longer available.');
+
+                return null;
+            }
+
+            if ($record->webhook_generation === null) {
+                // Rows accepted by the old web process during the expand
+                // phase are safe to adopt only under the still-current bot
+                // identity. This preserves them instead of silently dropping
+                // a queued update.
+                $record->forceFill([
+                    'webhook_generation' => $config->webhook_generation,
+                ])->save();
+            } elseif ($record->webhook_generation !== $config->webhook_generation) {
+                $this->markDiscarded($record, 'The Telegram webhook identity changed before this update was processed.');
+
+                return null;
+            }
+
+            $payload = is_array($record->payload) ? $record->payload : $this->update;
+            $record->forceFill([
+                'dispatch_claimed_at' => now(),
+                'dispatch_lease_id' => $this->dispatchLeaseId,
+            ])->save();
+
+            return ['config' => $config, 'record' => $record, 'payload' => $payload];
+        });
+
+        if ($state === null || $state['config'] === null || $state['record'] === null || $state['payload'] === null) {
             return;
         }
 
-        // Disconnected between the webhook accepting this update and the
-        // worker picking it up: nothing to do, and definitely nothing to
-        // reply with (the token that would authenticate a reply is gone).
-        if ($config === null
-            || ! $config->isConnected()
-            || ($this->webhookGeneration !== null
-                && $config->webhook_generation !== $this->webhookGeneration)
-            || ($record !== null
-                && $record->webhook_generation !== null
-                && $record->webhook_generation !== $config->webhook_generation)
-        ) {
-            $this->markProcessed($record);
-
-            return;
-        }
-
-        $payload = is_array($record?->payload) ? $record->payload : $this->update;
-        $action->handle($config, $payload);
+        $record = $state['record'];
+        $config = $state['config'];
+        $payload = $state['payload'];
+        $action->handle($config, $payload, $this->dispatchLeaseId);
         $this->markProcessed($record);
     }
 
@@ -119,8 +187,80 @@ class ProcessTelegramUpdateJob implements ShouldQueue
         return 'telegram-update:'.$this->telegramBotConfigId.':'.$generation.':'.$updateId;
     }
 
+    public function failed(?Throwable $exception): void
+    {
+        if ($exception !== null) {
+            report($exception);
+        }
+
+        $updateId = $this->update['update_id'] ?? null;
+        if (! is_int($updateId) && ! (is_string($updateId) && ctype_digit($updateId))) {
+            return;
+        }
+        $updateId = (int) $updateId;
+
+        DB::transaction(function () use ($updateId, $exception): void {
+            $query = TelegramUpdate::query()
+                ->where('telegram_bot_config_id', $this->telegramBotConfigId)
+                ->where('update_id', (int) $updateId)
+                ->whereNull('processed_at')
+                ->whereNull('failed_at')
+                ->whereNull('discarded_at');
+
+            if ($this->webhookGeneration !== null) {
+                $query->where('webhook_generation', $this->webhookGeneration);
+            }
+
+            if ($this->dispatchLeaseId !== null) {
+                $query->where('dispatch_lease_id', $this->dispatchLeaseId);
+            } else {
+                $query->whereNull('dispatch_lease_id');
+            }
+
+            $query->update([
+                'failed_at' => now(),
+                'last_error' => $exception?->getMessage() ?: 'Telegram update processing failed after retries.',
+                'dispatch_claimed_at' => null,
+                'dispatch_lease_id' => null,
+                'updated_at' => now(),
+            ]);
+        });
+    }
+
     private function markProcessed(?TelegramUpdate $record): void
     {
-        $record?->forceFill(['processed_at' => now()])->save();
+        if ($record === null) {
+            return;
+        }
+
+        $query = TelegramUpdate::query()
+            ->whereKey($record->id)
+            ->whereNull('processed_at')
+            ->whereNull('failed_at')
+            ->whereNull('discarded_at');
+
+        if ($this->dispatchLeaseId !== null) {
+            $query->where('dispatch_lease_id', $this->dispatchLeaseId);
+        } else {
+            $query->whereNull('dispatch_lease_id');
+        }
+
+        $query->update([
+            'processed_at' => now(),
+            'dispatch_claimed_at' => null,
+            'dispatch_lease_id' => null,
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function markDiscarded(TelegramUpdate $record, string $reason): void
+    {
+        $record->forceFill([
+            'processed_at' => now(),
+            'discarded_at' => now(),
+            'last_error' => $reason,
+            'dispatch_claimed_at' => null,
+            'dispatch_lease_id' => null,
+        ])->save();
     }
 }

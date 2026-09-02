@@ -293,6 +293,7 @@ class VideosController extends Controller
             'publish_error' => $video->publish_error,
             'postsyncer' => $video->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
+            'video_publish_enabled' => $postsyncerConfig?->videoPublishEnabled() ?? false,
             'needs_confirm_ask' => $postsyncerConfig !== null
                 && app(VideoPublishPlanner::class)->needsConfirmAsk($video, $postsyncerConfig),
             'idea_id' => $video->idea_id,

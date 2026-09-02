@@ -29,15 +29,17 @@ class CaptureScratchpadPhotoAction
         ?User $capturedBy,
         CaptureScratchpadPhotoData $data,
         ?string $telegramUpdateKey = null,
+        ?string $webhookGeneration = null,
     ): ScratchpadEntry {
         $mediaAsset = $this->resolveMediaAsset($workspace, $capturedBy, $data->file, 'image');
 
-        return DB::transaction(function () use ($workspace, $mediaAsset, $data, $telegramUpdateKey) {
+        return DB::transaction(function () use ($workspace, $mediaAsset, $data, $telegramUpdateKey, $webhookGeneration) {
             $entry = ScratchpadEntry::create([
                 'workspace_id' => $workspace->id,
                 'kind' => 'photo',
                 'source' => $data->source,
                 'telegram_update_key' => $telegramUpdateKey,
+                'webhook_generation' => $webhookGeneration,
                 'captured_at' => now(),
                 'body' => $data->caption,
                 'language' => $data->language,

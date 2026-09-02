@@ -31,12 +31,14 @@ class CaptureTextNoteAction
         ?User $capturedBy,
         CaptureTextNoteData $data,
         ?string $telegramUpdateKey = null,
+        ?string $webhookGeneration = null,
     ): ScratchpadEntry {
         $entry = ScratchpadEntry::create([
             'workspace_id' => $workspace->id,
             'kind' => 'text',
             'source' => $data->source,
             'telegram_update_key' => $telegramUpdateKey,
+            'webhook_generation' => $webhookGeneration,
             'captured_at' => now(),
             'body' => $data->body,
             'language' => $data->language,

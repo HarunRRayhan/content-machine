@@ -148,4 +148,32 @@ class Post extends Model
     {
         return $this->hasMany(TelegramPostRequest::class);
     }
+
+    /**
+     * A media mutation changes the reviewed publish payload just like a text
+     * mutation. Re-open any approval that was granted for the old payload.
+     */
+    public function invalidateApproval(): void
+    {
+        if ($this->approval_state !== 'approved') {
+            return;
+        }
+
+        $this->forceFill([
+            'approval_state' => 'pending',
+            'approved_at' => null,
+            'approved_by_user_id' => null,
+        ])->save();
+
+        $this->telegramPostRequests()
+            ->whereIn('state', [
+                TelegramPostRequest::APPROVED,
+                TelegramPostRequest::FAILED,
+            ])
+            ->update([
+                'state' => TelegramPostRequest::AWAITING_APPROVAL,
+                'confirmed_at' => null,
+                'error_message' => null,
+            ]);
+    }
 }

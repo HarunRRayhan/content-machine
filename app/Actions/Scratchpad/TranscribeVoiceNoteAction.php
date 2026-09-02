@@ -2,6 +2,8 @@
 
 namespace App\Actions\Scratchpad;
 
+use App\Actions\Telegram\ClaimTelegramPostWorkAction;
+use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -9,7 +11,7 @@ use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiTranscriptionClientContract;
-use App\Support\Telegram\TelegramClientContract;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\UnableToReadFile;
 
@@ -32,11 +34,23 @@ class TranscribeVoiceNoteAction
     public function __construct(
         private readonly AiTranscriptionClientContract $client,
         private readonly AiProviderCredentialResolver $resolver,
-        private readonly TelegramClientContract $telegramClient,
     ) {}
 
-    public function handle(Transcription $transcription): void
-    {
+    public function handle(
+        Transcription $transcription,
+        ?int $workRequestId = null,
+        ?string $workLeaseId = null,
+    ): void {
+        $transcription->refresh();
+
+        if (in_array($transcription->status, ['done', 'failed'], true)) {
+            return;
+        }
+
+        if (! $this->ownsPostWork($workRequestId, $workLeaseId)) {
+            return;
+        }
+
         $transcription->update(['status' => 'processing']);
 
         $mediaAsset = $transcription->mediaAsset;
@@ -45,15 +59,14 @@ class TranscribeVoiceNoteAction
         $credentials = $this->resolver->credentialChain($workspace)->where('provider', 'openai');
 
         if ($credentials->isEmpty()) {
-            $transcription->update([
-                'status' => 'failed',
-                'error_code' => 'no_provider_configured',
-                'error_message' => 'No OpenAI-shaped AI provider is configured for this workspace.',
-            ]);
-
-            $this->failTelegramPostRequests(
+            $this->failTranscription(
+                $transcription,
+                'no_provider_configured',
+                'No OpenAI-shaped AI provider is configured for this workspace.',
                 $transcription->scratchpadEntry,
                 'The audio could not be transcribed because no OpenAI-shaped AI provider is configured.',
+                $workRequestId,
+                $workLeaseId,
             );
 
             return;
@@ -66,15 +79,14 @@ class TranscribeVoiceNoteAction
         }
 
         if ($audioContents === null) {
-            $transcription->update([
-                'status' => 'failed',
-                'error_code' => 'audio_missing',
-                'error_message' => 'The audio file could not be read from storage.',
-            ]);
-
-            $this->failTelegramPostRequests(
+            $this->failTranscription(
+                $transcription,
+                'audio_missing',
+                'The audio file could not be read from storage.',
                 $transcription->scratchpadEntry,
                 'The audio file could not be read, so I could not create the post draft.',
+                $workRequestId,
+                $workLeaseId,
             );
 
             return;
@@ -92,41 +104,70 @@ class TranscribeVoiceNoteAction
                 continue;
             }
 
-            $transcription->update([
-                'status' => 'done',
-                'provider' => 'openai',
-                'model' => 'whisper-1',
-                'language' => $result->language,
-                'text' => $result->text,
-            ]);
+            DB::transaction(function () use ($transcription, $result, $workRequestId, $workLeaseId): void {
+                if ($workRequestId !== null) {
+                    $lockedRequest = TelegramPostRequest::query()
+                        ->whereKey($workRequestId)
+                        ->lockForUpdate()
+                        ->first();
 
-            $entry = $transcription->scratchpadEntry;
+                    if ($lockedRequest === null
+                        || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                        || ! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)
+                    ) {
+                        return;
+                    }
+                }
 
-            if ($entry !== null) {
+                $lockedTranscription = Transcription::query()
+                    ->with('scratchpadEntry')
+                    ->whereKey($transcription->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($lockedTranscription === null
+                    || in_array($lockedTranscription->status, ['done', 'failed'], true)
+                ) {
+                    return;
+                }
+
+                $lockedTranscription->forceFill([
+                    'status' => 'done',
+                    'provider' => 'openai',
+                    'model' => 'whisper-1',
+                    'language' => $result->language,
+                    'text' => $result->text,
+                ])->save();
+
+                $entry = $lockedTranscription->scratchpadEntry;
+
+                if ($entry === null) {
+                    return;
+                }
+
                 if ($entry->language === null && $result->language !== null) {
                     $entry->update(['language' => $result->language]);
                 }
 
-                $this->replyOnTelegram($entry, (string) $result->text);
-                $this->queueTelegramPostRequests($entry);
-            }
+                $this->replyOnTelegram($lockedTranscription, $entry, (string) $result->text);
+                $this->queueTelegramPostRequests($entry, $workRequestId, $workLeaseId);
+            });
 
             return;
         }
 
-        $transcription->update([
-            'status' => 'failed',
-            'error_code' => 'transcription_failed',
-            'error_message' => $lastError,
-        ]);
-
-        $this->failTelegramPostRequests(
+        $this->failTranscription(
+            $transcription,
+            'transcription_failed',
+            $lastError,
             $transcription->scratchpadEntry,
             'I could not transcribe that audio, so I could not create the post draft.',
+            $workRequestId,
+            $workLeaseId,
         );
     }
 
-    private function replyOnTelegram(ScratchpadEntry $entry, string $text): void
+    private function replyOnTelegram(Transcription $transcription, ScratchpadEntry $entry, string $text): void
     {
         if ($entry->source !== 'telegram') {
             return;
@@ -144,24 +185,109 @@ class TranscribeVoiceNoteAction
             return;
         }
 
-        $this->telegramClient->sendMessage((string) $config->bot_token, $chatId, "📝 Transcript: {$text}");
+        (new QueueTelegramMessageAction)->handle(
+            $config,
+            $chatId,
+            "📝 Transcript: {$text}",
+            'telegram:transcription:'.$transcription->id.':transcript',
+            $entry->webhook_generation,
+        );
     }
 
-    private function queueTelegramPostRequests(?ScratchpadEntry $entry): void
-    {
+    private function queueTelegramPostRequests(
+        ?ScratchpadEntry $entry,
+        ?int $currentRequestId = null,
+        ?string $currentLeaseId = null,
+    ): void {
         if ($entry === null) {
             return;
         }
+
+        $claimAction = new ClaimTelegramPostWorkAction;
 
         TelegramPostRequest::query()
             ->where('source_scratchpad_entry_id', $entry->id)
             ->where('state', TelegramPostRequest::GENERATING)
             ->get()
-            ->each(fn (TelegramPostRequest $request) => GenerateTelegramPostJob::dispatch($request->id));
+            ->each(function (TelegramPostRequest $request) use ($claimAction, $currentRequestId, $currentLeaseId): void {
+                if ($request->id === $currentRequestId && $currentLeaseId !== null) {
+                    $claimAction->release($request->id, $currentLeaseId);
+                }
+
+                $leaseId = $claimAction->claim($request->id);
+                if ($leaseId === null) {
+                    return;
+                }
+
+                GenerateTelegramPostJob::dispatch($request->id, $leaseId)->afterCommit();
+            });
     }
 
-    private function failTelegramPostRequests(?ScratchpadEntry $entry, string $message): void
-    {
+    private function failTranscription(
+        Transcription $transcription,
+        string $errorCode,
+        string $errorMessage,
+        ?ScratchpadEntry $entry,
+        string $telegramMessage,
+        ?int $workRequestId = null,
+        ?string $workLeaseId = null,
+    ): void {
+        DB::transaction(function () use (
+            $transcription,
+            $errorCode,
+            $errorMessage,
+            $entry,
+            $telegramMessage,
+            $workRequestId,
+            $workLeaseId,
+        ): void {
+            if ($workRequestId !== null) {
+                $lockedRequest = TelegramPostRequest::query()
+                    ->whereKey($workRequestId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($lockedRequest === null
+                    || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                    || ! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)
+                ) {
+                    return;
+                }
+            }
+
+            $lockedTranscription = Transcription::query()
+                ->with('scratchpadEntry')
+                ->whereKey($transcription->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedTranscription === null
+                || in_array($lockedTranscription->status, ['done', 'failed'], true)
+            ) {
+                return;
+            }
+
+            $lockedTranscription->forceFill([
+                'status' => 'failed',
+                'error_code' => $errorCode,
+                'error_message' => $errorMessage,
+            ])->save();
+
+            $this->failTelegramPostRequests(
+                $lockedTranscription->scratchpadEntry ?? $entry,
+                $telegramMessage,
+                $workRequestId,
+                $workLeaseId,
+            );
+        });
+    }
+
+    private function failTelegramPostRequests(
+        ?ScratchpadEntry $entry,
+        string $message,
+        ?int $workRequestId = null,
+        ?string $workLeaseId = null,
+    ): void {
         if ($entry === null) {
             return;
         }
@@ -170,25 +296,75 @@ class TranscribeVoiceNoteAction
             ->where('source_scratchpad_entry_id', $entry->id)
             ->where('state', TelegramPostRequest::GENERATING)
             ->with('telegramBotConfig')
+            ->when($workRequestId !== null, fn ($query) => $query->whereKey($workRequestId))
             ->get();
 
         foreach ($requests as $request) {
-            $updated = TelegramPostRequest::query()
-                ->whereKey($request->id)
-                ->where('state', TelegramPostRequest::GENERATING)
-                ->update([
+            DB::transaction(function () use ($request, $message, $workLeaseId): void {
+                $lockedRequest = TelegramPostRequest::query()
+                    ->with('telegramBotConfig')
+                    ->whereKey($request->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($lockedRequest === null
+                    || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                    || ! $this->ownsPostWorkRecord($lockedRequest, $workLeaseId)
+                ) {
+                    return;
+                }
+
+                $lockedRequest->forceFill([
                     'state' => TelegramPostRequest::FAILED,
                     'error_message' => $message,
-                ]);
+                    'work_claimed_at' => null,
+                    'work_lease_id' => null,
+                ])->save();
 
-            if ($updated === 0) {
-                continue;
-            }
-
-            $config = $request->telegramBotConfig;
-            if ($config !== null && $config->bot_token !== null) {
-                $this->telegramClient->sendMessage($config->bot_token, $request->telegram_chat_id, "❌ {$message}");
-            }
+                $config = $lockedRequest->telegramBotConfig;
+                if ($config !== null && $config->bot_token !== null) {
+                    (new QueueTelegramMessageAction)->handle(
+                        $config,
+                        $lockedRequest->telegram_chat_id,
+                        "❌ {$message}",
+                        'telegram:post-request:'.$lockedRequest->id.':transcription-failure',
+                        $lockedRequest->webhook_generation,
+                    );
+                }
+            });
         }
+    }
+
+    private function ownsPostWork(?int $requestId, ?string $leaseId): bool
+    {
+        if ($requestId === null) {
+            return true;
+        }
+
+        $query = TelegramPostRequest::query()
+            ->whereKey($requestId)
+            ->where('state', TelegramPostRequest::GENERATING);
+
+        if ($leaseId === null) {
+            $query->whereNull('work_lease_id');
+        } else {
+            $query
+                ->where('work_lease_id', $leaseId)
+                ->whereNotNull('work_claimed_at')
+                ->where('work_claimed_at', '>', now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS));
+        }
+
+        return $query->exists();
+    }
+
+    private function ownsPostWorkRecord(TelegramPostRequest $request, ?string $leaseId): bool
+    {
+        if ($leaseId === null) {
+            return $request->work_lease_id === null;
+        }
+
+        return $request->work_lease_id === $leaseId
+            && $request->work_claimed_at !== null
+            && $request->work_claimed_at->isAfter(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS));
     }
 }

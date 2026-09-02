@@ -22,9 +22,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $telegram_user_id
  * @property int $telegram_chat_id
  * @property string|null $telegram_update_key
+ * @property string|null $webhook_generation
  * @property string $state
  * @property string|null $instruction
  * @property string|null $error_message
+ * @property CarbonImmutable|null $work_claimed_at
+ * @property string|null $work_lease_id
  * @property CarbonImmutable|null $confirmed_at
  * @property CarbonImmutable|null $cancelled_at
  */
@@ -68,9 +71,12 @@ class TelegramPostRequest extends Model
         'telegram_user_id',
         'telegram_chat_id',
         'telegram_update_key',
+        'webhook_generation',
         'state',
         'instruction',
         'error_message',
+        'work_claimed_at',
+        'work_lease_id',
         'confirmed_at',
         'cancelled_at',
     ];
@@ -83,6 +89,7 @@ class TelegramPostRequest extends Model
         return [
             'confirmed_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'work_claimed_at' => 'datetime',
         ];
     }
 
@@ -124,9 +131,22 @@ class TelegramPostRequest extends Model
      */
     public function scopeForTelegram(Builder $query, TelegramBotConfig $config, int $telegramUserId, int $chatId): Builder
     {
-        return $query
+        $query = $query
             ->where('telegram_bot_config_id', $config->id)
             ->where('telegram_user_id', $telegramUserId)
             ->where('telegram_chat_id', $chatId);
+
+        if ($config->webhook_generation === null) {
+            return $query->whereNull('webhook_generation');
+        }
+
+        // Requests created by an old web instance during the expand phase do
+        // not have a generation yet. The contract migration handles any that
+        // remain after the old fleet drains.
+        return $query->where(function (Builder $generationQuery) use ($config): void {
+            $generationQuery
+                ->where('webhook_generation', $config->webhook_generation)
+                ->orWhereNull('webhook_generation');
+        });
     }
 }

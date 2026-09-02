@@ -191,7 +191,11 @@ class PostsyncerClient
 
         $url = rtrim($this->config->apiBase(), '/').$path;
 
-        $pending = Http::withToken($apiKey)->timeout(30)->acceptJson()->withHeaders($headers);
+        $pending = Http::withToken($apiKey)
+            ->timeout(30)
+            ->acceptJson()
+            ->withOptions(['allow_redirects' => false])
+            ->withHeaders($headers);
 
         try {
             $response = match ($method) {

@@ -1,7 +1,8 @@
 # PostSyncer
 
 Content Machine configures PostSyncer per workspace and schedules or publishes
-**posts and videos** from the dashboard. PostSyncer still delivers to Facebook,
+**posts** from the dashboard. Video publishing is temporarily disabled until
+safe retries and reconciliation are available. PostSyncer still delivers to Facebook,
 Instagram, TikTok, YouTube, and the other connected accounts; CM only
 orchestrates.
 
@@ -20,7 +21,7 @@ queue starts to hurt.
 |---|---|---|
 | `jobs` table | `cm-db` (Postgres) | Laravel `database` queue. `QUEUE_CONNECTION` is unset on Railway, so this is the default. |
 | `PublishPostJob` | `cm-web` `postsyncer` connection, `postsyncer` queue | Same volume constraint as Telegram capture: attachment covers live under `storage/app/uploads`, mounted only on `cm-web`. The job resolves signed media URLs and must see those files. |
-| `PublishVideoJob` | `cm-worker` default queue | Drive URLs only today; no scratchpad attachment dependency. |
+| `PublishVideoJob` | disabled | Video publishing is blocked until durable retry and reconciliation support is complete. |
 | `cm-worker` | Railway worker service | `queue:work --queue=default` plus `schedule:work` via supervisord. |
 | `cm-web` scratchpad worker | same web container (`/init`; `SCRATCHPAD_QUEUE_WORKER=0` disables it) | s6-supervised `queue:work --queue=scratchpad` for Telegram photo/voice and voice transcription. Those jobs read/write `storage/app/uploads`, and that volume is mounted only on `cm-web`. Telegram text, links, and commands use `cm-worker`'s supervised `default` queue. |
 | `cm-web` PostSyncer worker | same web container (`/init`; follows `SCRATCHPAD_QUEUE_WORKER`) | s6-supervised `queue:work postsyncer --queue=postsyncer --timeout=900` for post publishes. |
@@ -59,8 +60,9 @@ them. The old `/dashboard/settings/postsyncer` URL redirects to General.
 | **Refresh** | Reloads accounts for the workspace currently selected in the dropdown. |
 | **Connection** | The Workspaces page says whether PostSyncer returned workspaces for the saved API key. |
 
-Schedule and Publish stay disabled until the API key is set, the default
-language workspace id is filled, and **Publish enabled** is on.
+Post Schedule and Publish stay disabled until the API key is set, the default
+language workspace id is filled, and **Publish enabled** is on. Video Schedule
+and Publish remain disabled independently.
 
 ## PostSyncer API hosts (confirmed)
 
@@ -192,8 +194,7 @@ Search and language filters apply on every tab except Ideation.
 3. Schedule one draft **post** through `POST /api/v1/posts/{human_id}/publish`
    with a future `when` (never omit `when` on a probe). Confirm PostSyncer ids
    and `SCHEDULED`, then delete the PostSyncer post so it never goes live.
-4. Schedule one **video** with Video + Cover Drive URLs.
-5. Script Studio no longer talks to PostSyncer. Local video/post work uploads
+4. Script Studio no longer talks to PostSyncer. Local video/post work uploads
    to CM (`content_machine.py`). Schedule only through CM, dashboard or
    `POST /api/v1/posts|videos/{human_id}/publish`.
 

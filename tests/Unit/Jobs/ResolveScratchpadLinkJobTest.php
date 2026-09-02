@@ -8,6 +8,7 @@ use App\Jobs\ResolveScratchpadLinkJob;
 use App\Jobs\SummarizeCaptureJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\LinkResolution\LinkResolverContract;
@@ -167,7 +168,8 @@ class ResolveScratchpadLinkJobTest extends TestCase
 
         $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
         $this->assertStringContainsString('could not resolve', (string) $request->error_message);
-        $this->assertStringContainsString('could not resolve', $client->sentMessages[0]['text']);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertStringContainsString('could not resolve', $message->chunks[0]);
     }
 
     public function test_failed_marks_the_entry_as_unresolved_without_losing_the_url()
@@ -189,6 +191,7 @@ class ResolveScratchpadLinkJobTest extends TestCase
 
     public function test_failed_marks_link_post_requests_as_failed(): void
     {
+        Queue::fake();
         $workspace = Workspace::factory()->create();
         $config = TelegramBotConfig::factory()->connected()->create([
             'workspace_id' => $workspace->id,
@@ -212,6 +215,7 @@ class ResolveScratchpadLinkJobTest extends TestCase
         (new ResolveScratchpadLinkJob($entry))->failed(new Exception('resolver failed'));
 
         $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
-        $this->assertStringContainsString('could not resolve', $client->sentMessages[0]['text']);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertStringContainsString('could not resolve', $message->chunks[0]);
     }
 }

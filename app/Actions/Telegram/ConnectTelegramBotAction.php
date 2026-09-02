@@ -4,6 +4,9 @@ namespace App\Actions\Telegram;
 
 use App\Data\Telegram\ConnectTelegramBotData;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
+use App\Models\TelegramUpdate;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramBotCommands;
 use App\Support\Telegram\TelegramClientContract;
@@ -72,6 +75,50 @@ class ConnectTelegramBotAction
 
             if (! $setWebhookResult->successful) {
                 throw new RuntimeException((string) $setWebhookResult->error);
+            }
+
+            if ($rotateWebhookIdentity) {
+                // Retire work accepted by the old identity before the new
+                // identity becomes current. Keep the rows for reconciliation;
+                // deleting them would make an already-acknowledged delivery
+                // indistinguishable from one Telegram never sent.
+                TelegramUpdate::query()
+                    ->where('telegram_bot_config_id', $config->id)
+                    ->whereNull('processed_at')
+                    ->whereNull('failed_at')
+                    ->whereNull('discarded_at')
+                    ->update([
+                        'processed_at' => now(),
+                        'discarded_at' => now(),
+                        'last_error' => 'The Telegram bot connection changed before this update was processed.',
+                        'dispatch_claimed_at' => null,
+                        'dispatch_lease_id' => null,
+                        'updated_at' => now(),
+                    ]);
+
+                TelegramPostRequest::query()
+                    ->where('telegram_bot_config_id', $config->id)
+                    ->where('state', TelegramPostRequest::GENERATING)
+                    ->update([
+                        'state' => TelegramPostRequest::CANCELLED,
+                        'cancelled_at' => now(),
+                        'error_message' => 'The Telegram bot connection changed before this draft was generated.',
+                        'work_claimed_at' => null,
+                        'work_lease_id' => null,
+                        'updated_at' => now(),
+                    ]);
+
+                TelegramOutboundMessage::query()
+                    ->where('telegram_bot_config_id', $config->id)
+                    ->where('status', TelegramOutboundMessage::PENDING)
+                    ->update([
+                        'status' => TelegramOutboundMessage::DISCARDED,
+                        'discarded_at' => now(),
+                        'dispatch_claimed_at' => null,
+                        'dispatch_lease_id' => null,
+                        'last_error' => 'The Telegram bot connection changed before this message was sent.',
+                        'updated_at' => now(),
+                    ]);
             }
 
             $config->fill([

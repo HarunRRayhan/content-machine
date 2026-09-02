@@ -10,16 +10,20 @@ Artisan::command('inspire', function () {
 
 Schedule::command('postsyncer:sync-scheduled')
     ->everyFiveMinutes()
-    ->withoutOverlapping();
+    ->withoutOverlapping(10);
 
 Schedule::command('telegram:dispatch-pending-updates')
     ->everyMinute()
-    ->withoutOverlapping();
+    ->withoutOverlapping(2);
+
+Schedule::command('telegram:dispatch-pending-outbound-messages')
+    ->everyMinute()
+    ->withoutOverlapping(2);
 
 Schedule::command('telegram:dispatch-pending-post-work')
     ->everyMinute()
-    ->withoutOverlapping();
+    ->withoutOverlapping(2);
 
 Schedule::command('postsyncer:dispatch-pending-publishes')
     ->everyMinute()
-    ->withoutOverlapping();
+    ->withoutOverlapping(2);

@@ -307,6 +307,7 @@ class VideosApiTest extends TestCase
         Queue::fake();
         PostsyncerConfig::write($this->workspace, [
             'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'api_key' => 'test-api-key',
             'languages' => [
                 'english' => ['workspace_id' => '853', 'platforms' => []],

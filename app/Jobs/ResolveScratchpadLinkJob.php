@@ -3,15 +3,17 @@
 namespace App\Jobs;
 
 use App\Actions\Scratchpad\ResolveScratchpadLinkAction;
+use App\Actions\Telegram\ClaimTelegramPostWorkAction;
+use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramPostRequest;
-use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class ResolveScratchpadLinkJob implements ShouldQueue
@@ -20,9 +22,22 @@ class ResolveScratchpadLinkJob implements ShouldQueue
 
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 960;
 
+    /**
+     * Old queued payloads do not contain the optional Telegram post-work
+     * context.
+     */
+    public ?int $workRequestId = null;
+
+    public ?string $workLeaseId = null;
+
     public function __construct(
         public readonly ScratchpadEntry $entry,
-    ) {}
+        ?int $workRequestId = null,
+        ?string $workLeaseId = null,
+    ) {
+        $this->workRequestId = $workRequestId;
+        $this->workLeaseId = $workLeaseId;
+    }
 
     /**
      * Summarization only runs after a genuine resolution (never for
@@ -31,16 +46,43 @@ class ResolveScratchpadLinkJob implements ShouldQueue
      */
     public function handle(ResolveScratchpadLinkAction $action): void
     {
+        $requestId = $this->workRequestId;
+        if ($requestId === null) {
+            $requestIds = TelegramPostRequest::query()
+                ->where('source_scratchpad_entry_id', $this->entry->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->orderBy('id')
+                ->pluck('id');
+
+            foreach ($requestIds as $candidateId) {
+                $candidateId = (int) $candidateId;
+                $leaseId = (new ClaimTelegramPostWorkAction)->acquire($candidateId);
+                if ($leaseId !== null) {
+                    $requestId = $candidateId;
+                    $this->workRequestId = $candidateId;
+                    $this->workLeaseId = $leaseId;
+
+                    break;
+                }
+            }
+
+            if ($requestIds->isNotEmpty() && $requestId === null) {
+                return;
+            }
+        } else {
+            $leaseId = (new ClaimTelegramPostWorkAction)->acquire($requestId, $this->workLeaseId);
+            if ($leaseId === null) {
+                return;
+            }
+
+            $this->workLeaseId = $leaseId;
+        }
+
         $action->handle($this->entry);
 
         if (($this->entry->meta['resolved_kind'] ?? null) !== 'unresolved') {
             SummarizeCaptureJob::dispatch($this->entry);
-
-            TelegramPostRequest::query()
-                ->where('source_scratchpad_entry_id', $this->entry->id)
-                ->where('state', TelegramPostRequest::GENERATING)
-                ->get()
-                ->each(fn (TelegramPostRequest $request) => GenerateTelegramPostJob::dispatch($request->id));
+            $this->queueGeneration($requestId, $this->workLeaseId);
 
             return;
         }
@@ -83,17 +125,48 @@ class ResolveScratchpadLinkJob implements ShouldQueue
     {
         report($exception);
 
-        $this->entry->update([
-            'meta' => [
-                ...$this->entry->meta,
-                'resolved_via' => 'metadata only (resolution failed)',
-                'resolved_kind' => 'unresolved',
-            ],
-        ]);
+        DB::transaction(function (): void {
+            // Lock every request sharing this capture before changing the
+            // entry. An old serialized job must not mark a newer worker's
+            // shared source unresolved while that worker is resolving it.
+            $requests = TelegramPostRequest::query()
+                ->where('source_scratchpad_entry_id', $this->entry->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
 
-        $this->failTelegramPostRequests(
-            'I could not resolve that link, so I could not create the post draft.',
-        );
+            if ($this->workRequestId !== null) {
+                $request = $requests->firstWhere('id', $this->workRequestId);
+
+                if ($request === null || ! $this->ownsPostWork($request)) {
+                    return;
+                }
+            } elseif ($requests->contains(fn (TelegramPostRequest $request): bool => $request->work_lease_id !== null)) {
+                return;
+            }
+
+            $entry = ScratchpadEntry::query()
+                ->whereKey($this->entry->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($entry === null) {
+                return;
+            }
+
+            $entry->forceFill([
+                'meta' => [
+                    ...$entry->meta,
+                    'resolved_via' => 'metadata only (resolution failed)',
+                    'resolved_kind' => 'unresolved',
+                ],
+            ])->save();
+
+            $this->failTelegramPostRequests(
+                'I could not resolve that link, so I could not create the post draft.',
+            );
+        });
     }
 
     private function failTelegramPostRequests(string $message): void
@@ -104,29 +177,75 @@ class ResolveScratchpadLinkJob implements ShouldQueue
             ->with('telegramBotConfig')
             ->get();
 
-        $client = app(TelegramClientContract::class);
-
         foreach ($requests as $request) {
-            $updated = TelegramPostRequest::query()
-                ->whereKey($request->id)
-                ->where('state', TelegramPostRequest::GENERATING)
-                ->update([
+            DB::transaction(function () use ($request, $message): void {
+                $lockedRequest = TelegramPostRequest::query()
+                    ->with('telegramBotConfig')
+                    ->whereKey($request->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($lockedRequest === null
+                    || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                ) {
+                    return;
+                }
+
+                if (! $this->ownsPostWork($lockedRequest)) {
+                    return;
+                }
+
+                $lockedRequest->forceFill([
                     'state' => TelegramPostRequest::FAILED,
                     'error_message' => $message,
-                ]);
+                    'work_claimed_at' => null,
+                    'work_lease_id' => null,
+                ])->save();
 
-            if ($updated === 0) {
-                continue;
-            }
-
-            $config = $request->telegramBotConfig;
-            if ($config !== null && $config->bot_token !== null) {
-                $client->sendMessage(
-                    $config->bot_token,
-                    $request->telegram_chat_id,
-                    "❌ {$message}",
-                );
-            }
+                $config = $lockedRequest->telegramBotConfig;
+                if ($config !== null && $config->bot_token !== null) {
+                    (new QueueTelegramMessageAction)->handle(
+                        $config,
+                        $lockedRequest->telegram_chat_id,
+                        "❌ {$message}",
+                        'telegram:post-request:'.$lockedRequest->id.':link-failure',
+                        $lockedRequest->webhook_generation,
+                    );
+                }
+            });
         }
+    }
+
+    private function queueGeneration(?int $currentRequestId, ?string $currentLeaseId): void
+    {
+        $claimAction = new ClaimTelegramPostWorkAction;
+
+        TelegramPostRequest::query()
+            ->where('source_scratchpad_entry_id', $this->entry->id)
+            ->where('state', TelegramPostRequest::GENERATING)
+            ->get()
+            ->each(function (TelegramPostRequest $request) use ($claimAction, $currentRequestId, $currentLeaseId): void {
+                if ($request->id === $currentRequestId && $currentLeaseId !== null) {
+                    $claimAction->release($request->id, $currentLeaseId);
+                }
+
+                $leaseId = $claimAction->claim($request->id);
+                if ($leaseId === null) {
+                    return;
+                }
+
+                GenerateTelegramPostJob::dispatch($request->id, $leaseId);
+            });
+    }
+
+    private function ownsPostWork(TelegramPostRequest $request): bool
+    {
+        if ($this->workLeaseId === null) {
+            return $request->work_lease_id === null;
+        }
+
+        return $request->work_lease_id === $this->workLeaseId
+            && $request->work_claimed_at !== null
+            && $request->work_claimed_at->isAfter(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS));
     }
 }

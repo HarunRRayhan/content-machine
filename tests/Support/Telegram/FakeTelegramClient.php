@@ -87,6 +87,13 @@ final class FakeTelegramClient implements TelegramClientContract
         return $this;
     }
 
+    public function willSendMessage(TelegramApiResult $result): self
+    {
+        $this->sendMessageResult = $result;
+
+        return $this;
+    }
+
     public function getMe(string $botToken): TelegramGetMeResult
     {
         return $this->getMeResult;

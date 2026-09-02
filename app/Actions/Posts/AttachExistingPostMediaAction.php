@@ -24,25 +24,32 @@ class AttachExistingPostMediaAction
             throw new RuntimeException('Only image media can be attached as a post image.');
         }
 
-        return DB::transaction(function () use ($post, $mediaAsset, $role) {
-            $existing = $post->attachments()
+        return DB::transaction(function () use ($post, $mediaAsset, $role): Post {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $existing = $lockedPost->attachments()
                 ->where('media_asset_id', $mediaAsset->id)
                 ->first();
 
             if ($existing !== null) {
-                return $post->fresh(['attachments.mediaAsset']) ?? $post;
+                return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
             }
 
-            $maxPosition = $post->attachments()->max('position');
+            $maxPosition = $lockedPost->attachments()->max('position');
             $position = $maxPosition === null ? 0 : ((int) $maxPosition) + 1;
 
-            $post->attachments()->create([
+            $lockedPost->attachments()->create([
                 'media_asset_id' => $mediaAsset->id,
                 'role' => $role,
                 'position' => $position,
             ]);
 
-            return $post->fresh(['attachments.mediaAsset']) ?? $post;
+            $lockedPost->invalidateApproval();
+
+            return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
         });
     }
 }

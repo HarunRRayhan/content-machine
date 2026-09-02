@@ -12,7 +12,6 @@ use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiVisionCompletionClientContract;
-use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -51,10 +50,9 @@ class GenerateTelegramPostAction
         private readonly AiCompletionClientContract $completionClient,
         private readonly AiVisionCompletionClientContract $visionClient,
         private readonly AiProviderCredentialResolver $resolver,
-        private readonly TelegramClientContract $telegramClient,
     ) {}
 
-    public function handle(int $requestId): ?Post
+    public function handle(int $requestId, ?string $workLeaseId = null): ?Post
     {
         $request = TelegramPostRequest::query()
             ->with([
@@ -65,7 +63,15 @@ class GenerateTelegramPostAction
             ])
             ->findOrFail($requestId);
 
+        if (! $this->ownsPostWork($request, $workLeaseId)) {
+            return null;
+        }
+
         if ($request->post !== null) {
+            if ($request->state === TelegramPostRequest::AWAITING_APPROVAL) {
+                $this->sendPreview($request, $request->post, $this->facebookCaption($request->post));
+            }
+
             return $request->post;
         }
 
@@ -76,7 +82,7 @@ class GenerateTelegramPostAction
         $entry = $request->sourceEntry;
 
         if ($entry === null) {
-            return $this->fail($request, 'I could not find the source capture for this draft.');
+            return $this->fail($request, 'I could not find the source capture for this draft.', $workLeaseId);
         }
 
         $sourceText = $this->sourceText($request, $entry);
@@ -84,7 +90,7 @@ class GenerateTelegramPostAction
         if ($sourceText === '') {
             return $this->fail($request, $entry->kind === 'voice'
                 ? 'The audio transcription is not ready yet. Please wait for the draft preview before sending /post_now.'
-                : 'The source did not contain any text to turn into a post.');
+                : 'The source did not contain any text to turn into a post.', $workLeaseId);
         }
 
         $result = $entry->kind === 'photo'
@@ -92,7 +98,7 @@ class GenerateTelegramPostAction
             : $this->completeFromText($request, $sourceText);
 
         if (! $result->successful || $result->text === null) {
-            return $this->fail($request, 'I could not create the draft right now. Check the AI model settings and try again.');
+            return $this->fail($request, 'I could not create the draft right now. Check the AI model settings and try again.', $workLeaseId);
         }
 
         // Cancellation may arrive while the provider is completing. Do not
@@ -105,7 +111,7 @@ class GenerateTelegramPostAction
         $draft = $this->parseDraft($result->text);
 
         if ($draft === null) {
-            return $this->fail($request, 'The AI returned an unusable draft. Please try generating it again.');
+            return $this->fail($request, 'The AI returned an unusable draft. Please try generating it again.', $workLeaseId);
         }
 
         $image = $this->sourceImage($entry);
@@ -113,7 +119,7 @@ class GenerateTelegramPostAction
         $captions = $this->captions($draft, $imageName);
 
         /** @var array{request: TelegramPostRequest, post: Post}|null $generated */
-        $generated = DB::transaction(function () use ($request, $draft, $captions, $image): ?array {
+        $generated = DB::transaction(function () use ($request, $draft, $captions, $image, $workLeaseId): ?array {
             // Serialize finalization with /cancel. If cancellation acquired the
             // row first, no post is created; if this transaction acquired it
             // first, cancellation waits until the request is linked to the
@@ -124,7 +130,10 @@ class GenerateTelegramPostAction
                 ->lockForUpdate()
                 ->first();
 
-            if ($lockedRequest === null || $lockedRequest->state !== TelegramPostRequest::GENERATING) {
+            if ($lockedRequest === null
+                || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                || ! $this->ownsPostWork($lockedRequest, $workLeaseId)
+            ) {
                 return null;
             }
 
@@ -152,7 +161,11 @@ class GenerateTelegramPostAction
                 'post_id' => $post->id,
                 'state' => TelegramPostRequest::AWAITING_APPROVAL,
                 'error_message' => null,
+                'work_claimed_at' => null,
+                'work_lease_id' => null,
             ])->save();
+
+            $this->sendPreview($lockedRequest, $post, $draft['captions']['facebook']['caption']);
 
             return ['request' => $lockedRequest, 'post' => $post];
         });
@@ -161,12 +174,7 @@ class GenerateTelegramPostAction
             return null;
         }
 
-        $request = $generated['request'];
-        $post = $generated['post'];
-
-        $this->sendPreview($request, $post, $draft['captions']['facebook']['caption']);
-
-        return $post;
+        return $generated['post'];
     }
 
     private function completeFromText(TelegramPostRequest $request, string $sourceText): AiCompletionResult
@@ -372,28 +380,40 @@ class GenerateTelegramPostAction
         return null;
     }
 
-    private function fail(TelegramPostRequest $request, string $message): null
+    private function fail(TelegramPostRequest $request, string $message, ?string $workLeaseId = null): null
     {
-        $updated = TelegramPostRequest::query()
-            ->whereKey($request->id)
-            ->where('state', TelegramPostRequest::GENERATING)
-            ->update([
+        DB::transaction(function () use ($request, $message, $workLeaseId): void {
+            $lockedRequest = TelegramPostRequest::query()
+                ->with('telegramBotConfig')
+                ->whereKey($request->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedRequest === null
+                || $lockedRequest->state !== TelegramPostRequest::GENERATING
+                || ! $this->ownsPostWork($lockedRequest, $workLeaseId)
+            ) {
+                return;
+            }
+
+            $lockedRequest->forceFill([
                 'state' => TelegramPostRequest::FAILED,
                 'error_message' => $message,
-            ]);
+                'work_claimed_at' => null,
+                'work_lease_id' => null,
+            ])->save();
 
-        if ($updated === 0) {
-            return null;
-        }
-
-        $config = $request->telegramBotConfig;
-        if ($config !== null && $config->bot_token !== null) {
-            $this->telegramClient->sendMessage(
-                $config->bot_token,
-                $request->telegram_chat_id,
-                "❌ {$message}",
-            );
-        }
+            $config = $lockedRequest->telegramBotConfig;
+            if ($config !== null && $config->bot_token !== null) {
+                (new QueueTelegramMessageAction)->handle(
+                    $config,
+                    $lockedRequest->telegram_chat_id,
+                    "❌ {$message}",
+                    'telegram:post-request:'.$lockedRequest->id.':generation-failure',
+                    $lockedRequest->webhook_generation,
+                );
+            }
+        });
 
         return null;
     }
@@ -410,6 +430,35 @@ class GenerateTelegramPostAction
             Str::limit($facebookCaption, 900)."\n\nReview it in Content Machine:\n{$url}\n\n".
             "When you approve it: send /approve {$post->human_id}, then /post_now {$post->human_id} or /schedule {$post->human_id} tomorrow at 9am.";
 
-        $this->telegramClient->sendMessage($config->bot_token, $request->telegram_chat_id, $preview);
+        (new QueueTelegramMessageAction)->handle(
+            $config,
+            $request->telegram_chat_id,
+            $preview,
+            'telegram:post-request:'.$request->id.':preview',
+            $request->webhook_generation,
+        );
+    }
+
+    private function ownsPostWork(TelegramPostRequest $request, ?string $workLeaseId): bool
+    {
+        if ($workLeaseId === null) {
+            return $request->work_lease_id === null;
+        }
+
+        return $request->work_lease_id === $workLeaseId
+            && $request->work_claimed_at !== null
+            && $request->work_claimed_at->isAfter(now()->subSeconds(ClaimTelegramPostWorkAction::LEASE_SECONDS));
+    }
+
+    private function facebookCaption(Post $post): string
+    {
+        $captions = $post->captions;
+        $facebook = is_array($captions) ? ($captions['facebook'] ?? null) : null;
+
+        if (is_array($facebook) && is_string($facebook['caption'] ?? null)) {
+            return $facebook['caption'];
+        }
+
+        return (string) ($post->body ?? $post->title);
     }
 }

@@ -48,7 +48,7 @@ can actually reach you.
 | `/note <text>` | Saves a Scratch Pad text note. |
 | `/post <text>` | Creates a post draft from the text. A photo, voice note, or audio file can be sent after a bare `/post`. |
 | `/approve P-123` | Approves a generated draft for publishing. |
-| `/post_now P-123` | Publishes an approved draft now. |
+| `/post_now P-123` or `/post-now P-123` | Publishes an approved draft now. |
 | `/schedule P-123 YYYY-MM-DD HH:MM` | Schedules an approved draft in the workspace timezone. |
 | `/cancel` | Cancels the active post request without deleting its source or draft. |
 

@@ -21,6 +21,12 @@ class EnqueueVideoPublishAction
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
 
+        if (! $config->videoPublishEnabled()) {
+            throw ValidationException::withMessages([
+                'publish' => PostsyncerConfig::VIDEO_PUBLISH_DISABLED_MESSAGE,
+            ]);
+        }
+
         if (! $config->isReadyForPublish()) {
             throw ValidationException::withMessages([
                 'publish' => __('PostSyncer is not configured for publishing.'),

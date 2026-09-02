@@ -21,6 +21,18 @@ class PublishVideoAction
      */
     public function handle(Video $video, array $options): void
     {
+        $video->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($video->workspace);
+
+        if (! $config->videoPublishEnabled()) {
+            $video->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => PostsyncerConfig::VIDEO_PUBLISH_DISABLED_MESSAGE,
+            ])->save();
+
+            return;
+        }
+
         $originalStatus = $video->status;
 
         $video->update([
@@ -29,9 +41,7 @@ class PublishVideoAction
         ]);
 
         try {
-            $video->loadMissing('workspace');
             $this->assertFirstPublish($video);
-            $config = PostsyncerConfig::fromWorkspace($video->workspace);
             $client = new PostsyncerClient($config);
             $groups = $this->planner->plan($video, $config, $options);
 

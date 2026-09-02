@@ -17,6 +17,7 @@ use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
+use RuntimeException;
 
 /**
  * Turns one Telegram `message` update into a Scratch Pad capture, reusing
@@ -41,6 +42,8 @@ use Illuminate\Support\Facades\Cache;
  */
 class CaptureTelegramMessageAction
 {
+    private ?string $replyContextKey = null;
+
     public function __construct(
         private readonly CaptureTextNoteAction $captureTextNoteAction,
         private readonly CaptureScratchpadLinkAction $captureScratchpadLinkAction,
@@ -72,6 +75,9 @@ class CaptureTelegramMessageAction
         if (! is_int($chatId) || ! is_int($fromUserId)) {
             return null;
         }
+
+        $this->replyContextKey = $telegramUpdateKey
+            ?? hash('sha256', $config->id.':'.serialize($update));
 
         // Guaranteed non-null: ProcessTelegramUpdateJob only calls this
         // Action for a connected config. Narrowed here, once, so every
@@ -142,6 +148,15 @@ class CaptureTelegramMessageAction
                 ->first();
 
         if ($existing !== null) {
+            if ($reply) {
+                $this->reply($config, $chatId, match ($existing->kind) {
+                    'link' => '🔗 Link captured.',
+                    'photo' => '📷 Photo captured.',
+                    'voice' => '🎙️ Voice note captured.',
+                    default => 'Captured.',
+                });
+            }
+
             return $existing;
         }
 
@@ -196,6 +211,7 @@ class CaptureTelegramMessageAction
                 CaptureScratchpadLinkData::fromTelegram($text),
                 $queueEnrichment,
                 $telegramUpdateKey,
+                $config->webhook_generation,
             );
             if ($reply) {
                 $this->reply($config, $chatId, '🔗 Link captured.');
@@ -209,6 +225,7 @@ class CaptureTelegramMessageAction
             null,
             CaptureTextNoteData::fromTelegram($text),
             $telegramUpdateKey,
+            $config->webhook_generation,
         );
         if ($reply) {
             $this->reply($config, $chatId, 'Captured.');
@@ -264,6 +281,7 @@ class CaptureTelegramMessageAction
                 null,
                 CaptureScratchpadPhotoData::fromTelegram($file, $caption),
                 $telegramUpdateKey,
+                $config->webhook_generation,
             );
         } finally {
             @unlink($file->getRealPath());
@@ -325,6 +343,7 @@ class CaptureTelegramMessageAction
                 CaptureScratchpadVoiceData::fromTelegram($file, $chatId, $caption),
                 $queueEnrichment,
                 $telegramUpdateKey,
+                $config->webhook_generation,
             );
         } finally {
             @unlink($file->getRealPath());
@@ -340,7 +359,16 @@ class CaptureTelegramMessageAction
     private function toUploadedFile(string $contents, string $filename, string $mimeType): UploadedFile
     {
         $tempPath = tempnam(sys_get_temp_dir(), 'telegram-media');
-        file_put_contents($tempPath, $contents);
+
+        if ($tempPath === false) {
+            throw new RuntimeException('Could not create a temporary file for the Telegram media.');
+        }
+
+        if (file_put_contents($tempPath, $contents) === false) {
+            @unlink($tempPath);
+
+            throw new RuntimeException('Could not write the Telegram media to temporary storage.');
+        }
 
         // $test: true, since this file was never part of an HTTP multipart
         // upload — without it UploadedFile's own is_uploaded_file() check
@@ -366,7 +394,13 @@ class CaptureTelegramMessageAction
     private function reply(TelegramBotConfig $config, int $chatId, string $text): void
     {
         if ($config->bot_token !== null) {
-            $this->client->sendMessage($config->bot_token, $chatId, $text);
+            (new QueueTelegramMessageAction)->handle(
+                $config,
+                $chatId,
+                $text,
+                'telegram:update:'.($this->replyContextKey ?? hash('sha256', $config->id.':'.$chatId)).':reply:capture',
+                $config->webhook_generation,
+            );
         }
     }
 

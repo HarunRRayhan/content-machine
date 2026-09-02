@@ -3,6 +3,9 @@
 namespace App\Actions\Telegram;
 
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
+use App\Models\TelegramUpdate;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Support\Facades\DB;
@@ -52,6 +55,44 @@ class DisconnectTelegramBotAction
                     report($exception);
                 }
             }
+
+            TelegramUpdate::query()
+                ->where('telegram_bot_config_id', $locked->id)
+                ->whereNull('processed_at')
+                ->whereNull('failed_at')
+                ->whereNull('discarded_at')
+                ->update([
+                    'processed_at' => now(),
+                    'discarded_at' => now(),
+                    'last_error' => 'The Telegram bot was disconnected before this update was processed.',
+                    'dispatch_claimed_at' => null,
+                    'dispatch_lease_id' => null,
+                    'updated_at' => now(),
+                ]);
+
+            TelegramPostRequest::query()
+                ->where('telegram_bot_config_id', $locked->id)
+                ->where('state', TelegramPostRequest::GENERATING)
+                ->update([
+                    'state' => TelegramPostRequest::CANCELLED,
+                    'cancelled_at' => now(),
+                    'error_message' => 'The Telegram bot was disconnected before this draft was generated.',
+                    'work_claimed_at' => null,
+                    'work_lease_id' => null,
+                    'updated_at' => now(),
+                ]);
+
+            TelegramOutboundMessage::query()
+                ->where('telegram_bot_config_id', $locked->id)
+                ->where('status', TelegramOutboundMessage::PENDING)
+                ->update([
+                    'status' => TelegramOutboundMessage::DISCARDED,
+                    'discarded_at' => now(),
+                    'dispatch_claimed_at' => null,
+                    'dispatch_lease_id' => null,
+                    'last_error' => 'The Telegram bot was disconnected before this message was sent.',
+                    'updated_at' => now(),
+                ]);
 
             $locked->forceFill([
                 'bot_token' => null,

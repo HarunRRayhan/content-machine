@@ -58,6 +58,8 @@ class ApprovePostAction
                     || $lockedRequest->workspace_id !== $telegramConfig->workspace_id
                     || $lockedRequest->telegram_user_id !== $telegramUserId
                     || $lockedRequest->telegram_chat_id !== $telegramChatId
+                    || ($lockedRequest->webhook_generation !== null
+                        && $lockedRequest->webhook_generation !== $telegramConfig->webhook_generation)
                     || ! TelegramBotLink::query()
                         ->where('telegram_bot_config_id', $telegramConfig->id)
                         ->where('telegram_user_id', $telegramUserId)
@@ -65,6 +67,12 @@ class ApprovePostAction
                         ->exists()
                 ) {
                     throw new RuntimeException('This Telegram post request does not belong to your account.');
+                }
+
+                if ($lockedRequest->webhook_generation === null && $telegramConfig->webhook_generation !== null) {
+                    $lockedRequest->forceFill([
+                        'webhook_generation' => $telegramConfig->webhook_generation,
+                    ])->save();
                 }
             }
 

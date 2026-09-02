@@ -73,24 +73,28 @@ final class HttpTelegramClient implements TelegramClientContract
 
     public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult
     {
-        try {
-            $response = Http::asForm()->timeout(10)->post(self::API_BASE_URL."/bot{$botToken}/sendMessage", [
-                'chat_id' => $chatId,
-                'text' => $text,
-            ]);
-        } catch (Throwable) {
-            $result = TelegramApiResult::failure('Could not reach Telegram to send the reply.');
-            $this->logMessageFailure($chatId, $result->error);
+        foreach (TelegramMessageChunker::split($text) as $chunk) {
+            try {
+                $response = Http::asForm()->timeout(10)->post(self::API_BASE_URL."/bot{$botToken}/sendMessage", [
+                    'chat_id' => $chatId,
+                    'text' => $chunk,
+                ]);
+            } catch (Throwable) {
+                $result = TelegramApiResult::failure('Could not reach Telegram to send the reply.');
+                $this->logMessageFailure($chatId, $result->error);
 
-            return $result;
+                return $result;
+            }
+
+            $result = $this->toApiResult($response, 'Telegram rejected the message.');
+            if (! $result->successful) {
+                $this->logMessageFailure($chatId, $result->error);
+
+                return $result;
+            }
         }
 
-        $result = $this->toApiResult($response, 'Telegram rejected the message.');
-        if (! $result->successful) {
-            $this->logMessageFailure($chatId, $result->error);
-        }
-
-        return $result;
+        return TelegramApiResult::success();
     }
 
     public function setMyCommands(string $botToken, array $commands): TelegramApiResult
@@ -192,9 +196,15 @@ final class HttpTelegramClient implements TelegramClientContract
         }
 
         $description = $response->json('description');
+        $retryAfter = $response->json('parameters.retry_after');
+        $retryAfter = is_int($retryAfter) || (is_string($retryAfter) && ctype_digit($retryAfter))
+            ? max(1, (int) $retryAfter)
+            : null;
 
         return TelegramApiResult::failure(
-            is_string($description) && $description !== '' ? $description : $genericError
+            is_string($description) && $description !== '' ? $description : $genericError,
+            $retryAfter,
+            $response->status(),
         );
     }
 

@@ -13,6 +13,7 @@ use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
+use App\Models\TelegramOutboundMessage;
 use App\Models\TelegramPostRequest;
 use App\Models\User;
 use App\Models\Workspace;
@@ -76,7 +77,6 @@ class GenerateTelegramPostActionTest extends TestCase
             $completion,
             $completion,
             new AiProviderCredentialResolver,
-            $client,
         ))->handle($request->id);
 
         $this->assertInstanceOf(Post::class, $post);
@@ -84,9 +84,10 @@ class GenerateTelegramPostActionTest extends TestCase
         $this->assertSame('Useful idea', $post->title);
         $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->refresh()->state);
         $this->assertSame($post->id, $request->post_id);
-        $this->assertCount(1, $client->sentMessages);
-        $this->assertStringContainsString($post->human_id, $client->sentMessages[0]['text']);
-        $this->assertStringContainsString('/approve', $client->sentMessages[0]['text']);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertSame(TelegramOutboundMessage::PENDING, $message->status);
+        $this->assertStringContainsString($post->human_id, $message->chunks[0]);
+        $this->assertStringContainsString('/approve', $message->chunks[0]);
     }
 
     public function test_a_photo_uses_the_vision_chain_and_attaches_the_source_image(): void
@@ -144,7 +145,6 @@ class GenerateTelegramPostActionTest extends TestCase
             $completion,
             $completion,
             new AiProviderCredentialResolver,
-            new FakeTelegramClient,
         ))->handle($request->id);
 
         $this->assertInstanceOf(Post::class, $post);
@@ -197,7 +197,6 @@ class GenerateTelegramPostActionTest extends TestCase
             $completion,
             new FakePostCompletionClient('{}'),
             new AiProviderCredentialResolver,
-            new FakeTelegramClient,
         ))->handle($request->id);
 
         $this->assertNull($post);
@@ -240,7 +239,6 @@ class GenerateTelegramPostActionTest extends TestCase
             $completion,
             $completion,
             new AiProviderCredentialResolver,
-            new FakeTelegramClient,
         ))->handle($request->id);
 
         $this->assertNull($post);

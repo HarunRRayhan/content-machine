@@ -21,7 +21,9 @@ return new class extends Migration
         );
 
         Schema::table('telegram_updates', function (Blueprint $table): void {
-            $table->dropUnique(['telegram_bot_config_id', 'update_id']);
+            // Keep the original fence during the rolling deploy. Older web
+            // instances omit webhook_generation, and PostgreSQL treats NULL
+            // values as distinct in a unique index.
             $table->unique(['telegram_bot_config_id', 'webhook_generation', 'update_id']);
         });
     }
@@ -30,7 +32,6 @@ return new class extends Migration
     {
         Schema::table('telegram_updates', function (Blueprint $table): void {
             $table->dropUnique(['telegram_bot_config_id', 'webhook_generation', 'update_id']);
-            $table->unique(['telegram_bot_config_id', 'update_id']);
             $table->dropColumn('webhook_generation');
         });
     }

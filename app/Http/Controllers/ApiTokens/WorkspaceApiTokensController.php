@@ -6,9 +6,9 @@ use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Actions\ApiTokens\RevokeWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
 use App\Http\Requests\ApiTokens\StoreWorkspaceApiTokenRequest;
 use App\Models\User;
-use App\Models\Workspace;
 use App\Models\WorkspaceApiToken;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,10 +24,13 @@ use Inertia\Response;
  */
 class WorkspaceApiTokensController extends Controller
 {
+    use AuthorizesWorkspaceSettings;
+
     public function index(Request $request): Response
     {
         $this->currentUser($request);
         $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         return Inertia::render('dashboard/api-tokens', [
             // Live tokens only: revoked ones stay in the DB so history rows
@@ -64,6 +67,7 @@ class WorkspaceApiTokensController extends Controller
     ): RedirectResponse {
         $user = $this->currentUser($request);
         $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         ['token' => $token, 'plaintext' => $plaintext] = $createWorkspaceApiTokenAction->handle(
             $workspace,
@@ -98,6 +102,7 @@ class WorkspaceApiTokensController extends Controller
         RevokeWorkspaceApiTokenAction $revokeWorkspaceApiTokenAction,
     ): RedirectResponse {
         $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         abort_if($apiToken->workspace_id !== $workspace->id, 404);
 
@@ -118,14 +123,5 @@ class WorkspaceApiTokensController extends Controller
         abort_if(! $user instanceof User, 403);
 
         return $user;
-    }
-
-    private function currentWorkspace(): Workspace
-    {
-        $workspace = Workspace::current();
-
-        abort_if($workspace === null, 404, 'No current workspace.');
-
-        return $workspace;
     }
 }

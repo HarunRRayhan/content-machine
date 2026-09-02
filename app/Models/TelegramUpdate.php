@@ -16,6 +16,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $webhook_generation
  * @property array<string, mixed>|null $payload
  * @property CarbonImmutable|null $processed_at
+ * @property CarbonImmutable|null $failed_at
+ * @property CarbonImmutable|null $discarded_at
+ * @property string|null $last_error
+ * @property CarbonImmutable|null $dispatch_claimed_at
+ * @property string|null $dispatch_lease_id
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  */
@@ -32,6 +37,11 @@ class TelegramUpdate extends Model
         'webhook_generation',
         'payload',
         'processed_at',
+        'failed_at',
+        'discarded_at',
+        'last_error',
+        'dispatch_claimed_at',
+        'dispatch_lease_id',
     ];
 
     /**
@@ -42,6 +52,9 @@ class TelegramUpdate extends Model
         return [
             'payload' => 'array',
             'processed_at' => 'datetime',
+            'failed_at' => 'datetime',
+            'discarded_at' => 'datetime',
+            'dispatch_claimed_at' => 'datetime',
         ];
     }
 

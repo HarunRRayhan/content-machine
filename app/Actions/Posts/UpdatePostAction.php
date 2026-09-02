@@ -4,7 +4,6 @@ namespace App\Actions\Posts;
 
 use App\Data\Posts\UpdatePostData;
 use App\Models\Post;
-use App\Models\TelegramPostRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -94,20 +93,7 @@ class UpdatePostAction
             }
 
             if ($post->approval_state === 'approved' && $contentChanged) {
-                $attributes['approval_state'] = 'pending';
-                $attributes['approved_at'] = null;
-                $attributes['approved_by_user_id'] = null;
-
-                $post->telegramPostRequests()
-                    ->whereIn('state', [
-                        TelegramPostRequest::APPROVED,
-                        TelegramPostRequest::FAILED,
-                    ])
-                    ->update([
-                        'state' => TelegramPostRequest::AWAITING_APPROVAL,
-                        'confirmed_at' => null,
-                        'error_message' => null,
-                    ]);
+                $post->invalidateApproval();
             }
 
             if ($data->replaceExtended) {
