@@ -45,13 +45,13 @@ class ReserveContentIdAction
     }
 
     /**
-     * Keep a reservation sequence ahead of an explicitly imported number.
-     * Imported ids are not reservations themselves, but a later generated id
-     * must not reuse their number.
+     * Keep a generated id above an explicitly imported number.
      */
-    public function ensureSequencePast(Workspace $workspace, string $kind, int $number): void
+    public function advancePast(Workspace $workspace, string $kind, int $number): void
     {
-        $this->humanId($kind, $number);
+        if ($number < 1) {
+            throw new InvalidArgumentException('A content id number must be positive.');
+        }
 
         DB::table('id_sequences')->insertOrIgnore([
             'workspace_id' => $workspace->id,

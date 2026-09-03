@@ -46,7 +46,7 @@ class CreateVideoAction
                     ]);
                 }
 
-                $this->reserveContentIdAction->ensureSequencePast($workspace, 'video', $number);
+                $this->reserveContentIdAction->advancePast($workspace, 'video', $number);
             } else {
                 $contentId = $this->reserveContentIdAction->handle($workspace, 'video');
                 $humanId = $contentId->human_id;

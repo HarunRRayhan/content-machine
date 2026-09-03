@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 
 class SyncPresentationLibraryCommand extends Command
 {
-    protected $signature = 'cm:sync-presentation-library {workspace? : Workspace id; omit to sync all workspaces}';
+    protected $signature = 'cm:sync-presentation-library {workspace? : Workspace id; omit to sync all workspaces} {--allow-empty : Succeed when there are no workspaces yet}';
 
     protected $description = 'Sync presentation-library SVG assets into workspace media';
 
@@ -21,6 +21,12 @@ class SyncPresentationLibraryCommand extends Command
             : Workspace::query()->orderBy('id')->get();
 
         if ($workspaces->isEmpty()) {
+            if ($this->option('allow-empty')) {
+                $this->info('No workspaces found; nothing to sync.');
+
+                return self::SUCCESS;
+            }
+
             $this->error('No workspace found.');
 
             return self::FAILURE;

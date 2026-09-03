@@ -157,7 +157,16 @@ final class McpToolDispatcher
         $presenter = new PresentMediaAsset;
 
         return array_values($builder->get()
-            ->map(fn (MediaAsset $asset) => $presenter->summary($asset))
+            ->map(function (MediaAsset $asset) use ($presenter): array {
+                // MCP clients authenticate with a bearer token, not the
+                // dashboard session cookie used by the web media route.
+                return [
+                    ...$presenter->summary($asset),
+                    'preview_url' => route('api.v1.media.file', [
+                        'mediaAsset' => $asset->public_id,
+                    ]),
+                ];
+            })
             ->all());
     }
 

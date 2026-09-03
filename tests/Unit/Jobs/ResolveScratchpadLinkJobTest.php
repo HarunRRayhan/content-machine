@@ -3,15 +3,21 @@
 namespace Tests\Unit\Jobs;
 
 use App\Actions\Scratchpad\ResolveScratchpadLinkAction;
+use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Jobs\SummarizeCaptureJob;
 use App\Models\ScratchpadEntry;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ResolvedLink;
+use App\Support\Telegram\TelegramClientContract;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
 
 class ResolveScratchpadLinkJobTest extends TestCase
@@ -68,6 +74,78 @@ class ResolveScratchpadLinkJobTest extends TestCase
         Queue::assertPushed(SummarizeCaptureJob::class, fn (SummarizeCaptureJob $job) => $job->entry->is($entry));
     }
 
+    public function test_a_successful_resolution_dispatches_generation_for_a_telegram_post_request(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'body' => 'https://example.com/post',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $resolver = new class implements LinkResolverContract
+        {
+            public function resolve(string $url): ResolvedLink
+            {
+                return new ResolvedLink(kind: 'webpage', resolvedVia: 'page metadata', title: 'Resolved Title');
+            }
+        };
+
+        (new ResolveScratchpadLinkJob($entry))->handle(new ResolveScratchpadLinkAction($resolver));
+
+        Queue::assertPushed(GenerateTelegramPostJob::class, fn (GenerateTelegramPostJob $job): bool => $job->telegramPostRequestId === $request->id);
+    }
+
+    public function test_a_queued_link_job_finishes_source_enrichment_after_request_cancellation(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'body' => 'https://example.com/post',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+        $leaseId = '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22';
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::CANCELLED,
+            'work_claimed_at' => now(),
+            'work_lease_id' => $leaseId,
+        ]);
+        $resolver = new class implements LinkResolverContract
+        {
+            public function resolve(string $url): ResolvedLink
+            {
+                return new ResolvedLink(kind: 'webpage', resolvedVia: 'page metadata', title: 'Resolved Title');
+            }
+        };
+
+        (new ResolveScratchpadLinkJob($entry, $request->id, $leaseId))->handle(new ResolveScratchpadLinkAction($resolver));
+
+        $this->assertSame('Resolved Title', $entry->refresh()->title);
+        $this->assertNull($request->refresh()->work_lease_id);
+        Queue::assertPushed(SummarizeCaptureJob::class);
+        Queue::assertNotPushed(GenerateTelegramPostJob::class);
+    }
+
     public function test_an_unresolved_link_does_not_dispatch_the_summarizer()
     {
         Queue::fake();
@@ -92,6 +170,47 @@ class ResolveScratchpadLinkJobTest extends TestCase
         Queue::assertNotPushed(SummarizeCaptureJob::class);
     }
 
+    public function test_an_unresolved_link_fails_the_waiting_telegram_post_request(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'body' => 'https://example.com/post',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $client);
+
+        $resolver = new class implements LinkResolverContract
+        {
+            public function resolve(string $url): ResolvedLink
+            {
+                return ResolvedLink::unresolved('page could not be read');
+            }
+        };
+
+        (new ResolveScratchpadLinkJob($entry))->handle(new ResolveScratchpadLinkAction($resolver));
+
+        $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
+        $this->assertStringContainsString('could not resolve', (string) $request->error_message);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertStringContainsString('could not resolve', $message->chunks[0]);
+    }
+
     public function test_failed_marks_the_entry_as_unresolved_without_losing_the_url()
     {
         $entry = ScratchpadEntry::factory()->create([
@@ -107,5 +226,35 @@ class ResolveScratchpadLinkJobTest extends TestCase
         $this->assertSame('https://example.com/post', $entry->meta['url']);
         $this->assertSame('metadata only (resolution failed)', $entry->meta['resolved_via']);
         $this->assertSame('unresolved', $entry->meta['resolved_kind']);
+    }
+
+    public function test_failed_marks_link_post_requests_as_failed(): void
+    {
+        Queue::fake();
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'link',
+            'meta' => ['url' => 'https://example.com/post'],
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $client);
+
+        (new ResolveScratchpadLinkJob($entry))->failed(new Exception('resolver failed'));
+
+        $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertStringContainsString('could not resolve', $message->chunks[0]);
     }
 }

@@ -62,14 +62,14 @@ jobs:
       - name: Install NPM dependencies
         run: npm ci
 
-      - name: Build frontend assets
-        run: npm run build
-
       - name: Copy environment file
         run: cp .env.example .env
 
       - name: Generate application key
         run: php artisan key:generate
+
+      - name: Build frontend assets
+        run: npm run build
 
       - name: Configure database environment
         run: |
@@ -84,7 +84,9 @@ jobs:
         run: php artisan migrate --force
 
       - name: Run tests
-        run: ./vendor/bin/pest --parallel
+        # The suite uses one PostgreSQL schema and RefreshDatabase transactions;
+        # parallel workers race migrations and cannot safely share that schema.
+        run: ./vendor/bin/pest
 
   static:
     runs-on: ubuntu-latest
@@ -193,6 +195,8 @@ jobs:
             --env APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
             --env APP_ENV=production \
             --env AUTORUN_ENABLED=false \
+            --env CM_MIGRATION_GATE=false \
+            --env CM_SYNC_PRESENTATION_LIBRARY=false \
             --env QUEUE_CONNECTION=database \
             --env DB_CONNECTION=pgsql \
             --env DB_HOST=127.0.0.1 \

@@ -1,7 +1,8 @@
 # PostSyncer
 
 Content Machine configures PostSyncer per workspace and schedules or publishes
-**posts and videos** from the dashboard. PostSyncer still delivers to Facebook,
+**posts** from the dashboard. Video publishing is temporarily disabled until
+safe retries and reconciliation are available. PostSyncer still delivers to Facebook,
 Instagram, TikTok, YouTube, and the other connected accounts; CM only
 orchestrates.
 
@@ -115,6 +116,11 @@ This only applies when every planned group has a saved post id and payload
 snapshot. It rechecks each remote post before marking the operation successful;
 it never creates a new PostSyncer post. Use `--confirm-failed` only when a saved
 group is already an operator-confirmed remote `FAILED` record.
+
+`PublishPostJob` has a 900-second timeout and the dedicated `postsyncer`
+database queue has a 960-second visibility window. Its row lease and overlap
+lock make duplicate dispatches harmless, while leaving the scheduled recovery
+sweep free to re-enqueue a job if queue insertion fails.
 
 ## Settings → PostSyncer
 
@@ -268,6 +274,21 @@ GOOGLE_DRIVE_REDIRECT_URI=https://cm.example/settings/google-drive/callback
 Register the exact redirect URI in Google Cloud Console. The OAuth consent
 screen must allow the Drive scope for the account you connect.
 
+### Reconcile an uncertain create
+
+If a worker loses the response after `POST /posts`, first find the created post
+in the matching PostSyncer workspace. Verify its content, media, platforms,
+and schedule against the failed operation, then run this on the Content Machine
+deployment:
+
+```bash
+php artisan postsyncer:reconcile-post WORKSPACE_ID P-68 POSTSYNCER_POST_ID
+```
+
+The command calls `GET /posts/{id}` and only records the id when the workspace
+and group payload match. Retry the post afterwards; the reconciled group is
+checkpointed and won't be created again.
+
 ## Status tabs
 
 List pages mirror Script Studio's pipeline tabs with live counts.
@@ -289,8 +310,7 @@ Search and language filters apply on every tab except Ideation.
 3. Schedule one draft **post** through `POST /api/v1/posts/{human_id}/publish`
    with a future `when` (never omit `when` on a probe). Confirm PostSyncer ids
    and `SCHEDULED`, then delete the PostSyncer post so it never goes live.
-4. Schedule one **video** with Video + Cover Drive URLs.
-5. Script Studio no longer talks to PostSyncer. Local video/post work uploads
+4. Script Studio no longer talks to PostSyncer. Local video/post work uploads
    to CM (`content_machine.py`). Schedule only through CM, dashboard or
    `POST /api/v1/posts|videos/{human_id}/publish`.
 

@@ -3,6 +3,7 @@
 namespace App\Http\Resources\V1;
 
 use App\Models\Idea;
+use App\Support\CurrentApiToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -22,6 +23,13 @@ class IdeaResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        if (! app(CurrentApiToken::class)->can('ideas:read')) {
+            return [
+                'id' => $this->id,
+                'human_id' => $this->human_id,
+            ];
+        }
+
         return [
             'id' => $this->id,
             'human_id' => $this->human_id,

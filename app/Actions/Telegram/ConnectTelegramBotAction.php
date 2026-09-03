@@ -6,25 +6,18 @@ use App\Data\Telegram\ConnectTelegramBotData;
 use App\Models\TelegramBotConfig;
 use App\Models\Workspace;
 use App\Support\Telegram\TelegramBotCommands;
+use App\Support\Telegram\TelegramBotIdentityLock;
 use App\Support\Telegram\TelegramClientContract;
-use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
- * Validates a bot token against Telegram's own API, then registers this
- * app's webhook with Telegram, before ever storing anything: "configured"
- * and "enabled" are the same fact (TelegramBotConfig::isConnected()), so a
- * token that authenticates but whose webhook Telegram refuses to register
- * is never saved half-connected either. webhook_secret/webhook_slug are
- * generated once, on the workspace's first successful connect, and kept
- * stable across later disconnect/reconnect cycles so the registered
- * webhook URL doesn't change every time the token is rotated. The command
- * menu (setMyCommands) is registered last and best-effort: unlike the
- * webhook, a failure here doesn't block the connection, it only means
- * Telegram's own "/" UI won't suggest commands yet.
- *
- * @throws RuntimeException if Telegram rejects the token or the webhook registration
+ * Validates a bot token, durably records the candidate connection, then lets
+ * CompleteTelegramBotConnectionAction perform Telegram I/O outside a database
+ * transaction. If the process dies at either external boundary, the pending
+ * operation remains available to the recovery command.
  */
 class ConnectTelegramBotAction
 {
@@ -36,34 +29,86 @@ class ConnectTelegramBotAction
     {
         $getMeResult = $this->client->getMe($data->botToken);
 
-        if (! $getMeResult->successful) {
+        if (! $getMeResult->successful || $getMeResult->username === null) {
             throw new RuntimeException((string) $getMeResult->error);
         }
 
-        $config = TelegramBotConfig::firstOrNew(['workspace_id' => $workspace->id]);
-        $webhookSecret = $config->webhook_secret ?? Str::random(40);
-        $webhookSlug = $config->webhook_slug ?? Str::random(40);
+        $identityLock = TelegramBotIdentityLock::forWorkspace($workspace->id);
+        $identityLock->block(30);
 
-        $webhookUrl = URL::route('telegram.webhook', ['slug' => $webhookSlug]);
-        $setWebhookResult = $this->client->setWebhook($data->botToken, $webhookUrl, $webhookSecret);
+        try {
+            $configId = DB::transaction(function () use ($workspace, $data, $getMeResult): int {
+                Workspace::query()->whereKey($workspace->id)->lockForUpdate()->firstOrFail();
 
-        if (! $setWebhookResult->successful) {
-            throw new RuntimeException((string) $setWebhookResult->error);
+                $config = TelegramBotConfig::query()
+                    ->where('workspace_id', $workspace->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($config?->connection_operation !== null) {
+                    throw new RuntimeException(
+                        'A Telegram connection operation is already in progress. Retry after recovery completes.',
+                    );
+                }
+
+                $config ??= new TelegramBotConfig([
+                    'workspace_id' => $workspace->id,
+                ]);
+
+                $previousToken = $config->bot_token;
+                $rotateIdentity = $config->webhook_secret === null
+                    || $previousToken === null
+                    || $previousToken !== $data->botToken;
+                $operationId = (string) Str::uuid();
+
+                $config->forceFill([
+                    'workspace_id' => $workspace->id,
+                    'connection_operation' => TelegramBotConfig::CONNECTING,
+                    'connection_operation_id' => $operationId,
+                    'connection_operation_token' => $data->botToken,
+                    'connection_operation_username' => $getMeResult->username,
+                    'connection_operation_secret' => $rotateIdentity
+                        ? Str::random(40)
+                        : $config->webhook_secret,
+                    'connection_operation_slug' => $rotateIdentity
+                        ? Str::random(40)
+                        : $config->webhook_slug,
+                    'connection_operation_generation' => $rotateIdentity
+                        ? (string) Str::uuid()
+                        : $config->webhook_generation,
+                    'connection_cleanup_token' => null,
+                    'connection_operation_error' => null,
+                    'connection_operation_started_at' => now(),
+                ])->save();
+
+                return $config->id;
+            });
+
+            $completion = new CompleteTelegramBotConnectionAction($this->client);
+            $completed = $completion->handle($configId);
+            $config = TelegramBotConfig::query()->whereKey($configId)->first();
+
+            $cleanupPending = $config?->connection_operation === TelegramBotConfig::CLEANING_UP;
+
+            if ((! $completed && ! $cleanupPending) || $config === null || ! $config->isConnected()) {
+                $error = $completion->lastError()
+                    ?? $config->connection_operation_error
+                    ?? 'Telegram rejected the connection operation.';
+
+                throw new RuntimeException($error);
+            }
+
+            try {
+                $this->client->setMyCommands($data->botToken, TelegramBotCommands::LIST);
+            } catch (Throwable $exception) {
+                // The command menu is optional; the connected bot still
+                // accepts these commands as ordinary messages.
+                report($exception);
+            }
+
+            return $config->fresh() ?? $config;
+        } finally {
+            $identityLock->release();
         }
-
-        $config->fill([
-            'workspace_id' => $workspace->id,
-            'bot_token' => $data->botToken,
-            'bot_username' => $getMeResult->username,
-            'connected_at' => now(),
-            'webhook_secret' => $webhookSecret,
-            'webhook_slug' => $webhookSlug,
-        ]);
-
-        $config->save();
-
-        $this->client->setMyCommands($data->botToken, TelegramBotCommands::LIST);
-
-        return $config;
     }
 }

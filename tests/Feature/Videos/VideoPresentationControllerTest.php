@@ -113,6 +113,19 @@ class VideoPresentationControllerTest extends TestCase
         $this->assertStringNotContainsString('First spoken line', $html);
         $this->assertStringNotContainsString('body.embed .pres-notes{display:none}', $html);
         $this->assertStringNotContainsString('body.embed .pres-notes{display: none}', $html);
+        $this->assertStringContainsString('event.origin !== parentOrigin', $html);
+    }
+
+    public function test_deck_content_is_served_in_a_sandboxed_document(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $video = Video::factory()->for($workspace)->create([
+            'deck_manifest' => $this->deckManifest(),
+        ]);
+
+        $this->get(route('videos.presentation', $video))
+            ->assertOk()
+            ->assertHeader('Content-Security-Policy', "sandbox allow-scripts; frame-ancestors 'self'");
     }
 
     public function test_frame_is_sandboxed_and_contains_the_deck_package(): void

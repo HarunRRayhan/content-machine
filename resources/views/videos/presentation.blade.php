@@ -314,7 +314,21 @@
                 applyFs(document.fullscreenElement === shell);
             });
 
+            // The iframe is sandboxed without allow-same-origin, so its
+            // recipient origin is opaque and the parent must use '*'. Validate
+            // the sender origin here instead: an embedded document should only
+            // accept commands from the origin that loaded it.
+            var parentOrigin = null;
+            try {
+                parentOrigin = document.referrer ? new URL(document.referrer).origin : null;
+            } catch (e) {
+                parentOrigin = null;
+            }
+
             window.addEventListener('message', function (event) {
+                if (event.source !== window.parent) return;
+                if (parentOrigin !== null && event.origin !== parentOrigin) return;
+                if (parentOrigin === null && event.origin !== 'null') return;
                 const data = event.data;
                 if (!data) return;
 

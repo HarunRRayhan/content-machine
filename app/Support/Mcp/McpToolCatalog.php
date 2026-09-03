@@ -187,7 +187,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'publish_video',
-                'description' => 'Queue a video for PostSyncer. The video needs a Video Drive URL first. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately. After a schedule succeeds, verify the record and finish the Drive/tracker handoff.',
+                'description' => 'Video publishing is temporarily disabled until safe retries and reconciliation are available.',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string', 'description' => 'The video id, e.g. BV-50 or V-12.'],

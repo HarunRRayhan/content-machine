@@ -7,6 +7,7 @@ use App\Actions\Telegram\DisconnectTelegramBotAction;
 use App\Actions\Telegram\ToggleTelegramAiChatAction;
 use App\Data\Telegram\ConnectTelegramBotData;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
 use App\Http\Requests\Telegram\StoreTelegramBotConfigRequest;
 use App\Models\TelegramBotConfig;
 use App\Models\User;
@@ -20,6 +21,8 @@ use RuntimeException;
 
 class TelegramBotConfigController extends Controller
 {
+    use AuthorizesWorkspaceSettings;
+
     /**
      * Show the current workspace's Telegram connection state. The token
      * itself is never returned, only whether one is set and, if so, the
@@ -27,7 +30,7 @@ class TelegramBotConfigController extends Controller
      */
     public function edit(Request $request, AiProviderCredentialResolver $aiProviderCredentialResolver): Response
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
         $config = $this->config($workspace);
         $user = $request->user();
 
@@ -56,7 +59,8 @@ class TelegramBotConfigController extends Controller
 
     public function update(StoreTelegramBotConfigRequest $request, ConnectTelegramBotAction $connectTelegramBotAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         try {
             $connectTelegramBotAction->handle($workspace, ConnectTelegramBotData::fromRequest($request));
@@ -73,7 +77,8 @@ class TelegramBotConfigController extends Controller
 
     public function toggleAiChat(Request $request, ToggleTelegramAiChatAction $toggleTelegramAiChatAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
         $config = $this->config($workspace);
 
         abort_if($config === null || ! $config->isConnected(), 404, 'The Telegram bot is not connected.');
@@ -91,7 +96,8 @@ class TelegramBotConfigController extends Controller
 
     public function destroy(Request $request, DisconnectTelegramBotAction $disconnectTelegramBotAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
         $config = $this->config($workspace);
 
         if ($config !== null) {
@@ -106,14 +112,5 @@ class TelegramBotConfigController extends Controller
     private function config(Workspace $workspace): ?TelegramBotConfig
     {
         return TelegramBotConfig::query()->where('workspace_id', $workspace->id)->first();
-    }
-
-    private function currentWorkspace(Request $request): Workspace
-    {
-        $workspace = Workspace::current();
-
-        abort_if($workspace === null, 404, 'No current workspace.');
-
-        return $workspace;
     }
 }

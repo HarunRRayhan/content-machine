@@ -5,6 +5,7 @@ namespace Tests\Feature\Mcp;
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishPostJob;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
@@ -107,6 +108,31 @@ class McpServerTest extends TestCase
         $this->assertContains('get_post', $listed);
         $this->assertContains('update_post', $listed);
         $this->assertContains('publish_post', $listed);
+    }
+
+    public function test_list_media_returns_a_bearer_authenticated_preview_url(): void
+    {
+        $asset = MediaAsset::factory()->for($this->workspace)->create();
+
+        $text = $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 21,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'list_media',
+                'arguments' => [],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError')->json('result.content.0.text');
+
+        $this->assertIsString($text);
+        $this->assertStringContainsString(
+            str_replace('/', '\\/', route('api.v1.media.file', ['mediaAsset' => $asset->public_id])),
+            $text,
+        );
+        $this->assertStringNotContainsString(
+            str_replace('/', '\\/', route('media.file', $asset)),
+            $text,
+        );
     }
 
     public function test_capture_note_and_list_scratchpad_round_trip(): void

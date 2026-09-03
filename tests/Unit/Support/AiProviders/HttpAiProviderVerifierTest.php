@@ -4,12 +4,16 @@ namespace Tests\Unit\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
 use App\Support\AiProviders\HttpAiProviderVerifier;
+use App\Support\LinkResolution\PublicUrlGuard;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class HttpAiProviderVerifierTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_anthropic_success_hits_the_default_base_url_with_the_right_headers()
     {
         Http::fake(['api.anthropic.com/*' => Http::response(['data' => []], 200)]);
@@ -37,9 +41,32 @@ class HttpAiProviderVerifierTest extends TestCase
             'base_url' => 'https://proxy.example.com/anthropic',
         ]);
 
-        (new HttpAiProviderVerifier)->verify($credential);
+        (new HttpAiProviderVerifier(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '1.1.1.1']],
+        )))->verify($credential);
 
         Http::assertSent(fn ($request) => $request->url() === 'https://proxy.example.com/anthropic/v1/models');
+    }
+
+    public function test_a_custom_base_url_resolving_to_a_private_ip_is_rejected(): void
+    {
+        Http::fake();
+
+        $credential = AiProviderCredential::factory()->make([
+            'provider' => 'openai',
+            'base_url' => 'https://internal.example/v1',
+        ]);
+
+        $result = (new HttpAiProviderVerifier(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '10.0.0.1']],
+        )))->verify($credential);
+
+        $this->assertFalse($result->successful);
+        $this->assertSame(
+            'Could not reach the provider. Check the base URL and your network.',
+            $result->error,
+        );
+        Http::assertNothingSent();
     }
 
     public function test_openai_success_uses_bearer_auth()

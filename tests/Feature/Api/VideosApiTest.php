@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishVideoJob;
+use App\Models\Idea;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
@@ -199,6 +200,61 @@ class VideosApiTest extends TestCase
             ->assertJsonPath('data.human_id', 'V-54');
     }
 
+    public function test_an_explicit_import_advances_the_generated_video_sequence(): void
+    {
+        $this->acting()->postJson('/api/v1/videos', [
+            'human_id' => 'BV-1',
+            'number' => 1,
+            'title' => 'Imported video',
+        ])->assertCreated();
+
+        $this->acting()->postJson('/api/v1/videos', [
+            'title' => 'Generated video',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'V-2');
+    }
+
+    public function test_store_rejects_an_idea_from_another_workspace(): void
+    {
+        $foreignIdea = Idea::factory()->for(Workspace::factory())->create([
+            'kind' => 'video',
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos', [
+            'title' => 'Cross-workspace video',
+            'idea_id' => $foreignIdea->id,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('idea_id');
+
+        $this->assertDatabaseMissing('videos', ['title' => 'Cross-workspace video']);
+    }
+
+    public function test_a_write_only_token_does_not_receive_the_video_script_or_deck(): void
+    {
+        $writeToken = (new CreateWorkspaceApiTokenAction)->handle(
+            $this->workspace,
+            User::factory()->create(),
+            new CreateWorkspaceApiTokenData('write-only', ['videos:write']),
+        )['plaintext'];
+
+        $this->withToken($writeToken)->postJson('/api/v1/videos', [
+            'title' => 'Private video',
+            'body' => 'Private body',
+            'script_markdown' => 'Private script',
+            'deck_manifest' => [
+                'engine' => 'stage',
+                'deck_key' => 'test',
+                'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Private cue'}],stage:function(){return '';}};",
+            ],
+        ])
+            ->assertCreated()
+            ->assertJsonMissingPath('data.body')
+            ->assertJsonMissingPath('data.script_markdown')
+            ->assertJsonMissingPath('data.deck_manifest');
+    }
+
     public function test_show_and_patch_address_by_human_id(): void
     {
         Video::factory()->for($this->workspace)->create([
@@ -273,7 +329,7 @@ class VideosApiTest extends TestCase
         ]);
     }
 
-    public function test_update_can_record_postsyncer_groups(): void
+    public function test_update_cannot_forge_postsyncer_groups(): void
     {
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-12',
@@ -294,9 +350,10 @@ class VideosApiTest extends TestCase
                 ]],
             ],
         ])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'scheduled')
-            ->assertJsonPath('data.postsyncer.groups.0.post_id', '132195');
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer');
+
+        $this->assertNull(Video::query()->where('human_id', 'BV-12')->value('postsyncer'));
     }
 
     public function test_patch_rejects_a_private_drive_url(): void
@@ -339,7 +396,7 @@ class VideosApiTest extends TestCase
         $this->acting()->getJson('/api/v1/videos/BV-1')->assertNotFound();
     }
 
-    public function test_update_can_clear_stale_publish_error(): void
+    public function test_update_cannot_forge_publish_state_or_error(): void
     {
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-57',
@@ -354,9 +411,10 @@ class VideosApiTest extends TestCase
             'publish_state' => 'succeeded',
             'publish_error' => null,
         ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'succeeded')
-            ->assertJsonPath('data.publish_error', null);
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish_state');
+
+        $this->assertSame('failed', Video::query()->where('human_id', 'BV-57')->value('publish_state'));
     }
 
     public function test_publish_dispatches_job_and_returns_queued_state(): void
@@ -364,6 +422,7 @@ class VideosApiTest extends TestCase
         Queue::fake();
         PostsyncerConfig::write($this->workspace, [
             'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'api_key' => 'test-api-key',
             'languages' => [
                 'english' => ['workspace_id' => '853', 'platforms' => []],

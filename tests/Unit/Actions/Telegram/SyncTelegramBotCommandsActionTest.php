@@ -9,6 +9,7 @@ use App\Support\Telegram\TelegramBotCommands;
 use App\Support\Telegram\TelegramClientContract;
 use App\Support\Telegram\TelegramFileDownloadResult;
 use App\Support\Telegram\TelegramGetMeResult;
+use App\Support\Telegram\TelegramWebhookInfoResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
@@ -53,6 +54,11 @@ class SyncTelegramBotCommandsActionTest extends TestCase
             public function deleteWebhook(string $botToken): TelegramApiResult
             {
                 return TelegramApiResult::success();
+            }
+
+            public function getWebhookInfo(string $botToken): TelegramWebhookInfoResult
+            {
+                return TelegramWebhookInfoResult::success('', 0);
             }
 
             public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult

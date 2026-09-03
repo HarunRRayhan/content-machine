@@ -91,7 +91,7 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->name('ideas.show');
 
     Route::post('media-urls/check', [MediaUrlsApiController::class, 'check'])
-        ->middleware('auth.workspace-token')
+        ->middleware('auth.workspace-token:media:read')
         ->name('media-urls.check');
 
     Route::get('google-drive/files', [GoogleDriveApiController::class, 'files'])
@@ -151,6 +151,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.publish');
 
+    Route::post('posts/{human_id}/reconcile', [PostsApiController::class, 'reconcile'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile');
+
     Route::get('posts/{human_id}/media/{mediaAsset}', [PostsApiController::class, 'media'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.media');
@@ -158,4 +162,8 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('media', [MediaApiController::class, 'index'])
         ->middleware('auth.workspace-token:media:read')
         ->name('media.index');
+
+    Route::get('media/{mediaAsset:public_id}/file', [MediaApiController::class, 'file'])
+        ->middleware('auth.workspace-token:media:read')
+        ->name('media.file');
 });

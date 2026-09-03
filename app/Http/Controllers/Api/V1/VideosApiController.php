@@ -93,7 +93,11 @@ class VideosApiController extends Controller
             'video_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['nullable', 'string', Rule::in(Video::STATUSES)],
-            'idea_id' => ['nullable', 'integer'],
+            'idea_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('ideas', 'id')->where('workspace_id', $workspace->id),
+            ],
         ]);
 
         $video = $action->handle($workspace, $payload);
@@ -118,10 +122,9 @@ class VideosApiController extends Controller
             'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
-            'postsyncer' => ['sometimes', 'nullable', 'array'],
-            'postsyncer.groups' => ['sometimes', 'array'],
-            'publish_state' => ['sometimes', 'nullable', 'string', Rule::in(Video::PUBLISH_STATES)],
-            'publish_error' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'postsyncer' => ['prohibited'],
+            'publish_state' => ['prohibited'],
+            'publish_error' => ['prohibited'],
         ]);
 
         $action->handle($video, UpdateVideoData::fromApiPayload($payload, $video));

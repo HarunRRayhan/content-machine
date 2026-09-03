@@ -13,17 +13,24 @@ use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Actions\Telegram\ResolveTelegramIntentAction;
+use App\Jobs\GenerateTelegramPostJob;
+use App\Jobs\PublishPostJob;
+use App\Jobs\ResolveScratchpadLinkJob;
 use App\Models\AiProviderCredential;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
 use App\Models\TelegramLinkCode;
+use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
 use App\Models\User;
 use App\Models\Video;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use RuntimeException;
@@ -36,9 +43,12 @@ class HandleTelegramUpdateActionTest extends TestCase
 
     private FakeTelegramClient $client;
 
+    private int $nextUpdateId = 0;
+
     private function action(?AiCompletionClientContract $completionClient = null): HandleTelegramUpdateAction
     {
         $this->client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $this->client);
 
         $completionClient ??= new class implements AiCompletionClientContract
         {
@@ -68,10 +78,10 @@ class HandleTelegramUpdateActionTest extends TestCase
     private function update(int $fromId, string $text, int $chatId = 555): array
     {
         return [
-            'update_id' => 1,
+            'update_id' => ++$this->nextUpdateId,
             'message' => [
                 'message_id' => 42,
-                'chat' => ['id' => $chatId],
+                'chat' => ['id' => $chatId, 'type' => 'private'],
                 'from' => ['id' => $fromId, 'username' => 'sender'],
                 'text' => $text,
             ],
@@ -80,7 +90,36 @@ class HandleTelegramUpdateActionTest extends TestCase
 
     private function lastReply(): string
     {
-        return $this->client->sentMessages[count($this->client->sentMessages) - 1]['text'];
+        $messages = $this->outboundMessages();
+
+        return $messages[count($messages) - 1]['text'];
+    }
+
+    /**
+     * The test database wraps each test in a transaction, so after-commit
+     * delivery jobs are intentionally not run here. Read the committed
+     * outbox rows instead of pretending Telegram was called inline.
+     *
+     * @return list<array{botToken: string|null, chatId: int, text: string}>
+     */
+    private function outboundMessages(): array
+    {
+        $messages = [];
+
+        foreach (TelegramOutboundMessage::query()->with('telegramBotConfig')->orderBy('id')->get() as $message) {
+            $chunk = $message->chunks[0] ?? null;
+            if (! is_string($chunk)) {
+                continue;
+            }
+
+            $messages[] = [
+                'botToken' => $message->telegramBotConfig?->bot_token,
+                'chatId' => $message->chat_id,
+                'text' => $chunk,
+            ];
+        }
+
+        return $messages;
     }
 
     public function test_an_unlinked_sender_sending_plain_text_is_asked_to_link_and_nothing_is_captured()
@@ -91,6 +130,26 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::count());
         $this->assertStringContainsString('/link', $this->lastReply());
+    }
+
+    public function test_a_group_message_cannot_reach_private_commands_or_captures(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $update = $this->update(1, '/notes');
+        $update['message']['chat']['type'] = 'group';
+
+        $this->action()->handle($config, $update);
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertSame([], $this->outboundMessages());
+        $this->assertSame([], $this->client->reactionsSet);
+        $this->assertSame([], $this->client->chatActionsSent);
     }
 
     public function test_an_unlinked_sender_can_still_use_start_and_help()
@@ -304,6 +363,36 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertStringContainsString('Unknown command', $this->lastReply());
     }
 
+    public function test_a_command_suffix_is_only_accepted_for_this_bot(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_username' => 'capture_bot']);
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/posts@other_bot'));
+
+        $this->assertSame([], $this->outboundMessages());
+    }
+
+    public function test_a_command_suffix_matching_this_bot_is_routed(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create(['bot_username' => 'capture_bot']);
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/posts@CAPTURE_BOT'));
+
+        $this->assertStringContainsString('No posts yet.', $this->lastReply());
+    }
+
     public function test_a_linked_sender_sending_plain_text_is_captured_as_normal()
     {
         $config = TelegramBotConfig::factory()->connected()->create();
@@ -315,6 +404,24 @@ class HandleTelegramUpdateActionTest extends TestCase
         $entry = ScratchpadEntry::sole();
         $this->assertSame('a captured thought', $entry->body);
         $this->assertSame('Captured.', $this->lastReply());
+    }
+
+    public function test_a_redelivered_capture_update_does_not_create_a_second_note(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $update = $this->update(1, 'capture this once');
+        $action = $this->action();
+
+        $action->handle($config, $update);
+        $action->handle($config, $update);
+
+        $this->assertSame(1, ScratchpadEntry::count());
     }
 
     public function test_plain_text_with_ai_chat_enabled_gets_a_chat_reply_instead_of_being_captured()
@@ -424,7 +531,7 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->action($completionClient)->handle($config, $this->update(1, 'got any ideas?'));
 
-        $messages = array_column($this->client->sentMessages, 'text');
+        $messages = array_column($this->outboundMessages(), 'text');
         $this->assertContains("Couldn't generate a chat reply right now, so I saved this as a note instead.", $messages);
         $this->assertSame('Captured.', end($messages));
 
@@ -477,7 +584,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 555],
+                'chat' => ['id' => 555, 'type' => 'private'],
                 'from' => ['id' => 1, 'username' => 'sender'],
                 'text' => 'hey',
             ],
@@ -521,5 +628,329 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->action()->handle($config, $this->update(1, '/help'));
 
         $this->assertStringContainsString("I'll chat back", $this->lastReply());
+    }
+
+    public function test_post_command_captures_source_and_queues_generation_without_publishing(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/post turn this into a post'));
+
+        $request = TelegramPostRequest::sole();
+        $this->assertSame(TelegramPostRequest::GENERATING, $request->state);
+        $this->assertSame('turn this into a post', $request->sourceEntry->body);
+        $this->assertSame(0, Post::count());
+        Queue::assertPushed(GenerateTelegramPostJob::class, fn (GenerateTelegramPostJob $job): bool => $job->telegramPostRequestId === $request->id);
+        $this->assertStringContainsString('creating a draft', $this->lastReply());
+    }
+
+    public function test_bare_post_command_waits_for_the_next_message(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/post'));
+        $waiting = TelegramPostRequest::sole();
+        $this->assertSame(TelegramPostRequest::AWAITING_INPUT, $waiting->state);
+
+        $nextUpdate = $this->update(1, 'the next source');
+        $nextUpdate['update_id'] = 2;
+        $this->action()->handle($config, $nextUpdate);
+
+        $request = $waiting->refresh();
+        $this->assertSame(TelegramPostRequest::GENERATING, $request->state);
+        $this->assertSame('the next source', $request->sourceEntry->body);
+        $this->assertSame(1, TelegramPostRequest::count());
+        $this->assertStringContainsString('creating a draft', $this->lastReply());
+    }
+
+    public function test_approve_command_approves_the_latest_generated_draft(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $post = Post::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'approval_state' => 'pending',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::AWAITING_APPROVAL,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/approve'));
+
+        $this->assertSame('approved', $post->refresh()->approval_state);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->refresh()->state);
+        $this->assertStringContainsString('approved', $this->lastReply());
+    }
+
+    public function test_an_explicit_post_id_cannot_approve_another_telegram_users_request(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $post = Post::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'approval_state' => 'pending',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'telegram_user_id' => 2,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::AWAITING_APPROVAL,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/approve '.$post->human_id));
+
+        $this->assertSame('pending', $post->refresh()->approval_state);
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->refresh()->state);
+        $this->assertStringContainsString('No generated draft', $this->lastReply());
+    }
+
+    public function test_approve_without_a_post_id_refuses_when_multiple_requests_match(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+
+        foreach (['First draft', 'Second draft'] as $title) {
+            $post = Post::factory()->create([
+                'workspace_id' => $config->workspace_id,
+                'title' => $title,
+                'approval_state' => 'pending',
+            ]);
+            TelegramPostRequest::factory()->create([
+                'workspace_id' => $config->workspace_id,
+                'telegram_bot_config_id' => $config->id,
+                'post_id' => $post->id,
+                'telegram_user_id' => 1,
+                'telegram_chat_id' => 555,
+                'state' => TelegramPostRequest::AWAITING_APPROVAL,
+            ]);
+        }
+
+        $this->action()->handle($config, $this->update(1, '/approve'));
+
+        $this->assertSame(0, Post::where('approval_state', 'approved')->count());
+        $this->assertStringContainsString('More than one matching', $this->lastReply());
+    }
+
+    public function test_post_now_requires_approval_and_queues_only_after_it(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $post = Post::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'approval_state' => 'approved',
+            'captions' => [[
+                'part' => null,
+                'lang' => 'bn',
+                'platforms' => [[
+                    'name' => 'facebook',
+                    'title' => 'Title',
+                    'caption' => 'Caption',
+                    'first_comment' => '',
+                    'images' => [],
+                    'thread' => [],
+                ]],
+            ]],
+            'platforms' => ['facebook'],
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
+        PostsyncerConfig::write($config->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-key',
+            'languages' => [
+                'english' => ['workspace_id' => '123', 'platforms' => []],
+                'bangla' => ['workspace_id' => '123', 'platforms' => []],
+            ],
+            'post_types' => ['platforms' => ['facebook' => ['text' => 'on']]],
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/post_now'));
+
+        $this->assertSame('queued', $post->refresh()->publish_state, $this->lastReply());
+        $this->assertStringContainsString('queued', $this->lastReply());
+        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+    }
+
+    public function test_post_now_can_retry_a_failed_telegram_publish(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $post = Post::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'status' => 'ready',
+            'approval_state' => 'approved',
+            'captions' => ['facebook' => 'Caption'],
+            'platforms' => ['facebook'],
+            'publish_state' => 'failed',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::FAILED,
+        ]);
+        PostsyncerConfig::write($config->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-key',
+            'languages' => [
+                'english' => ['workspace_id' => '123', 'platforms' => []],
+                'bangla' => ['workspace_id' => '123', 'platforms' => []],
+            ],
+            'post_types' => ['platforms' => ['facebook' => ['text' => 'on']]],
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/post_now '.$post->human_id));
+
+        $this->assertSame('queued', $post->refresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->refresh()->state);
+        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+    }
+
+    public function test_post_link_waits_for_link_resolution_before_generation(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/post https://example.com/article'));
+
+        $request = TelegramPostRequest::sole();
+        $this->assertSame(TelegramPostRequest::GENERATING, $request->state);
+        Queue::assertPushed(ResolveScratchpadLinkJob::class, fn (ResolveScratchpadLinkJob $job): bool => $job->entry->is($request->sourceEntry));
+        Queue::assertNotPushed(GenerateTelegramPostJob::class);
+    }
+
+    public function test_schedule_queues_an_approved_draft_for_the_requested_time(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $post = Post::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'approval_state' => 'approved',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Scheduled caption'],
+        ]);
+        TelegramPostRequest::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
+        PostsyncerConfig::write($config->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-key',
+            'languages' => [
+                'english' => ['workspace_id' => '123', 'platforms' => []],
+                'bangla' => ['workspace_id' => '123', 'platforms' => []],
+            ],
+            'post_types' => ['platforms' => ['facebook' => ['text' => 'on']]],
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/schedule P-'.$post->number.' 2099-09-03 09:00'));
+
+        $this->assertSame('queued', $post->refresh()->publish_state);
+        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->post->is($post)
+            && $job->options['when'] === '2099-09-03T09:00:00+06:00');
+        $this->assertStringContainsString('queued', $this->lastReply());
+    }
+
+    public function test_cancel_marks_the_active_request_cancelled_without_deleting_the_source(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'body' => 'Keep this source.',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $config->workspace_id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 1,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+
+        $this->action()->handle($config, $this->update(1, '/cancel'));
+
+        $this->assertSame(TelegramPostRequest::CANCELLED, $request->refresh()->state);
+        $this->assertNotNull($entry->fresh());
+        $this->assertStringContainsString('Cancelled', $this->lastReply());
     }
 }

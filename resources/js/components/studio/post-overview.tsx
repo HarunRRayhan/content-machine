@@ -1,4 +1,4 @@
-import { Link, router } from '@inertiajs/react';
+import { Form, Link, router } from '@inertiajs/react';
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import PublishDialog from '@/components/content/publish-dialog';
@@ -23,7 +23,7 @@ const POST_PIPELINE = [
     { key: 'posted', label: 'Posted' },
 ] as const;
 
-const DHAKA_TZ = 'Asia/Dhaka';
+const DEFAULT_TIMEZONE = 'Asia/Dhaka';
 
 type Props = {
     postId: number;
@@ -43,6 +43,17 @@ type Props = {
     postsyncerReady: boolean;
     publishState: string;
     publishRetryable: boolean;
+    publishProgress: {
+        state?: string;
+        current?: {
+            index?: number;
+            group_key?: string;
+            phase?: string;
+        } | null;
+    } | null;
+    reconcileUrl: string;
+    approvalState: string;
+    timezone: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     handles?: HandleDirectory;
@@ -77,15 +88,74 @@ function groupWhen(group: PostsyncerGroup): string | null {
     return group.published_at ?? group.scheduled_at ?? null;
 }
 
-function parseWhen(value: string): Date | null {
-    const naive = value.match(
-        /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?$/,
+function timezoneParts(date: Date, timezone: string): Record<string, number> {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+    const values: Record<string, number> = {};
+
+    for (const part of parts) {
+        if (part.type !== 'literal') {
+            values[part.type] = Number(part.value);
+        }
+    }
+
+    return values;
+}
+
+function parseNaiveWhen(value: string, timezone: string): Date | null {
+    const match = value.match(
+        /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/,
     );
 
-    if (naive) {
-        const date = new Date(`${naive[1]}T${naive[2]}:00+06:00`);
+    if (!match) {
+        return null;
+    }
 
-        return Number.isNaN(date.getTime()) ? null : date;
+    const [, year, month, day, hour, minute, second = '0'] = match;
+    const desired = Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second),
+    );
+    let timestamp = desired;
+
+    // Find the UTC instant whose wall-clock parts match the workspace zone.
+    // Iteration also handles daylight-saving offset changes without shipping a
+    // timezone database to the browser.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        const local = timezoneParts(new Date(timestamp), timezone);
+        const rendered = Date.UTC(
+            local.year,
+            local.month - 1,
+            local.day,
+            local.hour,
+            local.minute,
+            local.second,
+        );
+        timestamp += desired - rendered;
+    }
+
+    const date = new Date(timestamp);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseWhen(value: string, timezone: string): Date | null {
+    const naive = parseNaiveWhen(value, timezone);
+
+    if (naive !== null) {
+        return naive;
     }
 
     const date = new Date(value);
@@ -93,25 +163,31 @@ function parseWhen(value: string): Date | null {
     return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatWhen(value: string | null | undefined): string | null {
+function formatWhen(
+    value: string | null | undefined,
+    timezone: string,
+): string | null {
     if (!value) {
         return null;
     }
 
-    const date = parseWhen(value);
+    const date = parseWhen(value, timezone);
 
     if (date === null) {
         return value;
     }
 
     return new Intl.DateTimeFormat('en-GB', {
-        timeZone: DHAKA_TZ,
+        timeZone: timezone,
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(date);
 }
 
-function earliestWhen(groups: PostsyncerGroup[]): string | null {
+function earliestWhen(
+    groups: PostsyncerGroup[],
+    timezone: string,
+): string | null {
     let best: Date | null = null;
     let bestRaw: string | null = null;
 
@@ -122,7 +198,7 @@ function earliestWhen(groups: PostsyncerGroup[]): string | null {
             continue;
         }
 
-        const date = parseWhen(raw);
+        const date = parseWhen(raw, timezone);
 
         if (date === null) {
             continue;
@@ -134,7 +210,7 @@ function earliestWhen(groups: PostsyncerGroup[]): string | null {
         }
     }
 
-    return formatWhen(bestRaw);
+    return formatWhen(bestRaw, timezone);
 }
 
 export default function PostOverview({
@@ -149,10 +225,15 @@ export default function PostOverview({
     postsyncerReady,
     publishState,
     publishRetryable,
+    publishProgress,
+    reconcileUrl,
+    approvalState,
+    timezone,
     needsConfirmAsk,
     postsyncer,
     handles,
 }: Props) {
+    const effectiveTimezone = timezone.trim() || DEFAULT_TIMEZONE;
     const studioStatus = mapStudioStatus(status);
     const archived = studioStatus === 'archived';
     const stage = archived
@@ -188,7 +269,15 @@ export default function PostOverview({
           : !postsyncerReady
             ? 'Configure PostSyncer in Settings before publishing.'
             : null;
-    const scheduledAt = earliestWhen(groups);
+    const publishUncertain = Boolean(
+        publishState === 'failed' &&
+        publishProgress?.state === 'uncertain' &&
+        publishProgress.current !== null &&
+        publishProgress.current !== undefined &&
+        publishProgress.current.phase !== 'uploading',
+    );
+    const awaitingApproval = approvalState === 'pending';
+    const scheduledAt = earliestWhen(groups, effectiveTimezone);
 
     function advanceStatus(nextStatus: 'archived' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {
@@ -208,6 +297,33 @@ export default function PostOverview({
 
     return (
         <div className="overview">
+            <section className="pane">
+                <div className="pane-head">
+                    <span className="k">Approval</span>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    {awaitingApproval ? (
+                        <span className="badge">
+                            Needs review before publishing
+                        </span>
+                    ) : (
+                        <span className="badge">Approved for publishing</span>
+                    )}
+                    {awaitingApproval && (
+                        <Form action={`/posts/${postId}/approve`} method="post">
+                            {({ processing }) => (
+                                <button
+                                    type="submit"
+                                    className="advance"
+                                    disabled={processing}
+                                >
+                                    Approve draft
+                                </button>
+                            )}
+                        </Form>
+                    )}
+                </div>
+            </section>
             <section className="pane">
                 <div className="pane-head">
                     <span className="k">Status</span>
@@ -258,7 +374,48 @@ export default function PostOverview({
                     </div>
 
                     <div className="act">
-                        {archived ? (
+                        {publishUncertain ? (
+                            <Form
+                                action={reconcileUrl}
+                                method="post"
+                                className="schedule-it"
+                            >
+                                {({ processing, errors }) => (
+                                    <>
+                                        <label className="schedule-it-label">
+                                            <span className="schedule-it-label-row">
+                                                Reconcile PostSyncer create
+                                            </span>
+                                            <input
+                                                name="postsyncer_id"
+                                                type="text"
+                                                inputMode="numeric"
+                                                required
+                                                placeholder="PostSyncer post ID"
+                                                disabled={processing}
+                                            />
+                                        </label>
+                                        <button
+                                            type="submit"
+                                            className="advance"
+                                            disabled={processing}
+                                        >
+                                            Verify and reconcile
+                                        </button>
+                                        {errors.postsyncer_id && (
+                                            <p className="schedule-it-error">
+                                                {errors.postsyncer_id}
+                                            </p>
+                                        )}
+                                        <p className="schedule-it-hint">
+                                            Find the created post in PostSyncer,
+                                            verify its content, then enter its
+                                            ID.
+                                        </p>
+                                    </>
+                                )}
+                            </Form>
+                        ) : archived ? (
                             <>
                                 <span className="badge archived">
                                     🗄️ Archived
@@ -301,7 +458,7 @@ export default function PostOverview({
                             <span className="badge">
                                 🗓️ Scheduled
                                 {scheduledAt
-                                    ? ` · ${scheduledAt} ${DHAKA_TZ}`
+                                    ? ` · ${scheduledAt} ${effectiveTimezone}`
                                     : ''}
                             </span>
                         )}
@@ -309,8 +466,10 @@ export default function PostOverview({
 
                     <WorkspaceScheduleLog
                         buckets={workspaceBuckets}
-                        formatWhen={formatWhen}
-                        timezone={DHAKA_TZ}
+                        formatWhen={(value) =>
+                            formatWhen(value, effectiveTimezone)
+                        }
+                        timezone={effectiveTimezone}
                         handles={handles}
                         heading={
                             studioStatus === 'posted'

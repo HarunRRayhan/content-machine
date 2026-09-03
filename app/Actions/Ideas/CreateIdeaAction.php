@@ -51,7 +51,15 @@ class CreateIdeaAction
                     ? (int) $attributes['number']
                     : $this->numberFromHumanId($humanId);
 
-                $this->ensureSequencePast($workspace, $kind, $number);
+                $reserveKind = match ($kind) {
+                    'post' => 'post_idea',
+                    'video' => 'video_idea',
+                    default => null,
+                };
+
+                if ($reserveKind !== null) {
+                    $this->reserveContentIdAction->advancePast($workspace, $reserveKind, $number);
+                }
             } else {
                 $reserveKind = match ($kind) {
                     'post' => 'post_idea',
@@ -112,41 +120,6 @@ class CreateIdeaAction
         }
 
         return (int) $matches[1];
-    }
-
-    /**
-     * Keep id_sequences ahead of imported numbers so the next reserve
-     * does not collide with a PI/VI we just brought over.
-     */
-    private function ensureSequencePast(Workspace $workspace, string $kind, int $number): void
-    {
-        $reserveKind = match ($kind) {
-            'post' => 'post_idea',
-            'video' => 'video_idea',
-            default => null,
-        };
-        if ($reserveKind === null) {
-            return;
-        }
-
-        DB::table('id_sequences')->insertOrIgnore([
-            'workspace_id' => $workspace->id,
-            'kind' => $reserveKind,
-            'next_value' => 1,
-        ]);
-
-        $sequence = DB::table('id_sequences')
-            ->where('workspace_id', $workspace->id)
-            ->where('kind', $reserveKind)
-            ->lockForUpdate()
-            ->first();
-
-        if ($sequence !== null && (int) $sequence->next_value <= $number) {
-            DB::table('id_sequences')
-                ->where('workspace_id', $workspace->id)
-                ->where('kind', $reserveKind)
-                ->update(['next_value' => $number + 1]);
-        }
     }
 
     private function uniqueSlug(string $title, int $workspaceId, string $kind): string

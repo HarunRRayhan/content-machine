@@ -6,6 +6,7 @@ use App\Models\Video;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Content\PresentationManifest;
+use App\Support\CurrentApiToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -19,6 +20,13 @@ class VideoResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        if (! app(CurrentApiToken::class)->can('videos:read')) {
+            return [
+                'id' => $this->id,
+                'human_id' => $this->human_id,
+            ];
+        }
+
         $include = $request->attributes->get('api_include');
         if (! $include instanceof IncludeFields) {
             $include = IncludeFields::full();
@@ -31,7 +39,10 @@ class VideoResource extends JsonResource
             'title' => $this->title,
             'language' => $this->language,
             'slug' => $this->slug,
-            'body' => $this->body,
+            'body' => $this->when(
+                $include->wants('body'),
+                $this->body,
+            ),
             'script_markdown' => $this->when(
                 $include->wants('script_markdown'),
                 $this->script_markdown,
@@ -63,7 +74,9 @@ class VideoResource extends JsonResource
             'cover_drive_url' => $this->cover_drive_url,
             'status' => $this->status,
             'publish_state' => $this->publish_state,
-            'publish_error' => $this->publish_error,
+            'publish_error' => $this->publish_error === null
+                ? null
+                : 'Publishing failed. Inspect the dashboard for details.',
             'postsyncer' => $this->postsyncer,
             'idea_id' => $this->idea_id,
             'created_at' => $this->created_at?->toIso8601String(),

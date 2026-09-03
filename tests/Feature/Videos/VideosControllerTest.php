@@ -560,4 +560,20 @@ class VideosControllerTest extends TestCase
 
         $this->get(route('videos.media', [$otherVideo, $media]))->assertNotFound();
     }
+
+    public function test_media_404s_for_an_unattached_asset_in_the_same_workspace(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create();
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/unattached.jpg',
+            'mime' => 'image/jpeg',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, 'secret');
+
+        $this->get(route('videos.media', [$video, $media]))->assertNotFound();
+    }
 }
