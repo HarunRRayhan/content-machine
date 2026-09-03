@@ -53,6 +53,26 @@ class PublishVideoActionTest extends TestCase
         ]);
     }
 
+    /**
+     * @return array{key: string, media_urls: list<string>}
+     */
+    private function legacyGroup(Video $video, Workspace $workspace): array
+    {
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+        $groups = (new VideoPublishPlanner(new MediaUrlResolver))->plan(
+            $video,
+            $config,
+            ['platforms' => ['facebook'], 'confirm_ask' => false],
+        );
+        $key = (string) (new \ReflectionMethod(PublishVideoAction::class, 'groupKey'))
+            ->invoke($this->action, $config, $groups[0]);
+
+        return [
+            'key' => $key,
+            'media_urls' => $groups[0]->mediaUrls,
+        ];
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -701,6 +721,45 @@ class PublishVideoActionTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_failure_keeps_a_newer_media_checkpoint_over_stale_local_progress(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        Http::fake(function ($request) use ($video) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                $latestVideo = $video->fresh();
+                $progress = $latestVideo->publish_progress;
+                $progress['current']['media_ids'] = [916];
+                $latestVideo->forceFill(['publish_progress' => $progress])->save();
+
+                return Http::response(['message' => 'invalid account'], 422);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $this->action->handle($video, ['confirm_ask' => false]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame('retryable', $video->publish_progress['current']['phase']);
+        $this->assertSame([916], $video->publish_progress['current']['media_ids']);
+    }
+
     public function test_second_publish_is_refused_when_groups_have_post_ids(): void
     {
         Http::fake();
@@ -904,6 +963,233 @@ class PublishVideoActionTest extends TestCase
         $video->refresh();
         $this->assertSame('succeeded', $video->publish_state);
         $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
+    }
+
+    public function test_legacy_missing_account_checkpoint_reuses_registered_media_after_mapping_fix(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 999]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS', 'caption' => 'Reel caption',
+                ]]],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+        $legacy = $this->legacyGroup($video, $workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                    ],
+                ],
+            ],
+        ]);
+        $video->forceFill([
+            'publish_state' => 'failed',
+            'publish_error' => 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. No account id mapped for platform facebook.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false, 'platforms' => ['facebook']],
+                'plan_hash' => 'legacy-plan',
+                'planned_groups' => [['index' => 0, 'group_key' => $legacy['key']]],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => $legacy['key'],
+                    'phase' => 'creating',
+                    'idempotency_key' => 'legacy-request',
+                    'media_ids' => [915],
+                    'media_urls' => $legacy['media_urls'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ])->save();
+
+        $this->action->handle($video, ['platforms' => ['facebook'], 'confirm_ask' => false]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/media/upload/url'));
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts'
+            && $request['content'][0]['media'] === [915]);
+    }
+
+    public function test_legacy_missing_account_checkpoint_is_not_rebound_when_media_changes(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+        $legacy = $this->legacyGroup($video, $workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                    ],
+                ],
+            ],
+        ]);
+        $video->forceFill([
+            'publish_state' => 'failed',
+            'publish_error' => 'No account id mapped for platform facebook.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false, 'platforms' => ['facebook']],
+                'plan_hash' => 'legacy-plan',
+                'planned_groups' => [['index' => 0, 'group_key' => $legacy['key']]],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => $legacy['key'],
+                    'phase' => 'creating',
+                    'idempotency_key' => 'legacy-request',
+                    'media_ids' => [915],
+                    'media_urls' => ['https://example.com/a-different-video.mp4'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ])->save();
+
+        $this->action->handle($video, ['platforms' => ['facebook'], 'confirm_ask' => false]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('cannot be repaired safely', (string) $video->publish_error);
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        Http::assertNothingSent();
+    }
+
+    public function test_create_reconciliation_rejects_an_uncertain_media_upload(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'uploading',
+                    'idempotency_key' => 'request-1',
+                    'media_ids' => [],
+                    'media_urls' => ['https://example.com/video.mp4'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $exception = null;
+        try {
+            $this->action->reconcile($video, 99);
+        } catch (PostsyncerException $thrown) {
+            $exception = $thrown;
+        }
+
+        $this->assertInstanceOf(PostsyncerException::class, $exception);
+        $this->assertStringContainsString('uncertain postsyncer create', strtolower((string) $exception?->getMessage()));
+        Http::assertNothingSent();
+    }
+
+    public function test_retryable_media_checkpoint_without_plan_metadata_is_not_reset(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+            'publish_state' => 'failed',
+            'publish_error' => 'PostSyncer create was rejected.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false, 'platforms' => ['facebook']],
+                'plan_hash' => null,
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'retryable',
+                    'idempotency_key' => 'request-1',
+                    'media_ids' => [915],
+                ],
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->action->handle($video, ['platforms' => ['facebook'], 'confirm_ask' => false]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertStringContainsString('no plan metadata', (string) $video->publish_error);
+        $this->assertSame('retryable', $video->publish_progress['current']['phase']);
+        $this->assertSame([915], $video->publish_progress['current']['media_ids']);
+        Http::assertNothingSent();
     }
 
     public function test_lost_create_response_records_an_uncertain_current_group(): void
