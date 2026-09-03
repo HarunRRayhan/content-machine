@@ -24,6 +24,12 @@ final class UpdatePresentationCueAction
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            if ($video->isPublishInProgress() || $video->hasUncertainPublish()) {
+                throw new InvalidArgumentException(
+                    'A video cannot be edited while its PostSyncer publish is queued, running, or uncertain.',
+                );
+            }
+
             $markdown = $video->script_markdown;
             $manifest = $video->deck_manifest;
             $deckJs = is_array($manifest) ? ($manifest['js'] ?? null) : null;
@@ -42,12 +48,15 @@ final class UpdatePresentationCueAction
                 throw new InvalidArgumentException('This presentation step is not linked to an editable script line.');
             }
 
+            // Validate the visual cue first so a stale browser payload reports
+            // the deck mismatch before checking the linked script line.
+            $updatedDeckJs = $this->replaceDeckCue($deckJs, $currentCue, $cue, $data->step);
             $scriptLine = $this->lineForStep(
                 $this->spokenLines($markdown),
                 $data->step,
                 $currentCue,
-                count($deckCues),
                 $deckCue['scriptLine'] ?? null,
+                $deckCue['scriptCue'] ?? null,
             );
             $updatedMarkdown = substr_replace(
                 $markdown,
@@ -55,7 +64,14 @@ final class UpdatePresentationCueAction
                 $scriptLine['offset'],
                 $scriptLine['length'],
             );
-            $manifest['js'] = $this->replaceDeckCue($deckJs, $currentCue, $cue, $data->step);
+            $manifest['js'] = $updatedDeckJs;
+
+            if ($markdown !== $updatedMarkdown) {
+                $video->recordFieldChange('script_markdown', $markdown, $updatedMarkdown);
+            }
+            if ($video->deck_manifest !== $manifest) {
+                $video->recordFieldChange('deck_manifest', $video->deck_manifest, $manifest);
+            }
 
             $video->forceFill([
                 'script_markdown' => $updatedMarkdown,
@@ -72,12 +88,13 @@ final class UpdatePresentationCueAction
         array $lines,
         int $step,
         string $currentCue,
-        int $deckCueCount,
         ?int $scriptLineIndex = null,
+        ?string $expectedScriptCue = null,
     ): array {
         if ($scriptLineIndex !== null) {
             $mappedLine = $lines[$scriptLineIndex] ?? null;
-            if ($mappedLine !== null) {
+            if ($mappedLine !== null
+                && ($expectedScriptCue === null || $mappedLine['cue'] === $expectedScriptCue)) {
                 return $mappedLine;
             }
 
@@ -86,21 +103,6 @@ final class UpdatePresentationCueAction
 
         $line = $lines[$step] ?? null;
         if ($line !== null && $line['cue'] === $currentCue) {
-            return $line;
-        }
-
-        $matches = array_values(array_filter(
-            $lines,
-            fn (array $candidate): bool => $candidate['cue'] === $currentCue,
-        ));
-
-        if (count($matches) === 1) {
-            return $matches[0];
-        }
-
-        // Older decks use shortened cues, but positional fallback is safe only
-        // when both artifacts still expose the same number of spoken steps.
-        if ($line !== null && count($lines) === $deckCueCount) {
             return $line;
         }
 
@@ -187,15 +189,49 @@ final class UpdatePresentationCueAction
             throw new InvalidArgumentException('Presentation step no longer matches its deck cue. Reload and try again.');
         }
 
-        $replacement = $target['literal'][0] === "'"
-            ? "'".$this->escapeSingleQuoted($cue)."'"
-            : $this->encodeDoubleQuoted($cue, true);
+        $replacement = $this->encodeDeckString($cue, $target['literal']);
+        $replacements = [[
+            'offset' => $target['offset'],
+            'length' => strlen($target['literal']),
+            'value' => $replacement,
+        ]];
 
-        return substr_replace($js, $replacement, $target['offset'], strlen($target['literal']));
+        if (isset($target['scriptCueLiteral'], $target['scriptCueOffset'])) {
+            $replacements[] = [
+                'offset' => $target['scriptCueOffset'],
+                'length' => strlen($target['scriptCueLiteral']),
+                'value' => $this->encodeDeckString($cue, $target['scriptCueLiteral']),
+            ];
+        }
+
+        usort($replacements, fn (array $left, array $right): int => $right['offset'] <=> $left['offset']);
+
+        foreach ($replacements as $replacement) {
+            $js = substr_replace(
+                $js,
+                $replacement['value'],
+                $replacement['offset'],
+                $replacement['length'],
+            );
+        }
+
+        return $js;
     }
 
     /**
-     * @return list<array{literal: string, offset: int, scriptLine?: int, editable?: bool}|null>
+     * @param  array{literal: string}|string  $target
+     */
+    private function encodeDeckString(string $value, array|string $target): string
+    {
+        $literal = is_array($target) ? $target['literal'] : $target;
+
+        return $literal[0] === "'"
+            ? "'".$this->escapeSingleQuoted($value)."'"
+            : $this->encodeDoubleQuoted($value, true);
+    }
+
+    /**
+     * @return list<array{literal: string, offset: int, scriptLine?: int, scriptCue?: string, scriptCueLiteral?: string, scriptCueOffset?: int, editable?: bool}|null>
      */
     private function deckCueLiterals(string $js): array
     {
@@ -244,6 +280,12 @@ final class UpdatePresentationCueAction
                 if (preg_match('/\bscriptLine\s*:\s*(\d+)/', $element['body'], $scriptLineMatch) === 1) {
                     $step['scriptLine'] = (int) $scriptLineMatch[1];
                 }
+                $scriptCue = $this->explicitScriptCue($element['body'], $element['offset']);
+                if ($scriptCue !== null) {
+                    $step['scriptCue'] = $scriptCue['value'];
+                    $step['scriptCueLiteral'] = $scriptCue['literal'];
+                    $step['scriptCueOffset'] = $scriptCue['offset'];
+                }
                 if (preg_match('/\beditable\s*:\s*(true|false)\b/', $element['body'], $editableMatch) === 1) {
                     $step['editable'] = $editableMatch[1] === 'true';
                 }
@@ -261,6 +303,12 @@ final class UpdatePresentationCueAction
                     if (preg_match('/\bscriptLine\s*:\s*(\d+)/', $element['body'], $scriptLineMatch) === 1) {
                         $step['scriptLine'] = (int) $scriptLineMatch[1];
                     }
+                    $scriptCue = $this->explicitScriptCue($element['body'], $element['offset']);
+                    if ($scriptCue !== null) {
+                        $step['scriptCue'] = $scriptCue['value'];
+                        $step['scriptCueLiteral'] = $scriptCue['literal'];
+                        $step['scriptCueOffset'] = $scriptCue['offset'];
+                    }
                     if (preg_match('/\beditable\s*:\s*(true|false)\b/', $element['body'], $editableMatch) === 1) {
                         $step['editable'] = $editableMatch[1] === 'true';
                     }
@@ -276,6 +324,32 @@ final class UpdatePresentationCueAction
         }
 
         return $steps;
+    }
+
+    /**
+     * @return array{value: string, literal: string, offset: int}|null
+     */
+    private function explicitScriptCue(string $element, int $offsetBase): ?array
+    {
+        if (preg_match(
+            '/\bscriptCue\s*:\s*(\'(?:\\\\.|[^\'\\\\])*\'|"(?:\\\\.|[^"\\\\])*")/s',
+            $element,
+            $match,
+            PREG_OFFSET_CAPTURE,
+        ) !== 1) {
+            return null;
+        }
+
+        $value = $this->decodeJavaScriptLiteral((string) $match[1][0]);
+        if ($value === null) {
+            return null;
+        }
+
+        return [
+            'value' => $value,
+            'literal' => (string) $match[1][0],
+            'offset' => $offsetBase + (int) $match[1][1],
+        ];
     }
 
     /**

@@ -20,19 +20,9 @@ final class PresenceFlags
     {
         return $query
             ->select($columns)
+            ->addSelect('has_deck')
             ->selectRaw("(script_markdown IS NOT NULL AND BTRIM(script_markdown) <> '') AS has_script")
-            ->selectRaw("(captions IS NOT NULL AND captions::text NOT IN ('null', '{}', '[]')) AS has_captions")
-            ->selectRaw("(deck_manifest IS NOT NULL
-                AND jsonb_typeof(deck_manifest->'js') = 'string'
-                AND BTRIM(deck_manifest->>'js') <> ''
-                AND jsonb_typeof(deck_manifest->'deck_key') = 'string'
-                AND BTRIM(deck_manifest->>'deck_key') <> ''
-                AND ((deck_manifest->>'js') LIKE ('%' || (deck_manifest->>'deck_key') || '%')
-                    OR (deck_manifest->>'js') LIKE ('%' || regexp_replace(deck_manifest->>'deck_key', '^(bv|ev)-', 'v-', 'i') || '%'))
-                AND ((deck_manifest->>'js') ~ 'stage[[:space:]]*:[[:space:]]*function'
-                    OR (deck_manifest->>'js') ~ 'slidesHtml[[:space:]]*:[[:space:]]*function')
-                AND (deck_manifest->>'js') ~ 'steps[[:space:]]*:'
-                AND (deck_manifest->>'js') ~ '(cue|note)[[:space:]]*:') AS has_deck");
+            ->selectRaw("(captions IS NOT NULL AND captions::text NOT IN ('null', '{}', '[]')) AS has_captions");
     }
 
     /**

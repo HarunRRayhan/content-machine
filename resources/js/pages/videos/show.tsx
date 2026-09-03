@@ -84,9 +84,7 @@ export default function VideoShow({ video }: PageProps) {
     const validTabs = useMemo<readonly TabKey[]>(() => {
         const tabs: TabKey[] = ['overview'];
 
-        if (!hasDeck) {
-            tabs.push('script');
-        }
+        tabs.push('script');
 
         if (hasCaptions) {
             tabs.push('captions');
@@ -148,16 +146,14 @@ export default function VideoShow({ video }: PageProps) {
                     >
                         📋 Overview
                     </button>
-                    {!hasDeck && (
-                        <button
-                            type="button"
-                            role="tab"
-                            aria-selected={activeTab === 'script'}
-                            onClick={() => setTab('script')}
-                        >
-                            📄 Script
-                        </button>
-                    )}
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'script'}
+                        onClick={() => setTab('script')}
+                    >
+                        📄 Script
+                    </button>
                     {hasCaptions && (
                         <button
                             type="button"
@@ -215,7 +211,7 @@ export default function VideoShow({ video }: PageProps) {
                     />
                 )}
 
-                {activeTab === 'script' && !hasDeck && (
+                {activeTab === 'script' && (
                     <ScriptPanel
                         scripts={video.parsed.scripts}
                         videoNumber={video.number}

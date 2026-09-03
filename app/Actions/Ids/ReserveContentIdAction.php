@@ -45,6 +45,35 @@ class ReserveContentIdAction
     }
 
     /**
+     * Keep a reservation sequence ahead of an explicitly imported number.
+     * Imported ids are not reservations themselves, but a later generated id
+     * must not reuse their number.
+     */
+    public function ensureSequencePast(Workspace $workspace, string $kind, int $number): void
+    {
+        $this->humanId($kind, $number);
+
+        DB::table('id_sequences')->insertOrIgnore([
+            'workspace_id' => $workspace->id,
+            'kind' => $kind,
+            'next_value' => 1,
+        ]);
+
+        $sequence = DB::table('id_sequences')
+            ->where('workspace_id', $workspace->id)
+            ->where('kind', $kind)
+            ->lockForUpdate()
+            ->first();
+
+        if ($sequence !== null && (int) $sequence->next_value <= $number) {
+            DB::table('id_sequences')
+                ->where('workspace_id', $workspace->id)
+                ->where('kind', $kind)
+                ->update(['next_value' => $number + 1]);
+        }
+    }
+
+    /**
      * Atomically increment the workspace+kind counter and return the number
      * it held before incrementing. `insertOrIgnore` seeds a missing row
      * without racing another caller doing the same (the unique index on

@@ -302,24 +302,24 @@ class PostsApiTest extends TestCase
         $this->configurePostsyncer();
 
         $this->acting()->postJson('/api/v1/posts', [
-            'human_id' => 'CM-TEST-1',
+            'human_id' => 'P-1',
             'number' => 1,
             'title' => 'Queue probe',
             'status' => 'draft',
         ])->assertCreated();
 
-        $this->acting()->postJson('/api/v1/posts/CM-TEST-1/publish', [
+        $this->acting()->postJson('/api/v1/posts/P-1/publish', [
             'when' => '2026-08-28T22:00:00+06:00',
             'platforms' => ['facebook'],
             'confirm_ask' => true,
         ])
             ->assertOk()
-            ->assertJsonPath('data.human_id', 'CM-TEST-1')
+            ->assertJsonPath('data.human_id', 'P-1')
             ->assertJsonPath('data.publish_state', 'queued')
             ->assertJsonMissingPath('data.publish_progress')
             ->assertJsonPath('data.publish_error', null);
 
-        $post = Post::query()->where('human_id', 'CM-TEST-1')->sole();
+        $post = Post::query()->where('human_id', 'P-1')->sole();
 
         Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
             return $job->post->is($post)
@@ -334,19 +334,19 @@ class PostsApiTest extends TestCase
         Queue::fake();
 
         $this->acting()->postJson('/api/v1/posts', [
-            'human_id' => 'CM-TEST-2',
+            'human_id' => 'P-2',
             'number' => 2,
             'title' => 'Not ready',
         ])->assertCreated();
 
-        $this->acting()->postJson('/api/v1/posts/CM-TEST-2/publish', [
+        $this->acting()->postJson('/api/v1/posts/P-2/publish', [
             'when' => '2026-08-28T22:00:00+06:00',
         ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('publish');
 
         Queue::assertNothingPushed();
-        $this->assertSame('idle', Post::query()->where('human_id', 'CM-TEST-2')->value('publish_state'));
+        $this->assertSame('idle', Post::query()->where('human_id', 'P-2')->value('publish_state'));
     }
 
     public function test_publish_rejects_when_already_queued(): void
@@ -355,12 +355,12 @@ class PostsApiTest extends TestCase
         $this->configurePostsyncer();
 
         Post::factory()->for($this->workspace)->create([
-            'human_id' => 'CM-TEST-3',
+            'human_id' => 'P-3',
             'number' => 3,
             'publish_state' => 'queued',
         ]);
 
-        $this->acting()->postJson('/api/v1/posts/CM-TEST-3/publish', [
+        $this->acting()->postJson('/api/v1/posts/P-3/publish', [
             'when' => '2026-08-28T22:00:00+06:00',
         ])
             ->assertUnprocessable()

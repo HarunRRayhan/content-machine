@@ -30,6 +30,7 @@ use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Content\PresentationManifest;
 use App\Support\CurrentApiToken;
 use App\Support\GoogleDrive\GoogleDriveClient;
 use App\Support\GoogleDrive\GoogleDriveLinkChecker;
@@ -337,8 +338,21 @@ final class McpToolDispatcher
             'cover_drive_url',
         ]);
 
+        if (array_key_exists('deck_manifest', $arguments)) {
+            $manifest = $arguments['deck_manifest'];
+
+            if ($manifest !== null && ! is_array($manifest)) {
+                throw new RuntimeException('deck_manifest must be an object or null.');
+            }
+            if (is_array($manifest) && ! PresentationManifest::isUsable($manifest)) {
+                throw new RuntimeException('deck_manifest must contain a registered, renderable presentation deck.');
+            }
+
+            $payload['deck_manifest'] = $manifest;
+        }
+
         if ($payload === []) {
-            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, status, video_drive_url, cover_drive_url.');
+            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url.');
         }
 
         $this->assertAllowedStatus($payload, Video::STATUSES, 'video');

@@ -233,6 +233,34 @@ class McpServerTest extends TestCase
         $this->assertSame('New title', Video::query()->where('human_id', 'V-12')->value('title'));
     }
 
+    public function test_update_video_accepts_a_renderable_deck_manifest(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-12',
+            'number' => 12,
+            'title' => 'Deck video',
+        ]);
+
+        $manifest = [
+            'engine' => 'stage',
+            'deck_key' => 'v-12',
+            'js' => "window.PRESENTATIONS['v-12']={steps:[{cue:'First line'}],stage:function(){return '<div>Deck</div>';}};",
+        ];
+
+        $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 80,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'update_video',
+                'arguments' => ['human_id' => 'BV-12', 'deck_manifest' => $manifest],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError');
+
+        $stored = Video::query()->where('human_id', 'BV-12')->firstOrFail();
+        $this->assertSame($manifest['js'], $stored->deck_manifest['js']);
+    }
+
     public function test_update_video_accepts_drive_urls(): void
     {
         $this->fakeAccessibleDriveLinks();

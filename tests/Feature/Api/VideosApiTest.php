@@ -184,6 +184,21 @@ class VideosApiTest extends TestCase
         $this->assertDatabaseCount('videos', 1);
     }
 
+    public function test_explicit_video_import_advances_the_generated_id_sequence(): void
+    {
+        $this->acting()->postJson('/api/v1/videos', [
+            'human_id' => 'BV-53',
+            'number' => 53,
+            'title' => 'Imported video',
+        ])->assertCreated();
+
+        $this->acting()->postJson('/api/v1/videos', [
+            'title' => 'Generated video',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.human_id', 'V-54');
+    }
+
     public function test_show_and_patch_address_by_human_id(): void
     {
         Video::factory()->for($this->workspace)->create([

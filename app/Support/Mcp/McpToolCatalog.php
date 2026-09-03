@@ -144,7 +144,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_video',
-                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, status, video_drive_url, cover_drive_url. Drive URLs must be publicly fetchable (Anyone with the link).',
+                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url. Drive URLs must be publicly fetchable (Anyone with the link).',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -153,6 +153,7 @@ final class McpToolCatalog
                     'slug' => ['type' => 'string'],
                     'body' => ['type' => 'string'],
                     'script_markdown' => ['type' => 'string'],
+                    'deck_manifest' => ['type' => ['object', 'null'], 'description' => 'Registered, renderable presentation deck package; pass null to remove it.'],
                     'status' => ['type' => 'string', 'enum' => Video::STATUSES],
                     'video_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the edited video.'],
                     'cover_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the cover image.'],

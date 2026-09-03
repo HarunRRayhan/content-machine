@@ -30,14 +30,31 @@ final class PresentationManifest
             && preg_match('/\b(?:cue|note)\s*:/', $source) === 1;
     }
 
-    private static function registersDeck(string $source, string $deckKey): bool
+    /**
+     * Return only the exact key and its known legacy alias. Never fall back to
+     * an arbitrary registered deck: a malformed manifest must fail closed.
+     *
+     * @return list<string>
+     */
+    public static function deckKeyCandidates(mixed $deckKey): array
     {
+        if (! is_string($deckKey) || trim($deckKey) === '') {
+            return [];
+        }
+
+        $deckKey = trim($deckKey);
         $keys = [$deckKey];
-        if (preg_match('/^(?:bv|ev)-(\d+)$/i', $deckKey, $match) === 1) {
+
+        if (preg_match('/^(?:v|bv|ev)-(\d+)$/i', $deckKey, $match) === 1) {
             $keys[] = 'v-'.$match[1];
         }
 
-        foreach (array_unique($keys) as $key) {
+        return array_values(array_unique($keys));
+    }
+
+    private static function registersDeck(string $source, string $deckKey): bool
+    {
+        foreach (self::deckKeyCandidates($deckKey) as $key) {
             $pattern = "/(?:window\\.)?\\bPRESENTATIONS\\s*\\[\\s*(['\"])".
                 preg_quote($key, '/').
                 '\\1\\s*\\]/';

@@ -114,7 +114,7 @@ Third spoken line
     $video = Video::factory()->create([
         'script_markdown' => $script,
         'deck_manifest' => [
-            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1}]};",
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1,scriptCue:'Second spoken line'}]};",
         ],
     ]);
 
@@ -130,6 +130,81 @@ Third spoken line
         ->toContain("First spoken line\nUpdated second line\nThird spoken line")
         ->not->toContain('Second spoken line');
     expect($video->deck_manifest['js'])->toContain("cue:'Updated second line'");
+});
+
+it('keeps an explicit script cue mapping current after an edit', function (): void {
+    $video = Video::factory()->create([
+        'script_markdown' => "```\nFirst spoken line\nSecond spoken line\n```",
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1,scriptCue:'Second spoken line'}]};",
+        ],
+    ]);
+
+    $action = new UpdatePresentationCueAction;
+    $action->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Second paraphrase',
+        cue: 'Updated second line',
+    ));
+
+    $video->refresh();
+
+    expect($video->deck_manifest['js'])
+        ->toContain("cue:'Updated second line'")
+        ->toContain("scriptCue:'Updated second line'");
+
+    $action->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Updated second line',
+        cue: 'Final second line',
+    ));
+
+    $video->refresh();
+
+    expect($video->script_markdown)->toContain('Final second line');
+    expect($video->deck_manifest['js'])
+        ->toContain("cue:'Final second line'")
+        ->toContain("scriptCue:'Final second line'");
+});
+
+it('rejects an explicit mapping when the locked script line is stale', function (): void {
+    $script = "```\nFirst spoken line\nChanged second line\nThird spoken line\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1,scriptCue:'Second spoken line'}]};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Second paraphrase',
+        cue: 'Updated second line',
+    )))->toThrow(InvalidArgumentException::class, 'Presentation step no longer matches its script line.');
+
+    $this->assertDatabaseHas('videos', [
+        'id' => $video->id,
+        'script_markdown' => $script,
+    ]);
+});
+
+it('rejects cue edits while publishing is locked', function (): void {
+    $script = "```\nFirst spoken line\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'First spoken line'}]};",
+        ],
+        'publish_state' => 'queued',
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'First spoken line',
+        cue: 'Updated line',
+    )))->toThrow(InvalidArgumentException::class, 'cannot be edited while');
+
+    $this->assertDatabaseCount('content_versions', 0);
 });
 
 it('does not offer a legacy visual-only step for editing', function (): void {

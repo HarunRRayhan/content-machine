@@ -23,9 +23,7 @@ class VideoPresentationController extends Controller
 {
     public function show(Request $request, Video $video): View|Response
     {
-        $workspace = Workspace::current();
-        abort_if($workspace === null, 404, 'No current workspace.');
-        abort_if($video->workspace_id !== $workspace->id, 404);
+        $this->assertCurrentWorkspaceVideo($video);
 
         $manifest = $video->deck_manifest;
         if (! PresentationManifest::isUsable($manifest)) {
@@ -48,14 +46,41 @@ class VideoPresentationController extends Controller
             ->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
+    public function frame(Request $request, Video $video): View|Response
+    {
+        $this->assertCurrentWorkspaceVideo($video);
+
+        $manifest = $video->deck_manifest;
+        if (! PresentationManifest::isUsable($manifest)) {
+            abort(404, 'No presentation deck stored for this video.');
+        }
+
+        $theme = $request->string('theme')->toString();
+        if (! in_array($theme, ['light', 'dark'], true)) {
+            $theme = 'light';
+        }
+
+        return response()
+            ->view('videos.presentation-frame', [
+                'manifest' => $manifest,
+                'theme' => $theme,
+                'deckKeys' => is_array($manifest)
+                    ? PresentationManifest::deckKeyCandidates($manifest['deck_key'] ?? null)
+                    : [],
+            ])
+            ->withHeaders([
+                'Content-Security-Policy' => "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data: blob:; media-src data: blob:; font-src data: https:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+                'Referrer-Policy' => 'no-referrer',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+    }
+
     public function updateCue(
         UpdatePresentationCueRequest $request,
         Video $video,
         UpdatePresentationCueAction $updatePresentationCueAction,
     ): JsonResponse {
-        $workspace = Workspace::current();
-        abort_if($workspace === null, 404, 'No current workspace.');
-        abort_if($video->workspace_id !== $workspace->id, 404);
+        $this->assertCurrentWorkspaceVideo($video);
 
         $data = UpdatePresentationCueData::fromRequest($request);
 
@@ -72,5 +97,12 @@ class VideoPresentationController extends Controller
             'ok' => true,
             'cue' => trim($data->cue),
         ]);
+    }
+
+    private function assertCurrentWorkspaceVideo(Video $video): void
+    {
+        $workspace = Workspace::current();
+        abort_if($workspace === null, 404, 'No current workspace.');
+        abort_if($video->workspace_id !== $workspace->id, 404);
     }
 }

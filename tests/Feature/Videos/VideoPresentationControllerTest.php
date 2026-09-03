@@ -33,7 +33,7 @@ class VideoPresentationControllerTest extends TestCase
             'engine' => 'stage',
             'deck_key' => 'test-deck',
             'css' => '',
-            'js' => "window.PRESENTATIONS['test-deck']={steps:[{cue:'First spoken line'},{cue:'Second line'}],stage:function(){return '<div>Deck</div>';}};",
+            'js' => "window.PRESENTATIONS['test-deck']={steps:[{cue:'First spoken line'},{cue:'Second line',scriptLine:1,scriptCue:'Second spoken line'}],stage:function(){return '<div>Deck</div>';}};",
         ];
     }
 
@@ -108,9 +108,25 @@ class VideoPresentationControllerTest extends TestCase
         $this->assertStringContainsString('id="presCue"', $html);
         $this->assertStringContainsString('id="presCueEditBtn"', $html);
         $this->assertStringContainsString('id="presCueEditor"', $html);
-        $this->assertStringContainsString('First spoken line', $html);
+        $this->assertStringContainsString('id="presFrame"', $html);
+        $this->assertStringContainsString('sandbox="allow-scripts"', $html);
+        $this->assertStringNotContainsString('First spoken line', $html);
         $this->assertStringNotContainsString('body.embed .pres-notes{display:none}', $html);
         $this->assertStringNotContainsString('body.embed .pres-notes{display: none}', $html);
+    }
+
+    public function test_frame_is_sandboxed_and_contains_the_deck_package(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $video = Video::factory()->for($workspace)->create([
+            'deck_manifest' => $this->deckManifest(),
+        ]);
+
+        $this->get(route('videos.presentation.frame', $video))
+            ->assertOk()
+            ->assertHeader('Content-Security-Policy', "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src data: blob:; media-src data: blob:; font-src data: https:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+            ->assertSee('First spoken line', false)
+            ->assertSee('source: \'cm-pres-frame\'', false);
     }
 
     public function test_update_cue_updates_the_script_and_deck(): void
@@ -142,6 +158,17 @@ MD,
         $this->assertStringContainsString('Updated line [on-screen: second line]', $video->script_markdown);
         $this->assertStringNotContainsString('Second spoken line', $video->script_markdown);
         $this->assertStringContainsString("cue:'Updated line'", $video->deck_manifest['js']);
+        $this->assertDatabaseCount('content_versions', 2);
+        $this->assertDatabaseHas('content_versions', [
+            'versionable_type' => $video->getMorphClass(),
+            'versionable_id' => $video->id,
+            'field' => 'script_markdown',
+        ]);
+        $this->assertDatabaseHas('content_versions', [
+            'versionable_type' => $video->getMorphClass(),
+            'versionable_id' => $video->id,
+            'field' => 'deck_manifest',
+        ]);
     }
 
     public function test_update_cue_rejects_a_stale_step(): void
@@ -162,6 +189,28 @@ MD,
         $this->assertDatabaseHas('videos', [
             'id' => $video->id,
             'script_markdown' => $script,
+        ]);
+    }
+
+    public function test_update_cue_rejects_a_publish_locked_video(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $video = Video::factory()->for($workspace)->create([
+            'script_markdown' => "```\n[HOOK]\nFirst spoken line\n```",
+            'deck_manifest' => $this->deckManifest(),
+            'publish_state' => 'running',
+        ]);
+
+        $this->patchJson(route('videos.presentation.cue', $video), [
+            'step' => 0,
+            'current_cue' => 'First spoken line',
+            'cue' => 'Updated line',
+        ])->assertStatus(422)->assertJson(['ok' => false]);
+
+        $this->assertDatabaseCount('content_versions', 0);
+        $this->assertDatabaseHas('videos', [
+            'id' => $video->id,
+            'script_markdown' => "```\n[HOOK]\nFirst spoken line\n```",
         ]);
     }
 
