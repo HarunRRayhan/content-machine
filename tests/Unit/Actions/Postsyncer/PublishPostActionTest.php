@@ -900,6 +900,110 @@ class PublishPostActionTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_partial_reconciliation_records_published_and_supplemental_groups(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'gateway timeout',
+            ], 500),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                        'tiktok' => ['account_id' => 3508],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['text' => 'on'],
+                    'tiktok' => ['text' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'tiktok'],
+            'captions' => [
+                'facebook' => 'Caption',
+                'tiktok' => 'Caption',
+            ],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => true]);
+        $post->refresh();
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Caption', 'media' => []]],
+                'platforms' => [
+                    ['platform' => 'facebook', 'status' => 'PUBLISHED', 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'Caption',
+                    ]],
+                    ['platform' => 'tiktok', 'status' => 'FAILED', 'settings' => [
+                        'description' => 'Caption',
+                    ]],
+                ],
+                'status' => 'PARTIALLY_FAILED',
+            ], 200),
+            'postsyncer.com/api/v1/analytics/posts/99' => Http::response([
+                'accounts' => [
+                    ['account_id' => 100, 'platform' => 'facebook'],
+                    ['account_id' => 3508, 'platform' => 'tiktok'],
+                ],
+            ], 200),
+            'postsyncer.com/api/v1/posts/100' => Http::response([
+                'id' => 100,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                'platforms' => [
+                    ['platform' => 'tiktok', 'status' => 'PUBLISHED', 'settings' => [
+                        'description' => 'Caption',
+                    ]],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+            'postsyncer.com/api/v1/analytics/posts/100' => Http::response([
+                'accounts' => [
+                    ['account_id' => 3508, 'platform' => 'tiktok'],
+                ],
+            ], 200),
+        ]);
+
+        $this->action->reconcile($post, 99, true, [[
+            'postsyncer_id' => 100,
+            'platforms' => ['tiktok'],
+            'media_ids' => [915],
+        ]]);
+
+        $post->refresh();
+        $progress = $post->publish_progress;
+        $this->assertSame(['facebook'], $progress['completed_groups'][0]['platforms']);
+        $this->assertSame('100', $progress['supplemental_groups'][0]['post_id']);
+
+        $this->action->handle($post, ['confirm_ask' => true]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertCount(2, $post->postsyncer['groups']);
+        $this->assertSame(['facebook'], $post->postsyncer['groups'][0]['platforms']);
+        $this->assertSame(['tiktok'], $post->postsyncer['groups'][1]['platforms']);
+        Http::assertNotSent(fn ($request) => $request->method() === 'POST'
+            && $request->url() === 'https://postsyncer.com/api/v1/posts');
+    }
+
     public function test_reconciliation_rejects_a_failed_remote_post(): void
     {
         $workspace = Workspace::factory()->create();

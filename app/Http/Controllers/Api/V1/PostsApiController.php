@@ -216,10 +216,22 @@ class PostsApiController extends Controller
 
         $payload = $request->validate([
             'postsyncer_id' => ['required', 'string', 'max:255'],
+            'confirm_failed' => ['nullable', 'boolean'],
+            'supplemental_groups' => ['nullable', 'array', 'max:10'],
+            'supplemental_groups.*.postsyncer_id' => ['required', 'string', 'max:255'],
+            'supplemental_groups.*.platforms' => ['required', 'array', 'min:1', 'max:11'],
+            'supplemental_groups.*.platforms.*' => ['string', 'max:64'],
+            'supplemental_groups.*.media_ids' => ['required', 'array', 'min:1'],
+            'supplemental_groups.*.media_ids.*' => ['required', 'integer', 'min:1'],
         ]);
 
         try {
-            $action->reconcile($post, $payload['postsyncer_id']);
+            $action->reconcile(
+                $post,
+                $payload['postsyncer_id'],
+                (bool) ($payload['confirm_failed'] ?? false),
+                $payload['supplemental_groups'] ?? [],
+            );
         } catch (PostsyncerException $exception) {
             throw ValidationException::withMessages([
                 'postsyncer_id' => $exception->getMessage(),

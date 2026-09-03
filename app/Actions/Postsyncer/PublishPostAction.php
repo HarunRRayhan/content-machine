@@ -245,6 +245,10 @@ class PublishPostAction
                 fn (array $completed): array => $this->publicGroup($completed),
                 $completedGroups,
             );
+            $publishedGroups = array_merge(
+                $publishedGroups,
+                $this->supplementalGroups($progress),
+            );
 
             $progress['state'] = 'succeeded';
             $progress['completed_groups'] = $completedGroups;
@@ -304,11 +308,14 @@ class PublishPostAction
      * operator supplies the PostSyncer id after verifying it in PostSyncer;
      * this method verifies the id belongs to the expected workspace and
      * payload before checkpointing it.
+     *
+     * @param  array<int, mixed>  $supplementalGroups
      */
     public function reconcile(
         Post $post,
         int|string $postsyncerPostId,
         bool $confirmFailed = false,
+        array $supplementalGroups = [],
     ): void {
         if (! $this->hasNumericPostId($postsyncerPostId)) {
             throw new PostsyncerException('A PostSyncer post id is required for reconciliation.');
@@ -347,7 +354,47 @@ class PublishPostAction
         }
 
         $client = new PostsyncerClient($config);
-        $remote = $this->normalizePostResponse($client->getPost($postsyncerPostId));
+        $remote = $this->normalizePostResponse($client->getPostWithAccountDetails($postsyncerPostId));
+        $remoteStatus = strtoupper((string) ($remote['status'] ?? ''));
+        $failedPlatforms = $this->failedPlatforms($remote);
+        $isPartial = $remoteStatus === 'PARTIALLY_FAILED';
+
+        $supplementalPublicGroups = $this->verifySupplementalGroups(
+            $client,
+            $config,
+            $group,
+            $failedPlatforms,
+            $supplementalGroups,
+        );
+
+        if ($isPartial) {
+            if (! $confirmFailed) {
+                throw new PostsyncerException(
+                    'A partially failed PostSyncer post requires explicit confirmation and replacement groups.',
+                );
+            }
+
+            $replacementPlatforms = [];
+            foreach ($supplementalPublicGroups as $supplemental) {
+                foreach ($supplemental['platforms'] as $platform) {
+                    $replacementPlatforms[] = $platform;
+                }
+            }
+            sort($replacementPlatforms);
+            $expectedFailedPlatforms = $failedPlatforms;
+            sort($expectedFailedPlatforms);
+
+            if ($replacementPlatforms !== $expectedFailedPlatforms) {
+                throw new PostsyncerException(
+                    'Replacement PostSyncer groups must cover every failed platform exactly once.',
+                );
+            }
+        } elseif ($supplementalPublicGroups !== []) {
+            throw new PostsyncerException(
+                'Supplemental PostSyncer groups are only valid for a partially failed post.',
+            );
+        }
+
         $this->assertReconciledPost(
             $remote,
             $config,
@@ -355,6 +402,8 @@ class PublishPostAction
             $current['media_ids'],
             $postsyncerPostId,
             $confirmFailed,
+            null,
+            $isPartial && $supplementalPublicGroups !== [],
         );
 
         DB::transaction(function () use (
@@ -365,6 +414,9 @@ class PublishPostAction
             $index,
             $postsyncerPostId,
             $confirmFailed,
+            $isPartial,
+            $supplementalPublicGroups,
+            $failedPlatforms,
         ): void {
             $lockedPost = Post::query()
                 ->whereKey($post->getKey())
@@ -401,6 +453,8 @@ class PublishPostAction
                 $current['media_ids'],
                 $postsyncerPostId,
                 $confirmFailed,
+                null,
+                $isPartial && $supplementalPublicGroups !== [],
             );
 
             $reconciledGroup = $this->formatProgressGroup(
@@ -408,9 +462,19 @@ class PublishPostAction
                 $remote,
                 $index,
                 $current['group_key'],
-                $confirmFailed && strtoupper((string) ($remote['status'] ?? '')) === 'FAILED',
+                $confirmFailed && in_array(
+                    strtoupper((string) ($remote['status'] ?? '')),
+                    ['FAILED', 'PARTIALLY_FAILED'],
+                    true,
+                ),
                 $this->buildPostBody($latestConfig, $latestGroup, $current['media_ids']),
             );
+            if ($isPartial) {
+                $reconciledGroup['platforms'] = array_values(array_filter(
+                    $reconciledGroup['platforms'],
+                    fn (string $platform): bool => ! in_array($platform, $failedPlatforms, true),
+                ));
+            }
             $completedGroups = $this->upsertCompletedGroup(
                 $this->completedGroups($latestProgress),
                 $reconciledGroup,
@@ -423,6 +487,9 @@ class PublishPostAction
             $latestProgress['completed_groups'] = $completedGroups;
             $latestProgress['current'] = null;
             $latestProgress['state'] = 'failed';
+            if ($supplementalPublicGroups !== []) {
+                $latestProgress['supplemental_groups'] = $supplementalPublicGroups;
+            }
             $lockedPost->forceFill([
                 'publish_state' => 'failed',
                 'publish_error' => 'PostSyncer post '.(string) $postsyncerPostId
@@ -575,7 +642,7 @@ class PublishPostAction
 
             $expectedPayload = $completed['expected_payload'];
             $snapshotGroup = $this->publishGroupFromSnapshot($completed, $expectedPayload);
-            $remote = $this->normalizePostResponse($client->getPost($completed['post_id']));
+            $remote = $this->normalizePostResponse($client->getPostWithAccountDetails($completed['post_id']));
             $this->assertReconciledPost(
                 $remote,
                 $config,
@@ -590,6 +657,10 @@ class PublishPostAction
         $publishedGroups = array_map(
             fn (array $completed): array => $this->publicGroup($completed),
             $completedGroups,
+        );
+        $publishedGroups = array_merge(
+            $publishedGroups,
+            $this->supplementalGroups($progress),
         );
         $progress['state'] = 'succeeded';
         $progress['current'] = null;
@@ -772,7 +843,7 @@ class PublishPostAction
             $remote = [];
 
             try {
-                $remote = $this->normalizePostResponse($client->getPost((string) $postId));
+                $remote = $this->normalizePostResponse($client->getPostWithAccountDetails((string) $postId));
                 $this->assertReconciledPost($remote, $config, $group, $mediaIds, $postId);
 
                 return $remote;
@@ -906,6 +977,7 @@ class PublishPostAction
         int|string $postsyncerPostId,
         bool $allowFailed = false,
         ?array $expectedPayload = null,
+        bool $allowPartial = false,
     ): void {
         if ((string) ($remote['id'] ?? '') !== (string) $postsyncerPostId) {
             throw new PostsyncerException('The supplied PostSyncer post id was not found.');
@@ -1072,7 +1144,8 @@ class PublishPostAction
         }
 
         $remoteStatus = strtoupper((string) ($remote['status'] ?? ''));
-        if (! ($allowFailed && $remoteStatus === 'FAILED')) {
+        if (! (($allowFailed && $remoteStatus === 'FAILED')
+            || ($allowPartial && $remoteStatus === 'PARTIALLY_FAILED'))) {
             $this->assertPublishableStatus(
                 $remote['status'] ?? null,
                 $group,
@@ -1114,6 +1187,129 @@ class PublishPostAction
         return ! array_key_exists('id', $response) && is_array($response['data'] ?? null)
             ? $response['data']
             : $response;
+    }
+
+    /**
+     * @param  array<string, mixed>  $remote
+     * @return list<string>
+     */
+    private function failedPlatforms(array $remote): array
+    {
+        $failed = [];
+
+        foreach ($remote['platforms'] ?? [] as $platform) {
+            if (! is_array($platform)) {
+                continue;
+            }
+
+            $status = strtoupper((string) ($platform['status'] ?? ''));
+            $name = strtolower((string) ($platform['platform'] ?? ''));
+            if ($name !== '' && in_array($status, ['FAILED', 'PARTIALLY_FAILED'], true)) {
+                $failed[] = $name;
+            }
+        }
+
+        return array_values(array_unique($failed));
+    }
+
+    /**
+     * Verify replacement posts for platform rows that failed inside a
+     * partially failed PostSyncer post.
+     *
+     * @param  list<string>  $failedPlatforms
+     * @param  array<int, mixed>  $requested
+     * @return list<array<string, mixed>>
+     */
+    private function verifySupplementalGroups(
+        PostsyncerClient $client,
+        PostsyncerConfig $config,
+        PublishGroup $primaryGroup,
+        array $failedPlatforms,
+        array $requested,
+    ): array {
+        $verified = [];
+        $seenPlatforms = [];
+
+        foreach ($requested as $candidate) {
+            if (! is_array($candidate)) {
+                throw new PostsyncerException('Each supplemental PostSyncer group must be an object.');
+            }
+
+            $postId = $candidate['postsyncer_id'] ?? null;
+            $platforms = $candidate['platforms'] ?? null;
+            $mediaIds = $candidate['media_ids'] ?? null;
+
+            if (! $this->hasNumericPostId($postId)
+                || ! is_array($platforms)
+                || $platforms === []
+                || ! is_array($mediaIds)) {
+                throw new PostsyncerException(
+                    'Each supplemental PostSyncer group needs a post id, platforms, and media ids.',
+                );
+            }
+
+            $normalizedPlatforms = array_values(array_map(
+                static fn (mixed $platform): string => strtolower((string) $platform),
+                $platforms,
+            ));
+            if (count($normalizedPlatforms) !== count(array_unique($normalizedPlatforms))) {
+                throw new PostsyncerException('Supplemental PostSyncer group platforms must be unique.');
+            }
+
+            foreach ($normalizedPlatforms as $platform) {
+                if ($platform === '' || ! in_array($platform, $failedPlatforms, true)) {
+                    throw new PostsyncerException(
+                        'Supplemental PostSyncer groups may only replace failed platforms.',
+                    );
+                }
+                if (in_array($platform, $seenPlatforms, true)) {
+                    throw new PostsyncerException(
+                        'Each failed platform may have only one supplemental PostSyncer group.',
+                    );
+                }
+                $seenPlatforms[] = $platform;
+            }
+
+            $normalizedMediaIds = $this->normalizeMediaIds($mediaIds);
+            if ($normalizedMediaIds === []) {
+                throw new PostsyncerException('Supplemental PostSyncer groups must contain media ids.');
+            }
+
+            $captions = [];
+            foreach ($normalizedPlatforms as $platform) {
+                $caption = $primaryGroup->captions[$platform] ?? null;
+                if (! is_string($caption)) {
+                    throw new PostsyncerException(
+                        "No caption is available for supplemental platform {$platform}.",
+                    );
+                }
+                $captions[$platform] = $caption;
+            }
+
+            $group = new PublishGroup(
+                language: $primaryGroup->language,
+                workspaceId: $primaryGroup->workspaceId,
+                platforms: $normalizedPlatforms,
+                mediaUrls: [],
+                captions: $captions,
+                when: null,
+                publishNow: true,
+            );
+            $remote = $this->normalizePostResponse(
+                $client->getPostWithAccountDetails($postId),
+            );
+            $this->assertReconciledPost(
+                $remote,
+                $config,
+                $group,
+                $normalizedMediaIds,
+                $postId,
+            );
+
+            $verified[] = $this->publicRemoteGroup($remote, $group, $postId);
+        }
+
+        return $verified;
     }
 
     /**
@@ -1545,7 +1741,7 @@ class PublishPostAction
     }
 
     /**
-     * @param  list<int|string>  $mediaIds
+     * @param  array<int, mixed>  $mediaIds
      * @return list<string>
      */
     private function normalizeMediaIds(array $mediaIds): array
@@ -2216,6 +2412,25 @@ class PublishPostAction
                 'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
             );
         }
+
+        if (array_key_exists('supplemental_groups', $progress)
+            && ! is_array($progress['supplemental_groups'])) {
+            throw new PostsyncerException(
+                'PostSyncer publish progress has invalid supplemental groups.'
+            );
+        }
+
+        foreach ($this->supplementalGroups($progress) as $supplemental) {
+            if (! $this->hasExistingPostId($supplemental['post_id'] ?? null)
+                || ! is_string($supplemental['status'] ?? null)
+                || ! is_string($supplemental['language'] ?? null)
+                || ! is_array($supplemental['platforms'] ?? null)
+                || $supplemental['platforms'] === []) {
+                throw new PostsyncerException(
+                    'PostSyncer publish progress has invalid supplemental groups.'
+                );
+            }
+        }
     }
 
     /**
@@ -2225,6 +2440,19 @@ class PublishPostAction
     private function completedGroups(array $progress): array
     {
         $groups = $progress['completed_groups'] ?? [];
+
+        return is_array($groups)
+            ? array_values(array_filter($groups, static fn (mixed $group): bool => is_array($group)))
+            : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     * @return list<array<string, mixed>>
+     */
+    private function supplementalGroups(array $progress): array
+    {
+        $groups = $progress['supplemental_groups'] ?? [];
 
         return is_array($groups)
             ? array_values(array_filter($groups, static fn (mixed $group): bool => is_array($group)))
@@ -2588,8 +2816,9 @@ class PublishPostAction
         }
 
         $remoteStatus = strtoupper((string) ($result['status'] ?? ''));
-        $status = $operatorConfirmedFailed && $remoteStatus === 'FAILED'
-            ? 'FAILED'
+        $status = $operatorConfirmedFailed
+            && in_array($remoteStatus, ['FAILED', 'PARTIALLY_FAILED'], true)
+            ? $remoteStatus
             : $this->assertPublishableStatus(
                 $result['status'] ?? null,
                 $group,
@@ -2691,5 +2920,25 @@ class PublishPostAction
         }
 
         return $public;
+    }
+
+    /**
+     * @param  array<string, mixed>  $remote
+     * @return array<string, mixed>
+     */
+    private function publicRemoteGroup(
+        array $remote,
+        PublishGroup $group,
+        int|string $postId,
+    ): array {
+        return [
+            'post_id' => (string) $postId,
+            'status' => strtoupper((string) ($remote['status'] ?? '')),
+            'scheduled_at' => isset($remote['scheduled_at'])
+                ? (string) $remote['scheduled_at']
+                : null,
+            'platforms' => $group->platforms,
+            'language' => $group->language,
+        ];
     }
 }
