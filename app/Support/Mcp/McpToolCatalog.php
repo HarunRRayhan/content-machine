@@ -7,7 +7,8 @@ use App\Models\Video;
 
 /**
  * The tools this workspace exposes over MCP: scratchpad capture/triage,
- * idea read/edit, video/post list/get/update, and post publish.
+ * idea read/edit, media browsing, video/post list/get/update, Drive browsing,
+ * and publishing.
  *
  * @phpstan-type McpTool array{name: string, description: string, inputSchema: array<string, mixed>, ability: string}
  */
@@ -143,7 +144,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_video',
-                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, status, video_drive_url, cover_drive_url. Drive URLs must be publicly fetchable (Anyone with the link).',
+                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url. Drive URLs must be publicly fetchable (Anyone with the link).',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -152,6 +153,7 @@ final class McpToolCatalog
                     'slug' => ['type' => 'string'],
                     'body' => ['type' => 'string'],
                     'script_markdown' => ['type' => 'string'],
+                    'deck_manifest' => ['type' => ['object', 'null'], 'description' => 'Registered, renderable presentation deck package; pass null to remove it.'],
                     'status' => ['type' => 'string', 'enum' => Video::STATUSES],
                     'video_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the edited video.'],
                     'cover_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the cover image.'],
@@ -164,6 +166,24 @@ final class McpToolCatalog
                 'inputSchema' => self::schema([
                     'url' => ['type' => 'string', 'description' => 'A Google Drive file share link.'],
                 ], ['url']),
+            ],
+            [
+                'name' => 'list_drive_files',
+                'description' => 'List files in the connected workspace Google Drive folder. Use folder_id to browse into a returned folder and q to search.',
+                'ability' => 'drive:read',
+                'inputSchema' => self::schema([
+                    'folder_id' => ['type' => 'string'],
+                    'q' => ['type' => 'string', 'description' => 'Search names in the selected folder.'],
+                    'page_token' => ['type' => 'string'],
+                ]),
+            ],
+            [
+                'name' => 'make_drive_file_public',
+                'description' => 'Grant a connected Google Drive file an Anyone-with-the-link reader permission and return its share URL.',
+                'ability' => 'drive:write',
+                'inputSchema' => self::schema([
+                    'file_id' => ['type' => 'string', 'description' => 'The Drive file id returned by list_drive_files.'],
+                ], ['file_id']),
             ],
             [
                 'name' => 'publish_video',

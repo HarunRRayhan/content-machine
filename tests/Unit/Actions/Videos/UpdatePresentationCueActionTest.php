@@ -1,0 +1,274 @@
+<?php
+
+use App\Actions\Videos\UpdatePresentationCueAction;
+use App\Data\Videos\UpdatePresentationCueData;
+use App\Models\Video;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+uses(TestCase::class, RefreshDatabase::class);
+
+it('updates the script and map based deck cue', function (): void {
+    $video = Video::factory()->create([
+        'script_markdown' => "```\n[HOOK]\nFirst spoken line\nSecond spoken line\n```",
+        'deck_manifest' => [
+            'js' => "const LINES=['First spoken line','Second spoken line']; window.PRESENTATIONS['test']={steps:LINES.map(function(line){return {cue:line};})};",
+        ],
+    ]);
+
+    (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 1,
+        currentCue: 'Second spoken line',
+        cue: 'Updated spoken line',
+    ));
+
+    $video->refresh();
+
+    $this->assertStringContainsString('Updated spoken line', $video->script_markdown);
+    $this->assertStringNotContainsString('Second spoken line', $video->script_markdown);
+    $this->assertStringContainsString("'Updated spoken line'", $video->deck_manifest['js']);
+});
+
+it('rejects a cue that belongs to another step', function (): void {
+    $script = "```\nFirst spoken line\nSecond spoken line\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "const LINES=['First spoken line','Second spoken line']; window.PRESENTATIONS['test']={steps:LINES.map(function(line){return {cue:line};})};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 1,
+        currentCue: 'First spoken line',
+        cue: 'Updated spoken line',
+    )))->toThrow(InvalidArgumentException::class, 'Presentation step no longer matches its deck cue.');
+
+    $this->assertDatabaseHas('videos', [
+        'id' => $video->id,
+        'script_markdown' => $script,
+    ]);
+});
+
+it('escapes a double quoted deck cue', function (): void {
+    $video = Video::factory()->create([
+        'script_markdown' => "```\nFirst spoken line\n```",
+        'deck_manifest' => [
+            'js' => 'window.PRESENTATIONS["test"]={steps:[{cue:"First spoken line"}]};',
+        ],
+    ]);
+
+    (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'First spoken line',
+        cue: '</script><script>alert(1)</script>',
+    ));
+
+    $video->refresh();
+
+    $this->assertStringContainsString('\u003C/script\u003E\u003Cscript\u003Ealert(1)\u003C/script\u003E', $video->deck_manifest['js']);
+    $this->assertStringNotContainsString('</script><script>alert(1)</script>', $video->deck_manifest['js']);
+});
+
+it('handles brackets and comments in a static deck', function (): void {
+    $video = Video::factory()->create([
+        'script_markdown' => "```\nFirst ] spoken line\n```",
+        'deck_manifest' => [
+            'js' => "// cue:'not a step'\nwindow.PRESENTATIONS['test']={steps:[{cue:'First ] spoken line'}]};",
+        ],
+    ]);
+
+    (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'First ] spoken line',
+        cue: 'Updated line',
+    ));
+
+    $video->refresh();
+
+    $this->assertStringContainsString("cue:'Updated line'", $video->deck_manifest['js']);
+});
+
+it('rejects positional fallback when script and deck lengths differ', function (): void {
+    $script = "```\nFirst spoken line\nSecond spoken line\nThird spoken line\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'First cue'},{cue:'Second cue'}]};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 1,
+        currentCue: 'Second cue',
+        cue: 'Updated line',
+    )))->toThrow(InvalidArgumentException::class, 'Presentation step no longer matches its script line.');
+});
+
+it('uses an explicit legacy script line mapping when cue counts differ', function (): void {
+    $script = '```
+First spoken line
+Second spoken line
+Third spoken line
+```';
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1,scriptCue:'Second spoken line'}]};",
+        ],
+    ]);
+
+    (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Second paraphrase',
+        cue: 'Updated second line',
+    ));
+
+    $video->refresh();
+
+    expect($video->script_markdown)
+        ->toContain("First spoken line\nUpdated second line\nThird spoken line")
+        ->not->toContain('Second spoken line');
+    expect($video->deck_manifest['js'])->toContain("cue:'Updated second line'");
+});
+
+it('keeps an explicit script cue mapping current after an edit', function (): void {
+    $video = Video::factory()->create([
+        'script_markdown' => "```\nFirst spoken line\nSecond spoken line\n```",
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1,scriptCue:'Second spoken line'}]};",
+        ],
+    ]);
+
+    $action = new UpdatePresentationCueAction;
+    $action->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Second paraphrase',
+        cue: 'Updated second line',
+    ));
+
+    $video->refresh();
+
+    expect($video->deck_manifest['js'])
+        ->toContain("cue:'Updated second line'")
+        ->toContain("scriptCue:'Updated second line'");
+
+    $action->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Updated second line',
+        cue: 'Final second line',
+    ));
+
+    $video->refresh();
+
+    expect($video->script_markdown)->toContain('Final second line');
+    expect($video->deck_manifest['js'])
+        ->toContain("cue:'Final second line'")
+        ->toContain("scriptCue:'Final second line'");
+});
+
+it('rejects an explicit mapping when the locked script line is stale', function (): void {
+    $script = "```\nFirst spoken line\nChanged second line\nThird spoken line\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Second paraphrase',scriptLine:1,scriptCue:'Second spoken line'}]};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Second paraphrase',
+        cue: 'Updated second line',
+    )))->toThrow(InvalidArgumentException::class, 'Presentation step no longer matches its script line.');
+
+    $this->assertDatabaseHas('videos', [
+        'id' => $video->id,
+        'script_markdown' => $script,
+    ]);
+});
+
+it('rejects cue edits while publishing is locked', function (): void {
+    $script = "```\nFirst spoken line\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'First spoken line'}]};",
+        ],
+        'publish_state' => 'queued',
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'First spoken line',
+        cue: 'Updated line',
+    )))->toThrow(InvalidArgumentException::class, 'cannot be edited while');
+
+    $this->assertDatabaseCount('content_versions', 0);
+});
+
+it('does not offer a legacy visual-only step for editing', function (): void {
+    $script = '```
+First spoken line
+```';
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Visual-only recap',editable:false}]};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Visual-only recap',
+        cue: 'Updated line',
+    )))->toThrow(InvalidArgumentException::class, 'not linked to an editable script line');
+
+    $this->assertDatabaseHas('videos', [
+        'id' => $video->id,
+        'script_markdown' => $script,
+    ]);
+});
+
+it('does not discard speech around an inline direction', function (): void {
+    $script = "```\nBefore [on-screen: card] after\n```";
+    $video = Video::factory()->create([
+        'script_markdown' => $script,
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{cue:'Before after'}]};",
+        ],
+    ]);
+
+    expect(fn () => (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 0,
+        currentCue: 'Before after',
+        cue: 'Updated line',
+    )))->toThrow(InvalidArgumentException::class, 'Cannot edit a script line with an inline direction.');
+
+    $this->assertDatabaseHas('videos', [
+        'id' => $video->id,
+        'script_markdown' => $script,
+    ]);
+});
+
+it('keeps note-only deck steps in the step index', function (): void {
+    $video = Video::factory()->create([
+        'script_markdown' => "```\nFirst spoken line\nSecond spoken line\n```",
+        'deck_manifest' => [
+            'js' => "window.PRESENTATIONS['test']={steps:[{note:'visual only'},{cue:'Second spoken line'}]};",
+        ],
+    ]);
+
+    (new UpdatePresentationCueAction)->handle($video, new UpdatePresentationCueData(
+        step: 1,
+        currentCue: 'Second spoken line',
+        cue: 'Updated second line',
+    ));
+
+    $video->refresh();
+
+    $this->assertStringContainsString('First spoken line', $video->script_markdown);
+    $this->assertStringContainsString('Updated second line', $video->script_markdown);
+    $this->assertStringContainsString("note:'visual only'", $video->deck_manifest['js']);
+    $this->assertStringContainsString("cue:'Updated second line'", $video->deck_manifest['js']);
+});

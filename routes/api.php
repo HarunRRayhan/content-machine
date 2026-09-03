@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\GoogleDriveApiController;
 use App\Http\Controllers\Api\V1\IdeasApiController;
 use App\Http\Controllers\Api\V1\MediaApiController;
 use App\Http\Controllers\Api\V1\MediaUrlsApiController;
@@ -92,6 +93,15 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('media-urls/check', [MediaUrlsApiController::class, 'check'])
         ->middleware('auth.workspace-token:media:read')
         ->name('media-urls.check');
+
+    Route::get('google-drive/files', [GoogleDriveApiController::class, 'files'])
+        ->middleware('auth.workspace-token:drive:read')
+        ->name('google-drive.files');
+
+    Route::post('google-drive/files/{fileId}/make-public', [GoogleDriveApiController::class, 'makePublic'])
+        ->where('fileId', '[A-Za-z0-9_-]{1,128}')
+        ->middleware('auth.workspace-token:drive:write')
+        ->name('google-drive.make-public');
 
     Route::get('videos', [VideosApiController::class, 'index'])
         ->middleware('auth.workspace-token:videos:read')

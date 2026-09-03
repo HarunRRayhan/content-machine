@@ -3,11 +3,11 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $video->human_id }} · Presentation</title>
     <link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
     <link rel="icon" href="/favicon.ico?v=3" sizes="32x32">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/dist/reveal.css">
     <style>
         :root {
             --font-bn: "Instrument Sans", "Noto Sans Bengali", "Hind Siliguri", ui-sans-serif, system-ui, sans-serif;
@@ -56,6 +56,7 @@
             gap:2.2cqh; padding:4cqh 5cqw; text-align:center}
         .pres-stage-reveal{position:absolute; inset:0; display:block; padding:0; gap:0}
         .pres-stage-reveal .reveal{width:100%; height:100%}
+        .pres-frame{display:block; width:100%; height:100%; border:0; background:transparent}
         .pres-load-error{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
             text-align:center; padding:5cqw; color:#b91c1c; font-size:15px}
         .pres-stage > [data-from]:not(.on){position:absolute !important; visibility:hidden; pointer-events:none}
@@ -83,10 +84,15 @@
             background:repeating-linear-gradient(to bottom, var(--cm-border) 0 6px, transparent 6px 12px)}
         .pres-notes{flex:1 1 260px; min-width:240px; max-width:520px}
         .pres-cue{font-family:var(--font-bn); font-size:26px; font-weight:600; line-height:1.45; color:var(--cm-fg);
-            padding:18px; border:1px solid var(--cm-border); border-radius:14px; background:var(--cm-muted); margin-bottom:12px}
+            padding:18px; border:1px solid var(--cm-border); border-radius:14px; background:var(--cm-muted); margin:0}
+        .pres-cue-row{display:flex; align-items:stretch; gap:8px; margin-bottom:12px}
+        .pres-cue-row .pres-cue{flex:1}
+        .pres-cue-editbtn{width:48px; border:1px solid var(--cm-border); border-radius:12px; background:var(--cm-muted); color:var(--cm-fg); cursor:pointer; font-size:20px}
+        .pres-cue-editor[hidden], .pres-cue-row[hidden]{display:none}
+        .pres-cue-editor textarea{display:block; width:100%; min-height:120px; resize:vertical; font:600 22px/1.45 var(--font-bn); color:var(--cm-fg); background:var(--cm-muted); border:1px solid var(--cm-border); border-radius:12px; padding:14px; margin-bottom:8px}
+        .pres-cue-actions{display:flex; gap:8px; justify-content:flex-end}
+        .pres-cue-error{color:#b91c1c; font-size:13px; margin:8px 0}
         .pres-keys{font-family:var(--font-cue); font-size:11px; color:var(--cm-muted-fg); margin-bottom:16px}
-        {!! $manifest['lib_css'] ?? '' !!}
-        {!! $manifest['css'] ?? '' !!}
     </style>
 </head>
 <body @class(['embed' => $embed])>
@@ -97,7 +103,17 @@
     <div class="pres-shell" id="presShell">
         <div class="pres-left-col">
             <div class="pres-left" id="presLeft">
-                <div class="pres-stage" id="presStage">Loading…</div>
+                <div class="pres-stage" id="presStage">
+                    <iframe
+                        class="pres-frame"
+                        id="presFrame"
+                        src="{{ route('videos.presentation.frame', ['video' => $video, 'theme' => $theme]) }}"
+                        title="{{ $video->title }} presentation"
+                        sandbox="allow-scripts"
+                        allow="fullscreen"
+                        allowfullscreen
+                    ></iframe>
+                </div>
             </div>
         </div>
         <div class="pres-gap"></div>
@@ -105,99 +121,159 @@
             <div class="pres-vidno" id="presVidNo">{{ $video->human_id }}</div>
             <div class="pres-stepno" id="presStepNo"></div>
             <div class="pres-dots" id="presDots"></div>
-            <div class="pres-cue" id="presCue"></div>
+            <div class="pres-cue-row" id="presCueRow">
+                <div class="pres-cue" id="presCue"></div>
+                <button type="button" class="pres-cue-editbtn" id="presCueEditBtn" title="Edit this script line" aria-label="Edit this script line">✎</button>
+            </div>
+            <div class="pres-cue-editor" id="presCueEditor" hidden>
+                <textarea id="presCueInput" rows="3" aria-label="Script line"></textarea>
+                <div class="pres-cue-actions">
+                    <button type="button" class="pres-fs-btn" id="presCueCancelBtn">Cancel</button>
+                    <button type="button" class="pres-fs-btn" id="presCueSaveBtn">Save</button>
+                </div>
+                <div class="pres-cue-error" id="presCueError" role="alert" hidden></div>
+            </div>
             <div class="pres-keys">Space / → next · ← back · R restart · F fullscreen</div>
             <button type="button" class="pres-fs-btn" id="presFsBtn">⛶ <span id="presFsLbl">Fullscreen</span></button>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.2.1/dist/reveal.js"></script>
-    <script>
-        window.PRESENTATIONS = window.PRESENTATIONS || {};
-    </script>
-    <script>{!! $manifest['lib_js'] ?? '' !!}</script>
-    <script>{!! $manifest['js'] ?? '' !!}</script>
     <script>
         (function () {
-            const deckKey = @json($manifest['deck_key'] ?? null);
-            const engineHint = @json($manifest['engine'] ?? null);
-            const deck = (deckKey && window.PRESENTATIONS[deckKey]) || Object.values(window.PRESENTATIONS)[0];
-            const stageEl = document.getElementById('presStage');
+            const frameEl = document.getElementById('presFrame');
             const cueEl = document.getElementById('presCue');
             const stepNoEl = document.getElementById('presStepNo');
             const dotsEl = document.getElementById('presDots');
             const shell = document.getElementById('presShell');
             const fsBtn = document.getElementById('presFsBtn');
             const fsLbl = document.getElementById('presFsLbl');
-
-            if (!deck) {
-                stageEl.innerHTML = '<div class="pres-load-error">Deck JavaScript did not register a presentation.</div>';
-                cueEl.textContent = 'Deck missing.';
-                return;
-            }
-
-            const isReveal = (deck.engine || engineHint) === 'reveal' || typeof deck.slidesHtml === 'function';
+            const cueRow = document.getElementById('presCueRow');
+            const cueEditor = document.getElementById('presCueEditor');
+            const cueInput = document.getElementById('presCueInput');
+            const cueEditBtn = document.getElementById('presCueEditBtn');
+            const cueCancelBtn = document.getElementById('presCueCancelBtn');
+            const cueSaveBtn = document.getElementById('presCueSaveBtn');
+            const cueError = document.getElementById('presCueError');
+            const cueUpdateUrl = @json(route('videos.presentation.cue', $video));
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            let steps = [];
             let presStep = 0;
-            let presRevealInstance = null;
 
-            if (isReveal) {
-                const html = typeof deck.slidesHtml === 'function' ? deck.slidesHtml() : (deck.slidesHtml || '');
-                stageEl.className = 'pres-stage pres-stage-reveal';
-                stageEl.innerHTML = '<div class="reveal" id="presReveal"><div class="slides">' + html + '</div></div>';
-                if (typeof Reveal === 'undefined') {
-                    stageEl.innerHTML = '<div class="pres-load-error">Reveal.js failed to load.</div>';
-                    return;
-                }
-                presRevealInstance = new Reveal(document.getElementById('presReveal'), {
-                    embedded: true, keyboard: false, controls: false, progress: false, hash: false,
-                    respondToHashChanges: false, postMessage: false,
-                    width: 1000, height: 1000, margin: 0, minScale: 0.2, maxScale: 2,
-                    transition: 'fade'
-                });
-            } else if (typeof deck.stage === 'function') {
-                stageEl.className = 'pres-stage step-0';
-                stageEl.innerHTML = deck.stage();
-            } else {
-                stageEl.innerHTML = '<div class="pres-load-error">This deck has no slidesHtml() or stage().</div>';
-                return;
+            function postFrame(payload) {
+                if (!frameEl?.contentWindow) return;
+                frameEl.contentWindow.postMessage({ source: 'cm-pres-host', ...payload }, '*');
             }
 
-            const steps = Array.isArray(deck.steps) ? deck.steps : [];
-            dotsEl.innerHTML = steps.map(function (_, i) {
-                return '<span class="pres-dot" data-i="' + i + '"></span>';
-            }).join('');
+            function clampStep(n) {
+                return Math.max(0, Math.min(Math.max(steps.length - 1, 0), n));
+            }
+
+            function setSteps(rawSteps) {
+                if (!Array.isArray(rawSteps)) return;
+                steps = rawSteps.slice(0, 200).map(function (step) {
+                    const value = step && typeof step === 'object' ? step : {};
+                    return {
+                        cue: typeof value.cue === 'string' ? value.cue.slice(0, 5000) : '',
+                        note: typeof value.note === 'string' ? value.note.slice(0, 5000) : '',
+                        editable: value.editable !== false,
+                        slide: Number.isInteger(value.slide) ? value.slide : undefined,
+                    };
+                });
+                dotsEl.innerHTML = steps.map(function (_, i) {
+                    return '<span class="pres-dot" data-i="' + i + '"></span>';
+                }).join('');
+                dotsEl.querySelectorAll('.pres-dot').forEach(function (dot) {
+                    dot.addEventListener('click', function () { showPresStep(+dot.dataset.i); });
+                });
+            }
 
             function updateChrome(n) {
-                presStep = Math.max(0, Math.min(Math.max(steps.length - 1, 0), n));
+                presStep = clampStep(n);
                 const step = steps[presStep] || {};
                 cueEl.textContent = step.cue || step.note || ('Slide ' + (presStep + 1));
-                stepNoEl.textContent = 'Step ' + presStep + ' / ' + Math.max(steps.length - 1, 0);
+                if (cueEditBtn) {
+                    cueEditBtn.hidden = step.editable === false || typeof step.cue !== 'string' || step.cue.trim() === '';
+                }
+                stepNoEl.textContent = steps.length
+                    ? 'Step ' + presStep + ' / ' + Math.max(steps.length - 1, 0)
+                    : 'Deck has no script cues';
                 dotsEl.querySelectorAll('.pres-dot').forEach(function (dot, i) {
                     dot.classList.toggle('active', i === presStep);
                 });
             }
 
-            function showPresStep(n) {
-                if (isReveal && presRevealInstance) {
-                    const target = Math.max(0, Math.min(steps.length - 1, n));
-                    const delta = target - presStep;
-                    if (delta > 0) { for (let i = 0; i < delta; i++) presRevealInstance.next(); }
-                    else if (delta < 0) { for (let i = 0; i < -delta; i++) presRevealInstance.prev(); }
-                    else if (target === 0) { presRevealInstance.slide(0, 0, -1); }
-                    updateChrome(target);
+            function exitCueEdit() {
+                if (cueRow) cueRow.hidden = false;
+                if (cueEditor) cueEditor.hidden = true;
+                if (cueError) {
+                    cueError.hidden = true;
+                    cueError.textContent = '';
+                }
+            }
+
+            function enterCueEdit() {
+                if (!cueInput || !cueRow || !cueEditor) return;
+                const step = steps[presStep] || {};
+                if (typeof step.cue !== 'string' || step.cue.trim() === '') return;
+                cueInput.value = step.cue;
+                cueRow.hidden = true;
+                cueEditor.hidden = false;
+                cueInput.focus();
+                cueInput.select();
+            }
+
+            async function saveCueEdit() {
+                if (!cueInput || !cueSaveBtn) return;
+                const cue = cueInput.value.trim();
+                if (!cue || /[\r\n]/.test(cue)) {
+                    if (cueError) {
+                        cueError.textContent = 'Enter one non-empty line.';
+                        cueError.hidden = false;
+                    }
                     return;
                 }
-                presStep = Math.max(0, Math.min(steps.length - 1, n));
-                stageEl.className = 'pres-stage step-' + presStep;
-                stageEl.querySelectorAll('[data-from]').forEach(function (el) {
-                    const from = +el.dataset.from;
-                    const until = el.dataset.until != null ? +el.dataset.until : Infinity;
-                    el.classList.toggle('on', presStep >= from && presStep <= until);
-                });
-                stageEl.querySelectorAll('[data-recede]').forEach(function (el) {
-                    el.classList.toggle('recede', presStep >= +el.dataset.recede);
-                });
-                updateChrome(presStep);
+                cueSaveBtn.disabled = true;
+                cueSaveBtn.textContent = 'Saving…';
+                try {
+                    const response = await fetch(cueUpdateUrl, {
+                        method: 'PATCH',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                        body: JSON.stringify({
+                            step: presStep,
+                            current_cue: (steps[presStep] || {}).cue || '',
+                            cue,
+                        }),
+                    });
+                    const result = await response.json();
+                    if (!response.ok || !result.ok) {
+                        throw new Error(result.error || 'Save failed.');
+                    }
+                    if (steps[presStep]) steps[presStep].cue = result.cue || cue;
+                    postFrame({ type: 'cue', step: presStep, cue: result.cue || cue });
+                    updateChrome(presStep);
+                    exitCueEdit();
+                } catch (error) {
+                    if (cueError) {
+                        cueError.textContent = error instanceof Error ? error.message : 'Save failed.';
+                        cueError.hidden = false;
+                    }
+                } finally {
+                    cueSaveBtn.disabled = false;
+                    cueSaveBtn.textContent = 'Save';
+                }
+            }
+
+            function showPresStep(n) {
+                exitCueEdit();
+                if (!steps.length) return;
+                const target = clampStep(n);
+                updateChrome(target);
+                postFrame({ type: 'go', step: target });
             }
 
             function sizePresLeft() {
@@ -209,7 +285,6 @@
                     : Math.max(260, Math.min(window.innerHeight - left.getBoundingClientRect().top - 16, window.innerWidth - 360));
                 left.style.height = side + 'px';
                 left.style.width = side + 'px';
-                if (presRevealInstance) presRevealInstance.layout();
             }
 
             function applyFs(isFs) {
@@ -228,9 +303,10 @@
             }
 
             function handleKey(key) {
-                if (key === 'ArrowRight' || key === ' ') { showPresStep(presStep + 1); return; }
-                if (key === 'ArrowLeft') { showPresStep(presStep - 1); return; }
-                if (key === 'r' || key === 'R') { showPresStep(0); return; }
+                if (key === 'ArrowRight' || key === ' ' || key === 'ArrowLeft' || key === 'r' || key === 'R') {
+                    postFrame({ type: 'key', key: key });
+                    return;
+                }
                 if (key === 'f' || key === 'F') { toggleFullscreen(); }
             }
 
@@ -254,16 +330,29 @@
                 if (parentOrigin !== null && event.origin !== parentOrigin) return;
                 if (parentOrigin === null && event.origin !== 'null') return;
                 const data = event.data;
-                if (!data || data.source !== 'cm-pres') return;
-                if (data.type === 'key') handleKey(data.key);
+                if (!data) return;
+
+                if (event.source === frameEl?.contentWindow && event.origin === 'null' && data.source === 'cm-pres-frame') {
+                    if (data.type === 'ready') {
+                        setSteps(data.steps);
+                        updateChrome(0);
+                    }
+                    if (data.type === 'state' && Number.isInteger(data.step)) updateChrome(data.step);
+                    if (data.type === 'error') cueEl.textContent = data.message || 'Deck failed to load.';
+                    if (data.type === 'fs') toggleFullscreen();
+                    return;
+                }
+
+                if (event.source !== window.parent || window.parent === window || event.origin !== window.location.origin) return;
+                if (data.source !== 'cm-pres') return;
+                if (data.type === 'key' && typeof data.key === 'string') handleKey(data.key);
                 if (data.type === 'fs') applyFs(!!data.on);
             });
 
-            dotsEl.querySelectorAll('.pres-dot').forEach(function (dot) {
-                dot.addEventListener('click', function () { showPresStep(+dot.dataset.i); });
-            });
-
             if (fsBtn) fsBtn.addEventListener('click', toggleFullscreen);
+            if (cueEditBtn) cueEditBtn.addEventListener('click', enterCueEdit);
+            if (cueCancelBtn) cueCancelBtn.addEventListener('click', exitCueEdit);
+            if (cueSaveBtn) cueSaveBtn.addEventListener('click', saveCueEdit);
 
             document.addEventListener('keydown', function (e) {
                 if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
@@ -275,18 +364,9 @@
 
             window.addEventListener('resize', sizePresLeft);
 
-            if (isReveal && presRevealInstance) {
-                presRevealInstance.initialize().then(function () {
-                    presRevealInstance.on('slidechanged', function () {
-                        updateChrome(presRevealInstance.getIndices().h || 0);
-                    });
-                    updateChrome(0);
-                    sizePresLeft();
-                });
-            } else {
-                showPresStep(0);
-                sizePresLeft();
-            }
+            if (frameEl) frameEl.addEventListener('load', function () { postFrame({ type: 'go', step: presStep }); });
+            updateChrome(0);
+            sizePresLeft();
         })();
     </script>
 </body>

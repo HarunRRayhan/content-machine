@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'google_drive' => [
+        'client_id' => env('GOOGLE_DRIVE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_DRIVE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_DRIVE_REDIRECT_URI', rtrim((string) env('APP_URL', 'http://localhost'), '/').'/settings/google-drive/callback'),
+    ],
+
 ];

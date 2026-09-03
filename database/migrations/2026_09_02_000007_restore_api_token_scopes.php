@@ -15,6 +15,8 @@ return new class extends Migration
 
     private const MEDIA_MIGRATION_AT = '2026-08-28 04:15:01+00';
 
+    private const DRIVE_MIGRATION_AT = '2026-09-01 00:00:00+00';
+
     private const POST_VIDEO_ABILITIES = [
         'videos:read',
         'videos:write',
@@ -33,6 +35,10 @@ return new class extends Migration
         $this->removeImplicitAbilities(
             self::MEDIA_MIGRATION_AT,
             self::MEDIA_ABILITIES,
+        );
+        $this->removeImplicitAbilities(
+            self::DRIVE_MIGRATION_AT,
+            ['drive:read', 'drive:write'],
         );
     }
 

@@ -34,9 +34,15 @@ class CreatePostAction
                     return $existing;
                 }
 
-                $number = isset($attributes['number'])
-                    ? (int) $attributes['number']
-                    : $this->numberFromHumanId($humanId);
+                $importedNumber = $this->numberFromHumanId($humanId);
+                $number = isset($attributes['number']) ? (int) $attributes['number'] : $importedNumber;
+
+                if ($number !== $importedNumber) {
+                    throw ValidationException::withMessages([
+                        'number' => 'number must match the number in human_id.',
+                    ]);
+                }
+
                 $this->reserveContentIdAction->advancePast($workspace, 'post', $number);
             } else {
                 $contentId = $this->reserveContentIdAction->handle($workspace, 'post');
@@ -86,9 +92,9 @@ class CreatePostAction
 
     private function numberFromHumanId(string $humanId): int
     {
-        if (preg_match('/(\d+)$/', $humanId, $matches) !== 1) {
+        if (preg_match('/^(?:P|BP|EP)-([1-9]\d*)$/', $humanId, $matches) !== 1) {
             throw ValidationException::withMessages([
-                'human_id' => 'human_id must end in a number when number is omitted.',
+                'human_id' => 'human_id must be P-N, BP-N, or EP-N with a positive number.',
             ]);
         }
 

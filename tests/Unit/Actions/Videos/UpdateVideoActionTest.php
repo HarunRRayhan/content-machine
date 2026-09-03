@@ -193,4 +193,25 @@ class UpdateVideoActionTest extends TestCase
         $this->assertSame('https://drive.google.com/file/d/new-video/view', $updated->video_drive_url);
         $this->assertSame('https://drive.google.com/file/d/new-cover/view', $updated->cover_drive_url);
     }
+
+    public function test_partial_api_payload_preserves_extended_fields_from_a_newer_row(): void
+    {
+        $video = Video::factory()->create([
+            'script_markdown' => 'old script',
+            'deck_manifest' => ['js' => 'old deck'],
+        ]);
+        $data = UpdateVideoData::fromApiPayload([
+            'deck_manifest' => ['js' => 'new deck'],
+        ], $video);
+
+        Video::query()->whereKey($video->id)->update([
+            'script_markdown' => 'newer script',
+        ]);
+
+        (new UpdateVideoAction)->handle($video, $data);
+
+        $video->refresh();
+        $this->assertSame('newer script', $video->script_markdown);
+        $this->assertSame(['js' => 'new deck'], $video->deck_manifest);
+    }
 }

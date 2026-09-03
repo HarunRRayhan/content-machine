@@ -413,6 +413,21 @@ class VideosControllerTest extends TestCase
             );
     }
 
+    public function test_show_does_not_advertise_an_empty_deck_manifest(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create([
+            'deck_manifest' => ['engine' => 'reveal', 'js' => ''],
+        ]);
+
+        $this->get(route('videos.show', $video))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.has_deck', false)
+            );
+    }
+
     public function test_show_404s_for_a_video_in_a_different_workspace()
     {
         $this->actingAsWorkspaceMember();

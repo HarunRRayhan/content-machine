@@ -22,14 +22,21 @@ Make Content Machine the place that configures PostSyncer and schedules/publishe
 | Execution | Queue jobs + dashboard progress (not sync HTTP in the web request) |
 | List UI | Studio-like status tabs including Ideation |
 
-## Non-goals (v1)
+## Non-goals (original v1 scope)
 
 - Direct PostSyncer access from agents or Script Studio
-- Google Drive OAuth / folder picker
 - Multipart file upload from CM as the primary path (link upload first; keep upload base URL for optional fallback later)
 - Polling PostSyncer to auto-flip `scheduled` → `posted` when a scheduled item goes live
 - Pixel-perfect copy of Script Studio CSS
 - Removing the separate Ideas nav page (Ideation tab embeds open ideas; Ideas page can remain)
+
+## Follow-up implementation (2026-09-01)
+
+The Google Drive OAuth connection and folder picker originally excluded from v1
+are now shipped. Workspace owners can connect Drive from Settings, choose the
+video export folder, browse files, and grant an Anyone-with-the-link reader
+permission before saving a media URL. See `docs/guides/postsyncer.md` for the
+current flow and deployment configuration.
 
 ## Architecture
 
@@ -263,6 +270,6 @@ Detailed task breakdown belongs in `docs/superpowers/plans/` after this spec is 
 
 - [x] No unresolved placeholders left as “TBD” for product behavior  
 - [x] Consistent with locked decisions (B dashboard, A settings, Drive A, media C, bilingual A, queue 2)  
-- [x] Scope excludes direct PostSyncer access and Drive OAuth
+- [x] Scope excludes direct PostSyncer access; Drive OAuth/folder-picker follow-up is shipped and documented in `docs/guides/postsyncer.md`
 - [x] Cutover and rollback flag present  
 - [x] Ties list-tab UX to the same project without blocking publish  
