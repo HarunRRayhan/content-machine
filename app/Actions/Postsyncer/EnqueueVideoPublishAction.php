@@ -176,12 +176,13 @@ class EnqueueVideoPublishAction
             ]);
         }
 
-        // Only ask-platform confirmation may change before an external group
-        // has been checkpointed. Schedule and platform changes are unsafe.
+        // Only ask-platform confirmation may change before any external
+        // progress has been checkpointed. Schedule and platform changes are unsafe.
         if (array_key_exists('confirm_ask', $requested)
             && (bool) ($requested['confirm_ask'] ?? false)
                 !== (bool) ($options['confirm_ask'] ?? false)) {
-            if ($this->hasCompletedGroups($progress)) {
+            if ($this->hasCompletedGroups($progress)
+                || ($progress['current'] ?? null) !== null) {
                 throw ValidationException::withMessages([
                     'publish' => __('Only the ask-platform confirmation may change when retrying a publish.'),
                 ]);

@@ -4,6 +4,7 @@ namespace App\Actions\Postsyncer;
 
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Postsyncer\LegacyPublishProgress;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
@@ -28,6 +29,7 @@ class PublishVideoAction
     {
         $video->refresh();
         $originalStatus = $video->status;
+        $publishError = $video->publish_error;
         $options = $this->normalizeOptions($options);
         $progress = $video->publish_progress;
 
@@ -67,7 +69,15 @@ class PublishVideoAction
             }
 
             $plan = $this->planMetadata($config, $groups, $options);
-            $progress = $this->prepareProgress($video, $progress, $plan, $runToken);
+            $progress = $this->prepareProgress(
+                $video,
+                $progress,
+                $plan,
+                $runToken,
+                $publishError,
+                $config,
+                $groups,
+            );
             if ($progress === null) {
                 return;
             }
@@ -305,7 +315,8 @@ class PublishVideoAction
         $this->assertProgressShape($progress);
 
         if (($progress['state'] ?? null) !== 'uncertain'
-            || ! is_array($progress['current'] ?? null)) {
+            || ! is_array($progress['current'] ?? null)
+            || ($progress['current']['phase'] ?? null) !== 'creating') {
             throw new PostsyncerException(
                 'This video does not have an uncertain PostSyncer create to reconcile.'
             );
@@ -913,16 +924,16 @@ class PublishVideoAction
         }
 
         $merged = $latest;
-        $localCurrent = $local['current'] ?? null;
-        $latestCurrent = $latest['current'] ?? null;
-
-        if (is_array($localCurrent) && $latestCurrent === null) {
-            $merged['current'] = $localCurrent;
-        }
-
         $completed = $this->completedGroups($latest);
         foreach ($this->completedGroups($local) as $localGroup) {
-            $completed = $this->upsertCompletedGroup($completed, $localGroup);
+            $index = $localGroup['index'] ?? null;
+            $groupKey = $localGroup['group_key'] ?? null;
+
+            if (is_int($index)
+                && is_string($groupKey)
+                && $this->completedGroup($completed, $index, $groupKey) === null) {
+                $completed[] = $localGroup;
+            }
         }
 
         usort(
@@ -931,6 +942,23 @@ class PublishVideoAction
                 <=> ((int) ($right['index'] ?? 0)),
         );
         $merged['completed_groups'] = $completed;
+
+        $localCurrent = $local['current'] ?? null;
+        $latestCurrent = $latest['current'] ?? null;
+        $localCurrentAlreadyCompleted = is_array($localCurrent)
+            && is_int($localCurrent['index'] ?? null)
+            && is_string($localCurrent['group_key'] ?? null)
+            && $this->completedGroup(
+                $completed,
+                $localCurrent['index'],
+                $localCurrent['group_key'],
+            ) !== null;
+
+        if (is_array($localCurrent)
+            && $latestCurrent === null
+            && ! $localCurrentAlreadyCompleted) {
+            $merged['current'] = $localCurrent;
+        }
 
         return $merged;
     }
@@ -1458,7 +1486,7 @@ class PublishVideoAction
                 $current = $failedProgress['current'] ?? null;
 
                 if (is_array($current)
-                    && ($current['phase'] ?? null) === 'creating'
+                    && in_array(($current['phase'] ?? null), ['creating', 'retryable'], true)
                     && ($current['media_ids'] ?? []) !== []) {
                     $current['phase'] = 'retryable';
                     $failedProgress['current'] = $current;
@@ -1519,6 +1547,7 @@ class PublishVideoAction
     /**
      * @param  array<string, mixed>|null  $existing
      * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     * @param  list<PublishGroup>  $groups
      * @return array<string, mixed>
      */
     private function prepareProgress(
@@ -1526,6 +1555,9 @@ class PublishVideoAction
         ?array $existing,
         array $plan,
         string $runToken,
+        ?string $publishError,
+        PostsyncerConfig $config,
+        array $groups,
     ): ?array {
         if ($existing === null) {
             $progress = [
@@ -1549,8 +1581,18 @@ class PublishVideoAction
 
         $this->assertProgressShape($existing);
 
-        if ($this->hasUnknownCurrent($existing)
-            || ($existing['state'] ?? null) === 'uncertain') {
+        $legacyAccountFailure = LegacyPublishProgress::isMissingAccountFailure(
+            $publishError,
+            $existing,
+        );
+
+        if ($legacyAccountFailure) {
+            $existing = $this->repairLegacyAccountProgress($existing, $plan, $config, $groups);
+        }
+
+        if (! $legacyAccountFailure
+            && ($this->hasUnknownCurrent($existing)
+                || ($existing['state'] ?? null) === 'uncertain')) {
             throw new PostsyncerException(
                 'A PostSyncer media upload or create has an unknown outcome. Resolve it before retrying.'
             );
@@ -1570,7 +1612,9 @@ class PublishVideoAction
         $storedGroups = $existing['planned_groups'] ?? null;
 
         if ($storedHash === null) {
-            if ($storedGroups !== [] || $this->completedGroups($existing) !== []) {
+            if ($storedGroups !== []
+                || $this->completedGroups($existing) !== []
+                || ($existing['current'] ?? null) !== null) {
                 throw new PostsyncerException(
                     'PostSyncer publish progress has no plan metadata. Reconcile it before retrying.'
                 );
@@ -1603,6 +1647,107 @@ class PublishVideoAction
         }
 
         return $existing;
+    }
+
+    /**
+     * Move a legacy pre-create account failure onto the current plan while
+     * retaining its registered media ids. Completed groups must still match
+     * the new plan before normal retry validation can continue.
+     *
+     * @param  array<string, mixed>  $progress
+     * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     * @param  list<PublishGroup>  $groups
+     * @return array<string, mixed>
+     */
+    private function repairLegacyAccountProgress(
+        array $progress,
+        array $plan,
+        PostsyncerConfig $config,
+        array $groups,
+    ): array {
+        $current = $progress['current'] ?? null;
+        $index = is_array($current) ? ($current['index'] ?? null) : null;
+        $planned = is_int($index) ? ($plan['groups'][$index] ?? null) : null;
+        $stored = is_int($index) ? ($progress['planned_groups'][$index] ?? null) : null;
+        $group = is_int($index) ? ($groups[$index] ?? null) : null;
+        $mediaUrls = is_array($current) ? ($current['media_urls'] ?? null) : null;
+
+        if (! is_array($current)
+            || ! is_int($index)
+            || ! is_array($planned)
+            || ! is_array($stored)
+            || ($stored['group_key'] ?? null) !== ($current['group_key'] ?? null)
+            || ! $group instanceof PublishGroup
+            || ! is_array($mediaUrls)
+            || ! array_is_list($mediaUrls)
+            || count(array_filter(
+                $mediaUrls,
+                static fn (mixed $url): bool => is_string($url),
+            )) !== count($mediaUrls)
+            || $this->canonicalMediaUrls($mediaUrls) !== $this->canonicalMediaUrls($group->mediaUrls)
+            || ! $this->legacyGroupKeyMatches($config, $group, (string) $current['group_key'])) {
+            throw new PostsyncerException(
+                'This video has a legacy account-mapping checkpoint that cannot be repaired safely.'
+            );
+        }
+
+        $current['phase'] = 'retryable';
+        $current['group_key'] = $planned['group_key'];
+        $current['idempotency_key'] = $this->idempotencyKey(
+            (string) $progress['operation_id'],
+            $index,
+            $planned['group_key'],
+        );
+        $progress['current'] = $current;
+        $progress['plan_hash'] = $plan['hash'];
+        $progress['planned_groups'] = $plan['groups'];
+        $progress['state'] = 'running';
+
+        return $progress;
+    }
+
+    /**
+     * The legacy key must match the current group with only account mappings
+     * changing from null to their configured values.
+     */
+    private function legacyGroupKeyMatches(
+        PostsyncerConfig $config,
+        PublishGroup $group,
+        string $legacyGroupKey,
+    ): bool {
+        $platforms = $group->platforms;
+        $variants = 1 << count($platforms);
+
+        for ($mask = 0; $mask < $variants; $mask++) {
+            $accountOverrides = [];
+
+            foreach ($platforms as $offset => $platform) {
+                if (($mask & (1 << $offset)) !== 0) {
+                    $accountOverrides[$platform] = null;
+                }
+            }
+
+            if ($this->groupKey($config, $group, $accountOverrides) === $legacyGroupKey) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<mixed>  $urls
+     * @return list<string>
+     */
+    private function canonicalMediaUrls(array $urls): array
+    {
+        $canonical = [];
+
+        foreach ($urls as $url) {
+            $canonical[] = $this->stableMediaUrl((string) $url);
+        }
+
+        return $canonical;
     }
 
     /**
@@ -1920,8 +2065,14 @@ class PublishVideoAction
         return hash('sha256', $operationId.'|'.$index.'|'.$groupKey);
     }
 
-    private function groupKey(PostsyncerConfig $config, PublishGroup $group): string
-    {
+    /**
+     * @param  array<string, mixed>  $accountOverrides
+     */
+    private function groupKey(
+        PostsyncerConfig $config,
+        PublishGroup $group,
+        array $accountOverrides = [],
+    ): string {
         $langConfig = $config->language($group->language);
         $platformAccounts = $langConfig['platforms'];
         $accounts = [];
@@ -1932,7 +2083,9 @@ class PublishVideoAction
             $platformConfig = is_array($platformAccounts[$platform] ?? null)
                 ? $platformAccounts[$platform]
                 : [];
-            $accounts[$platform] = $platformConfig['account_id'] ?? null;
+            $accounts[$platform] = array_key_exists($platform, $accountOverrides)
+                ? $accountOverrides[$platform]
+                : ($platformConfig['account_id'] ?? null);
         }
 
         ksort($accounts);

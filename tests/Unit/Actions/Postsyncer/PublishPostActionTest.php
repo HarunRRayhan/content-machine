@@ -56,6 +56,26 @@ class PublishPostActionTest extends TestCase
         ]);
     }
 
+    /**
+     * @return array{key: string, media_urls: list<string>}
+     */
+    private function legacyGroup(Post $post, Workspace $workspace): array
+    {
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+        $groups = (new PostPublishPlanner(new MediaUrlResolver))->plan(
+            $post,
+            $config,
+            ['confirm_ask' => false],
+        );
+        $key = (string) (new \ReflectionMethod(PublishPostAction::class, 'groupKey'))
+            ->invoke($this->action, $config, $groups[0]);
+
+        return [
+            'key' => $key,
+            'media_urls' => $groups[0]->mediaUrls,
+        ];
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -238,7 +258,7 @@ class PublishPostActionTest extends TestCase
         $this->action->handle($post, ['confirm_ask' => false]);
 
         $post->refresh();
-        $this->assertSame('succeeded', $post->publish_state, (string) $post->publish_error);
+        $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame(2, $lookups);
         Http::assertSentCount(3);
     }
@@ -500,6 +520,75 @@ class PublishPostActionTest extends TestCase
         $this->assertSame(['10', '11'], array_column($post->postsyncer['groups'], 'post_id'));
         $this->assertArrayNotHasKey('group_key', $post->postsyncer['groups'][0]);
         Http::assertSentCount(6);
+    }
+
+    public function test_failure_keeps_a_newer_reconciled_checkpoint_over_stale_local_progress(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'linkedin'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'FB caption',
+                        'images' => ['https://example.com/fb.png'],
+                    ],
+                    'linkedin' => [
+                        'caption' => 'LinkedIn caption',
+                        'images' => [],
+                    ],
+                ],
+            ],
+        ]);
+        $createCalls = 0;
+
+        Http::fake(function ($request) use ($post, &$createCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/10') {
+                return Http::response([
+                    'id' => 10,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'LinkedIn caption', 'media' => []]],
+                    'platforms' => [['platform' => 'linkedin', 'account_id' => 102, 'settings' => []]],
+                    'status' => 'PUBLISHED',
+                ], 200);
+            }
+
+            if ($request->url() !== 'https://postsyncer.com/api/v1/posts') {
+                return Http::response(['message' => 'Unexpected request'], 500);
+            }
+
+            $createCalls++;
+            if ($createCalls === 1) {
+                return Http::response(['id' => 10, 'status' => 'published'], 201);
+            }
+
+            $latestPost = $post->fresh();
+            $progress = $latestPost->publish_progress;
+            $progress['completed_groups'][0]['post_id'] = '110';
+            $progress['current']['phase'] = 'retryable';
+            $progress['current']['media_ids'] = [916];
+            $latestPost->forceFill(['publish_progress' => $progress])->save();
+
+            return Http::response(['message' => 'invalid account'], 422);
+        });
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('110', $post->publish_progress['completed_groups'][0]['post_id']);
+        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
+        $this->assertSame(2, $createCalls);
     }
 
     public function test_duplicate_delivery_after_success_does_not_publish_again_or_mark_failure(): void
@@ -1467,6 +1556,235 @@ class PublishPostActionTest extends TestCase
         $post->refresh();
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+    }
+
+    public function test_legacy_missing_account_checkpoint_reuses_registered_media_after_mapping_fix(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 999]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'POST', 'caption' => 'Caption',
+                ]]],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/image/view'],
+        ]);
+        $legacy = $this->legacyGroup($post, $workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                    ],
+                ],
+            ],
+        ]);
+        $post->forceFill([
+            'publish_state' => 'failed',
+            'publish_error' => 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. No account id mapped for platform facebook.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'legacy-plan',
+                'planned_groups' => [['index' => 0, 'group_key' => $legacy['key']]],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => $legacy['key'],
+                    'phase' => 'creating',
+                    'idempotency_key' => 'legacy-request',
+                    'media_ids' => [915],
+                    'media_urls' => $legacy['media_urls'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ])->save();
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/media/upload/url'));
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts'
+            && $request['content'][0]['media'] === [915]);
+    }
+
+    public function test_legacy_missing_account_checkpoint_is_not_rebound_when_media_changes(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/image/view'],
+        ]);
+        $legacy = $this->legacyGroup($post, $workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                    ],
+                ],
+            ],
+        ]);
+        $post->forceFill([
+            'publish_state' => 'failed',
+            'publish_error' => 'No account id mapped for platform facebook.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'legacy-plan',
+                'planned_groups' => [['index' => 0, 'group_key' => $legacy['key']]],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => $legacy['key'],
+                    'phase' => 'creating',
+                    'idempotency_key' => 'legacy-request',
+                    'media_ids' => [915],
+                    'media_urls' => ['https://example.com/a-different-image.png'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ])->save();
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('cannot be repaired safely', (string) $post->publish_error);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        Http::assertNothingSent();
+    }
+
+    public function test_create_reconciliation_rejects_an_uncertain_media_upload(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'uploading',
+                    'idempotency_key' => 'request-1',
+                    'media_ids' => [],
+                    'media_urls' => ['https://example.com/image.png'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $exception = null;
+        try {
+            $this->action->reconcile($post, 99);
+        } catch (PostsyncerException $thrown) {
+            $exception = $thrown;
+        }
+
+        $this->assertInstanceOf(PostsyncerException::class, $exception);
+        $this->assertStringContainsString('uncertain postsyncer create', strtolower((string) $exception?->getMessage()));
+        Http::assertNothingSent();
+    }
+
+    public function test_retryable_media_checkpoint_without_plan_metadata_is_not_reset(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'publish_state' => 'failed',
+            'publish_error' => 'PostSyncer create was rejected.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => null,
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'retryable',
+                    'idempotency_key' => 'request-1',
+                    'media_ids' => [915],
+                ],
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('no plan metadata', (string) $post->publish_error);
+        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
+        $this->assertSame([915], $post->publish_progress['current']['media_ids']);
+        Http::assertNothingSent();
     }
 
     public function test_uncertain_media_upload_can_be_reconciled_without_uploading_again(): void
