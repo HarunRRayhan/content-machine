@@ -293,6 +293,13 @@ class GenerateTelegramPostAction
     private function parseDraft(string $raw): ?array
     {
         $json = trim($raw);
+
+        // Models sometimes wrap an otherwise valid JSON response in a
+        // markdown code fence despite the prompt asking for bare JSON.
+        if (preg_match('/\A```(?:json)?\s*(.*?)\s*```\z/is', $json, $matches) === 1) {
+            $json = trim($matches[1]);
+        }
+
         try {
             $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
@@ -343,7 +350,7 @@ class GenerateTelegramPostAction
             $firstComment = trim($value['first_comment']);
 
             if ($caption === '') {
-                return null;
+                $caption = $body !== '' ? $body : $title;
             }
 
             $captions[$platform] = [

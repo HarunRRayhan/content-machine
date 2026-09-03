@@ -31,7 +31,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
 
     private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
-    private const MAX_TOKENS = 300;
+    private const MAX_TOKENS = 1000;
 
     public function __construct(
         private readonly ?PublicUrlGuard $urlGuard = null,
