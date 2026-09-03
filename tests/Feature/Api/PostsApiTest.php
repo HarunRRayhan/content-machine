@@ -553,6 +553,41 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '99');
     }
 
+    public function test_reconcile_media_endpoint_checkpoints_verified_media_ids(): void
+    {
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-MEDIA-API-RECONCILE',
+            'number' => 62,
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-media-api',
+                'run_token' => 'run-media-api',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'plan-media-api',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-media-api',
+                    'phase' => 'uploading',
+                    'idempotency_key' => 'idempotency-media-api',
+                    'media_ids' => [],
+                    'media_urls' => ['https://example.com/image.png'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/reconcile-media', [
+            'media_ids' => [915],
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
+            ->assertJsonPath('data.publish_progress.current.media_ids.0', '915');
+    }
+
     private function configurePostsyncer(): void
     {
         PostsyncerConfig::write($this->workspace, [
