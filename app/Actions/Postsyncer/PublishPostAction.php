@@ -1292,8 +1292,8 @@ class PublishPostAction
                 platforms: $normalizedPlatforms,
                 mediaUrls: [],
                 captions: $captions,
-                when: null,
-                publishNow: true,
+                when: $primaryGroup->when,
+                publishNow: $primaryGroup->publishNow,
             );
             $remote = $this->normalizePostResponse(
                 $client->getPostWithAccountDetails($postId),
