@@ -21,6 +21,7 @@ use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiVisionCompletionClientContract;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -134,6 +135,64 @@ class GenerateTelegramPostActionTest extends TestCase
 
         $this->assertStringContainsString('Original page description.', $completion->lastUserContent);
         $this->assertStringNotContainsString('Later AI summary.', $completion->lastUserContent);
+    }
+
+    public function test_an_unspecified_language_generates_all_enabled_variants_and_uses_english_title(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'enabled_languages' => ['english', 'bangla'],
+        ]);
+        $config = TelegramBotConfig::factory()->connected()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'text',
+            'source' => 'telegram',
+            'body' => 'A useful idea in two languages.',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $completion = new FakePostCompletionClient(json_encode([
+            'title' => 'English title',
+            'variants' => [
+                'en' => [
+                    'body' => 'The English body.',
+                    'captions' => [
+                        'facebook' => ['caption' => 'English Facebook caption', 'first_comment' => ''],
+                        'instagram' => ['caption' => 'English Instagram caption', 'first_comment' => ''],
+                    ],
+                ],
+                'bn' => [
+                    'body' => 'বাংলা বডি।',
+                    'captions' => [
+                        'facebook' => ['caption' => 'বাংলা ফেসবুক ক্যাপশন', 'first_comment' => ''],
+                        'instagram' => ['caption' => 'বাংলা ইনস্টাগ্রাম ক্যাপশন', 'first_comment' => ''],
+                    ],
+                ],
+            ],
+        ], JSON_THROW_ON_ERROR));
+
+        $post = (new GenerateTelegramPostAction(
+            app(CreatePostAction::class),
+            new AttachExistingPostMediaAction,
+            $completion,
+            $completion,
+            new AiProviderCredentialResolver,
+        ))->handle($request->id);
+
+        $this->assertInstanceOf(Post::class, $post);
+        $this->assertSame('English title', $post->title);
+        $this->assertSame('both', $post->language);
+        $this->assertSame('The English body.', $post->body);
+        $this->assertSame(['English', 'Bangla'], array_column($post->captions, 'part'));
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->refresh()->state);
     }
 
     public function test_a_photo_uses_the_vision_chain_and_attaches_the_source_image(): void
