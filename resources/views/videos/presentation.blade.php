@@ -326,9 +326,6 @@
             }
 
             window.addEventListener('message', function (event) {
-                if (event.source !== window.parent) return;
-                if (parentOrigin !== null && event.origin !== parentOrigin) return;
-                if (parentOrigin === null && event.origin !== 'null') return;
                 const data = event.data;
                 if (!data) return;
 
@@ -342,6 +339,10 @@
                     if (data.type === 'fs') toggleFullscreen();
                     return;
                 }
+
+                if (event.source !== window.parent) return;
+                if (parentOrigin !== null && event.origin !== parentOrigin) return;
+                if (parentOrigin === null && event.origin !== 'null') return;
 
                 if (event.source !== window.parent || window.parent === window || event.origin !== window.location.origin) return;
                 if (data.source !== 'cm-pres') return;

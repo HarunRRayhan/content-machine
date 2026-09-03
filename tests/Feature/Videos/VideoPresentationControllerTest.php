@@ -114,6 +114,11 @@ class VideoPresentationControllerTest extends TestCase
         $this->assertStringNotContainsString('body.embed .pres-notes{display:none}', $html);
         $this->assertStringNotContainsString('body.embed .pres-notes{display: none}', $html);
         $this->assertStringContainsString('event.origin !== parentOrigin', $html);
+        $childAt = strpos($html, 'event.source === frameEl?.contentWindow');
+        $parentGateAt = strpos($html, 'event.source !== window.parent');
+        $this->assertNotFalse($childAt);
+        $this->assertNotFalse($parentGateAt);
+        $this->assertLessThan($parentGateAt, $childAt);
     }
 
     public function test_presentation_host_allows_its_sandboxed_deck_frame(): void
