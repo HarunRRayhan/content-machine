@@ -588,6 +588,118 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.publish_progress.current.media_ids.0', '915');
     }
 
+    public function test_repair_account_mapping_endpoint_rebases_a_partial_publish(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
+                'data' => [[
+                    'id' => 7541,
+                    'workspace_id' => 853,
+                    'platform' => 'instagram',
+                    'username' => 'harundotdev',
+                    'has_expired' => false,
+                ]],
+            ], 200),
+        ]);
+
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'facebook' => ['account_id' => 200],
+                        'instagram' => ['account_id' => 7364],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['text' => 'on'],
+                    'instagram' => ['text' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-API-ACCOUNT-REPAIR',
+            'number' => 63,
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'instagram'],
+            'captions' => [
+                'Bangla' => ['facebook' => ['caption' => 'Bangla caption']],
+                'English' => [
+                    'facebook' => ['caption' => 'English Facebook caption'],
+                    'instagram' => ['caption' => 'English Instagram caption'],
+                ],
+            ],
+        ]);
+        $options = [
+            'when' => '2026-09-04T09:23:00+06:00',
+            'platforms' => ['facebook', 'instagram'],
+            'confirm_ask' => false,
+        ];
+        $action = app(PublishPostAction::class);
+        $plan = $action->freezePlan($post, PostsyncerConfig::fromWorkspace($this->workspace), $options);
+        $currentKey = $plan['groups'][1]['group_key'];
+
+        $post->forceFill([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-api-repair',
+                'run_token' => 'run-api-repair',
+                'options' => $plan['options'],
+                'plan_hash' => $plan['hash'],
+                'planned_groups' => $plan['groups'],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => $plan['groups'][0]['group_key'],
+                    'post_id' => '135500',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-09-04 09:23',
+                    'platforms' => ['facebook'],
+                    'language' => 'bangla',
+                ]],
+                'current' => [
+                    'index' => 1,
+                    'group_key' => $currentKey,
+                    'phase' => 'retryable',
+                    'idempotency_key' => 'old-api-repair-key',
+                    'media_ids' => [],
+                    'media_urls' => [],
+                ],
+                'state' => 'failed',
+            ],
+        ])->save();
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/repair-account-mapping', [
+            'language' => 'english',
+            'platform' => 'instagram',
+            'from_account_id' => 7364,
+            'to_account_id' => 7541,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.account_mapping_repair.to_account_id', '7541')
+            ->assertJsonPath('data.publish_progress.current.phase', 'retryable');
+
+        $this->workspace->refresh();
+        $this->assertSame(
+            '7541',
+            (string) PostsyncerConfig::fromWorkspace($this->workspace)
+                ->language('english')['platforms']['instagram']['account_id'],
+        );
+        Http::assertSentCount(1);
+    }
+
     private function configurePostsyncer(): void
     {
         PostsyncerConfig::write($this->workspace, [
