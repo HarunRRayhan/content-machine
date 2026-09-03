@@ -76,7 +76,7 @@ final class PublicUrlGuard
      * address check. The hostname remains in the URL for HTTP Host/SNI, while
      * the connection is forced to the addresses checked here.
      *
-     * @return array{curl: array<int, list<string>>}|array{}|null null means unsafe
+     * @return array{curl: array<int, list<string>|int>}|array{}|null null means unsafe
      */
     public function curlResolveOptions(string $url): ?array
     {
@@ -96,12 +96,24 @@ final class PublicUrlGuard
             return null;
         }
 
+        // Some production runtimes have IPv6 DNS resolution but no IPv6
+        // egress. If both families are available, pin only the public IPv4
+        // addresses and force cURL to use them; otherwise cURL can select an
+        // unreachable AAAA record and fail without trying the A records.
+        $ipv4 = array_values(array_filter(
+            $ips,
+            fn (string $ip): bool => filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false,
+        ));
+        $pinnedIps = $ipv4 === [] ? $ips : $ipv4;
+
         $resolve = array_map(
             fn (string $ip): string => $parts['host'].':'.$parts['port'].':'
                 .(filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? '['.$ip.']' : $ip),
-            $ips,
+            $pinnedIps,
         );
 
+        // CURLOPT_RESOLVE contains only the selected family, so cURL cannot
+        // fall back to an unreachable AAAA record after this point.
         return ['curl' => [CURLOPT_RESOLVE => $resolve]];
     }
 
