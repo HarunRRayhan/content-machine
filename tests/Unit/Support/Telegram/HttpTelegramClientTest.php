@@ -140,6 +140,20 @@ class HttpTelegramClientTest extends TestCase
         $this->assertSame(30, $result->retryAfterSeconds);
     }
 
+    public function test_send_message_keeps_permanent_http_failures_known(): void
+    {
+        Http::fake(['*' => Http::response([
+            'ok' => false,
+            'description' => 'Bad Request: chat not found',
+        ], 400)]);
+
+        $result = (new HttpTelegramClient)->sendMessage('123:token', 1, 'hi');
+
+        $this->assertFalse($result->successful);
+        $this->assertFalse($result->outcomeUnknown);
+        $this->assertSame(400, $result->status);
+    }
+
     public function test_a_connection_failure_on_send_message_is_reported_without_leaking_the_exception()
     {
         Log::spy();

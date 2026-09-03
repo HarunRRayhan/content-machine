@@ -239,6 +239,40 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $this->assertNull($record->failed_at);
     }
 
+    public function test_a_legacy_job_can_recover_after_a_webhook_redelivery_fills_the_payload(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 47,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Redelivered after migration.',
+            ],
+        ];
+
+        DB::table('telegram_updates')->insert([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 47,
+            'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
+            'processed_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $this->assertNotNull(TelegramUpdate::query()->sole()->processed_at);
+    }
+
     public function test_a_legacy_job_can_recover_an_update_marked_unreplayable_when_it_has_the_payload(): void
     {
         $config = TelegramBotConfig::factory()->connected()->create();

@@ -9,7 +9,6 @@ use App\Support\Telegram\TelegramBotIdentityLock;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use RuntimeException;
 use Throwable;
 
 class SendTelegramOutboundMessageAction
@@ -90,14 +89,20 @@ class SendTelegramOutboundMessageAction
                 }
 
                 $rateLimited = $result->status === 429 || $result->retryAfterSeconds !== null;
-                $retryAfter = $rateLimited ? max(1, $result->retryAfterSeconds ?? 60) : null;
-                $this->markRetryableFailure($messageId, $dispatchLeaseId, $error, $retryAfter);
+                if ($rateLimited) {
+                    $this->markRetryableFailure(
+                        $messageId,
+                        $dispatchLeaseId,
+                        $error,
+                        max(1, $result->retryAfterSeconds ?? 60),
+                    );
 
-                if ($retryAfter !== null) {
                     return;
                 }
 
-                throw new RuntimeException($error);
+                $this->markFailed($messageId, $dispatchLeaseId, $error);
+
+                return;
             }
 
             $outcome = $this->completeChunk($messageId, $dispatchLeaseId);
@@ -364,6 +369,33 @@ class SendTelegramOutboundMessageAction
                 'next_attempt_at' => now()->addSeconds($retryAfter ?? 60),
                 'dispatch_claimed_at' => null,
                 'dispatch_lease_id' => null,
+            ])->save();
+        });
+    }
+
+    private function markFailed(int $messageId, ?string $dispatchLeaseId, string $error): void
+    {
+        DB::transaction(function () use ($messageId, $dispatchLeaseId, $error): void {
+            $context = $this->lockedMessageContext($messageId);
+            if ($context === null) {
+                return;
+            }
+
+            $message = $context['message'];
+            if ($message === null
+                || $message->status !== TelegramOutboundMessage::SENDING
+                || ! $this->ownsDispatchClaim($message, $dispatchLeaseId)
+            ) {
+                return;
+            }
+
+            $message->forceFill([
+                'status' => TelegramOutboundMessage::FAILED,
+                'failed_at' => now(),
+                'last_error' => $error,
+                'dispatch_claimed_at' => null,
+                'dispatch_lease_id' => null,
+                'next_attempt_at' => null,
             ])->save();
         });
     }

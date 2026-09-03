@@ -373,7 +373,6 @@ class ProcessTelegramUpdateJob implements ShouldQueue
     private function canRecoverLegacyPayload(TelegramUpdate $record): bool
     {
         if ($this->webhookGeneration !== null
-            || $record->payload !== null
             || $record->discarded_at !== null
         ) {
             return false;
@@ -383,10 +382,18 @@ class ProcessTelegramUpdateJob implements ShouldQueue
             // The first payload migration marked every pre-existing row as
             // processed. A queued job from before that migration still carries
             // the raw update and is the one safe source for recovery.
-            return $record->failed_at === null && $record->last_error === null;
+            if ($record->failed_at !== null || $record->last_error !== null) {
+                return false;
+            }
+
+            // A Telegram redelivery may have filled the payload before the
+            // legacy queued job gets its turn. Only the exact serialized
+            // update may reopen that migrated row.
+            return $record->payload === null || $record->payload == $this->update;
         }
 
-        return $record->failed_at !== null
+        return $record->payload === null
+            && $record->failed_at !== null
             && $record->last_error === self::MISSING_PAYLOAD_ERROR;
     }
 }

@@ -22,7 +22,9 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
     public const TIMEOUT_SECONDS = 900;
 
-    public const UNIQUE_FOR_SECONDS = 3600;
+    // A stale publish is eligible for recovery after LEASE_SECONDS. The
+    // unique lock must not outlive that recovery window.
+    public const UNIQUE_FOR_SECONDS = 900;
 
     public const LEASE_SECONDS = 1020;
 
