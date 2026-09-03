@@ -229,6 +229,26 @@ class PostsApiController extends Controller
         return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
+    public function reconcileMedia(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'media_ids' => ['required', 'array', 'min:1'],
+            'media_ids.*' => ['required', 'integer', 'min:1'],
+        ]);
+
+        try {
+            $action->reconcileMedia($post, $payload['media_ids']);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'media_ids' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     /**
      * Stream a post image. Token-guarded; a media asset from another
      * workspace 404s rather than streaming.
