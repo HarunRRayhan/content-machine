@@ -59,7 +59,7 @@ class SendTelegramOutboundMessageJobTest extends TestCase
         $this->assertSame(TelegramOutboundMessage::SENT, $message->refresh()->status);
     }
 
-    public function test_a_failed_api_response_keeps_the_row_retryable(): void
+    public function test_a_rate_limit_response_keeps_the_row_retryable(): void
     {
         Queue::fake();
         $config = TelegramBotConfig::factory()->connected()->create();
@@ -67,19 +67,50 @@ class SendTelegramOutboundMessageJobTest extends TestCase
             'telegram_bot_config_id' => $config->id,
             'webhook_generation' => $config->webhook_generation,
         ]);
-        $client = (new FakeTelegramClient)->willSendMessage(TelegramApiResult::failure('Too many requests.'));
+        $client = (new FakeTelegramClient)->willSendMessage(TelegramApiResult::failure(
+            'Too many requests.',
+            retryAfterSeconds: 60,
+            status: 429,
+        ));
         $this->app->instance(TelegramClientContract::class, $client);
 
-        $this->expectException(RuntimeException::class);
-        try {
-            (new SendTelegramOutboundMessageJob($message->id))->handle(app(SendTelegramOutboundMessageAction::class));
-        } finally {
-            $message->refresh();
-            $this->assertSame(TelegramOutboundMessage::PENDING, $message->status);
-            $this->assertSame(1, $message->attempts);
-            $this->assertNotNull($message->next_attempt_at);
-            $this->assertSame('Too many requests.', $message->last_error);
-        }
+        (new SendTelegramOutboundMessageJob($message->id))->handle(app(SendTelegramOutboundMessageAction::class));
+
+        $message->refresh();
+        $this->assertSame(TelegramOutboundMessage::PENDING, $message->status);
+        $this->assertSame(1, $message->attempts);
+        $this->assertNotNull($message->next_attempt_at);
+        $this->assertSame('Too many requests.', $message->last_error);
+    }
+
+    public function test_a_permanent_api_failure_is_terminal_and_not_requeued(): void
+    {
+        Queue::fake();
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $message = TelegramOutboundMessage::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+        ]);
+        $client = (new FakeTelegramClient)->willSendMessage(TelegramApiResult::failure(
+            'Bad Request: chat not found',
+            status: 400,
+        ));
+        $this->app->instance(TelegramClientContract::class, $client);
+
+        (new SendTelegramOutboundMessageJob($message->id))->handle(app(SendTelegramOutboundMessageAction::class));
+
+        $message->refresh();
+        $this->assertSame(TelegramOutboundMessage::FAILED, $message->status);
+        $this->assertSame('Bad Request: chat not found', $message->last_error);
+        $this->assertNotNull($message->failed_at);
+
+        $this->artisan('telegram:dispatch-pending-outbound-messages')
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 0 pending Telegram outbound message(s).');
+        $this->artisan('telegram:dispatch-pending-outbound-messages')
+            ->assertSuccessful()
+            ->expectsOutput('Dispatched 0 pending Telegram outbound message(s).');
+        Queue::assertNothingPushed();
     }
 
     public function test_a_transport_failure_marks_the_message_uncertain_instead_of_retrying_automatically(): void

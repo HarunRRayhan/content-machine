@@ -18,6 +18,7 @@
   },
   "deploy": {
     "startCommand": "/usr/local/bin/cm-start-worker",
+    "healthcheckPath": null,
     "restartPolicyType": "ALWAYS",
     "drainingSeconds": 960
   }
