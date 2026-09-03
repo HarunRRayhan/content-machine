@@ -6,9 +6,9 @@ use App\Data\Calendar\CalendarEventData;
 use Carbon\CarbonImmutable;
 
 /**
- * Turns PostSyncer groups on a post or video into calendar occurrences.
- * Published wins over scheduled on the same group. Two groups at the
- * same instant collapse to one chip.
+ * Turns PostSyncer groups on a post or video into a single calendar occurrence.
+ * One post or video is always one chip: every PostSyncer group (platform,
+ * language, or retry) collapses to one event. Published wins over scheduled.
  */
 final class CollectCalendarOccurrences
 {
@@ -30,7 +30,6 @@ final class CollectCalendarOccurrences
             return [];
         }
 
-        $seen = [];
         $events = [];
 
         foreach ($groups as $group) {
@@ -44,17 +43,23 @@ final class CollectCalendarOccurrences
                 continue;
             }
 
-            $key = $event->kind.'|'.$event->id.'|'.$event->date.'|'.$event->state.'|'.$event->at;
-
-            if (isset($seen[$key])) {
-                continue;
-            }
-
-            $seen[$key] = true;
             $events[] = $event;
         }
 
-        return $events;
+        if ($events === []) {
+            return [];
+        }
+
+        $published = array_values(array_filter(
+            $events,
+            static fn (CalendarEventData $event): bool => $event->state === 'published',
+        ));
+
+        if ($published !== []) {
+            return [$this->latest($published)];
+        }
+
+        return [$this->earliest($events)];
     }
 
     /**
@@ -96,6 +101,54 @@ final class CollectCalendarOccurrences
             at: $at->toIso8601String(),
             date: $at->toDateString(),
         );
+    }
+
+    /**
+     * @param  list<CalendarEventData>  $events
+     */
+    private function latest(array $events): CalendarEventData
+    {
+        $best = $events[0];
+
+        foreach (array_slice($events, 1) as $event) {
+            if ($this->compareAt($event, $best) > 0) {
+                $best = $event;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * @param  list<CalendarEventData>  $events
+     */
+    private function earliest(array $events): CalendarEventData
+    {
+        $best = $events[0];
+
+        foreach (array_slice($events, 1) as $event) {
+            if ($this->compareAt($event, $best) < 0) {
+                $best = $event;
+            }
+        }
+
+        return $best;
+    }
+
+    private function compareAt(CalendarEventData $left, CalendarEventData $right): int
+    {
+        try {
+            $leftAt = CarbonImmutable::parse($left->at);
+            $rightAt = CarbonImmutable::parse($right->at);
+
+            if ($leftAt->equalTo($rightAt)) {
+                return 0;
+            }
+
+            return $leftAt->greaterThan($rightAt) ? 1 : -1;
+        } catch (\Throwable) {
+            return strcmp($left->at, $right->at);
+        }
     }
 
     private function stringOrNull(mixed $value): ?string

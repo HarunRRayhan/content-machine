@@ -71,6 +71,82 @@ class ListCalendarEventsActionTest extends TestCase
         $this->assertSame($video->id, $events[1]['id']);
     }
 
+    public function test_it_shows_one_chip_per_post_no_matter_how_many_groups_or_retries(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+
+        Post::factory()->for($workspace)->create([
+            'title' => 'Claude Fable',
+            'human_id' => 'P-71',
+            'status' => 'posted',
+            'postsyncer' => [
+                'groups' => [
+                    ['post_id' => '1', 'scheduled_at' => '2026-09-03T13:21:00+06:00', 'published_at' => '2026-09-03T13:21:00+06:00'],
+                    ['post_id' => '2', 'scheduled_at' => '2026-09-03T14:24:00+06:00', 'published_at' => '2026-09-03T14:24:00+06:00'],
+                    ['post_id' => '3', 'scheduled_at' => '2026-09-03T15:00:00+06:00', 'published_at' => '2026-09-03T15:00:00+06:00'],
+                    ['post_id' => '4', 'scheduled_at' => '2026-09-03T15:11:00+06:00', 'published_at' => '2026-09-03T15:11:00+06:00'],
+                    ['post_id' => '5', 'scheduled_at' => '2026-09-03T15:12:00+06:00', 'published_at' => '2026-09-03T15:12:00+06:00'],
+                    ['post_id' => '6', 'scheduled_at' => '2026-09-03T15:38:00+06:00', 'published_at' => '2026-09-03T15:38:00+06:00'],
+                ],
+            ],
+        ]);
+
+        $events = $this->action()->handle($workspace, 2026, 9);
+
+        $this->assertCount(1, $events);
+        $this->assertSame('P-71', $events[0]['human_id']);
+        $this->assertSame('published', $events[0]['state']);
+        $this->assertSame('2026-09-03', $events[0]['date']);
+        $this->assertSame('2026-09-03T15:38:00+06:00', $events[0]['at']);
+    }
+
+    public function test_it_collapses_scheduled_groups_at_different_times_into_one_chip(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+
+        Post::factory()->for($workspace)->create([
+            'title' => 'Drifted schedule',
+            'human_id' => 'P-72',
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [
+                    ['post_id' => '1', 'scheduled_at' => '2026-09-04T09:23:00+06:00'],
+                    ['post_id' => '2', 'scheduled_at' => '2026-09-04T10:15:00+06:00'],
+                ],
+            ],
+        ]);
+
+        $events = $this->action()->handle($workspace, 2026, 9);
+
+        $this->assertCount(1, $events);
+        $this->assertSame('P-72', $events[0]['human_id']);
+        $this->assertSame('scheduled', $events[0]['state']);
+        $this->assertSame('2026-09-04', $events[0]['date']);
+    }
+
+    public function test_published_groups_win_over_scheduled_groups_on_the_same_record(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+
+        Post::factory()->for($workspace)->create([
+            'title' => 'Partially live',
+            'human_id' => 'P-73',
+            'status' => 'posted',
+            'postsyncer' => [
+                'groups' => [
+                    ['post_id' => '1', 'scheduled_at' => '2026-09-05T09:00:00+06:00'],
+                    ['post_id' => '2', 'scheduled_at' => '2026-09-05T09:00:00+06:00', 'published_at' => '2026-09-05T09:05:00+06:00'],
+                ],
+            ],
+        ]);
+
+        $events = $this->action()->handle($workspace, 2026, 9);
+
+        $this->assertCount(1, $events);
+        $this->assertSame('P-73', $events[0]['human_id']);
+        $this->assertSame('published', $events[0]['state']);
+    }
+
     public function test_it_ignores_other_workspaces_and_records_without_dates(): void
     {
         $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
