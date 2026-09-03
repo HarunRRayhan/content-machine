@@ -71,6 +71,7 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
 | POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. Attachment-backed post jobs run on the Railway `cm-web` PostSyncer worker. Retries preserve the original options; an uncertain external create requires reconciliation. |
 | POST | `/api/v1/posts/{human_id}/reconcile-media` | posts:write | checkpoint PostSyncer media ids after an uncertain URL upload (`{ "media_ids": [915, ...] }`); verify ids in the matching workspace first |
+| POST | `/api/v1/posts/{human_id}/repair-account-mapping` | posts:write | repair one stale account in a failed partial publish; body: `{ "language", "platform", "from_account_id", "to_account_id" }`; verifies the target account in PostSyncer and rebases only the unfinished group |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
 Captures made through the API are recorded with `source: api`, and every

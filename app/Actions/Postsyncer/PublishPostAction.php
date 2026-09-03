@@ -2,12 +2,14 @@
 
 namespace App\Actions\Postsyncer;
 
+use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\LegacyPublishProgress;
+use App\Support\Postsyncer\MapPostsyncerAccounts;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -568,6 +570,315 @@ class PublishPostAction
         });
 
         $post->refresh();
+    }
+
+    /**
+     * Rebind one stale PostSyncer account and rebase the unfinished group of
+     * a failed publish. Completed external groups must remain byte-for-byte
+     * on the old plan; otherwise this operation refuses to change anything.
+     */
+    public function repairAccountMapping(
+        Post $post,
+        Workspace $workspace,
+        RepairPostAccountMappingData $mapping,
+    ): void {
+        abort_if($post->workspace_id !== $workspace->id, 404);
+
+        $post->refresh();
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+        $languageConfig = $config->language($mapping->language);
+        $postsyncerWorkspaceId = $languageConfig['workspace_id'];
+
+        if ($postsyncerWorkspaceId === null) {
+            throw new PostsyncerException(
+                "No PostSyncer workspace is configured for {$mapping->language}."
+            );
+        }
+
+        $targetAccount = $this->findRepairAccount(
+            new PostsyncerClient($config),
+            $postsyncerWorkspaceId,
+            $mapping,
+        );
+        $targetHandle = MapPostsyncerAccounts::accountHandle(
+            $targetAccount,
+            $postsyncerWorkspaceId,
+        );
+
+        DB::transaction(function () use (
+            $post,
+            $workspace,
+            $mapping,
+            $targetHandle,
+        ): void {
+            $lockedWorkspace = Workspace::query()
+                ->whereKey($workspace->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            abort_if($lockedPost->workspace_id !== $lockedWorkspace->id, 404);
+
+            if ($this->hasExistingPublicGroup($lockedPost)) {
+                throw new PostsyncerException(
+                    'This post already has public PostSyncer groups. Account mapping repair is not safe.'
+                );
+            }
+
+            $progress = $lockedPost->publish_progress;
+            if (! is_array($progress)) {
+                throw new PostsyncerException(
+                    'This post has no partial PostSyncer publish progress to repair.'
+                );
+            }
+
+            $this->assertProgressShape($progress);
+
+            if ($lockedPost->publish_state !== 'failed'
+                || ($progress['state'] ?? null) !== 'failed'
+                || ! is_array($progress['current'] ?? null)
+                || ($progress['current']['phase'] ?? null) !== 'retryable') {
+                throw new PostsyncerException(
+                    'Only a failed, retryable PostSyncer group can be repaired.'
+                );
+            }
+
+            if ($this->supplementalGroups($progress) !== []) {
+                throw new PostsyncerException(
+                    'Supplemental PostSyncer groups must be reconciled before account mapping repair.'
+                );
+            }
+
+            $oldConfig = PostsyncerConfig::fromWorkspace($lockedWorkspace);
+            $oldLanguageConfig = $oldConfig->language($mapping->language);
+            $oldPlatformConfig = is_array(
+                $oldLanguageConfig['platforms'][$mapping->platform] ?? null,
+            )
+                ? $oldLanguageConfig['platforms'][$mapping->platform]
+                : [];
+            $currentAccountId = $oldPlatformConfig['account_id'] ?? null;
+
+            if ((string) $currentAccountId !== $mapping->fromAccountId) {
+                throw new PostsyncerException(
+                    'The current PostSyncer account mapping changed. Reload the post before repairing it.'
+                );
+            }
+
+            $options = $progress['options'];
+            $oldGroups = $this->planner->plan($lockedPost, $oldConfig, $options);
+            $oldPlan = $this->planMetadata($oldConfig, $oldGroups, $options);
+
+            if (($progress['plan_hash'] ?? null) !== $oldPlan['hash']
+                || ($progress['planned_groups'] ?? null) !== $oldPlan['groups']) {
+                throw new PostsyncerException(
+                    'The stored PostSyncer plan no longer matches the current post or settings.'
+                    .' Reconcile it before repairing the account mapping.'
+                );
+            }
+
+            /** @var array<string, mixed> $current */
+            $current = $progress['current'];
+            $currentIndex = $current['index'] ?? null;
+            $oldCurrentKey = $current['group_key'] ?? null;
+            $oldCurrentGroup = is_int($currentIndex)
+                ? ($oldGroups[$currentIndex] ?? null)
+                : null;
+            $oldPlanned = is_int($currentIndex)
+                ? ($oldPlan['groups'][$currentIndex] ?? null)
+                : null;
+
+            if (! is_int($currentIndex)
+                || ! $oldCurrentGroup instanceof PublishGroup
+                || ! is_array($oldPlanned)
+                || ! is_string($oldCurrentKey)
+                || ! in_array($mapping->platform, $oldCurrentGroup->platforms, true)
+                || $oldPlanned['group_key'] !== $oldCurrentKey
+                || $this->groupKey($oldConfig, $oldCurrentGroup) !== $oldCurrentKey) {
+                throw new PostsyncerException(
+                    'The failed PostSyncer group no longer matches its stored plan.'
+                );
+            }
+
+            $completedGroups = $this->completedGroups($progress);
+            if ($completedGroups === []) {
+                throw new PostsyncerException(
+                    'This publish has no completed groups; repair the account mapping before starting it.'
+                );
+            }
+
+            $this->assertCompletedGroupsBelongToPlan($progress, $oldPlan['groups']);
+            $completedByIndex = [];
+            foreach ($completedGroups as $completed) {
+                $completedIndex = $completed['index'] ?? null;
+                if (! is_int($completedIndex) || $completedIndex >= $currentIndex) {
+                    throw new PostsyncerException(
+                        'The failed group is not the next group after the stored completed groups.'
+                    );
+                }
+
+                if (isset($completedByIndex[$completedIndex])) {
+                    throw new PostsyncerException(
+                        'PostSyncer publish progress contains duplicate completed groups.'
+                    );
+                }
+
+                $completedByIndex[$completedIndex] = true;
+            }
+
+            for ($index = 0; $index < $currentIndex; $index++) {
+                if (! isset($completedByIndex[$index])) {
+                    throw new PostsyncerException(
+                        'The failed group is not the next group after the stored completed groups.'
+                    );
+                }
+            }
+
+            $currentMediaUrls = $current['media_urls'] ?? null;
+            if (! is_array($currentMediaUrls)
+                || count(array_filter(
+                    $currentMediaUrls,
+                    static fn (mixed $url): bool => is_string($url),
+                )) !== count($currentMediaUrls)
+                || $this->canonicalMediaUrls($currentMediaUrls)
+                    !== $this->canonicalMediaUrls($oldCurrentGroup->mediaUrls)) {
+                throw new PostsyncerException(
+                    'The failed group media changed. Reconcile it before repairing the account mapping.'
+                );
+            }
+
+            $mediaIds = $current['media_ids'];
+            if (count($mediaIds) !== count($oldCurrentGroup->mediaUrls)
+                || count(array_unique(array_map('strval', $mediaIds))) !== count($mediaIds)
+                || count(array_filter(
+                    $mediaIds,
+                    fn (mixed $mediaId): bool => $this->hasNumericPostId($mediaId),
+                )) !== count($mediaIds)) {
+                throw new PostsyncerException(
+                    'The failed group media checkpoint is invalid. Reconcile it before repairing the account mapping.'
+                );
+            }
+
+            $existingHandle = $oldPlatformConfig['handle'] ?? '';
+            $handle = $targetHandle !== ''
+                ? $targetHandle
+                : (is_string($existingHandle) ? $existingHandle : '');
+            $enabled = MapPostsyncerAccounts::enabled($oldPlatformConfig, true);
+
+            PostsyncerConfig::write($lockedWorkspace, [
+                'languages' => [
+                    $mapping->language => [
+                        'platforms' => [
+                            $mapping->platform => [
+                                'account_id' => $mapping->toAccountId,
+                                'handle' => $handle,
+                                'enabled' => $enabled,
+                            ],
+                        ],
+                    ],
+                ],
+            ]);
+
+            $updatedConfig = PostsyncerConfig::fromWorkspace($lockedWorkspace);
+            $updatedGroups = $this->planner->plan($lockedPost, $updatedConfig, $options);
+            $updatedPlan = $this->planMetadata($updatedConfig, $updatedGroups, $options);
+            $updatedCurrentGroup = $updatedGroups[$currentIndex] ?? null;
+            $updatedCurrentPlan = $updatedPlan['groups'][$currentIndex] ?? null;
+
+            if (! $updatedCurrentGroup instanceof PublishGroup
+                || ! is_array($updatedCurrentPlan)
+                || $updatedCurrentPlan['group_key'] === $oldCurrentKey
+                || $this->canonicalMediaUrls($updatedCurrentGroup->mediaUrls)
+                    !== $this->canonicalMediaUrls($oldCurrentGroup->mediaUrls)) {
+                throw new PostsyncerException(
+                    'The account mapping did not produce a safe replacement for the failed group.'
+                );
+            }
+
+            foreach ($completedGroups as $completed) {
+                $completedIndex = $completed['index'];
+                $updatedPlanned = $updatedPlan['groups'][$completedIndex] ?? null;
+                if (! is_array($updatedPlanned)
+                    || $updatedPlanned['group_key'] !== $completed['group_key']) {
+                    throw new PostsyncerException(
+                        'Account mapping repair would change a completed PostSyncer group.'
+                    );
+                }
+            }
+
+            $newGroupKey = $updatedCurrentPlan['group_key'];
+            $current['group_key'] = $newGroupKey;
+            $current['phase'] = 'retryable';
+            $current['idempotency_key'] = $this->idempotencyKey(
+                (string) $progress['operation_id'],
+                $currentIndex,
+                $newGroupKey,
+            );
+            $current['media_urls'] = $updatedCurrentGroup->mediaUrls;
+            $current['expected_payload'] = $this->buildPostBody(
+                $updatedConfig,
+                $updatedCurrentGroup,
+                $mediaIds,
+            );
+            $progress['plan_hash'] = $updatedPlan['hash'];
+            $progress['planned_groups'] = $updatedPlan['groups'];
+            $progress['current'] = $current;
+            $progress['state'] = 'failed';
+            $progress['account_mapping_repair'] = [
+                'language' => $mapping->language,
+                'platform' => $mapping->platform,
+                'from_account_id' => $mapping->fromAccountId,
+                'to_account_id' => $mapping->toAccountId,
+            ];
+
+            $lockedPost->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'PostSyncer account mapping repaired from '
+                    .$mapping->fromAccountId.' to '.$mapping->toAccountId
+                    .'. Retry to continue the publish.',
+                'publish_progress' => $progress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function findRepairAccount(
+        PostsyncerClient $client,
+        string $postsyncerWorkspaceId,
+        RepairPostAccountMappingData $mapping,
+    ): array {
+        foreach ($client->listAccounts($postsyncerWorkspaceId) as $account) {
+            if ((string) ($account['id'] ?? '') !== $mapping->toAccountId) {
+                continue;
+            }
+
+            if (MapPostsyncerAccounts::platformName($account['platform'] ?? '') !== $mapping->platform) {
+                throw new PostsyncerException(
+                    "PostSyncer account {$mapping->toAccountId} is not a {$mapping->platform} account."
+                );
+            }
+
+            if (filter_var($account['has_expired'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                throw new PostsyncerException(
+                    "PostSyncer account {$mapping->toAccountId} is expired."
+                );
+            }
+
+            return $account;
+        }
+
+        throw new PostsyncerException(
+            "PostSyncer account {$mapping->toAccountId} was not found in workspace {$postsyncerWorkspaceId}."
+        );
     }
 
     /**

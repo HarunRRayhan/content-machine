@@ -11,7 +11,9 @@ use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\UpdatePostData;
+use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Posts\RepairPostAccountMappingRequest;
 use App\Http\Requests\Posts\StorePostDocumentRequest;
 use App\Http\Requests\Posts\StorePostImageRequest;
 use App\Http\Resources\V1\PostResource;
@@ -255,6 +257,28 @@ class PostsApiController extends Controller
         } catch (PostsyncerException $exception) {
             throw ValidationException::withMessages([
                 'media_ids' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function repairAccountMapping(
+        RepairPostAccountMappingRequest $request,
+        string $humanId,
+        PublishPostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        try {
+            $action->repairAccountMapping(
+                $post,
+                $this->currentWorkspace(),
+                RepairPostAccountMappingData::fromRequest($request),
+            );
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'to_account_id' => $exception->getMessage(),
             ]);
         }
 

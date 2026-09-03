@@ -3,6 +3,7 @@
 namespace Tests\Unit\Actions\Postsyncer;
 
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
@@ -1849,6 +1850,167 @@ class PublishPostActionTest extends TestCase
         $this->assertStringContainsString('cannot be repaired safely', (string) $post->publish_error);
         $this->assertSame('uncertain', $post->publish_progress['state']);
         Http::assertNothingSent();
+    }
+
+    public function test_partial_publish_account_mapping_rebases_only_the_unfinished_group(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
+                'data' => [[
+                    'id' => 7541,
+                    'workspace_id' => 853,
+                    'platform' => 'instagram',
+                    'username' => 'harundotdev',
+                    'has_expired' => false,
+                ]],
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'facebook' => ['account_id' => 200, 'handle' => '@english'],
+                        'instagram' => ['account_id' => 7364, 'handle' => '@harundotdev'],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['text' => 'on'],
+                    'instagram' => ['text' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'instagram'],
+            'captions' => [
+                'Bangla' => [
+                    'facebook' => ['caption' => 'Bangla caption'],
+                ],
+                'English' => [
+                    'facebook' => ['caption' => 'English Facebook caption'],
+                    'instagram' => ['caption' => 'English Instagram caption'],
+                ],
+            ],
+        ]);
+
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+        $options = [
+            'when' => '2026-09-04T09:23:00+06:00',
+            'platforms' => ['facebook', 'instagram'],
+            'confirm_ask' => false,
+        ];
+        $oldPlan = $this->action->freezePlan($post, $config, $options);
+        $oldCurrentKey = $oldPlan['groups'][1]['group_key'];
+        $oldIdempotencyKey = hash('sha256', 'operation-repair|1|'.$oldCurrentKey);
+
+        $post->forceFill([
+            'publish_state' => 'failed',
+            'publish_error' => 'PostSyncer account 7364 was not found.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-repair',
+                'run_token' => 'run-repair',
+                'options' => $oldPlan['options'],
+                'plan_hash' => $oldPlan['hash'],
+                'planned_groups' => $oldPlan['groups'],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => $oldPlan['groups'][0]['group_key'],
+                    'post_id' => '135500',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-09-04 09:23',
+                    'platforms' => ['facebook'],
+                    'language' => 'bangla',
+                ]],
+                'current' => [
+                    'index' => 1,
+                    'group_key' => $oldCurrentKey,
+                    'phase' => 'retryable',
+                    'idempotency_key' => $oldIdempotencyKey,
+                    'media_ids' => [],
+                    'media_urls' => [],
+                ],
+                'state' => 'failed',
+            ],
+        ])->save();
+
+        $this->action->repairAccountMapping(
+            $post,
+            $workspace,
+            new RepairPostAccountMappingData('english', 'instagram', '7364', '7541'),
+        );
+
+        $post->refresh();
+        $workspace->refresh();
+        $updatedConfig = PostsyncerConfig::fromWorkspace($workspace);
+        $updatedProgress = $post->publish_progress;
+        $updatedCurrent = $updatedProgress['current'];
+
+        $this->assertSame(
+            '7541',
+            (string) $updatedConfig->language('english')['platforms']['instagram']['account_id'],
+        );
+        $this->assertSame('@harundotdev', $updatedConfig->language('english')['platforms']['instagram']['handle']);
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $updatedProgress['state']);
+        $this->assertNotSame($oldPlan['hash'], $updatedProgress['plan_hash']);
+        $this->assertSame($oldPlan['groups'][0]['group_key'], $updatedProgress['completed_groups'][0]['group_key']);
+        $this->assertNotSame($oldCurrentKey, $updatedCurrent['group_key']);
+        $this->assertNotSame($oldIdempotencyKey, $updatedCurrent['idempotency_key']);
+        $this->assertSame('retryable', $updatedCurrent['phase']);
+        $this->assertSame('7541', (string) $updatedCurrent['expected_payload']['accounts'][1]['id']);
+        $this->assertStringContainsString('repaired from 7364 to 7541', (string) $post->publish_error);
+        Http::assertSentCount(1);
+    }
+
+    public function test_account_mapping_repair_refuses_an_unverified_target_account(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response(['data' => []], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'instagram' => ['account_id' => 7364],
+                    ],
+                ],
+            ],
+        ]);
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['instagram'],
+            'captions' => ['instagram' => 'Caption'],
+        ]);
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('was not found in workspace 853');
+
+        $this->action->repairAccountMapping(
+            $post,
+            $workspace,
+            new RepairPostAccountMappingData('english', 'instagram', '7364', '7541'),
+        );
+
+        $workspace->refresh();
+        $this->assertSame(
+            '7364',
+            (string) PostsyncerConfig::fromWorkspace($workspace)
+                ->language('english')['platforms']['instagram']['account_id'],
+        );
     }
 
     public function test_create_reconciliation_rejects_an_uncertain_media_upload(): void
