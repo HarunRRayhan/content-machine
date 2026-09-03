@@ -170,6 +170,48 @@ class PublishPostActionTest extends TestCase
         $this->assertNotSame($mediaKey, $postKey);
     }
 
+    public function test_canonical_facebook_post_may_omit_redundant_caption_setting(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 42,
+                'status' => 'published',
+            ], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'FB caption',
+                    'media' => [['id' => 915]],
+                ]],
+                'platforms' => [[
+                    'platform' => 'facebook',
+                    'account_id' => 100,
+                    'settings' => ['post_type' => 'POST'],
+                ]],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'FB caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+    }
+
     public function test_publish_updates_only_the_selected_telegram_request(): void
     {
         Http::fake([

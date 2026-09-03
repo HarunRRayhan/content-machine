@@ -1133,8 +1133,22 @@ class PublishPostAction
                 }
 
                 foreach ($expectedSettings as $setting => $value) {
-                    if (! array_key_exists($setting, $remoteSettings)
-                        || $remoteSettings[$setting] !== $value) {
+                    // PostSyncer stores Facebook and Instagram captions in
+                    // content[0].text and may omit the redundant platform
+                    // setting from the canonical resource. The content
+                    // comparison above still verifies the exact caption.
+                    if (! array_key_exists($setting, $remoteSettings)) {
+                        if ($setting === 'caption'
+                            && in_array(strtolower($platform), ['facebook', 'instagram'], true)) {
+                            continue;
+                        }
+
+                        throw new PostsyncerException(
+                            'The supplied PostSyncer post does not match the current platform settings.'
+                        );
+                    }
+
+                    if ($remoteSettings[$setting] !== $value) {
                         throw new PostsyncerException(
                             'The supplied PostSyncer post does not match the current platform settings.'
                         );
