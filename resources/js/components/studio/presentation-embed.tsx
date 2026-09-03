@@ -100,7 +100,6 @@ export default function PresentationEmbed({ src, title }: Props) {
             title={`${title} presentation`}
             allow="fullscreen"
             allowFullScreen
-            sandbox="allow-scripts"
             tabIndex={0}
         />
     );
