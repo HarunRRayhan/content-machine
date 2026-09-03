@@ -597,7 +597,7 @@ class GenerateTelegramPostAction
             return;
         }
 
-        $url = route('posts.show', ['post' => $post]).'?tab=captions';
+        $url = route('posts.show', ['post' => $post->human_id]).'?tab=captions';
         $preview = "✅ Draft {$post->human_id} is ready.\n\nTitle: {$post->title}\n\n".
             Str::limit($facebookCaption, 900)."\n\nReview it in Content Machine:\n{$url}\n\n".
             "When you approve it: send /approve {$post->human_id}, then /post_now {$post->human_id} or /schedule {$post->human_id} tomorrow at 9am.";

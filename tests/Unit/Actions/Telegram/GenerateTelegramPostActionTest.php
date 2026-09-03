@@ -89,6 +89,8 @@ class GenerateTelegramPostActionTest extends TestCase
         $this->assertSame(TelegramOutboundMessage::PENDING, $message->status);
         $this->assertStringContainsString($post->human_id, $message->chunks[0]);
         $this->assertStringContainsString('/approve', $message->chunks[0]);
+        $this->assertStringContainsString('/posts/'.$post->human_id, $message->chunks[0]);
+        $this->assertStringNotContainsString('/posts/'.$post->id, $message->chunks[0]);
     }
 
     public function test_a_link_generation_uses_the_resolution_snapshot_not_a_later_summary(): void
