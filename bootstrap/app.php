@@ -30,6 +30,10 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Railway/Cloudflare terminate TLS before forwarding requests. Trust
+        // the forwarded scheme so absolute signed media URLs validate there.
+        $middleware->trustProxies(at: '*');
+
         $middleware->alias([
             'auth.workspace-token' => AuthenticateWorkspaceToken::class,
         ]);
