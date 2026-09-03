@@ -197,6 +197,80 @@ class PostsyncerClient
     }
 
     /**
+     * PostSyncer's post resource omits account ids. Its analytics resource
+     * includes one account row per platform, which is needed when verifying a
+     * create response or reconciling an uncertain create.
+     *
+     * @return array<string, mixed>
+     */
+    public function getPostWithAccountDetails(int|string $id): array
+    {
+        $post = $this->getPost($id);
+        $platforms = $post['platforms'] ?? null;
+
+        if (! is_array($platforms) || ! $this->needsAccountDetails($platforms)) {
+            return $post;
+        }
+
+        $analytics = $this->getPostAnalytics($id);
+        $accountRows = $analytics['accounts'] ?? null;
+        if (! is_array($accountRows)) {
+            return $post;
+        }
+
+        $byPlatform = [];
+        foreach ($accountRows as $row) {
+            if (! is_array($row) || ! is_string($row['platform'] ?? null)) {
+                continue;
+            }
+
+            $accountId = $row['account_id'] ?? data_get($row, 'account.id');
+            if ($accountId === null || $accountId === '') {
+                continue;
+            }
+
+            $byPlatform[strtolower($row['platform'])][] = $row;
+        }
+
+        foreach ($platforms as $index => $platform) {
+            if (! is_array($platform)) {
+                continue;
+            }
+
+            $existingAccountId = $platform['account_id'] ?? data_get($platform, 'account.id');
+            if ($existingAccountId !== null && $existingAccountId !== '') {
+                continue;
+            }
+
+            $name = strtolower((string) ($platform['platform'] ?? ''));
+            $row = $byPlatform[$name][0] ?? null;
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $platform['account_id'] = $row['account_id'] ?? data_get($row, 'account.id');
+            if (is_array($row['account'] ?? null)) {
+                $platform['account'] = $row['account'];
+            }
+            $platforms[$index] = $platform;
+        }
+
+        $post['platforms'] = $platforms;
+
+        return $post;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getPostAnalytics(int|string $id): array
+    {
+        return $this->decodeResponse(
+            $this->request('get', '/analytics/posts/'.rawurlencode((string) $id)),
+        );
+    }
+
+    /**
      * @param  array<string, mixed>  $body
      * @param  array<string, string>  $headers
      */
@@ -253,6 +327,25 @@ class PostsyncerClient
         $json = $response->json();
 
         return is_array($json) ? $json : [];
+    }
+
+    /**
+     * @param  array<mixed>  $platforms
+     */
+    private function needsAccountDetails(array $platforms): bool
+    {
+        foreach ($platforms as $platform) {
+            if (! is_array($platform)) {
+                continue;
+            }
+
+            $accountId = $platform['account_id'] ?? data_get($platform, 'account.id');
+            if ($accountId === null || $accountId === '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function hasMediaId(mixed $id): bool

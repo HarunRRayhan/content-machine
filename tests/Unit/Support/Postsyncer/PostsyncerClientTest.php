@@ -248,6 +248,35 @@ class PostsyncerClientTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts/130052');
     }
 
+    public function test_get_post_with_account_details_enriches_platform_rows_from_analytics(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts/130052' => Http::response([
+                'id' => 130052,
+                'status' => 'PARTIALLY_FAILED',
+                'platforms' => [
+                    ['platform' => 'tiktok', 'status' => 'FAILED'],
+                ],
+            ], 200),
+            'postsyncer.com/api/v1/analytics/posts/130052' => Http::response([
+                'accounts' => [
+                    [
+                        'account_id' => 3508,
+                        'platform' => 'tiktok',
+                        'account' => ['id' => 3508],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $client = $this->clientWithKey();
+        $post = $client->getPostWithAccountDetails(130052);
+
+        $this->assertSame(3508, $post['platforms'][0]['account_id']);
+        $this->assertSame(3508, $post['platforms'][0]['account']['id']);
+        Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/analytics/posts/130052');
+    }
+
     public function test_get_post_url_encodes_the_remote_id(): void
     {
         Http::fake([
