@@ -38,7 +38,7 @@ class PublicUrlGuardTest extends TestCase
         $this->assertFalse($mixed->isSafe('https://example.test/path'));
     }
 
-    public function test_it_pins_the_public_dns_addresses_for_curl(): void
+    public function test_it_prefers_public_ipv4_dns_addresses_for_curl(): void
     {
         $guard = new PublicUrlGuard(
             fn (string $host): array => [['ip' => '1.1.1.1'], ['ipv6' => '2606:4700:4700::1111']],
@@ -48,6 +48,20 @@ class PublicUrlGuardTest extends TestCase
             'curl' => [
                 CURLOPT_RESOLVE => [
                     'example.test:443:1.1.1.1',
+                ],
+            ],
+        ], $guard->curlResolveOptions('https://example.test/path'));
+    }
+
+    public function test_it_pins_ipv6_when_no_public_ipv4_address_exists(): void
+    {
+        $guard = new PublicUrlGuard(
+            fn (string $host): array => [['ipv6' => '2606:4700:4700::1111']],
+        );
+
+        $this->assertSame([
+            'curl' => [
+                CURLOPT_RESOLVE => [
                     'example.test:443:[2606:4700:4700::1111]',
                 ],
             ],
