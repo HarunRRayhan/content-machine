@@ -49,10 +49,9 @@ class UpdatePostsyncerSettingsAction
                 if (LegacyPublishProgress::isMissingAccountFailure(
                     $record->publish_error,
                     $record->publish_progress,
-                )) {
-                    if (($record->publish_progress['legacy_repair'] ?? null) !== 'missing_account') {
-                        continue;
-                    }
+                ) && is_array($record->publish_progress)
+                    && ($record->publish_progress['completed_groups'] ?? []) === []) {
+                    continue;
                 }
 
                 if ($record->publish_state !== 'failed'
@@ -82,7 +81,9 @@ class UpdatePostsyncerSettingsAction
                     || ! LegacyPublishProgress::isMissingAccountFailure(
                         $record->publish_error,
                         $record->publish_progress,
-                    )) {
+                    )
+                    || ! is_array($record->publish_progress)
+                    || ($record->publish_progress['completed_groups'] ?? []) !== []) {
                     continue;
                 }
 

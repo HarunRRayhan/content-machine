@@ -66,7 +66,15 @@ class PublishPostAction
             }
 
             $plan = $this->planMetadata($config, $groups, $options);
-            $progress = $this->prepareProgress($post, $progress, $plan, $runToken, $publishError);
+            $progress = $this->prepareProgress(
+                $post,
+                $progress,
+                $plan,
+                $runToken,
+                $publishError,
+                $config,
+                $groups,
+            );
             if ($progress === null) {
                 return;
             }
@@ -309,7 +317,8 @@ class PublishPostAction
         $this->assertProgressShape($progress);
 
         if (($progress['state'] ?? null) !== 'uncertain'
-            || ! is_array($progress['current'] ?? null)) {
+            || ! is_array($progress['current'] ?? null)
+            || ($progress['current']['phase'] ?? null) !== 'creating') {
             throw new PostsyncerException(
                 'This post does not have an uncertain PostSyncer create to reconcile.'
             );
@@ -834,13 +843,6 @@ class PublishPostAction
         }
 
         $merged = $latest;
-        $localCurrent = $local['current'] ?? null;
-        $latestCurrent = $latest['current'] ?? null;
-
-        if (is_array($localCurrent) && $latestCurrent === null) {
-            $merged['current'] = $localCurrent;
-        }
-
         $completed = $this->completedGroups($latest);
         foreach ($this->completedGroups($local) as $localGroup) {
             $index = $localGroup['index'] ?? null;
@@ -859,6 +861,23 @@ class PublishPostAction
                 <=> ((int) ($right['index'] ?? 0)),
         );
         $merged['completed_groups'] = $completed;
+
+        $localCurrent = $local['current'] ?? null;
+        $latestCurrent = $latest['current'] ?? null;
+        $localCurrentAlreadyCompleted = is_array($localCurrent)
+            && is_int($localCurrent['index'] ?? null)
+            && is_string($localCurrent['group_key'] ?? null)
+            && $this->completedGroup(
+                $completed,
+                $localCurrent['index'],
+                $localCurrent['group_key'],
+            ) !== null;
+
+        if (is_array($localCurrent)
+            && $latestCurrent === null
+            && ! $localCurrentAlreadyCompleted) {
+            $merged['current'] = $localCurrent;
+        }
 
         return $merged;
     }
@@ -1494,7 +1513,7 @@ class PublishPostAction
                 $current = $failedProgress['current'] ?? null;
 
                 if (is_array($current)
-                    && ($current['phase'] ?? null) === 'creating'
+                    && in_array(($current['phase'] ?? null), ['creating', 'retryable'], true)
                     && ($current['media_ids'] ?? []) !== []) {
                     $current['phase'] = 'retryable';
                     $failedProgress['current'] = $current;
@@ -1555,6 +1574,7 @@ class PublishPostAction
     /**
      * @param  array<string, mixed>|null  $existing
      * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     * @param  list<PublishGroup>  $groups
      * @return array<string, mixed>|null
      */
     private function prepareProgress(
@@ -1563,6 +1583,8 @@ class PublishPostAction
         array $plan,
         string $runToken,
         ?string $publishError,
+        PostsyncerConfig $config,
+        array $groups,
     ): ?array {
         if ($existing === null) {
             $progress = [
@@ -1592,7 +1614,7 @@ class PublishPostAction
         );
 
         if ($legacyAccountFailure) {
-            $existing = $this->repairLegacyAccountProgress($existing, $plan);
+            $existing = $this->repairLegacyAccountProgress($existing, $plan, $config, $groups);
         }
 
         if (! $legacyAccountFailure
@@ -1661,17 +1683,36 @@ class PublishPostAction
      *
      * @param  array<string, mixed>  $progress
      * @param  array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}  $plan
+     * @param  list<PublishGroup>  $groups
      * @return array<string, mixed>
      */
-    private function repairLegacyAccountProgress(array $progress, array $plan): array
-    {
+    private function repairLegacyAccountProgress(
+        array $progress,
+        array $plan,
+        PostsyncerConfig $config,
+        array $groups,
+    ): array {
         $current = $progress['current'] ?? null;
         $index = is_array($current) ? ($current['index'] ?? null) : null;
         $planned = is_int($index) ? ($plan['groups'][$index] ?? null) : null;
+        $stored = is_int($index) ? ($progress['planned_groups'][$index] ?? null) : null;
+        $group = is_int($index) ? ($groups[$index] ?? null) : null;
+        $mediaUrls = is_array($current) ? ($current['media_urls'] ?? null) : null;
 
         if (! is_array($current)
             || ! is_int($index)
-            || ! is_array($planned)) {
+            || ! is_array($planned)
+            || ! is_array($stored)
+            || ($stored['group_key'] ?? null) !== ($current['group_key'] ?? null)
+            || ! $group instanceof PublishGroup
+            || ! is_array($mediaUrls)
+            || ! array_is_list($mediaUrls)
+            || count(array_filter(
+                $mediaUrls,
+                static fn (mixed $url): bool => is_string($url),
+            )) !== count($mediaUrls)
+            || $this->canonicalMediaUrls($mediaUrls) !== $this->canonicalMediaUrls($group->mediaUrls)
+            || ! $this->legacyGroupKeyMatches($config, $group, (string) $current['group_key'])) {
             throw new PostsyncerException(
                 'This post has a legacy account-mapping checkpoint that cannot be repaired safely.'
             );
@@ -1690,6 +1731,50 @@ class PublishPostAction
         $progress['state'] = 'running';
 
         return $progress;
+    }
+
+    /**
+     * The legacy key must match the current group with only account mappings
+     * changing from null to their configured values.
+     */
+    private function legacyGroupKeyMatches(
+        PostsyncerConfig $config,
+        PublishGroup $group,
+        string $legacyGroupKey,
+    ): bool {
+        $platforms = $group->platforms;
+        $variants = 1 << count($platforms);
+
+        for ($mask = 0; $mask < $variants; $mask++) {
+            $accountOverrides = [];
+
+            foreach ($platforms as $offset => $platform) {
+                if (($mask & (1 << $offset)) !== 0) {
+                    $accountOverrides[$platform] = null;
+                }
+            }
+
+            if ($this->groupKey($config, $group, $accountOverrides) === $legacyGroupKey) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<mixed>  $urls
+     * @return list<string>
+     */
+    private function canonicalMediaUrls(array $urls): array
+    {
+        $canonical = [];
+
+        foreach ($urls as $url) {
+            $canonical[] = $this->stableMediaUrl((string) $url);
+        }
+
+        return $canonical;
     }
 
     /**
@@ -2006,8 +2091,14 @@ class PublishPostAction
         return hash('sha256', $operationId.'|'.$index.'|'.$groupKey);
     }
 
-    private function groupKey(PostsyncerConfig $config, PublishGroup $group): string
-    {
+    /**
+     * @param  array<string, mixed>  $accountOverrides
+     */
+    private function groupKey(
+        PostsyncerConfig $config,
+        PublishGroup $group,
+        array $accountOverrides = [],
+    ): string {
         $langConfig = $config->language($group->language);
         $platformAccounts = $langConfig['platforms'];
         $accounts = [];
@@ -2018,7 +2109,9 @@ class PublishPostAction
             $platformConfig = is_array($platformAccounts[$platform] ?? null)
                 ? $platformAccounts[$platform]
                 : [];
-            $accounts[$platform] = $platformConfig['account_id'] ?? null;
+            $accounts[$platform] = array_key_exists($platform, $accountOverrides)
+                ? $accountOverrides[$platform]
+                : ($platformConfig['account_id'] ?? null);
         }
 
         ksort($accounts);

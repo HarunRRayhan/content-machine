@@ -351,6 +351,69 @@ class PostsyncerSettingsControllerTest extends TestCase
         }
     }
 
+    public function test_settings_update_rejects_legacy_checkpoints_with_completed_groups(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['account_id' => null],
+                    ],
+                ],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_error' => 'No account id mapped for platform facebook.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'legacy-plan',
+                'planned_groups' => [['index' => 0, 'group_key' => 'legacy-group']],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => 'legacy-group',
+                    'post_id' => '10',
+                ]],
+                'current' => [
+                    'index' => 1,
+                    'group_key' => 'legacy-current-group',
+                    'phase' => 'creating',
+                    'idempotency_key' => 'legacy-request',
+                    'media_ids' => [915],
+                    'media_urls' => ['https://example.com/media'],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'page' => 'workspaces',
+            'languages' => [
+                'bangla' => [
+                    'platforms' => [
+                        'facebook' => ['account_id' => '100'],
+                    ],
+                ],
+            ],
+        ])
+            ->assertSessionHasErrors('postsyncer')
+            ->assertRedirect();
+
+        $this->assertNull(
+            PostsyncerConfig::fromWorkspace($workspace->fresh())
+                ->language('bangla')['platforms']['facebook']['account_id'],
+        );
+        $this->assertSame('failed', $post->fresh()->publish_state);
+    }
+
     public function test_refresh_accounts_uses_the_selected_workspace_id(): void
     {
         [, $workspace] = $this->actingAsWorkspaceOwner();
