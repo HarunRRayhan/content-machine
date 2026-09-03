@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $webhook_generation
  * @property array<string, mixed>|null $payload
  * @property CarbonImmutable|null $processed_at
+ * @property bool $legacy_replayable
  * @property CarbonImmutable|null $failed_at
  * @property CarbonImmutable|null $discarded_at
  * @property string|null $last_error
@@ -37,6 +38,7 @@ class TelegramUpdate extends Model
         'webhook_generation',
         'payload',
         'processed_at',
+        'legacy_replayable',
         'failed_at',
         'discarded_at',
         'last_error',
@@ -69,6 +71,7 @@ class TelegramUpdate extends Model
         return [
             'payload' => 'array',
             'processed_at' => 'datetime',
+            'legacy_replayable' => 'boolean',
             'failed_at' => 'datetime',
             'discarded_at' => 'datetime',
             'dispatch_claimed_at' => 'datetime',

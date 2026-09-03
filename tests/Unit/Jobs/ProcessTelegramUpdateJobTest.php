@@ -226,6 +226,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
             'update_id' => 45,
             'payload' => null,
             'processed_at' => now(),
+            'legacy_replayable' => true,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -263,6 +264,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
             'update_id' => 47,
             'payload' => json_encode($payload, JSON_THROW_ON_ERROR),
             'processed_at' => now(),
+            'legacy_replayable' => true,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -273,7 +275,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $this->assertNotNull(TelegramUpdate::query()->sole()->processed_at);
     }
 
-    public function test_a_legacy_job_can_recover_an_update_marked_unreplayable_when_it_has_the_payload(): void
+    public function test_a_legacy_job_does_not_replay_an_update_without_the_migration_marker(): void
     {
         $config = TelegramBotConfig::factory()->connected()->create();
         $user = User::factory()->create();
@@ -291,7 +293,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
             ],
         ];
 
-        TelegramUpdate::create([
+        $record = TelegramUpdate::create([
             'telegram_bot_config_id' => $config->id,
             'webhook_generation' => $config->webhook_generation,
             'update_id' => 46,
@@ -301,11 +303,11 @@ class ProcessTelegramUpdateJobTest extends TestCase
 
         (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
 
-        $this->assertSame(1, ScratchpadEntry::count());
-        $record = TelegramUpdate::query()->sole();
-        $this->assertEquals($payload, $record->payload);
-        $this->assertNotNull($record->processed_at);
-        $this->assertNull($record->failed_at);
+        $this->assertSame(0, ScratchpadEntry::count());
+        $record->refresh();
+        $this->assertNull($record->payload);
+        $this->assertNull($record->processed_at);
+        $this->assertNotNull($record->failed_at);
     }
 
     public function test_clearnotes_is_replay_safe_when_processing_restarts_after_the_delete(): void
