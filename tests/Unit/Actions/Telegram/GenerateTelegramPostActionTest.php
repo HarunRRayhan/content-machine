@@ -292,6 +292,49 @@ class GenerateTelegramPostActionTest extends TestCase
         $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
         $this->assertSame('The AI returned an unusable draft. Please try generating it again.', $request->error_message);
     }
+
+    public function test_it_accepts_fenced_json_and_falls_back_for_empty_captions(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'text',
+            'source' => 'telegram',
+            'body' => 'A useful test body.',
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $completion = new FakePostCompletionClient("```json\n".json_encode([
+            'title' => 'Test title',
+            'body' => 'A useful test body.',
+            'language' => 'bn',
+            'captions' => [
+                'facebook' => ['caption' => '', 'first_comment' => ''],
+                'instagram' => ['caption' => '', 'first_comment' => ''],
+            ],
+        ], JSON_THROW_ON_ERROR)."\n```");
+
+        $post = (new GenerateTelegramPostAction(
+            app(CreatePostAction::class),
+            new AttachExistingPostMediaAction,
+            $completion,
+            $completion,
+            new AiProviderCredentialResolver,
+        ))->handle($request->id);
+
+        $this->assertInstanceOf(Post::class, $post);
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->refresh()->state);
+        $this->assertSame('A useful test body.', $post->captions[0]['platforms'][0]['caption']);
+        $this->assertSame('A useful test body.', $post->captions[0]['platforms'][1]['caption']);
+    }
 }
 
 final class FakePostCompletionClient implements AiCompletionClientContract, AiVisionCompletionClientContract
