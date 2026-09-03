@@ -147,6 +147,33 @@ class PublishPostJobTest extends TestCase
         $this->assertSame('queued', $post->publish_progress['state']);
     }
 
+    public function test_a_legacy_failed_job_does_not_overwrite_a_run_with_a_durable_lease(): void
+    {
+        $post = Post::factory()->create([
+            'publish_state' => 'running',
+            'publish_lease_id' => '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22',
+            'publish_claimed_at' => now(),
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => [],
+                'plan_hash' => null,
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'running',
+            ],
+        ]);
+
+        (new PublishPostJob($post, [], 'run-1'))->failed(new RuntimeException('stale failure'));
+
+        $post->refresh();
+        $this->assertSame('running', $post->publish_state);
+        $this->assertSame('72d9c4a1-58b0-4be7-95c0-a1d2227d2f22', $post->publish_lease_id);
+        $this->assertNull($post->publish_error);
+    }
+
     public function test_stale_explicit_run_does_not_invoke_the_publish_action(): void
     {
         $post = Post::factory()->create([

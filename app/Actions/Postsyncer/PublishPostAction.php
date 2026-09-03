@@ -1249,9 +1249,11 @@ class PublishPostAction
                 ])->save();
             }
 
-            $newLeaseId = $locked->publish_state === 'running'
-                ? (string) Str::uuid()
-                : ($locked->publish_lease_id ?? (string) Str::uuid());
+            // Every admitted worker gets a fresh durable lease. In particular,
+            // two queued jobs can carry the same pre-claim lease after the
+            // unique lock expires; rotating here makes the losing job unable
+            // to finalize the winner's live publish from failed().
+            $newLeaseId = (string) Str::uuid();
 
             $locked->forceFill([
                 'publish_state' => 'running',

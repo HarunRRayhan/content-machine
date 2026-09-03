@@ -84,8 +84,12 @@ class DispatchPendingPostPublishesCommandTest extends TestCase
             ->assertSuccessful()
             ->expectsOutput('Dispatched 1 pending PostSyncer publish(es).');
 
+        $post->refresh();
+        $this->assertSame('queued', $post->publish_state);
+        $this->assertNotSame($leaseId, $post->publish_lease_id);
+        $this->assertNotNull($post->publish_claimed_at);
         Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->post->is($post)
             && $job->operationId === 'operation-123'
-            && $job->leaseId === $leaseId);
+            && $job->leaseId === $post->publish_lease_id);
     }
 }

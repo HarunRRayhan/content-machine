@@ -22,11 +22,12 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
     public const TIMEOUT_SECONDS = 900;
 
-    // A stale publish is eligible for recovery after LEASE_SECONDS. The
-    // unique lock must not outlive that recovery window.
-    public const UNIQUE_FOR_SECONDS = 900;
-
     public const LEASE_SECONDS = 1020;
+
+    // Keep the unique lock through the durable recovery boundary. A shorter
+    // lock lets a second copy enter the queue while the first worker still
+    // owns the publish lease.
+    public const UNIQUE_FOR_SECONDS = self::LEASE_SECONDS;
 
     public const OVERLAP_EXPIRES_AFTER_SECONDS = 1020;
 
@@ -109,6 +110,7 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
 
             if ($post === null
                 || $post->publish_state === 'succeeded'
+                || ($this->leaseId === null && $post->publish_lease_id !== null)
                 || ($this->leaseId === null && ! $this->isCurrentRun($post, $runToken))) {
                 return false;
             }
