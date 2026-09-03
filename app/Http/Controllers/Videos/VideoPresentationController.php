@@ -44,10 +44,10 @@ class VideoPresentationController extends Controller
                 'theme' => $theme,
             ])
             ->header('Content-Type', 'text/html; charset=UTF-8')
-            // The deck is intentionally executable presentation content. Run
-            // it in an opaque origin so imported/API-provided JS cannot read
-            // the authenticated parent page or same-origin cookies.
-            ->header('Content-Security-Policy', "sandbox allow-scripts; frame-ancestors 'self'");
+            // This is the trusted presentation host. The executable deck is
+            // loaded by the child frame below, which has its own opaque-origin
+            // sandbox and restrictive CSP.
+            ->header('Content-Security-Policy', "frame-ancestors 'self'");
     }
 
     public function frame(Request $request, Video $video): View|Response

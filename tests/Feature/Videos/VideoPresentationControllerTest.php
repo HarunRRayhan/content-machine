@@ -116,7 +116,7 @@ class VideoPresentationControllerTest extends TestCase
         $this->assertStringContainsString('event.origin !== parentOrigin', $html);
     }
 
-    public function test_deck_content_is_served_in_a_sandboxed_document(): void
+    public function test_presentation_host_allows_its_sandboxed_deck_frame(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         $video = Video::factory()->for($workspace)->create([
@@ -125,7 +125,7 @@ class VideoPresentationControllerTest extends TestCase
 
         $this->get(route('videos.presentation', $video))
             ->assertOk()
-            ->assertHeader('Content-Security-Policy', "sandbox allow-scripts; frame-ancestors 'self'");
+            ->assertHeader('Content-Security-Policy', "frame-ancestors 'self'");
     }
 
     public function test_frame_is_sandboxed_and_contains_the_deck_package(): void
