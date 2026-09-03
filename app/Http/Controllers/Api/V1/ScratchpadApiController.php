@@ -191,8 +191,9 @@ class ScratchpadApiController extends Controller
     {
         $workspace = $this->currentWorkspace();
 
-        $this->resolveEntry($publicId);
+        $entry = $this->resolveEntry($publicId);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+        abort_if(! $entry->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,

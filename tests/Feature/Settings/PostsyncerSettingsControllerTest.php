@@ -77,6 +77,32 @@ class PostsyncerSettingsControllerTest extends TestCase
         $this->assertTrue(PostsyncerConfig::fromWorkspace($workspace->fresh())->publishEnabled());
     }
 
+    public function test_owner_can_disable_publishing_while_a_publish_is_queued(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
+        Post::factory()->for($workspace)->create([
+            'publish_state' => 'queued',
+        ]);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'page' => 'api',
+            'publish_enabled' => false,
+            'api_base' => 'https://postsyncer.com/api/v1',
+            'upload_base' => 'https://upload.postsyncer.com/api/v1',
+        ])
+            ->assertRedirect(route('settings.postsyncer.edit'));
+
+        $this->assertFalse(PostsyncerConfig::fromWorkspace($workspace->fresh())->publishEnabled());
+    }
+
     public function test_api_page_omits_workspaces_until_api_key_is_configured(): void
     {
         $this->actingAsWorkspaceOwner();

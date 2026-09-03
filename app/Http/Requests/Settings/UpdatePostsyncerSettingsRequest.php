@@ -84,8 +84,11 @@ class UpdatePostsyncerSettingsRequest extends FormRequest
         return array_merge([
             'page' => ['nullable', Rule::in(['api', 'workspaces'])],
             'api_key' => ['nullable', 'string', 'max:500'],
-            'api_base' => ['nullable', 'string', 'max:500'],
-            'upload_base' => ['nullable', 'string', 'max:500'],
+            // PostSyncer hosts are first-party constants. Accepting arbitrary
+            // URLs here would let a workspace admin make workers send the
+            // bearer key to an internal or attacker-controlled endpoint.
+            'api_base' => ['nullable', 'url', 'max:500', Rule::in([PostsyncerConfig::API_BASE])],
+            'upload_base' => ['nullable', 'url', 'max:500', Rule::in([PostsyncerConfig::UPLOAD_BASE])],
             'publish_enabled' => ['boolean'],
             'default_language' => ['nullable', Rule::in(PostsyncerConfig::LANGUAGES)],
             'enabled_languages' => ['nullable', 'array'],

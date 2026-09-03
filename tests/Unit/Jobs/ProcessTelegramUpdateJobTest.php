@@ -17,11 +17,15 @@ use App\Jobs\ProcessTelegramUpdateJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramBotLink;
+use App\Models\TelegramUpdate;
 use App\Models\User;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
@@ -33,6 +37,7 @@ class ProcessTelegramUpdateJobTest extends TestCase
     private function action(): HandleTelegramUpdateAction
     {
         $client = new FakeTelegramClient;
+        $this->app->instance(TelegramClientContract::class, $client);
         $completionClient = new class implements AiCompletionClientContract
         {
             public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
@@ -67,13 +72,19 @@ class ProcessTelegramUpdateJobTest extends TestCase
         $update = [
             'update_id' => 1,
             'message' => [
-                'chat' => ['id' => 1],
+                'chat' => ['id' => 1, 'type' => 'private'],
                 'from' => ['id' => 1],
                 'text' => 'A captured note.',
             ],
         ];
+        TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 1,
+            'payload' => $update,
+        ]);
 
-        (new ProcessTelegramUpdateJob($config->id, $update))->handle($this->action());
+        (new ProcessTelegramUpdateJob($config->id, $update, $config->webhook_generation))->handle($this->action());
 
         $this->assertSame(1, ScratchpadEntry::count());
     }
@@ -91,11 +102,240 @@ class ProcessTelegramUpdateJobTest extends TestCase
 
         $update = [
             'update_id' => 1,
-            'message' => ['chat' => ['id' => 1], 'from' => ['id' => 1], 'text' => 'hi'],
+            'message' => ['chat' => ['id' => 1, 'type' => 'private'], 'from' => ['id' => 1], 'text' => 'hi'],
         ];
 
         (new ProcessTelegramUpdateJob($config->id, $update))->handle($this->action());
 
         $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_audio_updates_use_the_scratchpad_queue(): void
+    {
+        $job = new ProcessTelegramUpdateJob(1, [
+            'update_id' => 1,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'audio' => ['file_id' => 'audio-id'],
+            ],
+        ]);
+
+        $this->assertSame('scratchpad', $job->queue);
+    }
+
+    public function test_a_legacy_serialized_job_defaults_the_webhook_generation(): void
+    {
+        $job = new ProcessTelegramUpdateJob(123, ['update_id' => 1]);
+        $legacyJob = unserialize(serialize($job));
+
+        $this->assertInstanceOf(ProcessTelegramUpdateJob::class, $legacyJob);
+        $this->assertNull($legacyJob->webhookGeneration);
+        $this->assertSame('telegram-update:123:legacy:1', $legacyJob->uniqueId());
+    }
+
+    public function test_a_completed_update_is_not_processed_again(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 42,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Process once.',
+            ],
+        ];
+        TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 42,
+            'payload' => $payload,
+        ]);
+
+        $job = new ProcessTelegramUpdateJob($config->id, $payload, $config->webhook_generation);
+        $action = $this->action();
+        $job->handle($action);
+        $job->handle($action);
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $this->assertNotNull(TelegramUpdate::query()->sole()->processed_at);
+    }
+
+    public function test_a_legacy_job_can_process_an_update_backfilled_to_the_current_generation(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 44,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Backfilled update.',
+            ],
+        ];
+
+        DB::table('telegram_updates')->insert([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 44,
+            'payload' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $record = TelegramUpdate::query()->sole();
+        $this->assertEquals($payload, $record->payload);
+        $this->assertNotNull($record->processed_at);
+    }
+
+    public function test_a_legacy_job_can_recover_an_update_marked_processed_by_the_payload_migration(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 45,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Migration recovery.',
+            ],
+        ];
+
+        DB::table('telegram_updates')->insert([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 45,
+            'payload' => null,
+            'processed_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $record = TelegramUpdate::query()->sole();
+        $this->assertEquals($payload, $record->payload);
+        $this->assertNotNull($record->processed_at);
+        $this->assertNull($record->failed_at);
+    }
+
+    public function test_a_legacy_job_can_recover_an_update_marked_unreplayable_when_it_has_the_payload(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $payload = [
+            'update_id' => 46,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'Retry recovery.',
+            ],
+        ];
+
+        TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 46,
+            'failed_at' => now(),
+            'last_error' => ProcessTelegramUpdateJob::MISSING_PAYLOAD_ERROR,
+        ]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload))->handle($this->action());
+
+        $this->assertSame(1, ScratchpadEntry::count());
+        $record = TelegramUpdate::query()->sole();
+        $this->assertEquals($payload, $record->payload);
+        $this->assertNotNull($record->processed_at);
+        $this->assertNull($record->failed_at);
+    }
+
+    public function test_clearnotes_is_replay_safe_when_processing_restarts_after_the_delete(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        ScratchpadEntry::factory()->for($config->workspace)->count(3)->create();
+        $payload = [
+            'update_id' => 43,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => '/clearnotes',
+            ],
+        ];
+        TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $config->webhook_generation,
+            'update_id' => 43,
+            'payload' => $payload,
+        ]);
+
+        $job = new ProcessTelegramUpdateJob($config->id, $payload, $config->webhook_generation);
+        $job->handle($this->action());
+        $job->handle($this->action());
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertNotNull(TelegramUpdate::query()->sole()->processed_at);
+    }
+
+    public function test_an_old_webhook_generation_is_discarded_without_running_the_update(): void
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create([
+            'telegram_bot_config_id' => $config->id,
+            'user_id' => $user->id,
+            'telegram_user_id' => 1,
+        ]);
+        $oldGeneration = $config->webhook_generation;
+        $payload = [
+            'update_id' => 55,
+            'message' => [
+                'chat' => ['id' => 1, 'type' => 'private'],
+                'from' => ['id' => 1],
+                'text' => 'stale update',
+            ],
+        ];
+        $record = TelegramUpdate::create([
+            'telegram_bot_config_id' => $config->id,
+            'webhook_generation' => $oldGeneration,
+            'update_id' => 55,
+            'payload' => $payload,
+        ]);
+        $config->update(['webhook_generation' => (string) Str::uuid()]);
+
+        (new ProcessTelegramUpdateJob($config->id, $payload, $oldGeneration))->handle($this->action());
+
+        $this->assertSame(0, ScratchpadEntry::count());
+        $this->assertNotNull($record->refresh()->processed_at);
     }
 }

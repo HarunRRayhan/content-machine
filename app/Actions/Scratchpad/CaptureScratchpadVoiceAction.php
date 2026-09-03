@@ -29,17 +29,26 @@ class CaptureScratchpadVoiceAction
 {
     use ResolvesMediaAsset;
 
-    public function handle(Workspace $workspace, ?User $capturedBy, CaptureScratchpadVoiceData $data): ScratchpadEntry
-    {
+    public function handle(
+        Workspace $workspace,
+        ?User $capturedBy,
+        CaptureScratchpadVoiceData $data,
+        bool $queueTranscription = true,
+        ?string $telegramUpdateKey = null,
+        ?string $webhookGeneration = null,
+    ): ScratchpadEntry {
         $mediaAsset = $this->resolveMediaAsset($workspace, $capturedBy, $data->file, 'audio');
 
-        [$entry, $transcription] = DB::transaction(function () use ($workspace, $mediaAsset, $data) {
+        [$entry, $transcription] = DB::transaction(function () use ($workspace, $mediaAsset, $data, $queueTranscription, $telegramUpdateKey, $webhookGeneration) {
             $entry = ScratchpadEntry::create([
                 'workspace_id' => $workspace->id,
                 'kind' => 'voice',
                 'source' => $data->source,
+                'telegram_update_key' => $telegramUpdateKey,
+                'webhook_generation' => $webhookGeneration,
                 'captured_at' => now(),
                 'language' => $data->language,
+                'body' => $data->caption,
                 'status' => 'new',
                 'meta' => $data->telegramChatId !== null ? ['telegram_chat_id' => $data->telegramChatId] : [],
             ]);
@@ -58,10 +67,12 @@ class CaptureScratchpadVoiceAction
                 'status' => 'pending',
             ]);
 
+            if ($queueTranscription) {
+                TranscribeVoiceNoteJob::dispatch($transcription)->afterCommit();
+            }
+
             return [$entry, $transcription];
         });
-
-        TranscribeVoiceNoteJob::dispatch($transcription);
 
         return $entry;
     }

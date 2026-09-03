@@ -38,6 +38,8 @@ class PublishVideoActionTest extends TestCase
     {
         PostsyncerConfig::write($workspace, [
             'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'languages' => [
                 'bangla' => [
                     'workspace_id' => '15211',
@@ -148,6 +150,41 @@ class PublishVideoActionTest extends TestCase
         ], $video->postsyncer);
 
         Http::assertSentCount(3);
+        $mediaRequest = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+        )->first();
+        $postRequest = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts',
+        )->first();
+        $mediaKey = $mediaRequest[0]->header('Idempotency-Key')[0] ?? null;
+        $postKey = $postRequest[0]->header('Idempotency-Key')[0] ?? null;
+        $this->assertIsString($mediaKey);
+        $this->assertIsString($postKey);
+        $this->assertStringEndsWith(':media', $mediaKey);
+        $this->assertStringEndsWith(':post', $postKey);
+        $this->assertNotSame($mediaKey, $postKey);
+    }
+
+    public function test_worker_fails_closed_when_video_publishing_is_disabled(): void
+    {
+        Http::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        PostsyncerConfig::write($workspace, ['video_publish_enabled' => false]);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Disabled video publish'],
+        ]);
+
+        $this->action->handle($video, ['confirm_ask' => false]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame(PostsyncerConfig::VIDEO_PUBLISH_DISABLED_MESSAGE, $video->publish_error);
+        Http::assertNothingSent();
     }
 
     public function test_create_polls_an_async_canonical_response_before_checkpointing(): void

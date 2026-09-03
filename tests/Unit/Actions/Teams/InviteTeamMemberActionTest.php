@@ -17,6 +17,7 @@ class InviteTeamMemberActionTest extends TestCase
     {
         $team = Team::factory()->create();
         $inviter = User::factory()->create();
+        $team->members()->attach($inviter->id, ['role' => 'owner']);
         $data = new InviteTeamMemberData(email: 'new-member@example.com', role: 'member');
 
         $invitation = (new InviteTeamMemberAction)->handle($team, $inviter, $data);

@@ -6,6 +6,7 @@ use App\Models\Attachment;
 use App\Models\Post;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\CurrentApiToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -22,6 +23,13 @@ class PostResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        if (! app(CurrentApiToken::class)->can('posts:read')) {
+            return [
+                'id' => $this->id,
+                'human_id' => $this->human_id,
+            ];
+        }
+
         $include = $request->attributes->get('api_include');
         if (! $include instanceof IncludeFields) {
             $include = IncludeFields::full();
@@ -57,7 +65,11 @@ class PostResource extends JsonResource
             'image_drive_urls' => $this->image_drive_urls,
             'status' => $this->status,
             'publish_state' => $this->publish_state,
-            'publish_error' => $this->publish_error,
+            'publish_error' => $this->publish_error === null
+                ? null
+                : 'Publishing failed. Inspect the dashboard for details.',
+            'publish_progress' => $this->publish_progress,
+            'approval_state' => $this->approval_state ?? 'approved',
             'postsyncer' => $this->postsyncer,
             'idea_id' => $this->idea_id,
             'attachments' => $this->relationLoaded('attachments')

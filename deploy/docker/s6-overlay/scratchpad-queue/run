@@ -1,3 +1,7 @@
 #!/command/with-contenv sh
 
-exec s6-setuidgid www-data php /var/www/html/artisan queue:work --queue=scratchpad --tries=3 --backoff=10,60,300 --max-time=3600 --sleep=1 --rest=0.5
+set -eu
+
+/usr/local/bin/cm-wait-for-migrations
+
+exec s6-setuidgid www-data php /var/www/html/artisan queue:work --queue=scratchpad --tries=3 --backoff=10,60,300 --timeout=900 --max-time=3600 --sleep=1 --rest=0.5

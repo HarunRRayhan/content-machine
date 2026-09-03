@@ -43,6 +43,7 @@ class ResolveScratchpadLinkActionTest extends TestCase
         $this->assertSame('A Great Article', $entry->title);
         $this->assertSame('What the article is about.', $entry->body);
         $this->assertSame('https://example.com/article', $entry->meta['url']);
+        $this->assertSame('What the article is about.', $entry->meta['resolved_description']);
         $this->assertSame('page metadata (og tags)', $entry->meta['resolved_via']);
         $this->assertSame('webpage', $entry->meta['resolved_kind']);
         $this->assertSame('https://example.com/cover.jpg', $entry->meta['thumbnail_url']);

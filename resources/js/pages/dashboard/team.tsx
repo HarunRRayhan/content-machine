@@ -21,16 +21,24 @@ type Invitation = {
     email: string;
     role: string;
     expired: boolean;
-    url: string;
+    url: string | null;
 };
 
 type PageProps = {
     team: { name: string; slug: string };
     members: Member[];
     invitations: Invitation[];
+    canManageInvitations: boolean;
+    canInviteOwners: boolean;
 };
 
-export default function Team({ team, members, invitations }: PageProps) {
+export default function Team({
+    team,
+    members,
+    invitations,
+    canManageInvitations,
+    canInviteOwners,
+}: PageProps) {
     return (
         <>
             <Head title="Team" />
@@ -83,65 +91,82 @@ export default function Team({ team, members, invitations }: PageProps) {
                                     )}
                                 </div>
 
-                                <Input
-                                    readOnly
-                                    value={invitation.url}
-                                    onFocus={(e) => e.currentTarget.select()}
-                                    className="font-mono text-xs"
-                                />
+                                {invitation.url ? (
+                                    <Input
+                                        readOnly
+                                        value={invitation.url}
+                                        onFocus={(e) =>
+                                            e.currentTarget.select()
+                                        }
+                                        className="font-mono text-xs"
+                                    />
+                                ) : (
+                                    <p className="text-sm text-muted-foreground">
+                                        Invite links are visible to team admins
+                                        only.
+                                    </p>
+                                )}
                             </div>
                         ))}
                     </div>
                 )}
 
-                <div className="max-w-md space-y-4 rounded-lg border p-4">
-                    <Heading
-                        variant="small"
-                        title="Invite someone"
-                        description="No email is sent yet, copy the link that appears above once it's created."
-                    />
+                {canManageInvitations && (
+                    <div className="max-w-md space-y-4 rounded-lg border p-4">
+                        <Heading
+                            variant="small"
+                            title="Invite someone"
+                            description="No email is sent yet, copy the link that appears above once it's created."
+                        />
 
-                    <Form
-                        {...TeamController.storeInvitation.form()}
-                        resetOnSuccess
-                        className="space-y-4"
-                    >
-                        {({ processing, errors }) => (
-                            <>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="email">Email</Label>
-                                    <Input
-                                        id="email"
-                                        type="email"
-                                        name="email"
-                                        required
-                                        placeholder="teammate@example.com"
-                                    />
-                                    <InputError message={errors.email} />
-                                </div>
+                        <Form
+                            {...TeamController.storeInvitation.form()}
+                            resetOnSuccess
+                            className="space-y-4"
+                        >
+                            {({ processing, errors }) => (
+                                <>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="email">Email</Label>
+                                        <Input
+                                            id="email"
+                                            type="email"
+                                            name="email"
+                                            required
+                                            placeholder="teammate@example.com"
+                                        />
+                                        <InputError message={errors.email} />
+                                    </div>
 
-                                <div className="grid gap-2">
-                                    <Label htmlFor="role">Role</Label>
-                                    <select
-                                        id="role"
-                                        name="role"
-                                        defaultValue="member"
-                                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
-                                    >
-                                        <option value="member">Member</option>
-                                        <option value="admin">Admin</option>
-                                        <option value="owner">Owner</option>
-                                    </select>
-                                    <InputError message={errors.role} />
-                                </div>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="role">Role</Label>
+                                        <select
+                                            id="role"
+                                            name="role"
+                                            defaultValue="member"
+                                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none"
+                                        >
+                                            <option value="member">
+                                                Member
+                                            </option>
+                                            <option value="admin">Admin</option>
+                                            {canInviteOwners && (
+                                                <option value="owner">
+                                                    Owner
+                                                </option>
+                                            )}
+                                        </select>
+                                        <InputError message={errors.role} />
+                                    </div>
 
-                                <Button disabled={processing}>
-                                    Send invitation
-                                </Button>
-                            </>
-                        )}
-                    </Form>
-                </div>
+                                    <Button disabled={processing}>
+                                        Send invitation
+                                    </Button>
+                                </>
+                            )}
+                        </Form>
+                    </div>
+                )}
             </div>
         </>
     );

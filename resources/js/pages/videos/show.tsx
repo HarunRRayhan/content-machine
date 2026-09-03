@@ -55,6 +55,7 @@ type VideoDetail = {
     publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
     postsyncer_ready: boolean;
+    video_publish_enabled: boolean;
     needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
@@ -194,6 +195,7 @@ export default function VideoShow({ video }: PageProps) {
                         coverDriveUrl={video.cover_drive_url}
                         publishUrl={`/videos/${video.id}/publish`}
                         postsyncerReady={video.postsyncer_ready}
+                        videoPublishingEnabled={video.video_publish_enabled}
                         publishState={video.publish_state}
                         publishRetryable={video.publish_retryable}
                         needsConfirmAsk={video.needs_confirm_ask}

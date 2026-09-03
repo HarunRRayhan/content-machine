@@ -4,6 +4,7 @@ namespace App\Http\Resources\V1;
 
 use App\Models\Attachment;
 use App\Models\ScratchpadEntry;
+use App\Support\CurrentApiToken;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -25,6 +26,15 @@ class ScratchpadEntryResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        if (! app(CurrentApiToken::class)->can('scratchpad:read')) {
+            return [
+                'id' => $this->id,
+                'public_id' => $this->public_id,
+                'kind' => $this->kind,
+                'status' => $this->status,
+            ];
+        }
+
         return [
             'id' => $this->id,
             'public_id' => $this->public_id,

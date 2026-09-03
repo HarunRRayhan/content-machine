@@ -103,6 +103,7 @@ type Props = {
     coverDriveUrl: string | null;
     publishUrl: string;
     postsyncerReady: boolean;
+    videoPublishingEnabled: boolean;
     publishState: string;
     publishRetryable: boolean;
     needsConfirmAsk: boolean;
@@ -228,6 +229,7 @@ export default function VideoOverview({
     coverDriveUrl,
     publishUrl,
     postsyncerReady,
+    videoPublishingEnabled,
     publishState,
     publishRetryable,
     needsConfirmAsk,
@@ -326,6 +328,7 @@ export default function VideoOverview({
     const missingVideoDriveUrl =
         !hasVideoDriveUrl && studioStatus === 'recorded';
     const canSchedule =
+        videoPublishingEnabled &&
         postsyncerReady &&
         !publishBusy &&
         hasVideoDriveUrl &&
@@ -333,7 +336,11 @@ export default function VideoOverview({
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
     const canRetry =
-        postsyncerReady && !publishBusy && hasVideoDriveUrl && publishRetryable;
+        videoPublishingEnabled &&
+        postsyncerReady &&
+        !publishBusy &&
+        hasVideoDriveUrl &&
+        publishRetryable;
     const retryDisabled = !canRetry || (needsConfirmAsk && !confirmAskChecked);
     const scheduledAt = earliestWhen(groups);
 
@@ -610,6 +617,15 @@ export default function VideoOverview({
                                                 <p className="schedule-it-hint">
                                                     Configure PostSyncer in
                                                     Settings before scheduling.
+                                                </p>
+                                            )}
+                                            {!videoPublishingEnabled && (
+                                                <p className="schedule-it-hint">
+                                                    Video publishing is
+                                                    temporarily disabled while
+                                                    safe retry and
+                                                    reconciliation support is
+                                                    being completed.
                                                 </p>
                                             )}
                                             {missingVideoDriveUrl && (

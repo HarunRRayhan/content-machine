@@ -56,6 +56,8 @@ class AttachPostDocumentAction
                 'position' => $position,
             ]);
 
+            $lockedPost->invalidateApproval();
+
             return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
         });
     }

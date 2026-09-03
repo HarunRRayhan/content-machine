@@ -3,16 +3,22 @@
 namespace Tests\Unit\Actions\Scratchpad;
 
 use App\Actions\Scratchpad\TranscribeVoiceNoteAction;
+use App\Jobs\GenerateTelegramPostJob;
 use App\Models\AiProviderCredential;
 use App\Models\MediaAsset;
+use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use App\Models\Workspace;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiTranscriptionClientContract;
 use App\Support\AiProviders\AiTranscriptionResult;
+use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\Telegram\FakeTelegramClient;
 use Tests\TestCase;
@@ -20,6 +26,13 @@ use Tests\TestCase;
 class TranscribeVoiceNoteActionTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->instance(TelegramClientContract::class, new FakeTelegramClient);
+    }
 
     public function test_a_successful_transcription_updates_the_row_and_backfills_the_entry_language()
     {
@@ -55,9 +68,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        $telegram = new FakeTelegramClient;
-
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, $telegram))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $transcription->refresh();
         $this->assertSame('done', $transcription->status);
@@ -68,7 +79,67 @@ class TranscribeVoiceNoteActionTest extends TestCase
 
         $entry->refresh();
         $this->assertSame('bengali', $entry->language);
-        $this->assertSame([], $telegram->sentMessages);
+    }
+
+    public function test_cancellation_during_provider_work_finishes_transcription_without_creating_a_post(): void
+    {
+        Queue::fake();
+        Storage::fake('scratchpad');
+        Storage::disk('scratchpad')->put('audio/note.ogg', 'raw-bytes');
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->for($workspace)->connected()->create();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create([
+            'kind' => 'voice',
+            'source' => 'telegram',
+            'meta' => ['telegram_chat_id' => 555],
+        ]);
+        $mediaAsset = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'audio',
+            'disk' => 'scratchpad',
+            'path' => 'audio/note.ogg',
+            'mime' => 'audio/ogg',
+            'original_filename' => 'note.ogg',
+        ]);
+        $transcription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $entry->id,
+            'media_asset_id' => $mediaAsset->id,
+        ]);
+        AiProviderCredential::factory()->openai()->create(['workspace_id' => $workspace->id]);
+        $leaseId = '72d9c4a1-58b0-4be7-95c0-a1d2227d2f22';
+        $request = TelegramPostRequest::factory()->for($workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'webhook_generation' => $config->webhook_generation,
+            'state' => TelegramPostRequest::GENERATING,
+            'work_claimed_at' => now(),
+            'work_lease_id' => $leaseId,
+        ]);
+
+        $client = new class($request) implements AiTranscriptionClientContract
+        {
+            public function __construct(private TelegramPostRequest $request) {}
+
+            public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
+            {
+                $this->request->update(['state' => TelegramPostRequest::CANCELLED]);
+
+                return AiTranscriptionResult::success(text: 'transcribed after cancellation', language: 'bn');
+            }
+        };
+
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle(
+            $transcription,
+            $request->id,
+            $leaseId,
+        );
+
+        $this->assertSame('done', $transcription->refresh()->status);
+        $this->assertSame(TelegramPostRequest::CANCELLED, $request->refresh()->state);
+        $this->assertSame(0, Post::query()->count());
+        $this->assertSame(0, TelegramOutboundMessage::query()->count());
     }
 
     public function test_it_does_not_overwrite_an_entry_language_that_was_already_set()
@@ -100,7 +171,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, new FakeTelegramClient))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $this->assertSame('en', $entry->refresh()->language);
     }
@@ -137,14 +208,63 @@ class TranscribeVoiceNoteActionTest extends TestCase
                 return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
             }
         };
-        $telegram = new FakeTelegramClient;
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, $telegram))->handle($transcription);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertSame($config->bot_token, $message->telegramBotConfig?->bot_token);
+        $this->assertSame(987654321, $message->chat_id);
+        $this->assertSame('📝 Transcript: transcribed text', $message->chunks[0]);
+    }
 
-        $this->assertCount(1, $telegram->sentMessages);
-        $this->assertSame($config->bot_token, $telegram->sentMessages[0]['botToken']);
-        $this->assertSame(987654321, $telegram->sentMessages[0]['chatId']);
-        $this->assertSame('📝 Transcript: transcribed text', $telegram->sentMessages[0]['text']);
+    public function test_a_successful_telegram_transcription_queues_post_generation(): void
+    {
+        Storage::fake('scratchpad');
+        Storage::disk('scratchpad')->put('audio/note.ogg', 'raw-bytes');
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $mediaAsset = MediaAsset::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'audio',
+            'disk' => 'scratchpad',
+            'path' => 'audio/note.ogg',
+            'mime' => 'audio/ogg',
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'kind' => 'voice',
+            'source' => 'telegram',
+            'meta' => ['telegram_chat_id' => 555],
+        ]);
+        $transcription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $entry->id,
+            'media_asset_id' => $mediaAsset->id,
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        AiProviderCredential::factory()->openai()->create(['workspace_id' => $workspace->id]);
+
+        $client = new class implements AiTranscriptionClientContract
+        {
+            public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
+            {
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+            }
+        };
+
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
+
+        Queue::assertPushed(GenerateTelegramPostJob::class, fn (GenerateTelegramPostJob $job): bool => $job->telegramPostRequestId === $request->id);
+        $this->assertSame(TelegramPostRequest::GENERATING, $request->refresh()->state);
     }
 
     public function test_no_reply_is_sent_for_a_web_sourced_entry_even_with_a_connected_bot()
@@ -179,11 +299,10 @@ class TranscribeVoiceNoteActionTest extends TestCase
                 return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
             }
         };
-        $telegram = new FakeTelegramClient;
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, $telegram))->handle($transcription);
-
-        $this->assertSame([], $telegram->sentMessages);
+        $this->assertSame('done', $transcription->refresh()->status);
+        $this->assertSame(0, TelegramOutboundMessage::count());
     }
 
     public function test_no_reply_is_sent_for_a_telegram_sourced_entry_with_no_stored_chat_id()
@@ -216,11 +335,10 @@ class TranscribeVoiceNoteActionTest extends TestCase
                 return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
             }
         };
-        $telegram = new FakeTelegramClient;
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, $telegram))->handle($transcription);
-
-        $this->assertSame([], $telegram->sentMessages);
+        $this->assertSame('done', $transcription->refresh()->status);
+        $this->assertSame(0, TelegramOutboundMessage::count());
     }
 
     public function test_no_reply_is_sent_when_the_workspace_has_no_connected_bot()
@@ -251,11 +369,10 @@ class TranscribeVoiceNoteActionTest extends TestCase
                 return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
             }
         };
-        $telegram = new FakeTelegramClient;
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, $telegram))->handle($transcription);
-
-        $this->assertSame([], $telegram->sentMessages);
+        $this->assertSame('done', $transcription->refresh()->status);
+        $this->assertSame(0, TelegramOutboundMessage::count());
     }
 
     public function test_no_provider_configured_fails_honestly_without_touching_storage()
@@ -272,11 +389,48 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, new FakeTelegramClient))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $transcription->refresh();
         $this->assertSame('failed', $transcription->status);
         $this->assertSame('no_provider_configured', $transcription->error_code);
+    }
+
+    public function test_no_provider_configured_fails_a_telegram_post_request(): void
+    {
+        Queue::fake();
+        $workspace = Workspace::factory()->create();
+        $config = TelegramBotConfig::factory()->connected()->create([
+            'workspace_id' => $workspace->id,
+        ]);
+        $entry = ScratchpadEntry::factory()->create([
+            'workspace_id' => $workspace->id,
+            'source' => 'telegram',
+        ]);
+        $mediaAsset = MediaAsset::factory()->create(['workspace_id' => $workspace->id]);
+        $transcription = Transcription::factory()->create([
+            'scratchpad_entry_id' => $entry->id,
+            'media_asset_id' => $mediaAsset->id,
+        ]);
+        $request = TelegramPostRequest::factory()->create([
+            'workspace_id' => $workspace->id,
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $entry->id,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+        $client = new class implements AiTranscriptionClientContract
+        {
+            public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
+            {
+                throw new \RuntimeException('should never be called');
+            }
+        };
+
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
+
+        $this->assertSame(TelegramPostRequest::FAILED, $request->refresh()->state);
+        $message = TelegramOutboundMessage::query()->sole();
+        $this->assertStringContainsString('no OpenAI-shaped', $message->chunks[0]);
     }
 
     public function test_an_anthropic_only_workspace_is_treated_as_having_no_provider()
@@ -294,7 +448,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, new FakeTelegramClient))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $this->assertSame('no_provider_configured', $transcription->refresh()->error_code);
     }
@@ -320,7 +474,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, new FakeTelegramClient))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $transcription->refresh();
         $this->assertSame('failed', $transcription->status);
@@ -356,7 +510,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, new FakeTelegramClient))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $this->assertSame(['sk-first', 'sk-second'], $client->attemptedKeys);
         $transcription->refresh();
@@ -387,7 +541,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             }
         };
 
-        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver, new FakeTelegramClient))->handle($transcription);
+        (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
 
         $transcription->refresh();
         $this->assertSame('failed', $transcription->status);

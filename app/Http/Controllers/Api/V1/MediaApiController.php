@@ -9,7 +9,9 @@ use App\Models\Workspace;
 use App\Support\Media\MediaLibraryTab;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MediaApiController extends Controller
 {
@@ -49,6 +51,22 @@ class MediaApiController extends Controller
 
         return MediaAssetResource::collection(
             $query->paginate(min((int) $request->integer('per_page', 50), 100)),
+        );
+    }
+
+    public function file(MediaAsset $mediaAsset): StreamedResponse
+    {
+        $workspace = Workspace::current();
+
+        abort_if($workspace === null || $mediaAsset->workspace_id !== $workspace->id, 404);
+
+        return Storage::disk($mediaAsset->disk)->response(
+            $mediaAsset->path,
+            $mediaAsset->original_filename,
+            [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ],
         );
     }
 }

@@ -2,7 +2,10 @@
 
 namespace App\Actions\Postsyncer;
 
+use App\Jobs\PublishPostJob;
 use App\Models\Post;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\LegacyPublishProgress;
 use App\Support\Postsyncer\PostPublishPlanner;
@@ -23,10 +26,31 @@ class PublishPostAction
     ) {}
 
     /**
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
+     * Freeze the local plan metadata before a queued job can be processed.
+     * Workers still re-plan to refresh expiring signed media URLs, but the
+     * persisted hash and group keys make any content/config drift fail closed.
+     *
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options
+     * @return array{hash: string, groups: list<array{index: int, group_key: string}>, options: array<string, mixed>}
      */
-    public function handle(Post $post, array $options, ?string $runToken = null): void
+    public function freezePlan(Post $post, PostsyncerConfig $config, array $options): array
     {
+        $normalizedOptions = $this->normalizeOptions($options);
+        $groups = $this->planner->plan($post, $config, $normalizedOptions);
+
+        return $this->planMetadata($config, $groups, $normalizedOptions);
+    }
+
+    /**
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options
+     */
+    public function handle(
+        Post $post,
+        array $options,
+        ?string $runToken = null,
+        ?string $operationId = null,
+        ?string $leaseId = null,
+    ): void {
         $post->refresh();
         $originalStatus = $post->status;
         $publishError = $post->publish_error;
@@ -45,17 +69,24 @@ class PublishPostAction
             return;
         }
 
-        if (! $this->startRun($post, $runToken)) {
-            return;
-        }
-
-        $post->refresh();
-        $progress = $post->publish_progress;
+        $claimLeaseId = null;
 
         try {
+            $claimed = $this->claimPost($post, $options, $runToken, $operationId, $leaseId);
+
+            if ($claimed === null) {
+                return;
+            }
+
+            $post = $claimed;
+            $progress = $post->publish_progress;
+            $claimLeaseId = $post->publish_lease_id;
             $post->loadMissing('workspace');
             $this->assertFirstPublish($post);
             $config = PostsyncerConfig::fromWorkspace($post->workspace);
+            if (! $config->publishEnabled()) {
+                throw new PostsyncerException('PostSyncer publishing is disabled in Settings.');
+            }
             $client = new PostsyncerClient($config);
             $groups = $this->planner->plan($post, $config, $options);
 
@@ -74,6 +105,7 @@ class PublishPostAction
                 $publishError,
                 $config,
                 $groups,
+                $claimLeaseId,
             );
             if ($progress === null) {
                 return;
@@ -83,10 +115,15 @@ class PublishPostAction
 
             if (! $this->allPlannedGroupsCompleted($progress)) {
                 foreach ($groups as $index => $group) {
-                    if (! $this->assertPlanUnchanged($post, $options, $plan, $runToken)) {
+                    if (! $this->assertPlanUnchanged($post, $options, $plan, $runToken, $claimLeaseId)) {
                         return;
                     }
                     $groupKey = $this->groupKey($config, $group);
+                    $idempotencyKey = $this->idempotencyKey(
+                        (string) $progress['operation_id'],
+                        $index,
+                        $groupKey,
+                    );
 
                     if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
                         continue;
@@ -100,20 +137,20 @@ class PublishPostAction
                             'index' => $index,
                             'group_key' => $groupKey,
                             'phase' => $group->mediaUrls !== [] ? 'uploading' : 'creating',
-                            'idempotency_key' => $this->idempotencyKey(
-                                (string) $progress['operation_id'],
-                                $index,
-                                $groupKey,
-                            ),
+                            'idempotency_key' => $idempotencyKey,
                             'media_ids' => [],
                             'media_urls' => $group->mediaUrls,
                         ];
-                        if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                        if (! $this->saveProgressForRun($post, $progress, $runToken, $claimLeaseId)) {
                             return;
                         }
 
                         if ($group->mediaUrls !== []) {
-                            $mediaIds = $client->uploadFromUrls($group->workspaceId, $group->mediaUrls);
+                            $mediaIds = $client->uploadFromUrls(
+                                $group->workspaceId,
+                                $group->mediaUrls,
+                                $idempotencyKey.':media',
+                            );
 
                             // PostSyncer can return 200 with an empty media list when a
                             // signed/Drive URL fails to fetch. Never continue as a
@@ -128,14 +165,15 @@ class PublishPostAction
 
                             $progress['current']['phase'] = 'creating';
                             $progress['current']['media_ids'] = $mediaIds;
-                            if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                            if (! $this->saveProgressForRun($post, $progress, $runToken, $claimLeaseId)) {
                                 return;
                             }
                         }
                     }
 
                     $post->refresh();
-                    if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+                    if (! $this->runTokenMatches($post->publish_progress, $runToken)
+                        || $post->publish_lease_id !== $claimLeaseId) {
                         return;
                     }
 
@@ -146,22 +184,19 @@ class PublishPostAction
                         'index' => $index,
                         'group_key' => $groupKey,
                         'phase' => 'creating',
-                        'idempotency_key' => $this->idempotencyKey(
-                            (string) $progress['operation_id'],
-                            $index,
-                            $groupKey,
-                        ),
+                        'idempotency_key' => $idempotencyKey,
                         'media_ids' => $mediaIds,
                         'media_urls' => $group->mediaUrls,
                         'expected_payload' => $body,
                     ];
-                    if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                    if (! $this->saveProgressForRun($post, $progress, $runToken, $claimLeaseId)) {
                         return;
                     }
 
-                    $result = $client->createPost($body);
+                    $result = $client->createPost($body, $idempotencyKey.':post');
                     $post->refresh();
-                    if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+                    if (! $this->runTokenMatches($post->publish_progress, $runToken)
+                        || $post->publish_lease_id !== $claimLeaseId) {
                         return;
                     }
                     $verified = $this->verifyCreatedPost(
@@ -172,7 +207,8 @@ class PublishPostAction
                         $mediaIds,
                     );
                     $post->refresh();
-                    if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+                    if (! $this->runTokenMatches($post->publish_progress, $runToken)
+                        || $post->publish_lease_id !== $claimLeaseId) {
                         return;
                     }
                     $completedGroups[] = $this->formatProgressGroup(
@@ -192,7 +228,7 @@ class PublishPostAction
                     // the worker may be restarted before the whole plan finishes.
                     $progress['completed_groups'] = $completedGroups;
                     $progress['current'] = null;
-                    if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+                    if (! $this->saveProgressForRun($post, $progress, $runToken, $claimLeaseId)) {
                         return;
                     }
                 }
@@ -213,50 +249,17 @@ class PublishPostAction
             $progress['state'] = 'succeeded';
             $progress['completed_groups'] = $completedGroups;
             $progress['current'] = null;
-            DB::transaction(function () use (
+            if (! $this->finalizeSuccess(
                 $post,
-                $options,
-                $plan,
                 $publishedGroups,
                 $progress,
-                $runToken,
-            ): void {
-                $lockedPost = Post::query()
-                    ->whereKey($post->getKey())
-                    ->lockForUpdate()
-                    ->firstOrFail();
-
-                if (! $this->runTokenMatches($lockedPost->publish_progress, $runToken)) {
-                    return;
-                }
-
-                if (! $lockedPost->isPublishInProgress()) {
-                    throw new PostsyncerException(
-                        'The post publish state changed before finalization. Retry the publish.'
-                    );
-                }
-
-                $lockedPost->loadMissing('workspace');
-                $latestConfig = PostsyncerConfig::fromWorkspace($lockedPost->workspace);
-                $latestGroups = $this->planner->plan($lockedPost, $latestConfig, $options);
-                $latestPlan = $this->planMetadata($latestConfig, $latestGroups, $options);
-
-                if ($latestPlan['hash'] !== $plan['hash']
-                    || $latestPlan['groups'] !== $plan['groups']) {
-                    throw new PostsyncerException(
-                        'The post changed while the PostSyncer publish was running. '
-                        .'The external groups were not finalized in Content Machine.'
-                    );
-                }
-
-                $lockedPost->forceFill([
-                    'postsyncer' => ['groups' => $publishedGroups],
-                    'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
-                    'publish_state' => 'succeeded',
-                    'publish_error' => null,
-                    'publish_progress' => $progress,
-                ])->save();
-            });
+                $options,
+                $claimLeaseId,
+            )) {
+                throw new PostsyncerException(
+                    'The publish could not be finalized because its approval or cancellation state changed.'
+                );
+            }
         } catch (Throwable $e) {
             $unknownOutcome = $this->recordFailureForRun(
                 $post,
@@ -264,6 +267,9 @@ class PublishPostAction
                 $originalStatus,
                 is_array($progress) ? $progress : null,
                 $e,
+                $claimLeaseId,
+                $operationId,
+                $options,
             );
 
             if ($unknownOutcome === null) {
@@ -273,7 +279,8 @@ class PublishPostAction
             // Keep deterministic PostSyncer errors in the record. Only
             // failures that are safe to repeat should reach the queue worker.
             if (! $unknownOutcome
-                && ! ($e instanceof PostsyncerException && ! $e->retryable)) {
+                && ! ($e instanceof PostsyncerException && ! $e->retryable)
+                && ! ($e instanceof \InvalidArgumentException)) {
                 throw $e;
             }
 
@@ -808,6 +815,10 @@ class PublishPostAction
         }
 
         if ($exception instanceof PostsyncerException) {
+            if (! $exception->responseReceived && $exception->getPrevious() instanceof ConnectionException) {
+                return true;
+            }
+
             $code = (int) $exception->getCode();
 
             if (in_array($code, [404, 408, 425, 429], true) || $code >= 500) {
@@ -1106,6 +1117,344 @@ class PublishPostAction
     }
 
     /**
+     * Keep the Telegram request state tied to the publish operation that owns
+     * the post. Dashboard/API publishes simply have no matching request.
+     *
+     * @param  array<string, mixed>|null  $options
+     */
+    private function updateTelegramPostRequests(
+        Post $post,
+        string $state,
+        ?string $errorMessage = null,
+        ?array $options = null,
+    ): void {
+        if ($options === null) {
+            return;
+        }
+
+        $requestId = $this->telegramRequestId($options);
+        if ($requestId === null) {
+            return;
+        }
+
+        $query = $post->telegramPostRequests()
+            ->whereIn('state', [
+                TelegramPostRequest::AWAITING_APPROVAL,
+                TelegramPostRequest::APPROVED,
+                TelegramPostRequest::FAILED,
+            ])
+            ->whereKey($requestId);
+
+        $query->update([
+            'state' => $state,
+            'error_message' => $errorMessage,
+        ]);
+    }
+
+    /**
+     * Admit one publish worker under a durable row lease. Cancellation and
+     * approval checks use the same lock ordering as the worker.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    private function claimPost(
+        Post $post,
+        array $options,
+        string $runToken,
+        ?string $operationId = null,
+        ?string $leaseId = null,
+    ): ?Post {
+        return DB::transaction(function () use ($post, $options, $runToken, $operationId, $leaseId): ?Post {
+            Workspace::query()
+                ->whereKey($post->workspace_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $locked = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $progress = $locked->publish_progress;
+
+            if ($operationId !== null
+                && (! is_array($progress) || ($progress['operation_id'] ?? null) !== $operationId)
+            ) {
+                return null;
+            }
+
+            if (is_array($progress)
+                && $this->hasRunToken($progress)
+                && ! $this->runTokenMatches($progress, $runToken)) {
+                return null;
+            }
+
+            if ($leaseId !== null && $locked->publish_lease_id !== $leaseId) {
+                $safeUploadRetry = $locked->publish_lease_id === null
+                    && $locked->publish_state === 'failed'
+                    && is_array($progress)
+                    && is_array($progress['current'] ?? null)
+                    && ($progress['current']['phase'] ?? null) === 'uploading';
+
+                if (! $safeUploadRetry) {
+                    return null;
+                }
+            }
+
+            if ($locked->publish_state === 'succeeded') {
+                return null;
+            }
+
+            $legacyAccountFailure = LegacyPublishProgress::isMissingAccountFailure(
+                $locked->publish_error,
+                is_array($progress) ? $progress : null,
+            );
+
+            if ($locked->publish_state === 'failed'
+                && is_array($progress)
+                && ! $legacyAccountFailure
+                && ($this->hasUnknownCurrent($progress) || ($progress['state'] ?? null) === 'uncertain')
+            ) {
+                return null;
+            }
+
+            if ($locked->publish_state === 'running') {
+                $claimedAt = $locked->publish_claimed_at;
+                $staleAt = now()->subSeconds(PublishPostJob::LEASE_SECONDS);
+
+                if ($claimedAt !== null && $claimedAt->greaterThan($staleAt)) {
+                    return null;
+                }
+
+                $unknownOutcome = is_array($progress)
+                    && ($this->hasUnknownCurrent($progress) || ($progress['state'] ?? null) === 'uncertain');
+
+                if ($unknownOutcome) {
+                    $progress['state'] = 'uncertain';
+                    $error = 'PostSyncer create outcome is uncertain. Reconcile PostSyncer before retrying. '
+                        .'The previous publish worker lease expired.';
+                    $locked->forceFill([
+                        'publish_state' => 'failed',
+                        'publish_error' => $error,
+                        'publish_progress' => $progress,
+                        'publish_claimed_at' => null,
+                        'publish_lease_id' => null,
+                    ])->save();
+                    $this->updateTelegramPostRequests($locked, TelegramPostRequest::FAILED, $error, $options);
+
+                    return null;
+                }
+            }
+
+            $telegramRequest = $this->lockTelegramRequest($locked, $options);
+
+            if ($telegramRequest !== null
+                && in_array($telegramRequest->state, [
+                    TelegramPostRequest::CANCELLED,
+                    TelegramPostRequest::PUBLISHED,
+                ], true)
+            ) {
+                if ($locked->publish_state === 'queued') {
+                    $locked->forceFill([
+                        'publish_state' => 'idle',
+                        'publish_error' => null,
+                        'publish_claimed_at' => null,
+                        'publish_lease_id' => null,
+                    ])->save();
+                }
+
+                return null;
+            }
+
+            if (($locked->approval_state ?? 'approved') !== 'approved') {
+                $locked->forceFill([
+                    'publish_state' => 'failed',
+                    'publish_error' => 'This post needs human approval before it can be published.',
+                    'publish_claimed_at' => null,
+                    'publish_lease_id' => null,
+                ])->save();
+
+                return null;
+            }
+
+            if ($telegramRequest?->state === TelegramPostRequest::FAILED) {
+                $telegramRequest->forceFill([
+                    'state' => TelegramPostRequest::APPROVED,
+                    'error_message' => null,
+                ])->save();
+            }
+
+            $newLeaseId = $locked->publish_state === 'running'
+                ? (string) Str::uuid()
+                : ($locked->publish_lease_id ?? (string) Str::uuid());
+
+            $locked->forceFill([
+                'publish_state' => 'running',
+                'publish_error' => null,
+                'publish_claimed_at' => now(),
+                'publish_lease_id' => $newLeaseId,
+                'publish_progress' => is_array($progress)
+                    ? [...$progress, 'run_token' => $runToken]
+                    : $progress,
+            ])->save();
+
+            return $locked;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private function lockTelegramRequest(Post $post, array $options): ?TelegramPostRequest
+    {
+        $requestId = $this->telegramRequestId($options);
+        if ($requestId === null) {
+            return null;
+        }
+
+        $request = TelegramPostRequest::query()->whereKey($requestId)->first();
+
+        if ($request === null
+            || $request->workspace_id !== $post->workspace_id
+            || $request->post_id !== $post->id) {
+            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
+        }
+
+        $config = TelegramBotConfig::query()
+            ->whereKey($request->telegram_bot_config_id)
+            ->lockForUpdate()
+            ->first();
+
+        if ($config === null
+            || ! $config->isConnected()
+            || ($request->webhook_generation !== null
+                && $request->webhook_generation !== $config->webhook_generation)
+        ) {
+            throw new PostsyncerException(
+                'The Telegram bot connection changed before this publish could run.',
+            );
+        }
+
+        $request = TelegramPostRequest::query()
+            ->whereKey($requestId)
+            ->lockForUpdate()
+            ->first();
+
+        if ($request === null
+            || $request->workspace_id !== $post->workspace_id
+            || $request->post_id !== $post->id
+            || ($request->webhook_generation !== null
+                && $request->webhook_generation !== $config->webhook_generation)) {
+            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
+        }
+
+        if ($request->webhook_generation === null && $config->webhook_generation !== null) {
+            $request->forceFill([
+                'webhook_generation' => $config->webhook_generation,
+            ])->save();
+        }
+
+        if (! in_array($request->state, [
+            TelegramPostRequest::APPROVED,
+            TelegramPostRequest::FAILED,
+            TelegramPostRequest::CANCELLED,
+            TelegramPostRequest::PUBLISHED,
+        ], true)) {
+            throw new PostsyncerException('The Telegram draft is not ready to publish.');
+        }
+
+        return $request;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $publishedGroups
+     * @param  array<string, mixed>  $progress
+     * @param  array<string, mixed>  $options
+     */
+    private function finalizeSuccess(
+        Post $post,
+        array $publishedGroups,
+        array $progress,
+        array $options,
+        ?string $leaseId,
+    ): bool {
+        return DB::transaction(function () use ($post, $publishedGroups, $progress, $options, $leaseId): bool {
+            $locked = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null
+                || $locked->publish_state !== 'running'
+                || ($locked->approval_state ?? 'approved') !== 'approved'
+                || ! is_array($locked->publish_progress)
+                || ($locked->publish_progress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($leaseId !== null && $locked->publish_lease_id !== $leaseId)
+                || ($leaseId !== null
+                    && ($locked->publish_claimed_at === null
+                        || $locked->publish_claimed_at->isBefore(now()->subSeconds(PublishPostJob::LEASE_SECONDS))))
+            ) {
+                return false;
+            }
+
+            $locked->loadMissing('workspace');
+            $latestConfig = PostsyncerConfig::fromWorkspace($locked->workspace);
+            $latestGroups = $this->planner->plan($locked, $latestConfig, $options);
+            $latestPlan = $this->planMetadata($latestConfig, $latestGroups, $options);
+
+            if ($latestPlan['hash'] !== ($progress['plan_hash'] ?? null)
+                || $latestPlan['groups'] !== ($progress['planned_groups'] ?? null)
+            ) {
+                throw new PostsyncerException(
+                    'The post changed while the PostSyncer publish was running. '
+                    .'The external groups were not finalized in Content Machine.'
+                );
+            }
+
+            $request = $this->lockTelegramRequest($locked, $options);
+            if ($request !== null && $request->state !== TelegramPostRequest::APPROVED) {
+                return false;
+            }
+
+            $locked->forceFill([
+                'postsyncer' => ['groups' => $publishedGroups],
+                'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
+                'publish_state' => 'succeeded',
+                'publish_error' => null,
+                'publish_progress' => $progress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+
+            $this->updateTelegramPostRequests($locked, TelegramPostRequest::PUBLISHED, null, $options);
+
+            return true;
+        });
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private function telegramRequestId(array $options): ?int
+    {
+        $id = $options['telegram_request_id'] ?? null;
+
+        if ($id === null) {
+            return null;
+        }
+
+        if (is_int($id) && $id > 0) {
+            return $id;
+        }
+
+        if (is_string($id) && ctype_digit($id) && (int) $id > 0) {
+            return (int) $id;
+        }
+
+        throw new PostsyncerException('The Telegram publish request id is invalid.');
+    }
+
+    /**
      * Rebuild only the metadata needed to validate a stored payload snapshot.
      * The current planner is intentionally not used for this group because
      * this command exists to recover from a changed plan.
@@ -1368,9 +1717,15 @@ class PublishPostAction
         array $options,
         array $plan,
         string $runToken,
+        ?string $leaseId = null,
     ): bool {
         $post->refresh();
-        if (! $this->runTokenMatches($post->publish_progress, $runToken)) {
+        if (! $this->runTokenMatches($post->publish_progress, $runToken)
+            || ($leaseId !== null && $post->publish_lease_id !== $leaseId)
+            || ($leaseId !== null
+                && ($post->publish_claimed_at === null
+                    || $post->publish_claimed_at->isBefore(now()->subSeconds(PublishPostJob::LEASE_SECONDS))))
+        ) {
             return false;
         }
 
@@ -1392,48 +1747,11 @@ class PublishPostAction
 
         $post->refresh();
 
-        return $this->runTokenMatches($post->publish_progress, $runToken);
-    }
-
-    private function startRun(Post $post, string $runToken): bool
-    {
-        return DB::transaction(function () use ($post, $runToken): bool {
-            Workspace::query()
-                ->whereKey($post->workspace_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $lockedPost = Post::query()
-                ->whereKey($post->getKey())
-                ->lockForUpdate()
-                ->first();
-
-            if ($lockedPost === null) {
-                return false;
-            }
-
-            if ($lockedPost->publish_state === 'succeeded') {
-                return false;
-            }
-
-            $progress = $lockedPost->publish_progress;
-            if ($this->hasRunToken($progress)
-                && ! $this->runTokenMatches($progress, $runToken)) {
-                return false;
-            }
-
-            if (is_array($progress)) {
-                $progress['run_token'] = $runToken;
-            }
-
-            $lockedPost->forceFill([
-                'publish_state' => 'running',
-                'publish_error' => null,
-                'publish_progress' => $progress,
-            ])->save();
-
-            return true;
-        });
+        return $this->runTokenMatches($post->publish_progress, $runToken)
+            && ($leaseId === null || $post->publish_lease_id === $leaseId)
+            && ($leaseId === null
+                || ($post->publish_claimed_at !== null
+                    && $post->publish_claimed_at->isAfter(now()->subSeconds(PublishPostJob::LEASE_SECONDS))));
     }
 
     /**
@@ -1443,9 +1761,13 @@ class PublishPostAction
      *
      * @param  array<string, mixed>  $progress
      */
-    private function saveProgressForRun(Post $post, array $progress, string $runToken): bool
-    {
-        return DB::transaction(function () use ($post, $progress, $runToken): bool {
+    private function saveProgressForRun(
+        Post $post,
+        array $progress,
+        string $runToken,
+        ?string $leaseId = null,
+    ): bool {
+        return DB::transaction(function () use ($post, $progress, $runToken, $leaseId): bool {
             $lockedPost = Post::query()
                 ->whereKey($post->getKey())
                 ->lockForUpdate()
@@ -1454,11 +1776,24 @@ class PublishPostAction
             if ($lockedPost === null
                 || (! $this->runTokenMatches($lockedPost->publish_progress, $runToken)
                     && ! ($lockedPost->publish_progress === null
-                        && $lockedPost->publish_state === 'running'))) {
+                        && $lockedPost->publish_state === 'running'))
+                || ($lockedPost->approval_state ?? 'approved') !== 'approved'
+                || ($leaseId !== null && $lockedPost->publish_lease_id !== $leaseId)
+                || ($leaseId !== null
+                    && ($lockedPost->publish_claimed_at === null
+                        || $lockedPost->publish_claimed_at->isBefore(now()->subSeconds(PublishPostJob::LEASE_SECONDS))))) {
                 return false;
             }
 
-            $lockedPost->update(['publish_progress' => $progress]);
+            $request = $this->lockTelegramRequest($lockedPost, $progress['options'] ?? []);
+            if ($request !== null && $request->state !== TelegramPostRequest::APPROVED) {
+                return false;
+            }
+
+            $lockedPost->forceFill([
+                'publish_progress' => $progress,
+                'publish_claimed_at' => $leaseId === null ? $lockedPost->publish_claimed_at : now(),
+            ])->save();
 
             return true;
         });
@@ -1466,6 +1801,7 @@ class PublishPostAction
 
     /**
      * @param  array<string, mixed>|null  $localProgress
+     * @param  array<string, mixed>  $options
      * @return bool|null True/false is whether the failure has an uncertain
      *                   outcome; null means the worker no longer owns the run.
      */
@@ -1475,6 +1811,9 @@ class PublishPostAction
         string $originalStatus,
         ?array $localProgress,
         Throwable $exception,
+        ?string $leaseId = null,
+        ?string $operationId = null,
+        array $options = [],
     ): ?bool {
         return DB::transaction(function () use (
             $post,
@@ -1482,6 +1821,9 @@ class PublishPostAction
             $originalStatus,
             $localProgress,
             $exception,
+            $leaseId,
+            $operationId,
+            $options,
         ): ?bool {
             $lockedPost = Post::query()
                 ->whereKey($post->getKey())
@@ -1495,12 +1837,28 @@ class PublishPostAction
                 return null;
             }
 
+            $latestProgress = $lockedPost->publish_progress;
+            if ($operationId !== null
+                && (! is_array($latestProgress) || ($latestProgress['operation_id'] ?? null) !== $operationId)
+            ) {
+                return null;
+            }
+
+            if ($leaseId !== null && $lockedPost->publish_lease_id !== $leaseId) {
+                return null;
+            }
+
+            if ($leaseId !== null
+                && ($lockedPost->publish_claimed_at === null
+                    || $lockedPost->publish_claimed_at->isBefore(now()->subSeconds(PublishPostJob::LEASE_SECONDS)))) {
+                return null;
+            }
+
             if ($lockedPost->publish_state === 'succeeded'
                 && $this->hasExistingPublicGroup($lockedPost)) {
                 return null;
             }
 
-            $latestProgress = $lockedPost->publish_progress;
             $failedProgress = $this->failureProgress(
                 $localProgress,
                 is_array($latestProgress) ? $latestProgress : null,
@@ -1547,7 +1905,11 @@ class PublishPostAction
                 'publish_state' => 'failed',
                 'publish_error' => $error,
                 'publish_progress' => $failedProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
             ])->save();
+
+            $this->updateTelegramPostRequests($lockedPost, TelegramPostRequest::FAILED, $error, $options);
 
             return $unknownOutcome;
         });
@@ -1585,6 +1947,7 @@ class PublishPostAction
         ?string $publishError,
         PostsyncerConfig $config,
         array $groups,
+        ?string $leaseId = null,
     ): ?array {
         if ($existing === null) {
             $progress = [
@@ -1599,7 +1962,7 @@ class PublishPostAction
                 'state' => 'running',
             ];
 
-            if (! $this->saveProgressForRun($post, $progress, $runToken)) {
+            if (! $this->saveProgressForRun($post, $progress, $runToken, $leaseId)) {
                 return null;
             }
 
@@ -1669,7 +2032,7 @@ class PublishPostAction
         $existing['run_token'] = $runToken;
         $existing['options'] = $plan['options'];
         $existing['state'] = 'running';
-        if (! $this->saveProgressForRun($post, $existing, $runToken)) {
+        if (! $this->saveProgressForRun($post, $existing, $runToken, $leaseId)) {
             return null;
         }
 
@@ -2018,6 +2381,11 @@ class PublishPostAction
                 : [];
             sort($platforms);
             $normalized['platforms'] = $platforms;
+        }
+
+        $telegramRequestId = $this->telegramRequestId($options);
+        if ($telegramRequestId !== null) {
+            $normalized['telegram_request_id'] = $telegramRequestId;
         }
 
         ksort($normalized);

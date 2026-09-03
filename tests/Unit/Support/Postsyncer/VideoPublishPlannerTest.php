@@ -11,6 +11,7 @@ use App\Support\Postsyncer\PublishGroup;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class VideoPublishPlannerTest extends TestCase
@@ -175,6 +176,26 @@ class VideoPublishPlannerTest extends TestCase
         $this->assertInstanceOf(CarbonImmutable::class, $group->when);
         $this->assertSame($when, $group->when->format('Y-m-d H:i:s'));
         $this->assertSame('Asia/Dhaka', $group->when->timezoneName);
+    }
+
+    public function test_invalid_when_is_reported_as_a_validation_error(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Later'],
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('The publish time is invalid.');
+
+        $this->planner->plan($video, $config, [
+            'platforms' => ['facebook'],
+            'when' => 'not-a-date',
+            'confirm_ask' => false,
+        ]);
     }
 
     public function test_no_platforms_in_options_plans_groups_from_captions(): void

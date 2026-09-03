@@ -45,6 +45,35 @@ class ReserveContentIdAction
     }
 
     /**
+     * Keep a generated id above an explicitly imported number.
+     */
+    public function advancePast(Workspace $workspace, string $kind, int $number): void
+    {
+        if ($number < 1) {
+            throw new InvalidArgumentException('A content id number must be positive.');
+        }
+
+        DB::table('id_sequences')->insertOrIgnore([
+            'workspace_id' => $workspace->id,
+            'kind' => $kind,
+            'next_value' => 1,
+        ]);
+
+        $sequence = DB::table('id_sequences')
+            ->where('workspace_id', $workspace->id)
+            ->where('kind', $kind)
+            ->lockForUpdate()
+            ->first();
+
+        if ($sequence !== null && (int) $sequence->next_value <= $number) {
+            DB::table('id_sequences')
+                ->where('workspace_id', $workspace->id)
+                ->where('kind', $kind)
+                ->update(['next_value' => $number + 1]);
+        }
+    }
+
+    /**
      * Atomically increment the workspace+kind counter and return the number
      * it held before incrementing. `insertOrIgnore` seeds a missing row
      * without racing another caller doing the same (the unique index on

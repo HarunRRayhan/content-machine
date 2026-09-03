@@ -17,8 +17,8 @@
     ]
   },
   "deploy": {
-    "startCommand": "docker-php-serversideup-entrypoint supervisord -c /etc/supervisor/conf.d/supervisord.conf",
+    "startCommand": "/usr/local/bin/cm-start-worker",
     "restartPolicyType": "ALWAYS",
-    "drainingSeconds": 120
+    "drainingSeconds": 960
   }
 }

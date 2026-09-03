@@ -14,8 +14,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Str;
 
 /**
- * A raw capture from the Scratch Pad: a quick text note today, a voice
- * memo/photo/link/file once later phases add them. Nothing here is
+ * A raw capture from the Scratch Pad: a text note, link, photo, or voice
+ * memo. Nothing here is
  * triaged automatically; `status`/`intent` only change when a human routes
  * it via scratchpad-triage.
  *
@@ -25,6 +25,8 @@ use Illuminate\Support\Str;
  * @property string $kind
  * @property CarbonImmutable $captured_at
  * @property string $source
+ * @property string|null $telegram_update_key
+ * @property string|null $webhook_generation
  * @property string|null $language
  * @property string|null $title
  * @property string|null $body
@@ -53,6 +55,8 @@ class ScratchpadEntry extends Model
         'kind',
         'captured_at',
         'source',
+        'telegram_update_key',
+        'webhook_generation',
         'language',
         'title',
         'body',
@@ -85,6 +89,18 @@ class ScratchpadEntry extends Model
     {
         static::creating(function (self $entry) {
             $entry->public_id ??= (string) Str::ulid();
+
+            if ($entry->source !== 'telegram' || $entry->webhook_generation !== null) {
+                return;
+            }
+
+            $generation = TelegramBotConfig::query()
+                ->where('workspace_id', $entry->workspace_id)
+                ->value('webhook_generation');
+
+            $entry->webhook_generation = is_string($generation)
+                ? $generation
+                : (string) Str::uuid();
         });
     }
 

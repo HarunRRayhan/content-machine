@@ -97,4 +97,14 @@ class WorkspaceTokenAuthTest extends TestCase
             ->getJson("/api/v1/scratchpad/{$foreignEntry->public_id}")
             ->assertNotFound();
     }
+
+    public function test_media_url_checks_require_the_media_read_ability(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $plaintext = $this->mintToken($workspace, ['scratchpad:read']);
+
+        $this->withToken($plaintext)
+            ->postJson('/api/v1/media-urls/check', ['url' => 'https://drive.google.com/file/d/example/view'])
+            ->assertForbidden();
+    }
 }

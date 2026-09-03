@@ -3,6 +3,7 @@
 namespace App\Support\AiProviders;
 
 use App\Models\AiProviderCredential;
+use App\Support\LinkResolution\PublicUrlGuard;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -20,6 +21,10 @@ final class HttpAiProviderVerifier implements AiProviderVerifierContract
     private const ANTHROPIC_VERSION = '2023-06-01';
 
     private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+
+    public function __construct(
+        private readonly ?PublicUrlGuard $urlGuard = null,
+    ) {}
 
     public function verify(AiProviderCredential $credential): AiProviderVerificationResult
     {
@@ -76,12 +81,15 @@ final class HttpAiProviderVerifier implements AiProviderVerifierContract
 
     private function verifyAnthropic(AiProviderCredential $credential): Response
     {
-        $baseUrl = rtrim($credential->base_url ?? self::ANTHROPIC_DEFAULT_BASE_URL, '/');
+        $endpoint = $this->baseUrl()->resolve($credential->base_url, self::ANTHROPIC_DEFAULT_BASE_URL);
 
         return Http::withHeaders([
             'x-api-key' => $credential->api_key,
             'anthropic-version' => self::ANTHROPIC_VERSION,
-        ])->timeout(10)->get("{$baseUrl}/v1/models");
+        ])->timeout(10)->withOptions([
+            'allow_redirects' => false,
+            ...$endpoint['options'],
+        ])->get($endpoint['url'].'/v1/models');
     }
 
     private function verifyOpenAi(AiProviderCredential $credential): Response
@@ -90,11 +98,20 @@ final class HttpAiProviderVerifier implements AiProviderVerifierContract
         // version segment (https://api.openai.com/v1, .../openai/v1 for
         // Groq, https://openrouter.ai/api/v1, ...), so the models endpoint
         // is a bare "/models" rather than another "/v1/models".
-        $baseUrl = rtrim($credential->base_url ?? self::OPENAI_DEFAULT_BASE_URL, '/');
+        $endpoint = $this->baseUrl()->resolve($credential->base_url, self::OPENAI_DEFAULT_BASE_URL);
 
         return Http::withToken($credential->api_key)
             ->timeout(10)
-            ->get("{$baseUrl}/models");
+            ->withOptions([
+                'allow_redirects' => false,
+                ...$endpoint['options'],
+            ])
+            ->get($endpoint['url'].'/models');
+    }
+
+    private function baseUrl(): AiProviderBaseUrl
+    {
+        return new AiProviderBaseUrl($this->urlGuard);
     }
 
     private function describeFailure(Response $response): string

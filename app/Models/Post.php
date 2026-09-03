@@ -10,6 +10,7 @@ use Database\Factories\PostFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
@@ -31,9 +32,14 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property array<string, mixed>|null $platforms
  * @property array<int, string>|null $image_drive_urls
  * @property array<string, mixed>|null $postsyncer
- * @property array<string, mixed>|null $publish_progress
  * @property string $publish_state
  * @property string|null $publish_error
+ * @property array<string, mixed>|null $publish_progress
+ * @property CarbonImmutable|null $publish_claimed_at
+ * @property string|null $publish_lease_id
+ * @property string $approval_state
+ * @property CarbonImmutable|null $approved_at
+ * @property int|null $approved_by_user_id
  * @property string $status
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
@@ -61,6 +67,11 @@ class Post extends Model
         'failed',
     ];
 
+    public const APPROVAL_STATES = [
+        'pending',
+        'approved',
+    ];
+
     /**
      * @var list<string>
      */
@@ -79,8 +90,13 @@ class Post extends Model
         'image_drive_urls',
         'postsyncer',
         'publish_progress',
+        'publish_claimed_at',
+        'publish_lease_id',
         'publish_state',
         'publish_error',
+        'approval_state',
+        'approved_at',
+        'approved_by_user_id',
         'status',
         'created_by_user_id',
     ];
@@ -96,6 +112,8 @@ class Post extends Model
             'image_drive_urls' => 'array',
             'postsyncer' => 'array',
             'publish_progress' => 'array',
+            'publish_claimed_at' => 'datetime',
+            'approved_at' => 'datetime',
         ];
     }
 
@@ -162,5 +180,41 @@ class Post extends Model
     public function attachments(): MorphMany
     {
         return $this->morphMany(Attachment::class, 'attachable')->orderBy('position');
+    }
+
+    /**
+     * @return HasMany<TelegramPostRequest, $this>
+     */
+    public function telegramPostRequests(): HasMany
+    {
+        return $this->hasMany(TelegramPostRequest::class);
+    }
+
+    /**
+     * A media mutation changes the reviewed publish payload just like a text
+     * mutation. Re-open any approval that was granted for the old payload.
+     */
+    public function invalidateApproval(): void
+    {
+        if ($this->approval_state !== 'approved') {
+            return;
+        }
+
+        $this->forceFill([
+            'approval_state' => 'pending',
+            'approved_at' => null,
+            'approved_by_user_id' => null,
+        ])->save();
+
+        $this->telegramPostRequests()
+            ->whereIn('state', [
+                TelegramPostRequest::APPROVED,
+                TelegramPostRequest::FAILED,
+            ])
+            ->update([
+                'state' => TelegramPostRequest::AWAITING_APPROVAL,
+                'confirmed_at' => null,
+                'error_message' => null,
+            ]);
     }
 }

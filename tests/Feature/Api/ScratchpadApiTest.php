@@ -163,6 +163,21 @@ class ScratchpadApiTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_an_unattached_asset_in_the_same_workspace_is_not_found(): void
+    {
+        Storage::fake('scratchpad');
+
+        $entry = ScratchpadEntry::factory()->for($this->workspace)->create(['kind' => 'text']);
+        $asset = MediaAsset::factory()->for($this->workspace)->create([
+            'disk' => 'scratchpad',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($asset->path, 'bytes');
+
+        $this->acting()->get("/api/v1/scratchpad/{$entry->public_id}/media/{$asset->id}")
+            ->assertNotFound();
+    }
+
     public function test_update_changes_only_the_fields_sent_and_records_versions()
     {
         $entry = ScratchpadEntry::factory()->for($this->workspace)->create([

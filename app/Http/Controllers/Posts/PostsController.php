@@ -101,6 +101,7 @@ class PostsController extends Controller
                 'template',
                 'status',
                 'publish_state',
+                'approval_state',
                 'language',
                 'platforms',
                 'postsyncer',
@@ -155,6 +156,10 @@ class PostsController extends Controller
 
         abort_if($post->workspace_id !== $workspace->id, 404);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
+        abort_unless(
+            $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(),
+            404,
+        );
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,
@@ -247,6 +252,7 @@ class PostsController extends Controller
             'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
             'status' => $post->status,
             'publish_state' => $post->publish_state,
+            'approval_state' => $post->approval_state ?? 'approved',
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
             'groups' => $this->presentGroups($post),
@@ -342,6 +348,10 @@ class PostsController extends Controller
             ))->forPreview();
         }
 
+        $timezone = $workspace !== null && trim($workspace->timezone) !== ''
+            ? $workspace->timezone
+            : 'Asia/Dhaka';
+
         $publishOptions = is_array($post->publish_progress)
             && is_array($post->publish_progress['options'] ?? null)
             ? $post->publish_progress['options']
@@ -376,6 +386,9 @@ class PostsController extends Controller
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
             'publish_retryable' => $post->canRetryPublish(),
+            'publish_progress' => $post->publish_progress,
+            'approval_state' => $post->approval_state ?? 'approved',
+            'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
             'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
             'needs_confirm_ask' => $needsConfirmAsk,

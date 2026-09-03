@@ -6,6 +6,7 @@ use App\Support\Telegram\TelegramApiResult;
 use App\Support\Telegram\TelegramClientContract;
 use App\Support\Telegram\TelegramFileDownloadResult;
 use App\Support\Telegram\TelegramGetMeResult;
+use App\Support\Telegram\TelegramWebhookInfoResult;
 
 /**
  * A single reusable TelegramClientContract test double, replacing what
@@ -30,6 +31,11 @@ final class FakeTelegramClient implements TelegramClientContract
     public array $deleteWebhookCalledWith = [];
 
     /**
+     * @var list<array{botToken: string, url: string, secretToken: string}>
+     */
+    public array $setWebhookCalledWith = [];
+
+    /**
      * @var list<array{botToken: string, commands: array<int, array{command: string, description: string}>}>
      */
     public array $setMyCommandsCalledWith = [];
@@ -50,6 +56,8 @@ final class FakeTelegramClient implements TelegramClientContract
 
     private TelegramApiResult $deleteWebhookResult;
 
+    private TelegramWebhookInfoResult $webhookInfoResult;
+
     private TelegramApiResult $sendMessageResult;
 
     private TelegramApiResult $setMyCommandsResult;
@@ -61,6 +69,7 @@ final class FakeTelegramClient implements TelegramClientContract
         $this->getMeResult = TelegramGetMeResult::success('fake_bot');
         $this->setWebhookResult = TelegramApiResult::success();
         $this->deleteWebhookResult = TelegramApiResult::success();
+        $this->webhookInfoResult = TelegramWebhookInfoResult::success('', 0);
         $this->sendMessageResult = TelegramApiResult::success();
         $this->setMyCommandsResult = TelegramApiResult::success();
         $this->downloadFileResult = TelegramFileDownloadResult::failure('FakeTelegramClient::willDownloadFile() was never configured for this test.');
@@ -80,9 +89,30 @@ final class FakeTelegramClient implements TelegramClientContract
         return $this;
     }
 
+    public function willDeleteWebhook(TelegramApiResult $result): self
+    {
+        $this->deleteWebhookResult = $result;
+
+        return $this;
+    }
+
+    public function willGetWebhookInfo(TelegramWebhookInfoResult $result): self
+    {
+        $this->webhookInfoResult = $result;
+
+        return $this;
+    }
+
     public function willDownloadFile(TelegramFileDownloadResult $result): self
     {
         $this->downloadFileResult = $result;
+
+        return $this;
+    }
+
+    public function willSendMessage(TelegramApiResult $result): self
+    {
+        $this->sendMessageResult = $result;
 
         return $this;
     }
@@ -94,6 +124,12 @@ final class FakeTelegramClient implements TelegramClientContract
 
     public function setWebhook(string $botToken, string $url, string $secretToken): TelegramApiResult
     {
+        $this->setWebhookCalledWith[] = [
+            'botToken' => $botToken,
+            'url' => $url,
+            'secretToken' => $secretToken,
+        ];
+
         return $this->setWebhookResult;
     }
 
@@ -102,6 +138,11 @@ final class FakeTelegramClient implements TelegramClientContract
         $this->deleteWebhookCalledWith[] = $botToken;
 
         return $this->deleteWebhookResult;
+    }
+
+    public function getWebhookInfo(string $botToken): TelegramWebhookInfoResult
+    {
+        return $this->webhookInfoResult;
     }
 
     public function sendMessage(string $botToken, int $chatId, string $text): TelegramApiResult

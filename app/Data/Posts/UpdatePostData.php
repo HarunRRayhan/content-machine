@@ -32,6 +32,8 @@ final readonly class UpdatePostData
         public ?string $publishState = null,
         public ?string $publishError = null,
         public bool $replaceExtended = false,
+        public bool $hasBody = true,
+        public bool $hasCaptions = false,
         public bool $hasImageDriveUrls = false,
         public bool $hasPostsyncer = false,
         public bool $hasPublishState = false,
@@ -44,9 +46,14 @@ final readonly class UpdatePostData
         return new self(
             title: $request->string('title')->toString(),
             body: $request->filled('body') ? $request->string('body')->toString() : null,
+            captions: $request->has('captions') && is_array($request->input('captions'))
+                ? $request->input('captions')
+                : null,
             status: $request->filled('status') ? $request->string('status')->toString() : null,
             imageDriveUrls: self::parseDriveUrls($request->input('image_drive_urls')),
             replaceExtended: false,
+            hasBody: $request->has('body'),
+            hasCaptions: $request->has('captions'),
             hasImageDriveUrls: $request->has('image_drive_urls'),
         );
     }
@@ -126,6 +133,8 @@ final readonly class UpdatePostData
                 ? ($payload['publish_error'] !== null ? (string) $payload['publish_error'] : null)
                 : null,
             replaceExtended: true,
+            hasBody: true,
+            hasCaptions: array_key_exists('captions', $payload),
             hasImageDriveUrls: array_key_exists('image_drive_urls', $payload),
             hasPostsyncer: array_key_exists('postsyncer', $payload),
             hasPublishState: array_key_exists('publish_state', $payload),

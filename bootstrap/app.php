@@ -33,10 +33,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'auth.workspace-token' => AuthenticateWorkspaceToken::class,
         ]);
-        // Trust Railway's TLS-terminating load balancer so signed URLs and
-        // Storage::temporaryUrl() generate https:// links instead of http://.
-        $middleware->trustProxies(at: '*');
-
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
         // Telegram itself posts here, it can't carry a CSRF token; the

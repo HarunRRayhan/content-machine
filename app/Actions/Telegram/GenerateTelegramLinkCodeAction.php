@@ -5,7 +5,9 @@ namespace App\Actions\Telegram;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramLinkCode;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * Issues a fresh, single-use code for one team member to link their own
@@ -21,21 +23,32 @@ class GenerateTelegramLinkCodeAction
 
     public function handle(TelegramBotConfig $config, User $user): TelegramLinkCode
     {
-        TelegramLinkCode::query()
-            ->where('telegram_bot_config_id', $config->id)
-            ->where('user_id', $user->id)
-            ->whereNull('consumed_at')
-            ->delete();
+        return DB::transaction(function () use ($config, $user): TelegramLinkCode {
+            $lockedConfig = TelegramBotConfig::query()
+                ->whereKey($config->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        do {
-            $code = Str::upper(Str::random(8));
-        } while (TelegramLinkCode::query()->where('code', $code)->exists());
+            if (! $lockedConfig->isConnected()) {
+                throw new RuntimeException('Connect the bot before generating a link code.');
+            }
 
-        return TelegramLinkCode::create([
-            'telegram_bot_config_id' => $config->id,
-            'user_id' => $user->id,
-            'code' => $code,
-            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
-        ]);
+            TelegramLinkCode::query()
+                ->where('telegram_bot_config_id', $lockedConfig->id)
+                ->where('user_id', $user->id)
+                ->whereNull('consumed_at')
+                ->delete();
+
+            do {
+                $code = Str::upper(Str::random(8));
+            } while (TelegramLinkCode::query()->where('code', $code)->exists());
+
+            return TelegramLinkCode::create([
+                'telegram_bot_config_id' => $lockedConfig->id,
+                'user_id' => $user->id,
+                'code' => $code,
+                'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+            ]);
+        });
     }
 }

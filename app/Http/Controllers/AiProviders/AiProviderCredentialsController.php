@@ -12,12 +12,12 @@ use App\Data\AiProviders\CreateAiProviderCredentialData;
 use App\Data\AiProviders\ReorderAiProviderCredentialsData;
 use App\Data\AiProviders\UpdateAiProviderCredentialData;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
 use App\Http\Requests\AiProviders\ReorderAiProviderCredentialsRequest;
 use App\Http\Requests\AiProviders\StoreAiProviderCredentialRequest;
 use App\Http\Requests\AiProviders\UpdateAiProviderCredentialRequest;
 use App\Models\AiProviderCredential;
 use App\Models\AiProviderCredentialModel;
-use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -26,6 +26,8 @@ use RuntimeException;
 
 class AiProviderCredentialsController extends Controller
 {
+    use AuthorizesWorkspaceSettings;
+
     /**
      * Renders both panels of the AI Models page: providers (this
      * workspace's API keys, priority ascending) on the right, and the two
@@ -36,7 +38,8 @@ class AiProviderCredentialsController extends Controller
      */
     public function index(Request $request): Response
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         $credentials = AiProviderCredential::query()
             ->where('workspace_id', $workspace->id)
@@ -63,7 +66,8 @@ class AiProviderCredentialsController extends Controller
 
     public function store(StoreAiProviderCredentialRequest $request, CreateAiProviderCredentialAction $createAiProviderCredentialAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         $createAiProviderCredentialAction->handle($workspace, CreateAiProviderCredentialData::fromRequest($request));
 
@@ -74,7 +78,8 @@ class AiProviderCredentialsController extends Controller
 
     public function update(UpdateAiProviderCredentialRequest $request, AiProviderCredential $aiProviderCredential, UpdateAiProviderCredentialAction $updateAiProviderCredentialAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
 
@@ -87,7 +92,8 @@ class AiProviderCredentialsController extends Controller
 
     public function destroy(Request $request, AiProviderCredential $aiProviderCredential, DeleteAiProviderCredentialAction $deleteAiProviderCredentialAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
 
@@ -100,7 +106,8 @@ class AiProviderCredentialsController extends Controller
 
     public function toggle(Request $request, AiProviderCredential $aiProviderCredential, ToggleAiProviderCredentialAction $toggleAiProviderCredentialAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
 
@@ -111,7 +118,8 @@ class AiProviderCredentialsController extends Controller
 
     public function reorder(ReorderAiProviderCredentialsRequest $request, ReorderAiProviderCredentialsAction $reorderAiProviderCredentialsAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         try {
             $reorderAiProviderCredentialsAction->handle($workspace, ReorderAiProviderCredentialsData::fromRequest($request));
@@ -126,7 +134,8 @@ class AiProviderCredentialsController extends Controller
 
     public function verify(Request $request, AiProviderCredential $aiProviderCredential, VerifyAiProviderCredentialAction $verifyAiProviderCredentialAction): RedirectResponse
     {
-        $workspace = $this->currentWorkspace($request);
+        $workspace = $this->currentWorkspace();
+        $this->authorizeWorkspaceAdmin($request, $workspace);
 
         abort_if($aiProviderCredential->workspace_id !== $workspace->id, 404);
 
@@ -138,15 +147,6 @@ class AiProviderCredentialsController extends Controller
         ]);
 
         return to_route('settings.ai-providers.index');
-    }
-
-    private function currentWorkspace(Request $request): Workspace
-    {
-        $workspace = Workspace::current();
-
-        abort_if($workspace === null, 404, 'No current workspace.');
-
-        return $workspace;
     }
 
     /**

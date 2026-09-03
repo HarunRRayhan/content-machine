@@ -5,6 +5,7 @@ namespace App\Support\Postsyncer;
 use App\Models\Video;
 use App\Support\Content\NormalizeCaptions;
 use Carbon\CarbonImmutable;
+use InvalidArgumentException;
 
 /**
  * Builds PostSyncer publish groups for a video: one reel group with Drive media URLs.
@@ -309,6 +310,10 @@ class VideoPublishPlanner
             return null;
         }
 
-        return CarbonImmutable::parse($when, $timezone)->timezone($timezone);
+        try {
+            return CarbonImmutable::parse($when, $timezone)->timezone($timezone);
+        } catch (\Throwable) {
+            throw new InvalidArgumentException('The publish time is invalid.');
+        }
     }
 }

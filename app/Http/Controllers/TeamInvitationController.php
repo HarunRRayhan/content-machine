@@ -40,8 +40,8 @@ class TeamInvitationController extends Controller
 
     /**
      * An already-authenticated visitor accepting the invite directly from
-     * the invite page (covers the case their account's email doesn't match
-     * the invited address, so the on-login auto-accept didn't fire).
+     * the invite page. The action verifies that the account email matches
+     * the invited address before adding membership.
      */
     public function accept(Request $request, string $token, AcceptTeamInvitationAction $acceptTeamInvitationAction): RedirectResponse
     {
