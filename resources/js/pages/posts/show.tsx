@@ -179,14 +179,6 @@ export default function PostShow({ post }: PageProps) {
 
                 {tab === 'captions' && (
                     <>
-                        <PostDraftEditor
-                            postId={post.id}
-                            title={post.title}
-                            body={post.body}
-                            groups={post.captions}
-                            editable={editable}
-                            key={`${post.id}:${post.updated_at ?? ''}`}
-                        />
                         {hasCaptions ? (
                             <PostCaptionsPanel
                                 groups={post.captions}
@@ -200,6 +192,14 @@ export default function PostShow({ post }: PageProps) {
                                 No captions on this post yet.
                             </p>
                         )}
+                        <PostDraftEditor
+                            postId={post.id}
+                            title={post.title}
+                            body={post.body}
+                            groups={post.captions}
+                            editable={editable}
+                            key={`${post.id}:${post.updated_at ?? ''}`}
+                        />
                     </>
                 )}
             </div>

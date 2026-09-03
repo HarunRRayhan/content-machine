@@ -1,10 +1,21 @@
 import type { FormDataConvertible } from '@inertiajs/core';
 import { router } from '@inertiajs/react';
+import { Pencil } from 'lucide-react';
 import { useState } from 'react';
 import type {
     CaptionGroup,
     CaptionPlatform,
 } from '@/components/content/captions-panel';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 
 type EditableCaptionGroup = CaptionGroup & {
     lang?: string | null;
@@ -32,6 +43,7 @@ export default function PostDraftEditor({
     const [draftGroups, setDraftGroups] = useState(groups);
     const [saving, setSaving] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [open, setOpen] = useState(false);
 
     if (!editable) {
         return null;
@@ -76,6 +88,7 @@ export default function PostDraftEditor({
             },
             {
                 preserveScroll: true,
+                onSuccess: () => setOpen(false),
                 onError: (nextErrors) =>
                     setErrors(nextErrors as Record<string, string>),
                 onFinish: () => setSaving(false),
@@ -83,64 +96,119 @@ export default function PostDraftEditor({
         );
     }
 
+    function openEditor() {
+        setDraftTitle(title);
+        setDraftBody(body ?? '');
+        setDraftGroups(groups);
+        setErrors({});
+        setOpen(true);
+    }
+
     return (
-        <section className="pane mb-5">
-            <div className="pane-head">
-                <span className="k">✎ Edit draft</span>
+        <>
+            <div className="flex justify-end pb-4">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="Edit draft"
+                    title="Edit draft"
+                    onClick={openEditor}
+                >
+                    <Pencil className="h-4 w-4" />
+                    <span className="sr-only">Edit draft</span>
+                </Button>
             </div>
-            <form className="studio-form" onSubmit={saveDraft}>
-                <label htmlFor="post-draft-title">Title</label>
-                <input
-                    id="post-draft-title"
-                    value={draftTitle}
-                    onChange={(event) => setDraftTitle(event.target.value)}
-                    maxLength={255}
-                    required
-                />
-                {errors.title && (
-                    <p className="text-sm text-red-600">{errors.title}</p>
-                )}
 
-                <label htmlFor="post-draft-body">Post body</label>
-                <textarea
-                    id="post-draft-body"
-                    value={draftBody}
-                    onChange={(event) => setDraftBody(event.target.value)}
-                    rows={5}
-                    maxLength={20000}
-                />
-                {errors.body && (
-                    <p className="text-sm text-red-600">{errors.body}</p>
-                )}
+            <Dialog open={open} onOpenChange={setOpen}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+                    <div className="studio-page min-h-0">
+                        <DialogHeader className="pr-8">
+                            <DialogTitle>Edit draft</DialogTitle>
+                            <DialogDescription>
+                                Update the draft content and platform captions.
+                            </DialogDescription>
+                        </DialogHeader>
 
-                {draftGroups.map((group, groupIndex) =>
-                    group.platforms.map((platform, platformIndex) => (
-                        <CaptionEditor
-                            key={`${group.part ?? 'main'}-${groupIndex}-${platform.name}-${platformIndex}`}
-                            idPrefix={`${groupIndex}-${platformIndex}`}
-                            group={group}
-                            platform={platform}
-                            onChange={(field, value) =>
-                                updateCaption(
-                                    groupIndex,
-                                    platformIndex,
-                                    field,
-                                    value,
-                                )
-                            }
-                        />
-                    )),
-                )}
+                        <form className="studio-form" onSubmit={saveDraft}>
+                            <label htmlFor="post-draft-title">Title</label>
+                            <input
+                                id="post-draft-title"
+                                value={draftTitle}
+                                onChange={(event) =>
+                                    setDraftTitle(event.target.value)
+                                }
+                                maxLength={255}
+                                required
+                            />
+                            {errors.title && (
+                                <p className="text-sm text-red-600">
+                                    {errors.title}
+                                </p>
+                            )}
 
-                {errors.captions && (
-                    <p className="text-sm text-red-600">{errors.captions}</p>
-                )}
+                            <label htmlFor="post-draft-body">Post body</label>
+                            <textarea
+                                id="post-draft-body"
+                                value={draftBody}
+                                onChange={(event) =>
+                                    setDraftBody(event.target.value)
+                                }
+                                rows={5}
+                                maxLength={20000}
+                            />
+                            {errors.body && (
+                                <p className="text-sm text-red-600">
+                                    {errors.body}
+                                </p>
+                            )}
 
-                <button type="submit" className="advance" disabled={saving}>
-                    {saving ? 'Saving...' : 'Save draft'}
-                </button>
-            </form>
-        </section>
+                            {draftGroups.map((group, groupIndex) =>
+                                group.platforms.map(
+                                    (platform, platformIndex) => (
+                                        <CaptionEditor
+                                            key={`${group.part ?? 'main'}-${groupIndex}-${platform.name}-${platformIndex}`}
+                                            idPrefix={`${groupIndex}-${platformIndex}`}
+                                            group={group}
+                                            platform={platform}
+                                            onChange={(field, value) =>
+                                                updateCaption(
+                                                    groupIndex,
+                                                    platformIndex,
+                                                    field,
+                                                    value,
+                                                )
+                                            }
+                                        />
+                                    ),
+                                ),
+                            )}
+
+                            {errors.captions && (
+                                <p className="text-sm text-red-600">
+                                    {errors.captions}
+                                </p>
+                            )}
+
+                            <DialogFooter className="pt-2">
+                                <DialogClose asChild>
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        disabled={saving}
+                                    >
+                                        Cancel
+                                    </Button>
+                                </DialogClose>
+                                <Button type="submit" disabled={saving}>
+                                    {saving ? 'Saving...' : 'Save draft'}
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }
 
