@@ -13,7 +13,9 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('videos', [VideosController::class, 'index'])->name('videos.index');
         Route::get('videos/{video}', [VideosController::class, 'show'])->name('videos.show');
         Route::get('videos/{video}/media/{mediaAsset}', [VideosController::class, 'media'])->name('videos.media');
+        Route::get('videos/{video}/presentation/frame', [VideoPresentationController::class, 'frame'])->name('videos.presentation.frame');
         Route::get('videos/{video}/presentation', [VideoPresentationController::class, 'show'])->name('videos.presentation');
+        Route::patch('videos/{video}/presentation/cue', [VideoPresentationController::class, 'updateCue'])->name('videos.presentation.cue');
         Route::patch('videos/{video}', [VideosController::class, 'update'])->name('videos.update');
         Route::post('videos/{video}/publish', PublishVideoController::class)->name('videos.publish');
     });

@@ -11,8 +11,12 @@ use App\Models\ScratchpadEntry;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\GoogleDrive\GoogleDriveConfig;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as ClientRequest;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -97,6 +101,8 @@ class McpServerTest extends TestCase
         $this->assertContains('get_video', $listed);
         $this->assertContains('update_video', $listed);
         $this->assertContains('check_drive_url', $listed);
+        $this->assertContains('list_drive_files', $listed);
+        $this->assertContains('make_drive_file_public', $listed);
         $this->assertContains('publish_video', $listed);
         $this->assertContains('list_posts', $listed);
         $this->assertContains('get_post', $listed);
@@ -253,6 +259,34 @@ class McpServerTest extends TestCase
         $this->assertSame('New title', Video::query()->where('human_id', 'V-12')->value('title'));
     }
 
+    public function test_update_video_accepts_a_renderable_deck_manifest(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-12',
+            'number' => 12,
+            'title' => 'Deck video',
+        ]);
+
+        $manifest = [
+            'engine' => 'stage',
+            'deck_key' => 'v-12',
+            'js' => "window.PRESENTATIONS['v-12']={steps:[{cue:'First line'}],stage:function(){return '<div>Deck</div>';}};",
+        ];
+
+        $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 80,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'update_video',
+                'arguments' => ['human_id' => 'BV-12', 'deck_manifest' => $manifest],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError');
+
+        $stored = Video::query()->where('human_id', 'BV-12')->firstOrFail();
+        $this->assertSame($manifest['js'], $stored->deck_manifest['js']);
+    }
+
     public function test_update_video_accepts_drive_urls(): void
     {
         $this->fakeAccessibleDriveLinks();
@@ -301,6 +335,76 @@ class McpServerTest extends TestCase
 
         $this->assertIsString($text);
         $this->assertStringContainsString('"accessible":false', $text);
+    }
+
+    public function test_drive_mcp_tools_list_files_and_make_one_public(): void
+    {
+        Config::set([
+            'services.google_drive.client_id' => 'drive-client-id',
+            'services.google_drive.client_secret' => 'drive-client-secret',
+        ]);
+
+        GoogleDriveConfig::storeTokens($this->workspace, [
+            'access_token' => 'access-token',
+            'refresh_token' => 'refresh-token',
+            'expires_at' => now()->addHour()->timestamp,
+        ]);
+
+        $metadataCalls = 0;
+        Http::fake(function (ClientRequest $request) use (&$metadataCalls) {
+            if (str_contains($request->url(), '/permissions')) {
+                return Http::response(['id' => 'anyoneWithLink']);
+            }
+
+            if (str_contains($request->url(), '/files/file-id')) {
+                $metadataCalls++;
+
+                return Http::response([
+                    'id' => 'file-id',
+                    'name' => '062-final.mp4',
+                    'mimeType' => 'video/mp4',
+                    'permissions' => $metadataCalls === 1
+                        ? []
+                        : [['type' => 'anyone', 'role' => 'reader']],
+                ]);
+            }
+
+            return Http::response([
+                'files' => [[
+                    'id' => 'file-id',
+                    'name' => '062-final.mp4',
+                    'mimeType' => 'video/mp4',
+                    'permissions' => [],
+                ]],
+            ]);
+        });
+
+        $listed = $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 83,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'list_drive_files',
+                'arguments' => ['q' => '062'],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError')->json('result.content.0.text');
+
+        $this->assertIsString($listed);
+        $this->assertStringContainsString('062-final.mp4', $listed);
+
+        $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 84,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'make_drive_file_public',
+                'arguments' => ['file_id' => 'file-id'],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError');
+
+        Http::assertSent(fn (ClientRequest $request): bool => str_contains($request->url(), '/permissions')
+            && $request['type'] === 'anyone'
+            && $request['role'] === 'reader');
     }
 
     public function test_missing_videos_write_is_a_tool_error_and_does_not_write(): void

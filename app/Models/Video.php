@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Concerns\BelongsToWorkspace;
 use App\Concerns\RecordsHistory;
 use App\Concerns\ResolvesByHumanId;
+use App\Support\Content\PresentationManifest;
 use Carbon\CarbonImmutable;
 use Database\Factories\VideoFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -30,6 +31,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $script_markdown
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $deck_manifest
+ * @property bool $has_deck
  * @property string|null $video_drive_url
  * @property string|null $cover_drive_url
  * @property array<string, mixed>|null $postsyncer
@@ -80,6 +82,7 @@ class Video extends Model
         'script_markdown',
         'captions',
         'deck_manifest',
+        'has_deck',
         'video_drive_url',
         'cover_drive_url',
         'postsyncer',
@@ -98,9 +101,19 @@ class Video extends Model
         return [
             'captions' => 'array',
             'deck_manifest' => 'array',
+            'has_deck' => 'boolean',
             'postsyncer' => 'array',
             'publish_progress' => 'array',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (self $video): void {
+            if ($video->isDirty('deck_manifest')) {
+                $video->has_deck = PresentationManifest::isUsable($video->deck_manifest);
+            }
+        });
     }
 
     public function isPublishInProgress(): bool

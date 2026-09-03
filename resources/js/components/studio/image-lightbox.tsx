@@ -69,6 +69,7 @@ export default function ImageLightbox({
                     key={startIndex}
                     images={images}
                     startIndex={startIndex}
+                    onClose={onClose}
                 />
             ) : null}
         </Dialog.Root>
@@ -78,9 +79,11 @@ export default function ImageLightbox({
 function LightboxBody({
     images,
     startIndex,
+    onClose,
 }: {
     images: LightboxImage[];
     startIndex: number;
+    onClose: () => void;
 }) {
     const [zoom, setZoom] = useState(1);
     const [currentIndex, setCurrentIndex] = useState(() =>
@@ -174,6 +177,19 @@ function LightboxBody({
             <Dialog.Content
                 className="image-lightbox"
                 aria-describedby={undefined}
+                onPointerDown={(event) => {
+                    const target = event.target;
+
+                    if (!(target instanceof Element)) {
+                        return;
+                    }
+
+                    if (target.closest('button')) {
+                        return;
+                    }
+
+                    onClose();
+                }}
             >
                 <Dialog.Title className="sr-only">
                     {multi

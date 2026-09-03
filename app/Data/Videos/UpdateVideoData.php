@@ -6,9 +6,8 @@ use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Video;
 
 /**
- * Editable surface for a video. Dashboard updates only title/body
- * (`replaceExtended=false`); API PATCH replaces the extended columns too.
- * Drive URL columns are written only when the request sent those keys.
+ * Editable surface for a video. Dashboard updates title/body and API PATCH
+ * writes only the fields present in its payload.
  */
 final readonly class UpdateVideoData
 {
@@ -37,6 +36,14 @@ final readonly class UpdateVideoData
         public bool $hasPostsyncer = false,
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
+        public bool $hasTitle = true,
+        public bool $hasBody = true,
+        public bool $hasLanguage = false,
+        public bool $hasSlug = false,
+        public bool $hasScriptMarkdown = false,
+        public bool $hasCaptions = false,
+        public bool $hasDeckManifest = false,
+        public bool $hasStatus = false,
     ) {}
 
     public static function fromRequest(UpdateVideoRequest $request): self
@@ -50,6 +57,7 @@ final readonly class UpdateVideoData
             replaceExtended: false,
             hasVideoDriveUrl: $request->has('video_drive_url'),
             hasCoverDriveUrl: $request->has('cover_drive_url'),
+            hasBody: true,
         );
     }
 
@@ -79,6 +87,14 @@ final readonly class UpdateVideoData
                 ? ($payload['publish_error'] !== null ? (string) $payload['publish_error'] : null)
                 : null,
             replaceExtended: true,
+            hasTitle: array_key_exists('title', $payload),
+            hasBody: array_key_exists('body', $payload),
+            hasLanguage: array_key_exists('language', $payload),
+            hasSlug: array_key_exists('slug', $payload),
+            hasScriptMarkdown: array_key_exists('script_markdown', $payload),
+            hasCaptions: array_key_exists('captions', $payload),
+            hasDeckManifest: array_key_exists('deck_manifest', $payload),
+            hasStatus: array_key_exists('status', $payload),
             hasVideoDriveUrl: array_key_exists('video_drive_url', $payload),
             hasCoverDriveUrl: array_key_exists('cover_drive_url', $payload),
             hasPostsyncer: array_key_exists('postsyncer', $payload),

@@ -130,6 +130,10 @@ const mainNavItems: NavItem[] = [
                 matchPrefix: true,
             },
             {
+                title: 'Google Drive',
+                href: '/settings/google-drive',
+            },
+            {
                 title: 'AI Models',
                 href: aiProvidersIndex(),
             },
