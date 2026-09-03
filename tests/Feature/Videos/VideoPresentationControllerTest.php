@@ -119,6 +119,9 @@ class VideoPresentationControllerTest extends TestCase
         $this->assertNotFalse($childAt);
         $this->assertNotFalse($parentGateAt);
         $this->assertLessThan($parentGateAt, $childAt);
+        $this->assertStringContainsString('background:var(--cm-bg)', $html);
+        $this->assertStringNotContainsString('#presShell.is-fullscreen .pres-cue{background:#f6f7f8', $html);
+        $this->assertStringContainsString('.pres-cue-row:hover .pres-cue-editbtn', $html);
     }
 
     public function test_presentation_host_allows_its_sandboxed_deck_frame(): void

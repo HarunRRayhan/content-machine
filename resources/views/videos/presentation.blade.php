@@ -68,12 +68,12 @@
             --good:#3f8b52; --warn:#9c6b16; --bad:#c23a22; --info:#3d6ea5; --ready:#6b4fa0;
             border-radius:18px; background:#ffffff; overflow:hidden; container-type:size}
         #presShell.is-fullscreen{display:flex; align-items:center; justify-content:center; gap:36px; width:100vw; height:100vh;
-            background:#ffffff; padding:3vh 4vw; box-sizing:border-box; position:static; left:auto; margin-left:0;
-            color:#1c1e20}
+            background:var(--cm-bg); padding:3vh 4vw; box-sizing:border-box; position:static; left:auto; margin-left:0;
+            color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-left, #presShell.is-fullscreen #presLeft{height:calc(100vh - 76px); width:calc(100vh - 76px)}
-        #presShell.is-fullscreen .pres-notes{max-width:640px; font-size:1.15em; color:#1c1e20}
-        #presShell.is-fullscreen .pres-cue{background:#f6f7f8; border-color:rgba(28,30,32,.2); color:#1c1e20}
-        #presShell.is-fullscreen .pres-fs-btn{background:#f6f7f8; color:#1c1e20; border-color:rgba(28,30,32,.2)}
+        #presShell.is-fullscreen .pres-notes{max-width:640px; font-size:1.15em; color:var(--cm-fg)}
+        #presShell.is-fullscreen .pres-cue{background:var(--cm-muted); border-color:var(--cm-border); color:var(--cm-fg)}
+        #presShell.is-fullscreen .pres-fs-btn{background:var(--cm-muted); color:var(--cm-fg); border-color:var(--cm-border)}
         .pres-vidno{font-family:var(--font-cue); font-size:15px; font-weight:800; color:var(--cm-fg);
             text-align:center; margin:0 0 2px; letter-spacing:.02em}
         .pres-stepno{font-family:monospace; font-size:12px; color:var(--cm-muted-fg); text-align:center; margin:0 0 8px}
@@ -85,9 +85,12 @@
         .pres-notes{flex:1 1 260px; min-width:240px; max-width:520px}
         .pres-cue{font-family:var(--font-bn); font-size:26px; font-weight:600; line-height:1.45; color:var(--cm-fg);
             padding:18px; border:1px solid var(--cm-border); border-radius:14px; background:var(--cm-muted); margin:0}
-        .pres-cue-row{display:flex; align-items:stretch; gap:8px; margin-bottom:12px}
-        .pres-cue-row .pres-cue{flex:1}
-        .pres-cue-editbtn{width:48px; border:1px solid var(--cm-border); border-radius:12px; background:var(--cm-muted); color:var(--cm-fg); cursor:pointer; font-size:20px}
+        .pres-cue-row{position:relative; margin-bottom:12px}
+        .pres-cue-editbtn{position:absolute; right:10px; bottom:10px; width:36px; height:36px;
+            border:1px solid var(--cm-border); border-radius:10px; background:var(--cm-muted); color:var(--cm-fg);
+            cursor:pointer; font-size:16px; line-height:1; opacity:0; pointer-events:none; transition:opacity .15s ease}
+        .pres-cue-row:hover .pres-cue-editbtn, .pres-cue-row:focus-within .pres-cue-editbtn{opacity:1; pointer-events:auto}
+        .pres-cue-editbtn[hidden]{display:none}
         .pres-cue-editor[hidden], .pres-cue-row[hidden]{display:none}
         .pres-cue-editor textarea{display:block; width:100%; min-height:120px; resize:vertical; font:600 22px/1.45 var(--font-bn); color:var(--cm-fg); background:var(--cm-muted); border:1px solid var(--cm-border); border-radius:12px; padding:14px; margin-bottom:8px}
         .pres-cue-actions{display:flex; gap:8px; justify-content:flex-end}
