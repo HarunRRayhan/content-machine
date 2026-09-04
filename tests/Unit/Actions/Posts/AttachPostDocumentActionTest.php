@@ -78,6 +78,35 @@ class AttachPostDocumentActionTest extends TestCase
         $this->assertSame(1, Attachment::count());
     }
 
+    public function test_a_new_upload_removes_previous_document_generations(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $user = User::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $action = new AttachPostDocumentAction;
+
+        $action->handle(
+            $post,
+            $user,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('old.pdf', 'old pdf bytes')),
+        );
+        $oldAsset = MediaAsset::sole();
+        $oldPath = $oldAsset->path;
+
+        $action->handle(
+            $post->fresh(),
+            $user,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('new.pdf', 'new pdf bytes')),
+        );
+
+        $this->assertSame(1, MediaAsset::count());
+        $this->assertSame(1, Attachment::count());
+        $this->assertSame('new.pdf', MediaAsset::sole()->original_filename);
+        Storage::disk('scratchpad')->assertMissing($oldPath);
+    }
+
     public function test_it_rejects_an_upload_while_a_postsyncer_publish_is_in_progress(): void
     {
         Storage::fake('scratchpad');

@@ -37,7 +37,9 @@ export function resolveLinkedinCarouselPdf(
         }
     }
 
-    for (const name of Object.keys(imageUrls)) {
+    // Attachments are presented oldest-first. The newest uploaded PDF is the
+    // last matching entry, so walk backward rather than embedding stale history.
+    for (const name of Object.keys(imageUrls).reverse()) {
         if (/-linkedin-carousel\.pdf$/i.test(name)) {
             candidates.push(name);
         }

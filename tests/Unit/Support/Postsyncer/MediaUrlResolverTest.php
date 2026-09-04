@@ -132,6 +132,43 @@ class MediaUrlResolverTest extends TestCase
         $this->assertStringContainsString('publish-media/posts/', $urls[0]);
     }
 
+    public function test_linkedin_document_url_uses_the_newest_document_attachment(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $old = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'document',
+            'disk' => 'scratchpad',
+            'path' => 'posts/old.pdf',
+            'mime' => 'application/pdf',
+        ]);
+        $new = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'document',
+            'disk' => 'scratchpad',
+            'path' => 'posts/new.pdf',
+            'mime' => 'application/pdf',
+        ]);
+        Storage::disk('scratchpad')->put($old->path, 'old');
+        Storage::disk('scratchpad')->put($new->path, 'new');
+
+        Attachment::factory()->for($post, 'attachable')->for($old)->create([
+            'role' => 'document',
+            'position' => 0,
+        ]);
+        Attachment::factory()->for($post, 'attachable')->for($new)->create([
+            'role' => 'document',
+            'position' => 1,
+        ]);
+
+        $url = $this->resolver->linkedinDocumentUrl($post->fresh());
+
+        $this->assertNotNull($url);
+        $this->assertStringContainsString("/publish-media/posts/{$post->id}/{$new->id}", $url);
+        $this->assertStringNotContainsString("/publish-media/posts/{$post->id}/{$old->id}", $url);
+    }
+
     public function test_for_post_skips_attachments_without_resolvable_urls(): void
     {
         $workspace = Workspace::factory()->create();
