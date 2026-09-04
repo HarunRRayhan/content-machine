@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" @class(['dark' => ($theme ?? 'light') === 'dark'])>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -27,14 +27,6 @@
             --line: var(--cm-border);
             --line-strong: color-mix(in oklch, var(--cm-fg) 20%, transparent);
             --accent: var(--cm-primary);
-        }
-        html.dark {
-            --cm-bg: oklch(0.145 0 0);
-            --cm-fg: oklch(0.985 0 0);
-            --cm-muted: oklch(0.269 0 0);
-            --cm-muted-fg: oklch(0.708 0 0);
-            --cm-border: oklch(0.269 0 0);
-            --cm-primary: oklch(0.985 0 0);
         }
         * { box-sizing: border-box; }
         html, body { margin: 0; min-height: 100%; background: var(--cm-bg); color: var(--cm-fg); font-family: var(--font-bn); }
@@ -110,7 +102,7 @@
                     <iframe
                         class="pres-frame"
                         id="presFrame"
-                        src="{{ route('videos.presentation.frame', ['video' => $video, 'theme' => $theme]) }}"
+                        src="{{ route('videos.presentation.frame', ['video' => $video]) }}"
                         title="{{ $video->title }} presentation"
                         sandbox="allow-scripts"
                         allow="fullscreen"

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" @class(['dark' => ($theme ?? 'light') === 'dark'])>
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,25 +26,6 @@
             --bad: #c23a22;
             --info: #3d6ea5;
             --ready: #6b4fa0;
-        }
-        html.dark {
-            --bg: #202427;
-            --bg2: #282d31;
-            --bg3: #31373b;
-            --raised: #3a4146;
-            --ink: #f0f2f3;
-            --ink-soft: #c2c8cc;
-            --ink-faint: #929ba1;
-            --line: rgba(240, 242, 243, .1);
-            --line-strong: rgba(240, 242, 243, .18);
-            --accent: #72c79b;
-            --accent-soft: #9be0b8;
-            --amber: #e7b45d;
-            --good: #86d69a;
-            --warn: #e7b45d;
-            --bad: #ed7761;
-            --info: #83b4e1;
-            --ready: #c0a9f0;
         }
         * { box-sizing: border-box; }
         html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
