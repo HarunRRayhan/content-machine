@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { useAppearance } from '@/hooks/use-appearance';
 
 type Props = {
     src: string;
@@ -10,12 +9,9 @@ const PRES_KEYS = new Set([' ', 'ArrowRight', 'ArrowLeft', 'r', 'R', 'f', 'F']);
 
 export default function PresentationEmbed({ src, title }: Props) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
-    const { resolvedAppearance } = useAppearance();
-    const srcWithTheme = `${src}${src.includes('?') ? '&' : '?'}theme=${resolvedAppearance}`;
-
     useEffect(() => {
         iframeRef.current?.focus();
-    }, [srcWithTheme]);
+    }, [src]);
 
     useEffect(() => {
         function isTyping(target: EventTarget | null): boolean {
@@ -96,7 +92,7 @@ export default function PresentationEmbed({ src, title }: Props) {
         <iframe
             ref={iframeRef}
             className="pres-embed"
-            src={srcWithTheme}
+            src={src}
             title={`${title} presentation`}
             allow="fullscreen"
             allowFullScreen

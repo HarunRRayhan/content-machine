@@ -124,6 +124,31 @@ class VideoPresentationControllerTest extends TestCase
         $this->assertStringContainsString('.pres-cue-row:hover .pres-cue-editbtn', $html);
     }
 
+    public function test_presentation_is_always_rendered_with_the_fixed_light_theme(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $video = Video::factory()->for($workspace)->create([
+            'deck_manifest' => $this->deckManifest(),
+        ]);
+
+        $hostHtml = $this->get(route('videos.presentation', [
+            'video' => $video,
+            'theme' => 'dark',
+        ]))->assertOk()->getContent();
+
+        $frameHtml = $this->get(route('videos.presentation.frame', [
+            'video' => $video,
+            'theme' => 'dark',
+        ]))->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('class="dark"', $hostHtml);
+        $this->assertStringNotContainsString('html.dark', $hostHtml);
+        $this->assertStringNotContainsString('theme=dark', $hostHtml);
+        $this->assertStringNotContainsString('class="dark"', $frameHtml);
+        $this->assertStringNotContainsString('html.dark', $frameHtml);
+        $this->assertStringContainsString('--bg: #eef0f1', $frameHtml);
+    }
+
     public function test_presentation_host_allows_its_sandboxed_deck_frame(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
