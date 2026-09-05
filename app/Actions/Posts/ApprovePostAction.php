@@ -8,7 +8,7 @@ use App\Models\TelegramBotLink;
 use App\Models\TelegramPostRequest;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The human approval gate for generated drafts. PostSyncer's confirm_ask
@@ -48,7 +48,9 @@ class ApprovePostAction
                     || $lockedRequest->post_id !== $lockedPost->id
                     || $lockedRequest->state !== TelegramPostRequest::AWAITING_APPROVAL
                 ) {
-                    throw new RuntimeException('This Telegram post request is no longer waiting for approval.');
+                    throw ValidationException::withMessages([
+                        'post' => __('This Telegram post request is no longer waiting for approval.'),
+                    ]);
                 }
 
                 if ($telegramConfig === null
@@ -66,7 +68,9 @@ class ApprovePostAction
                         ->where('user_id', $actor->id)
                         ->exists()
                 ) {
-                    throw new RuntimeException('This Telegram post request does not belong to your account.');
+                    throw ValidationException::withMessages([
+                        'post' => __('This Telegram post request does not belong to your account.'),
+                    ]);
                 }
 
                 if ($lockedRequest->webhook_generation === null && $telegramConfig->webhook_generation !== null) {
@@ -77,8 +81,13 @@ class ApprovePostAction
             }
 
             if ($lockedPost->approval_state !== 'approved') {
-                if (! in_array($lockedPost->status, ['draft', 'ready'], true)) {
-                    throw new RuntimeException('Only draft posts can be approved.');
+                // Re-approval must also work after a publish went out, so a
+                // retry can be authorized (P-73: approval is one-shot and the
+                // post sits at scheduled, which used to 500 here).
+                if (! in_array($lockedPost->status, ['draft', 'ready', 'scheduled', 'posted'], true)) {
+                    throw ValidationException::withMessages([
+                        'post' => __('Only draft, ready, scheduled, or posted posts can be approved.'),
+                    ]);
                 }
 
                 $lockedPost->forceFill([
