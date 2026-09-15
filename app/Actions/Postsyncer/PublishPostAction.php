@@ -367,6 +367,7 @@ class PublishPostAction
             $group,
             $failedPlatforms,
             $supplementalGroups,
+            $confirmFailed,
         );
 
         if ($isPartial) {
@@ -2218,6 +2219,7 @@ class PublishPostAction
         PublishGroup $primaryGroup,
         array $failedPlatforms,
         array $requested,
+        bool $allowFailed = false,
     ): array {
         $verified = [];
         $seenPlatforms = [];
@@ -2296,6 +2298,7 @@ class PublishPostAction
                 $group,
                 $normalizedMediaIds,
                 $postId,
+                $allowFailed,
             );
 
             $verified[] = $this->publicRemoteGroup($remote, $group, $postId);
