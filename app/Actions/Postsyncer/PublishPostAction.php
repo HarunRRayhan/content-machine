@@ -573,6 +573,115 @@ class PublishPostAction
     }
 
     /**
+     * Clear an uncertain media-upload checkpoint after an operator has
+     * verified that PostSyncer stored no media for the current group.
+     *
+     * This is intentionally separate from reconcileMedia(): an empty upload
+     * response cannot supply ids, but leaving the checkpoint in `uploading`
+     * makes a publish permanently unretryable. The next retry starts the
+     * upload again through the normal Content Machine path.
+     */
+    public function reconcileMediaAbsent(Post $post): void
+    {
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to reconcile.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if (($progress['state'] ?? null) !== 'uncertain'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'uploading') {
+            throw new PostsyncerException(
+                'This post does not have an uncertain PostSyncer media upload to reconcile.',
+            );
+        }
+
+        if (($current['media_ids'] ?? null) !== []) {
+            throw new PostsyncerException(
+                'This post has checkpointed PostSyncer media ids. Reconcile those ids instead.',
+            );
+        }
+
+        if (! is_array($current['media_urls'] ?? null)
+            || $current['media_urls'] === []
+            || count(array_filter(
+                $current['media_urls'],
+                static fn (mixed $url): bool => is_string($url) && trim($url) !== '',
+            )) !== count($current['media_urls'])) {
+            throw new PostsyncerException(
+                'This post has no valid media-upload URLs to retry safely.',
+            );
+        }
+
+        $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
+        $options = $progress['options'];
+        $groups = $this->planner->plan($post, $config, $options);
+        $plan = $this->planMetadata($config, $groups, $options);
+        $index = $current['index'];
+        $group = $groups[$index] ?? null;
+
+        if (($progress['plan_hash'] ?? null) !== $plan['hash']
+            || ($progress['planned_groups'] ?? null) !== $plan['groups']) {
+            throw new PostsyncerException(
+                'The stored PostSyncer plan no longer matches this post. Reconcile it before retrying.',
+            );
+        }
+
+        if (! $group instanceof PublishGroup
+            || ($current['group_key'] ?? null) !== $this->groupKey($config, $group)
+            || $this->canonicalMediaUrls($current['media_urls'])
+                !== $this->canonicalMediaUrls($group->mediaUrls)) {
+            throw new PostsyncerException(
+                'The PostSyncer media-upload checkpoint no longer matches this publish plan.',
+            );
+        }
+
+        DB::transaction(function () use ($post, $progress, $current): void {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($latestProgress['state'] ?? null) !== 'uncertain'
+                || ($latestProgress['current']['index'] ?? null) !== ($current['index'] ?? null)
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'uploading'
+                || ($latestProgress['current']['media_ids'] ?? null) !== []) {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while media reconciliation was running.',
+                );
+            }
+
+            $latestProgress['current'] = null;
+            $latestProgress['state'] = 'failed';
+            $latestProgress['media_upload_recovery'] = [
+                'mode' => 'operator_confirmed_absent',
+                'confirmed_at' => now()->toISOString(),
+                'media_count' => count($current['media_urls']),
+            ];
+
+            $lockedPost->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'PostSyncer media upload was verified absent. Retry the publish to upload it again.',
+                'publish_progress' => $latestProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
      * Rebind one stale PostSyncer account and rebase the unfinished group of
      * a failed publish. Completed external groups must remain byte-for-byte
      * on the old plan; otherwise this operation refuses to change anything.

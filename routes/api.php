@@ -159,6 +159,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile-media');
 
+    Route::post('posts/{human_id}/reconcile-media-absent', [PostsApiController::class, 'reconcileMediaAbsent'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile-media-absent');
+
     Route::post('posts/{human_id}/repair-account-mapping', [PostsApiController::class, 'repairAccountMapping'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.repair-account-mapping');
