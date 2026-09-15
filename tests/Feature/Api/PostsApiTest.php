@@ -647,6 +647,66 @@ class PostsApiTest extends TestCase
             );
     }
 
+    public function test_reconcile_create_absent_endpoint_makes_verified_empty_create_retryable(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['photo' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-CREATE-ABSENT-API',
+            'number' => 64,
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'temporary outage',
+            ], 500),
+        ]);
+
+        app(PublishPostAction::class)->handle($post, [
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('creating', $post->publish_progress['current']['phase']);
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/reconcile-create-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.state', 'failed')
+            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
+            ->assertJsonPath('data.publish_progress.current.media_ids.0', '915')
+            ->assertJsonPath(
+                'data.publish_progress.create_recovery.mode',
+                'operator_confirmed_absent',
+            );
+    }
+
     public function test_repair_account_mapping_endpoint_rebases_a_partial_publish(): void
     {
         Http::fake([

@@ -2245,6 +2245,93 @@ class PublishPostActionTest extends TestCase
         $this->assertSame(2, $uploadCalls);
     }
 
+    public function test_verified_absent_create_can_be_reconciled_without_reuploading_media(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+        $uploadCalls = 0;
+        $createCalls = 0;
+
+        Http::fake(function ($request) use (&$uploadCalls, &$createCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                $uploadCalls++;
+
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                $createCalls++;
+
+                return $createCalls === 1
+                    ? Http::response(['message' => 'temporary outage'], 500)
+                    : Http::response([
+                        'id' => 42,
+                        'status' => 'scheduled',
+                        'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                    ], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST',
+                        'caption' => 'Caption',
+                    ]]],
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $options = [
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ];
+
+        $this->action->handle($post, $options);
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('creating', $post->publish_progress['current']['phase']);
+        $this->assertSame([915], $post->publish_progress['current']['media_ids']);
+
+        $this->action->reconcileCreateAbsent($post);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
+        $this->assertSame(['915'], $post->publish_progress['current']['media_ids']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $post->publish_progress['create_recovery']['mode'],
+        );
+
+        $this->action->handle($post, $options);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('scheduled', $post->status);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(1, $uploadCalls);
+        $this->assertSame(2, $createCalls);
+    }
+
     public function test_sets_running_before_api_calls(): void
     {
         Http::fake([

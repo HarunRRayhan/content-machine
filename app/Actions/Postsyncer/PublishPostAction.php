@@ -682,6 +682,104 @@ class PublishPostAction
     }
 
     /**
+     * Mark an uncertain create as absent after an operator verified that
+     * PostSyncer created no matching post. Keep the uploaded media ids so the
+     * next retry creates the post without registering the media again.
+     */
+    public function reconcileCreateAbsent(Post $post): void
+    {
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to reconcile.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if (($progress['state'] ?? null) !== 'uncertain'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'creating') {
+            throw new PostsyncerException(
+                'This post does not have an uncertain PostSyncer create to reconcile.',
+            );
+        }
+
+        if (! is_array($current['expected_payload'] ?? null)) {
+            throw new PostsyncerException(
+                'This post has no saved PostSyncer create payload to retry safely.',
+            );
+        }
+
+        $normalizedMediaIds = $this->normalizeMediaIds($current['media_ids'] ?? []);
+        $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
+        $options = $progress['options'];
+        $groups = $this->planner->plan($post, $config, $options);
+        $plan = $this->planMetadata($config, $groups, $options);
+        $index = $current['index'];
+        $group = $groups[$index] ?? null;
+
+        if (($progress['plan_hash'] ?? null) !== $plan['hash']
+            || ($progress['planned_groups'] ?? null) !== $plan['groups']) {
+            throw new PostsyncerException(
+                'The stored PostSyncer plan no longer matches this post. Reconcile it before retrying.',
+            );
+        }
+
+        if (! $group instanceof PublishGroup
+            || ($current['group_key'] ?? null) !== $this->groupKey($config, $group)
+            || (is_array($current['media_urls'] ?? null)
+                && $this->canonicalMediaUrls($current['media_urls'])
+                    !== $this->canonicalMediaUrls($group->mediaUrls))) {
+            throw new PostsyncerException(
+                'The PostSyncer create checkpoint no longer matches this publish plan.',
+            );
+        }
+
+        DB::transaction(function () use ($post, $progress, $current, $normalizedMediaIds): void {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($latestProgress['state'] ?? null) !== 'uncertain'
+                || ($latestProgress['current']['index'] ?? null) !== $current['index']
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'creating'
+                || array_map('strval', $latestProgress['current']['media_ids'] ?? [])
+                    !== $normalizedMediaIds) {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while create reconciliation was running.',
+                );
+            }
+
+            $latestProgress['current']['phase'] = 'retryable';
+            $latestProgress['current']['media_ids'] = $normalizedMediaIds;
+            $latestProgress['state'] = 'failed';
+            $latestProgress['create_recovery'] = [
+                'mode' => 'operator_confirmed_absent',
+                'confirmed_at' => now()->toISOString(),
+                'media_count' => count($normalizedMediaIds),
+            ];
+
+            $lockedPost->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'PostSyncer create was verified absent. Retry the publish to create it with the existing media.',
+                'publish_progress' => $latestProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
      * Rebind one stale PostSyncer account and rebase the unfinished group of
      * a failed publish. Completed external groups must remain byte-for-byte
      * on the old plan; otherwise this operation refuses to change anything.
