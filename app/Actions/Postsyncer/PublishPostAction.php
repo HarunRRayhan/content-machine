@@ -504,6 +504,238 @@ class PublishPostAction
     }
 
     /**
+     * Reconcile a partially failed create and create replacement groups for
+     * the platforms that definitively failed. The replacement creates still
+     * happen through Content Machine's worker boundary; callers never write to
+     * PostSyncer directly. If a replacement create has an unknown outcome, the
+     * checkpoint prevents this method from replaying it.
+     */
+    public function recoverPartialFailure(Post $post, int|string $postsyncerPostId): void
+    {
+        if (! $this->hasNumericPostId($postsyncerPostId)) {
+            throw new PostsyncerException('A PostSyncer post id is required for reconciliation.');
+        }
+
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to reconcile.');
+        }
+
+        $this->assertProgressShape($progress);
+
+        if (($progress['state'] ?? null) !== 'uncertain'
+            || ! is_array($progress['current'] ?? null)
+            || ($progress['current']['phase'] ?? null) !== 'creating') {
+            throw new PostsyncerException(
+                'This post does not have an uncertain PostSyncer create to reconcile.'
+            );
+        }
+
+        if (is_array($progress['partial_recovery'] ?? null)) {
+            throw new PostsyncerException(
+                'A partial-failure replacement attempt already exists. Reconcile it before retrying.'
+            );
+        }
+
+        $current = $progress['current'];
+        $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
+        $groups = $this->planner->plan($post, $config, $progress['options']);
+        $index = $current['index'] ?? null;
+        $group = is_int($index) ? ($groups[$index] ?? null) : null;
+
+        if (! $group instanceof PublishGroup
+            || ($current['group_key'] ?? null) !== $this->groupKey($config, $group)) {
+            throw new PostsyncerException(
+                'The PostSyncer reconciliation group no longer matches the publish plan.'
+            );
+        }
+
+        $mediaIds = $this->normalizeMediaIds($current['media_ids'] ?? []);
+        $expectedPayload = $current['expected_payload'] ?? null;
+        if (! is_array($expectedPayload)) {
+            throw new PostsyncerException(
+                'The uncertain PostSyncer create has no payload snapshot to verify.'
+            );
+        }
+
+        $client = new PostsyncerClient($config);
+        $remote = $this->normalizePostResponse(
+            $client->getPostWithAccountDetails($postsyncerPostId),
+        );
+        $failedPlatforms = $this->failedPlatforms($remote);
+
+        if (strtoupper((string) ($remote['status'] ?? '')) !== 'PARTIALLY_FAILED'
+            || $failedPlatforms === []) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post is not a partially failed create with failed platforms.'
+            );
+        }
+
+        sort($failedPlatforms);
+        foreach ($failedPlatforms as $platform) {
+            if (! in_array($platform, $group->platforms, true)) {
+                throw new PostsyncerException(
+                    'The supplied PostSyncer post failed a platform outside the current publish group.'
+                );
+            }
+        }
+
+        if (count($failedPlatforms) >= count($group->platforms)) {
+            throw new PostsyncerException(
+                'The supplied PostSyncer post has no definitively published platform to reconcile.'
+            );
+        }
+
+        // Verify the primary record before creating any replacement. This is
+        // the same payload/media/workspace check used by normal reconciliation.
+        $this->assertReconciledPost(
+            $remote,
+            $config,
+            $group,
+            $mediaIds,
+            $postsyncerPostId,
+            true,
+            $expectedPayload,
+            true,
+        );
+
+        $replacementGroups = [];
+        $attemptGroups = [];
+        foreach ($failedPlatforms as $platform) {
+            $caption = $group->captions[$platform] ?? null;
+            if (! is_string($caption)) {
+                throw new PostsyncerException(
+                    "No caption is available for failed platform {$platform}."
+                );
+            }
+
+            $replacement = new PublishGroup(
+                language: $group->language,
+                workspaceId: $group->workspaceId,
+                platforms: [$platform],
+                mediaUrls: [],
+                captions: [$platform => $caption],
+                when: $group->when,
+                publishNow: $group->publishNow,
+                threadTweets: $group->threadTweets,
+                firstComment: PublishGroup::supportsFirstComment($platform)
+                    ? $group->firstComment
+                    : null,
+            );
+            $body = $this->buildPostBody($config, $replacement, $mediaIds);
+            $idempotencyKey = $this->idempotencyKey(
+                (string) $progress['operation_id'],
+                (int) $index,
+                hash('sha256', 'partial-recovery|'.$platform),
+            );
+
+            $replacementGroups[$platform] = [
+                'group' => $replacement,
+                'body' => $body,
+                'idempotency_key' => $idempotencyKey,
+            ];
+            $attemptGroups[$platform] = [
+                'platforms' => [$platform],
+                'media_ids' => $mediaIds,
+                'status' => 'pending',
+                'expected_payload' => $body,
+                'idempotency_key' => $idempotencyKey,
+            ];
+        }
+
+        $attempt = [
+            'mode' => 'partial_failure_replacement',
+            'primary_post_id' => (string) $postsyncerPostId,
+            'index' => $index,
+            'failed_platforms' => $failedPlatforms,
+            'state' => 'creating',
+            'groups' => array_values($attemptGroups),
+        ];
+        $this->storePartialRecovery($post, $progress, $attempt);
+
+        $supplementalGroups = [];
+        foreach ($failedPlatforms as $platform) {
+            $replacement = $replacementGroups[$platform];
+            $attemptGroups[$platform]['status'] = 'creating';
+            $attempt['groups'] = array_values($attemptGroups);
+            $this->storePartialRecovery($post, $progress, $attempt);
+
+            try {
+                $created = $client->createPost(
+                    $replacement['body'],
+                    $replacement['idempotency_key'].':post',
+                );
+                $created = $this->normalizePostResponse($created);
+                $replacementPostId = $created['id'] ?? null;
+
+                if (! $this->hasNumericPostId($replacementPostId)) {
+                    throw new PostsyncerException(
+                        'PostSyncer accepted a replacement create but returned no verifiable post id.',
+                        0,
+                        null,
+                        false,
+                        true,
+                        true,
+                    );
+                }
+
+                $attemptGroups[$platform]['post_id'] = (string) $replacementPostId;
+                $attemptGroups[$platform]['status'] = 'created';
+                $attempt['groups'] = array_values($attemptGroups);
+                $this->storePartialRecovery($post, $progress, $attempt);
+
+                $this->verifyCreatedPost(
+                    $client,
+                    $created,
+                    $config,
+                    $replacement['group'],
+                    $mediaIds,
+                );
+
+                $attemptGroups[$platform]['status'] = 'verified';
+                $attempt['groups'] = array_values($attemptGroups);
+                $this->storePartialRecovery($post, $progress, $attempt);
+                $supplementalGroups[] = [
+                    'postsyncer_id' => (string) $replacementPostId,
+                    'platforms' => [$platform],
+                    'media_ids' => $mediaIds,
+                ];
+            } catch (Throwable $exception) {
+                $attemptGroups[$platform]['status'] = 'uncertain';
+                $attemptGroups[$platform]['error'] = $exception->getMessage();
+                $attempt['groups'] = array_values($attemptGroups);
+                $attempt['state'] = 'uncertain';
+                $this->storePartialRecovery($post, $progress, $attempt);
+
+                throw $exception;
+            }
+        }
+
+        $attempt['state'] = 'verified';
+        $this->storePartialRecovery($post, $progress, $attempt);
+
+        // Reconcile the primary partial record plus the verified replacement
+        // records into the normal checkpoint shape. The next ordinary retry
+        // then finalizes the operation without another external create.
+        $this->reconcile(
+            $post,
+            $postsyncerPostId,
+            true,
+            $supplementalGroups,
+        );
+
+        $post->refresh();
+        $latestProgress = $post->publish_progress;
+        if (is_array($latestProgress)) {
+            $latestProgress['partial_recovery']['state'] = 'completed';
+            $post->forceFill(['publish_progress' => $latestProgress])->save();
+        }
+    }
+
+    /**
      * Checkpoint media ids after an upload response was lost. PostSyncer does
      * not expose an idempotency key for media imports, so retrying the upload
      * is not safe until an operator supplies the ids already present there.
@@ -2523,6 +2755,48 @@ class PublishPostAction
         }
 
         return $normalized;
+    }
+
+    /**
+     * Persist a partial-failure replacement checkpoint before and after every
+     * external replacement create. A lost response therefore cannot be
+     * replayed by calling the recovery endpoint again.
+     *
+     * @param  array<string, mixed>  $originalProgress
+     * @param  array<string, mixed>  $attempt
+     */
+    private function storePartialRecovery(
+        Post $post,
+        array $originalProgress,
+        array $attempt,
+    ): void {
+        DB::transaction(function () use ($post, $originalProgress, $attempt): void {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null)
+                    !== ($originalProgress['operation_id'] ?? null)
+                || ($latestProgress['state'] ?? null) !== 'uncertain'
+                || ($latestProgress['current']['index'] ?? null)
+                    !== ($originalProgress['current']['index'] ?? null)
+                || ($latestProgress['current']['group_key'] ?? null)
+                    !== ($originalProgress['current']['group_key'] ?? null)) {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while partial-failure recovery was running.'
+                );
+            }
+
+            $latestProgress['partial_recovery'] = $attempt;
+            $lockedPost->forceFill([
+                'publish_progress' => $latestProgress,
+            ])->save();
+        });
+
+        $post->refresh();
     }
 
     /**

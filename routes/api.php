@@ -159,6 +159,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile');
 
+    Route::post('posts/{human_id}/reconcile-partial-failure', [PostsApiController::class, 'recoverPartialFailure'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile-partial-failure');
+
     Route::post('posts/{human_id}/reconcile-media', [PostsApiController::class, 'reconcileMedia'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile-media');

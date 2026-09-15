@@ -256,6 +256,28 @@ class PostsApiController extends Controller
         return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
+    public function recoverPartialFailure(
+        Request $request,
+        string $humanId,
+        PublishPostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'postsyncer_id' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $action->recoverPartialFailure($post, $payload['postsyncer_id']);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'postsyncer_id' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     public function reconcileMedia(Request $request, string $humanId, PublishPostAction $action): PostResource
     {
         $post = $this->resolvePost($humanId);
