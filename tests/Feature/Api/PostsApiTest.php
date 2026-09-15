@@ -588,6 +588,65 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.publish_progress.current.media_ids.0', '915');
     }
 
+    public function test_reconcile_media_absent_endpoint_resets_verified_empty_upload(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['photo' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-MEDIA-ABSENT-API',
+            'number' => 63,
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'message' => 'temporary outage',
+            ], 503),
+        ]);
+
+        try {
+            app(PublishPostAction::class)->handle($post, [
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+        } catch (PostsyncerException) {
+            // The failed upload creates the uncertain checkpoint this endpoint repairs.
+        }
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('uploading', $post->publish_progress['current']['phase']);
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/reconcile-media-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.state', 'failed')
+            ->assertJsonPath('data.publish_progress.current', null)
+            ->assertJsonPath(
+                'data.publish_progress.media_upload_recovery.mode',
+                'operator_confirmed_absent',
+            );
+    }
+
     public function test_repair_account_mapping_endpoint_rebases_a_partial_publish(): void
     {
         Http::fake([

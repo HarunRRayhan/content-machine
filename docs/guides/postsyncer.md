@@ -79,6 +79,21 @@ php artisan postsyncer:reconcile-video-media WORKSPACE_ID BV-68 MEDIA_ID[,MEDIA_
 The command requires exactly one valid id per uploaded URL and changes the
 checkpoint to a retryable create. It never uploads the URLs again.
 
+If inspection confirms that PostSyncer stored no media for the upload, clear
+the checkpoint through the API instead of supplying ids:
+
+```bash
+curl -X POST https://cm.harun.dev/api/v1/posts/P-68/reconcile-media-absent \
+  -H "Authorization: Bearer $CONTENT_MACHINE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"confirmed_absent":true}'
+```
+
+This only accepts an uncertain upload with an empty media-id list and an
+unchanged publish plan. It clears the checkpoint so the next retry uploads the
+URLs through Content Machine. If any media id exists, use the normal media
+reconciliation command instead.
+
 ### Reconcile an uncertain create
 
 PostSyncer does not accept an idempotency key on create. If a worker loses the

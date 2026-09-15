@@ -263,6 +263,25 @@ class PostsApiController extends Controller
         return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
+    public function reconcileMediaAbsent(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileMediaAbsent($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     public function repairAccountMapping(
         RepairPostAccountMappingRequest $request,
         string $humanId,
