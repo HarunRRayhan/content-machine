@@ -115,6 +115,22 @@ accepted the content; Content Machine preserves the group's raw `FAILED` status,
 stores the operator confirmation marker, and counts it as effectively delivered
 without losing the failure signal on later status syncs.
 
+If a read-only search confirms that no matching PostSyncer post exists, recover
+an uncertain post create through Content Machine instead of replaying it blindly:
+
+```bash
+curl -X POST https://cm.harun.dev/api/v1/posts/P-68/reconcile-create-absent \
+  -H "Authorization: Bearer $CONTENT_MACHINE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"confirmed_absent":true}'
+```
+
+This only accepts an uncertain create with a saved payload and an unchanged
+publish plan. It changes the current group to retryable while preserving its
+checkpointed media ids, so the next retry creates the post without uploading
+the same media again. Verify the matching workspace and payload are absent
+before calling it.
+
 ### Recover a drifted plan
 
 If local content changes after every external group has been checkpointed, a
