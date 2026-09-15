@@ -78,6 +78,7 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/posts/{human_id}/reconcile-media` | posts:write | checkpoint PostSyncer media ids after an uncertain URL upload (`{ "media_ids": [915, ...] }`); verify ids in the matching workspace first |
 | POST | `/api/v1/posts/{human_id}/reconcile-media-absent` | posts:write | reset an uncertain URL upload after verifying no media was stored (`{ "confirmed_absent": true }`); requires an unchanged plan and an empty media-id checkpoint |
 | POST | `/api/v1/posts/{human_id}/reconcile-create-absent` | posts:write | reset an uncertain PostSyncer create after verifying no matching post was created (`{ "confirmed_absent": true }`); keeps checkpointed media ids and requires an unchanged plan |
+| POST | `/api/v1/posts/{human_id}/rebase-retry-publish-now` | posts:write | rebase a failed partial schedule whose time has passed to publish-now; verifies every completed group is still the original `PUBLISHED` post and preserves unfinished media ids |
 | POST | `/api/v1/posts/{human_id}/repair-account-mapping` | posts:write | repair one stale account in a failed partial publish; body: `{ "language", "platform", "from_account_id", "to_account_id" }`; verifies the target account in PostSyncer and rebases only the unfinished group |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 

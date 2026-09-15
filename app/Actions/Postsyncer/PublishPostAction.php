@@ -780,6 +780,234 @@ class PublishPostAction
     }
 
     /**
+     * Rebase a failed partial schedule whose requested time has passed onto a
+     * publish-now retry. This is deliberately narrower than changing publish
+     * options: every completed group must still be remotely verifiable as the
+     * original published group, and only the unfinished groups get created.
+     */
+    public function rebaseRetryToPublishNow(Post $post): void
+    {
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to rebase.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if ($post->publish_state !== 'failed'
+            || ($progress['state'] ?? null) !== 'failed'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'retryable') {
+            throw new PostsyncerException(
+                'This post does not have a failed, retryable PostSyncer group to rebase.',
+            );
+        }
+
+        if ($this->hasExistingPublicGroup($post)) {
+            throw new PostsyncerException(
+                'This post already has finalized PostSyncer groups. Rebase is not supported.',
+            );
+        }
+
+        $oldOptions = $progress['options'] ?? null;
+        $oldWhen = is_array($oldOptions) ? ($oldOptions['when'] ?? null) : null;
+        if (! is_array($oldOptions) || ! is_string($oldWhen) || trim($oldWhen) === '') {
+            throw new PostsyncerException(
+                'This post does not have a scheduled publish that can be rebased.',
+            );
+        }
+
+        try {
+            if (! CarbonImmutable::parse($oldWhen)->isPast()) {
+                throw new PostsyncerException(
+                    'The existing PostSyncer schedule has not passed; preserve it and retry normally.',
+                );
+            }
+        } catch (PostsyncerException $exception) {
+            throw $exception;
+        } catch (Throwable) {
+            throw new PostsyncerException('The existing PostSyncer schedule is invalid.');
+        }
+
+        $completedGroups = $this->completedGroups($progress);
+        if ($completedGroups === []) {
+            throw new PostsyncerException(
+                'This post has no completed PostSyncer groups to verify before rebasing.',
+            );
+        }
+
+        $post->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($post->workspace);
+        $oldGroups = $this->planner->plan($post, $config, $oldOptions);
+        $oldPlan = $this->planMetadata($config, $oldGroups, $oldOptions);
+
+        if (($progress['plan_hash'] ?? null) !== $oldPlan['hash']
+            || ($progress['planned_groups'] ?? null) !== $oldPlan['groups']) {
+            throw new PostsyncerException(
+                'The stored PostSyncer plan no longer matches this post. Reconcile it before rebasing.',
+            );
+        }
+
+        $newOptions = $oldOptions;
+        $newOptions['when'] = null;
+        $newOptions = $this->normalizeOptions($newOptions);
+        $newGroups = $this->planner->plan($post, $config, $newOptions);
+        $newPlan = $this->planMetadata($config, $newGroups, $newOptions);
+
+        if (count($oldGroups) !== count($newGroups)) {
+            throw new PostsyncerException(
+                'The publish groups changed while preparing the publish-now rebase.',
+            );
+        }
+
+        foreach ($oldGroups as $index => $oldGroup) {
+            $newGroup = $newGroups[$index] ?? null;
+            if (! $newGroup instanceof PublishGroup) {
+                throw new PostsyncerException(
+                    'The publish groups changed while preparing the publish-now rebase.',
+                );
+            }
+
+            $this->assertSameGroupExceptSchedule($oldGroup, $newGroup);
+        }
+
+        $client = new PostsyncerClient($config);
+        $rebasedCompleted = [];
+        foreach ($completedGroups as $completed) {
+            $index = $completed['index'] ?? null;
+            $postId = $completed['post_id'] ?? null;
+            $oldGroup = is_int($index) ? ($oldGroups[$index] ?? null) : null;
+            $newGroup = is_int($index) ? ($newGroups[$index] ?? null) : null;
+            $expectedPayload = $completed['expected_payload'] ?? null;
+
+            if (! is_int($index)
+                || ! $this->hasNumericPostId($postId)
+                || ! $oldGroup instanceof PublishGroup
+                || ! $newGroup instanceof PublishGroup
+                || ! is_array($expectedPayload)
+                || ($completed['group_key'] ?? null) !== ($oldPlan['groups'][$index]['group_key'] ?? null)) {
+                throw new PostsyncerException(
+                    'Completed PostSyncer progress is incomplete; reconcile it before rebasing.',
+                );
+            }
+
+            $mediaIds = $this->mediaIdsFromPayload($expectedPayload);
+            $remote = $this->normalizePostResponse($client->getPostWithAccountDetails((string) $postId));
+
+            $this->assertReconciledPost(
+                $remote,
+                $config,
+                $oldGroup,
+                $mediaIds,
+                $postId,
+                false,
+                $expectedPayload,
+            );
+
+            if (strtoupper((string) ($remote['status'] ?? '')) !== 'PUBLISHED') {
+                throw new PostsyncerException(
+                    'Every completed group must be PUBLISHED before a schedule can be rebased to publish-now.',
+                );
+            }
+
+            $rebased = $completed;
+            $rebased['group_key'] = $newPlan['groups'][$index]['group_key'];
+            $rebased['status'] = 'PUBLISHED';
+            $rebased['scheduled_at'] = null;
+            $rebased['platforms'] = $newGroup->platforms;
+            $rebased['language'] = $newGroup->language;
+            $rebasedCompleted[] = $rebased;
+        }
+
+        $currentIndex = $current['index'] ?? null;
+        $currentOldGroup = is_int($currentIndex) ? ($oldGroups[$currentIndex] ?? null) : null;
+        $currentNewGroup = is_int($currentIndex) ? ($newGroups[$currentIndex] ?? null) : null;
+        $currentMediaIds = $this->normalizeMediaIds($current['media_ids'] ?? []);
+        $currentExpectedPayload = $current['expected_payload'] ?? null;
+
+        if (! is_int($currentIndex)
+            || ! $currentOldGroup instanceof PublishGroup
+            || ! $currentNewGroup instanceof PublishGroup
+            || ($current['group_key'] ?? null) !== ($oldPlan['groups'][$currentIndex]['group_key'] ?? null)
+            || ! is_array($currentExpectedPayload)
+            || count($currentMediaIds) !== count($currentNewGroup->mediaUrls)
+            || $this->canonicalJson($this->normalizePayloadMediaIds(
+                $this->buildPostBody($config, $currentOldGroup, $currentMediaIds),
+            )) !== $this->canonicalJson($this->normalizePayloadMediaIds($currentExpectedPayload))) {
+            throw new PostsyncerException(
+                'The current PostSyncer checkpoint no longer matches this publish plan.',
+            );
+        }
+
+        $rebasedCurrent = $current;
+        $rebasedCurrent['group_key'] = $newPlan['groups'][$currentIndex]['group_key'];
+        $rebasedCurrent['idempotency_key'] = $this->idempotencyKey(
+            (string) $progress['operation_id'],
+            $currentIndex,
+            $rebasedCurrent['group_key'],
+        );
+        $rebasedCurrent['media_urls'] = $currentNewGroup->mediaUrls;
+        $rebasedCurrent['expected_payload'] = $this->buildPostBody(
+            $config,
+            $currentNewGroup,
+            $currentMediaIds,
+        );
+
+        usort(
+            $rebasedCompleted,
+            fn (array $left, array $right): int => ((int) $left['index']) <=> ((int) $right['index']),
+        );
+
+        $rebasedProgress = $progress;
+        $rebasedProgress['options'] = $newPlan['options'];
+        $rebasedProgress['plan_hash'] = $newPlan['hash'];
+        $rebasedProgress['planned_groups'] = $newPlan['groups'];
+        $rebasedProgress['completed_groups'] = $rebasedCompleted;
+        $rebasedProgress['current'] = $rebasedCurrent;
+        $rebasedProgress['state'] = 'failed';
+        $rebasedProgress['schedule_recovery'] = [
+            'mode' => 'past_schedule_to_publish_now',
+            'rebased_at' => now()->toISOString(),
+            'completed_groups_verified' => count($rebasedCompleted),
+        ];
+
+        DB::transaction(function () use ($post, $progress, $rebasedProgress): void {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($lockedPost->publish_state ?? null) !== 'failed'
+                || ($latestProgress['state'] ?? null) !== 'failed'
+                || ($latestProgress['current']['index'] ?? null)
+                    !== ($progress['current']['index'] ?? null)
+                || ($latestProgress['current']['group_key'] ?? null)
+                    !== ($progress['current']['group_key'] ?? null)
+                || ($latestProgress['current']['phase'] ?? null) !== 'retryable') {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while the schedule rebase was running.',
+                );
+            }
+
+            $lockedPost->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'Past PostSyncer schedule rebased to publish-now. Retry to continue the publish.',
+                'publish_progress' => $rebasedProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
      * Rebind one stale PostSyncer account and rebase the unfinished group of
      * a failed publish. Completed external groups must remain byte-for-byte
      * on the old plan; otherwise this operation refuses to change anything.
@@ -2298,6 +2526,64 @@ class PublishPostAction
     }
 
     /**
+     * @param  array<string, mixed>  $payload
+     * @return list<string>
+     */
+    private function mediaIdsFromPayload(array $payload): array
+    {
+        $content = $payload['content'] ?? null;
+        if (! is_array($content)) {
+            throw new PostsyncerException('The stored PostSyncer payload has no content to verify.');
+        }
+
+        $mediaIds = [];
+        foreach ($content as $item) {
+            if (! is_array($item)) {
+                throw new PostsyncerException('The stored PostSyncer payload has invalid content details.');
+            }
+
+            $media = $item['media'] ?? [];
+            if (! is_array($media)) {
+                throw new PostsyncerException('The stored PostSyncer payload has invalid media details.');
+            }
+
+            foreach ($media as $mediaId) {
+                $mediaIds[] = $mediaId;
+            }
+        }
+
+        return $this->normalizeMediaIds($mediaIds);
+    }
+
+    /**
+     * PostSyncer may return media ids as integers while the reconciliation
+     * endpoint stores them as strings. Treat those representations equally
+     * when comparing a saved payload snapshot.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function normalizePayloadMediaIds(array $payload): array
+    {
+        $content = $payload['content'] ?? null;
+        if (! is_array($content)) {
+            return $payload;
+        }
+
+        foreach ($content as $index => $item) {
+            if (! is_array($item) || ! is_array($item['media'] ?? null)) {
+                continue;
+            }
+
+            $content[$index]['media'] = array_map('strval', $item['media']);
+        }
+
+        $payload['content'] = $content;
+
+        return $payload;
+    }
+
+    /**
      * @param  array<string, mixed>  $platformAccounts
      * @return list<array{id: int|string, settings: array<string, mixed>}>
      */
@@ -3261,6 +3547,27 @@ class PublishPostAction
             'when' => $group->when?->toIso8601String(),
             'publish_now' => $group->publishNow,
         ]));
+    }
+
+    private function assertSameGroupExceptSchedule(PublishGroup $old, PublishGroup $new): void
+    {
+        $oldPlatforms = $old->platforms;
+        $newPlatforms = $new->platforms;
+        sort($oldPlatforms);
+        sort($newPlatforms);
+
+        if ($old->language !== $new->language
+            || (string) $old->workspaceId !== (string) $new->workspaceId
+            || $oldPlatforms !== $newPlatforms
+            || $this->canonicalMediaUrls($old->mediaUrls)
+                !== $this->canonicalMediaUrls($new->mediaUrls)
+            || $old->captions !== $new->captions
+            || $old->threadTweets !== $new->threadTweets
+            || $old->firstComment !== $new->firstComment) {
+            throw new PostsyncerException(
+                'The publish groups changed beyond their schedule; rebase is not safe.',
+            );
+        }
     }
 
     private function stableMediaUrl(string $url): string

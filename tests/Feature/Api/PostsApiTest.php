@@ -727,6 +727,113 @@ class PostsApiTest extends TestCase
             );
     }
 
+    public function test_rebase_retry_to_publish_now_preserves_unfinished_media_ids(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'twitter' => ['account_id' => 100],
+                        'facebook' => ['account_id' => 101],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'twitter' => ['text' => 'on'],
+                    'facebook' => ['photo' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-REBASE-NOW-API',
+            'number' => 66,
+            'status' => 'ready',
+            'approval_state' => 'approved',
+            'language' => 'bn',
+            'platforms' => ['twitter', 'facebook'],
+            'captions' => [
+                'twitter' => [
+                    'caption' => 'A short thread',
+                    'thread' => ['A follow-up'],
+                    'images' => [],
+                ],
+                'facebook' => ['caption' => 'A photo post'],
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/example/view'],
+        ]);
+
+        $createdRemote = null;
+        $createCount = 0;
+        Http::fake(function ($request) use (&$createdRemote, &$createCount) {
+            $url = $request->url();
+
+            if (str_ends_with($url, '/media/upload/url')) {
+                return Http::response([
+                    'media' => [['id' => 9001]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if (str_ends_with($url, '/posts') && $request->method() === 'POST') {
+                $createCount++;
+                if ($createCount === 1) {
+                    $body = $request->data();
+                    $account = $body['accounts'][0];
+                    $createdRemote = [
+                        'id' => 1001,
+                        'workspace_id' => '15211',
+                        'status' => 'PUBLISHED',
+                        'scheduled_at' => '2020-01-01 00:00',
+                        'content' => $body['content'],
+                        'platforms' => [[
+                            'platform' => 'twitter',
+                            'account_id' => $account['id'],
+                            'settings' => $account['settings'],
+                        ]],
+                    ];
+
+                    return Http::response($createdRemote, 200);
+                }
+
+                return Http::response(['message' => 'temporary outage'], 500);
+            }
+
+            if (str_ends_with($url, '/posts/1001') && $request->method() === 'GET') {
+                return Http::response($createdRemote, 200);
+            }
+
+            return Http::response(['message' => 'unexpected request'], 404);
+        });
+
+        $action = app(PublishPostAction::class);
+        $action->handle($post, [
+            'when' => '2020-01-01T00:00:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame(['9001'], array_map('strval', $post->publish_progress['current']['media_ids']));
+
+        $action->reconcileCreateAbsent($post);
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/rebase-retry-publish-now')
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.options.when', null)
+            ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'PUBLISHED')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.scheduled_at', null)
+            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
+            ->assertJsonPath('data.publish_progress.current.media_ids.0', '9001');
+    }
+
     public function test_repair_account_mapping_endpoint_rebases_a_partial_publish(): void
     {
         Http::fake([
