@@ -416,6 +416,26 @@ class PostsApiTest extends TestCase
         });
     }
 
+    public function test_approve_uses_the_api_token_owner_and_returns_approved_state(): void
+    {
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-APPROVE-API',
+            'number' => 65,
+            'status' => 'draft',
+            'approval_state' => 'pending',
+        ]);
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/approve')
+            ->assertOk()
+            ->assertJsonPath('data.human_id', 'P-APPROVE-API')
+            ->assertJsonPath('data.approval_state', 'approved');
+
+        $this->assertDatabaseHas('posts', [
+            'id' => $post->id,
+            'approval_state' => 'approved',
+        ]);
+    }
+
     public function test_publish_rejects_when_postsyncer_is_not_ready(): void
     {
         Queue::fake();

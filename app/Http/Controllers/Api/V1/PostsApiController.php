@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
 use App\Actions\Posts\CreatePostAction;
@@ -210,6 +211,18 @@ class PostsApiController extends Controller
         $post = $action->handle($post, $this->currentWorkspace(), $options);
 
         return new PostResource($post->load(['attachments.mediaAsset']));
+    }
+
+    public function approve(Request $request, string $humanId, ApprovePostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+        $user = $request->user();
+
+        abort_unless($user instanceof User, 401, 'An API token with a user owner is required.');
+
+        $action->handle($post, $user);
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
     public function reconcile(Request $request, string $humanId, PublishPostAction $action): PostResource
