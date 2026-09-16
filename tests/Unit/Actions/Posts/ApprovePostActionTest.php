@@ -10,6 +10,7 @@ use App\Models\TelegramPostRequest;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class ApprovePostActionTest extends TestCase
@@ -97,5 +98,34 @@ class ApprovePostActionTest extends TestCase
         $this->assertSame('approved', $post->refresh()->approval_state);
         $this->assertSame(TelegramPostRequest::APPROVED, $request->refresh()->state);
         $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $otherRequest->refresh()->state);
+    }
+
+    public function test_it_reapproves_a_scheduled_post_after_a_publish(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $actor = User::factory()->create();
+        $post = Post::factory()->for($workspace)->create([
+            'approval_state' => 'pending',
+            'status' => 'scheduled',
+        ]);
+
+        (new ApprovePostAction)->handle($post, $actor);
+
+        $this->assertSame('approved', $post->refresh()->approval_state);
+        $this->assertSame($actor->id, $post->approved_by_user_id);
+    }
+
+    public function test_it_rejects_approval_for_an_archived_post_with_validation(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $actor = User::factory()->create();
+        $post = Post::factory()->for($workspace)->create([
+            'approval_state' => 'pending',
+            'status' => 'archived',
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new ApprovePostAction)->handle($post, $actor);
     }
 }
