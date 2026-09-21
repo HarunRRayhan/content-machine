@@ -187,7 +187,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'publish_video',
-                'description' => 'Video publishing is temporarily disabled until safe retries and reconciliation are available.',
+                'description' => 'Queue a video for immediate publishing or schedule it through Content Machine. Retries preserve the original options and uncertain external creates must be reconciled first.',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string', 'description' => 'The video id, e.g. BV-50 or V-12.'],
