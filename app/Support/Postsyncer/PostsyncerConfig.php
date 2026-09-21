@@ -97,7 +97,11 @@ class PostsyncerConfig
 
     public function videoPublishEnabled(): bool
     {
-        return (bool) ($this->data['video_publish_enabled'] ?? false);
+        // Video publishing now has the same checkpoint, retry, and
+        // reconciliation fence as post publishing. Keep an explicit false as
+        // an emergency stop, but do not make every existing workspace opt in
+        // to a feature that is already ready for the owner's publish command.
+        return (bool) ($this->data['video_publish_enabled'] ?? true);
     }
 
     public function defaultLanguage(): string

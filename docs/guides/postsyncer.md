@@ -1,8 +1,8 @@
 # PostSyncer
 
 Content Machine configures PostSyncer per workspace and schedules or publishes
-**posts** from the dashboard. Video publishing is temporarily disabled until
-safe retries and reconciliation are available. PostSyncer still delivers to Facebook,
+**posts and videos** from the dashboard. Video publishing uses the same safe
+retry and reconciliation fences as post publishing. PostSyncer still delivers to Facebook,
 Instagram, TikTok, YouTube, and the other connected accounts; CM only
 orchestrates.
 

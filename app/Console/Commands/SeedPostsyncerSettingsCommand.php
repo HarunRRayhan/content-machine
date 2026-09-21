@@ -73,6 +73,7 @@ class SeedPostsyncerSettingsCommand extends Command
         PostsyncerConfig::write($workspace, [
             'api_key' => $apiKey,
             'publish_enabled' => true,
+            'video_publish_enabled' => true,
             'languages' => $this->mapLanguages($workspaces),
             'post_types' => $this->mapPostTypes($postTypes),
         ]);

@@ -101,6 +101,7 @@ class PostsyncerConfigTest extends TestCase
         $this->assertSame('https://upload.postsyncer.com/api/v1', $config->uploadBase());
         $this->assertNull($config->apiKey());
         $this->assertFalse($config->publishEnabled());
+        $this->assertTrue($config->videoPublishEnabled());
         $this->assertFalse($config->isConfigured());
         $this->assertSame(['workspace_id' => null, 'platforms' => []], $config->language('bangla'));
         $this->assertSame([], $config->postTypes());
