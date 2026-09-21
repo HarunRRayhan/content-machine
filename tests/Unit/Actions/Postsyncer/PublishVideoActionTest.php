@@ -97,19 +97,24 @@ class PublishVideoActionTest extends TestCase
                 'content' => [[
                     'text' => 'FB reel caption',
                     'media' => [['id' => 915]],
-                    'cover_image' => ['thumbnail' => 916],
+                    'cover_image' => ['thumbnail' => ['id' => 916]],
                 ]],
                 'platforms' => [
-                    ['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    ['platform' => 'facebook', 'settings' => [
                         'post_type' => 'REELS',
-                        'caption' => 'FB reel caption',
                     ]],
-                    ['platform' => 'instagram', 'account_id' => 101, 'settings' => [
+                    ['platform' => 'instagram', 'settings' => [
                         'post_type' => 'REELS',
                         'caption' => 'IG reel caption',
                     ]],
                 ],
                 'status' => 'PUBLISHED',
+            ], 200),
+            'postsyncer.com/api/v1/analytics/posts/42' => Http::response([
+                'accounts' => [
+                    ['platform' => 'facebook', 'account_id' => 100],
+                    ['platform' => 'instagram', 'account_id' => 101],
+                ],
             ], 200),
         ]);
 
@@ -136,7 +141,7 @@ class PublishVideoActionTest extends TestCase
         ]);
 
         $video->refresh();
-        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('succeeded', $video->publish_state, (string) $video->publish_error);
         $this->assertNull($video->publish_error);
         $this->assertSame('posted', $video->status);
         $this->assertEquals([
@@ -149,7 +154,7 @@ class PublishVideoActionTest extends TestCase
             ]],
         ], $video->postsyncer);
 
-        Http::assertSentCount(3);
+        Http::assertSentCount(4);
         $mediaRequest = Http::recorded(
             fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
         )->first();

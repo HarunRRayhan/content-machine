@@ -338,7 +338,7 @@ class PublishVideoAction
         }
 
         $client = new PostsyncerClient($config);
-        $remote = $this->normalizePostResponse($client->getPost($postsyncerPostId));
+        $remote = $this->normalizePostResponse($client->getPostWithAccountDetails($postsyncerPostId));
         $this->assertReconciledPost(
             $remote,
             $config,
@@ -566,7 +566,7 @@ class PublishVideoAction
 
             $expectedPayload = $completed['expected_payload'];
             $snapshotGroup = $this->publishGroupFromSnapshot($completed, $expectedPayload);
-            $remote = $this->normalizePostResponse($client->getPost($completed['post_id']));
+            $remote = $this->normalizePostResponse($client->getPostWithAccountDetails($completed['post_id']));
             $this->assertReconciledPost(
                 $remote,
                 $config,
@@ -842,7 +842,7 @@ class PublishVideoAction
             $remote = [];
 
             try {
-                $remote = $this->normalizePostResponse($client->getPost((string) $postId));
+                $remote = $this->normalizePostResponse($client->getPostWithAccountDetails((string) $postId));
                 $this->assertReconciledPost($remote, $config, $group, $mediaIds, $postId);
 
                 return $remote;
@@ -1035,11 +1035,23 @@ class PublishVideoAction
 
             $expectedCover = $expectedItem['cover_image'] ?? null;
             $remoteCover = $remoteItem['cover_image'] ?? null;
+            $remoteThumbnail = is_array($remoteCover)
+                ? ($remoteCover['thumbnail'] ?? null)
+                : null;
+            $remoteThumbnailId = is_array($remoteThumbnail)
+                ? ($remoteThumbnail['id'] ?? null)
+                : $remoteThumbnail;
+            $expectedThumbnail = is_array($expectedCover)
+                ? ($expectedCover['thumbnail'] ?? null)
+                : null;
+            $expectedThumbnailId = is_array($expectedThumbnail)
+                ? ($expectedThumbnail['id'] ?? null)
+                : $expectedThumbnail;
+
             if (($expectedCover === null) !== ($remoteCover === null)
                 || ($expectedCover !== null
                     && (! is_array($remoteCover)
-                        || (string) ($remoteCover['thumbnail'] ?? '')
-                            !== (string) ($expectedCover['thumbnail'] ?? '')))) {
+                        || (string) $remoteThumbnailId !== (string) $expectedThumbnailId))) {
                 throw new PostsyncerException(
                     'The supplied PostSyncer post does not match the current video publish group.'
                 );
@@ -1132,8 +1144,22 @@ class PublishVideoAction
                 }
 
                 foreach ($expectedSettings as $setting => $value) {
-                    if (! array_key_exists($setting, $remoteSettings)
-                        || $remoteSettings[$setting] !== $value) {
+                    // PostSyncer stores Facebook and Instagram captions in
+                    // content[0].text and may omit the redundant platform
+                    // setting from the canonical resource. The content
+                    // comparison above still verifies the exact caption.
+                    if (! array_key_exists($setting, $remoteSettings)) {
+                        if ($setting === 'caption'
+                            && in_array(strtolower($platform), ['facebook', 'instagram'], true)) {
+                            continue;
+                        }
+
+                        throw new PostsyncerException(
+                            'The supplied PostSyncer post does not match the current platform settings.'
+                        );
+                    }
+
+                    if ($remoteSettings[$setting] !== $value) {
                         throw new PostsyncerException(
                             'The supplied PostSyncer post does not match the current platform settings.'
                         );
