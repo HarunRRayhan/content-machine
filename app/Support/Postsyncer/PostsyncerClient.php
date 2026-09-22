@@ -189,6 +189,19 @@ class PostsyncerClient
     }
 
     /**
+     * Update an existing, not-yet-published PostSyncer post.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array<string, mixed>
+     */
+    public function updatePost(int|string $id, array $body): array
+    {
+        return $this->decodeResponse(
+            $this->request('put', '/posts/'.rawurlencode((string) $id), $body),
+        );
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function getPost(int|string $id): array
@@ -205,14 +218,14 @@ class PostsyncerClient
      */
     public function getPostWithAccountDetails(int|string $id): array
     {
-        $post = $this->getPost($id);
+        $post = $this->unwrapData($this->getPost($id));
         $platforms = $post['platforms'] ?? null;
 
         if (! is_array($platforms) || ! $this->needsAccountDetails($platforms)) {
             return $post;
         }
 
-        $analytics = $this->getPostAnalytics($id);
+        $analytics = $this->unwrapData($this->getPostAnalytics($id));
         $accountRows = $analytics['accounts'] ?? null;
         if (! is_array($accountRows)) {
             return $post;
@@ -296,6 +309,7 @@ class PostsyncerClient
             $response = match ($method) {
                 'get' => $pending->get($url),
                 'post' => $pending->post($url, $body),
+                'put' => $pending->put($url, $body),
                 default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
             };
         } catch (Throwable $exception) {
@@ -327,6 +341,22 @@ class PostsyncerClient
         $json = $response->json();
 
         return is_array($json) ? $json : [];
+    }
+
+    /**
+     * PostSyncer has returned both resource-shaped and {data: resource}
+     * responses across API versions. Keep account enrichment independent of
+     * that envelope; callers that need the raw response can still use the
+     * existing getPost/getPostAnalytics methods.
+     *
+     * @param  array<string, mixed>  $response
+     * @return array<string, mixed>
+     */
+    private function unwrapData(array $response): array
+    {
+        return is_array($response['data'] ?? null)
+            ? $response['data']
+            : $response;
     }
 
     /**

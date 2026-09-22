@@ -125,6 +125,38 @@ class PostsyncerClientTest extends TestCase
         ));
     }
 
+    public function test_update_post_sends_the_full_payload_with_put(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'status' => 'scheduled',
+                'scheduled_at' => '2026-08-25 12:29',
+            ], 200),
+        ]);
+
+        $body = [
+            'workspace_id' => 15211,
+            'content' => [['text' => 'Hello', 'media' => [915]]],
+            'accounts' => [['id' => 100, 'settings' => []]],
+            'schedule_type' => 'schedule',
+            'schedule_for' => [
+                'date' => '2026-08-25',
+                'time' => '12:29',
+                'timezone' => 'Asia/Dhaka',
+            ],
+        ];
+
+        $client = $this->clientWithKey();
+        $result = $client->updatePost(42, $body);
+
+        $this->assertSame(42, $result['id']);
+        Http::assertSent(fn ($request) => $request->method() === 'PUT'
+            && $request->url() === 'https://postsyncer.com/api/v1/posts/42'
+            && $request->hasHeader('Authorization', 'Bearer test-api-key')
+            && $request['schedule_for']['time'] === '12:29');
+    }
+
     public function test_list_workspaces_returns_ids_with_names(): void
     {
         Http::fake([
@@ -252,18 +284,22 @@ class PostsyncerClientTest extends TestCase
     {
         Http::fake([
             'postsyncer.com/api/v1/posts/130052' => Http::response([
-                'id' => 130052,
-                'status' => 'PARTIALLY_FAILED',
-                'platforms' => [
-                    ['platform' => 'tiktok', 'status' => 'FAILED'],
+                'data' => [
+                    'id' => 130052,
+                    'status' => 'PARTIALLY_FAILED',
+                    'platforms' => [
+                        ['platform' => 'tiktok', 'status' => 'FAILED'],
+                    ],
                 ],
             ], 200),
             'postsyncer.com/api/v1/analytics/posts/130052' => Http::response([
-                'accounts' => [
-                    [
-                        'account_id' => 3508,
-                        'platform' => 'tiktok',
-                        'account' => ['id' => 3508],
+                'data' => [
+                    'accounts' => [
+                        [
+                            'account_id' => 3508,
+                            'platform' => 'tiktok',
+                            'account' => ['id' => 3508],
+                        ],
                     ],
                 ],
             ], 200),

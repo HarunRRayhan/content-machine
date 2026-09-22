@@ -9,10 +9,12 @@ use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Actions\Postsyncer\ReschedulePostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\UpdatePostData;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
+use App\Data\Postsyncer\ReschedulePostData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\RepairPostAccountMappingRequest;
 use App\Http\Requests\Posts\StorePostDocumentRequest;
@@ -33,6 +35,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -223,6 +226,32 @@ class PostsApiController extends Controller
         $action->handle($post, $user);
 
         return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reschedule(
+        Request $request,
+        string $humanId,
+        ReschedulePostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'when' => ['required', 'string', 'max:64'],
+        ]);
+
+        try {
+            $post = $action->handle(
+                $post,
+                $this->currentWorkspace(),
+                ReschedulePostData::fromApiPayload($payload),
+            );
+        } catch (InvalidArgumentException|PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'when' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->load(['attachments.mediaAsset']));
     }
 
     public function reconcile(Request $request, string $humanId, PublishPostAction $action): PostResource
