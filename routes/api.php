@@ -155,6 +155,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.approve');
 
+    Route::post('posts/{human_id}/reschedule', [PostsApiController::class, 'reschedule'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reschedule');
+
     Route::post('posts/{human_id}/reconcile', [PostsApiController::class, 'reconcile'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile');
