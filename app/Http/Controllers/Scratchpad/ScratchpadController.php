@@ -244,9 +244,8 @@ class ScratchpadController extends Controller
 
     /**
      * Hard-delete an entry. 404s if it's not in the current workspace, same
-     * boundary as every other single-entry action here; refuses (via a
-     * flashed error, back to the entry) if it's already been triaged into
-     * an idea, since DeleteScratchpadEntryAction won't sever that link.
+     * boundary as every other single-entry action here. Any linked idea is
+     * preserved with its scratchpad source link cleared by the action.
      */
     public function destroy(Request $request, ScratchpadEntry $entry, DeleteScratchpadEntryAction $deleteScratchpadEntryAction): RedirectResponse
     {
