@@ -3,31 +3,28 @@
 namespace App\Actions\Scratchpad;
 
 use App\Models\Attachment;
+use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\ScratchpadEntry;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 
 /**
  * Hard-deletes a scratchpad entry: its status/content history, its
  * transcriptions, its attachments, and (unless another attachment still
  * points at the same deduped file) the underlying media asset and stored
- * file. A triaged entry already has a real Idea pointing back at it
- * (`ideas.scratchpad_entry_id`), so deleting it would silently sever that
- * link; this refuses rather than doing that quietly.
- *
- * @throws RuntimeException if the entry has already been triaged into an idea
+ * file. If an idea points back at this entry, it is preserved and its source
+ * link is cleared before the entry is removed.
  */
 class DeleteScratchpadEntryAction
 {
     public function handle(ScratchpadEntry $entry): void
     {
-        if ($entry->status === 'triaged') {
-            throw new RuntimeException("This entry has already been triaged into an idea and can't be deleted.");
-        }
-
         DB::transaction(function () use ($entry) {
+            Idea::query()
+                ->where('scratchpad_entry_id', $entry->id)
+                ->update(['scratchpad_entry_id' => null]);
+
             $entry->statusTransitions()->delete();
             $entry->contentVersions()->delete();
             $entry->transcriptions()->delete();

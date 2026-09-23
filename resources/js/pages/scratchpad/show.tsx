@@ -118,28 +118,25 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
                         <Badge variant="outline">via {entry.source}</Badge>
                     </div>
 
-                    {entry.status !== 'triaged' && (
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                                if (
-                                    confirm(
-                                        "Delete this entry? This can't be undone.",
-                                    )
-                                ) {
-                                    router.delete(
-                                        ScratchpadController.destroy.url(
-                                            entry.id,
-                                        ),
-                                    );
-                                }
-                            }}
-                        >
-                            Delete
-                        </Button>
-                    )}
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                            const message =
+                                entry.status === 'triaged'
+                                    ? 'Delete this capture? Its idea will stay, but its source link will be removed. This cannot be undone.'
+                                    : "Delete this entry? This can't be undone.";
+
+                            if (confirm(message)) {
+                                router.delete(
+                                    ScratchpadController.destroy.url(entry.id),
+                                );
+                            }
+                        }}
+                    >
+                        Delete
+                    </Button>
                 </div>
 
                 <ScratchpadEntryMedia attachments={entry.attachments} />

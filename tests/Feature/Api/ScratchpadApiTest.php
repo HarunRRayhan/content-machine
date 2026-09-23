@@ -235,11 +235,11 @@ class ScratchpadApiTest extends TestCase
         ])->assertStatus(409);
     }
 
-    public function test_destroy_deletes_a_new_entry_but_refuses_a_triaged_one()
+    public function test_destroy_deletes_new_and_triaged_entries_and_detaches_the_triaged_idea()
     {
         $fresh = ScratchpadEntry::factory()->for($this->workspace)->create(['kind' => 'text']);
         $triaged = ScratchpadEntry::factory()->for($this->workspace)->create(['status' => 'triaged']);
-        Idea::factory()->for($this->workspace)->create([
+        $idea = Idea::factory()->for($this->workspace)->create([
             'kind' => 'post',
             'scratchpad_entry_id' => $triaged->id,
         ]);
@@ -250,8 +250,11 @@ class ScratchpadApiTest extends TestCase
         $this->assertModelMissing($fresh);
 
         $this->acting()->deleteJson("/api/v1/scratchpad/{$triaged->public_id}")
-            ->assertStatus(409);
-        $this->assertModelExists($triaged);
+            ->assertOk()
+            ->assertJsonPath('deleted', true);
+        $this->assertModelMissing($triaged);
+        $this->assertModelExists($idea);
+        $this->assertNull($idea->fresh()->scratchpad_entry_id);
     }
 
     public function test_triage_files_a_post_idea_and_flips_the_entry()
