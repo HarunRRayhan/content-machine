@@ -134,6 +134,10 @@ const mainNavItems: NavItem[] = [
                 href: '/settings/google-drive',
             },
             {
+                title: 'Pexels',
+                href: '/settings/pexels',
+            },
+            {
                 title: 'AI Models',
                 href: aiProvidersIndex(),
             },

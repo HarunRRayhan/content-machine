@@ -4,6 +4,7 @@ use App\Http\Controllers\AiProviders\AiProviderCredentialModelsController;
 use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\Settings\GeneralSettingsController;
 use App\Http\Controllers\Settings\GoogleDriveController;
+use App\Http\Controllers\Settings\PexelsSettingsController;
 use App\Http\Controllers\Settings\PostsyncerSettingsController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Controllers\Telegram\TelegramBotLinkController;
@@ -17,6 +18,9 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::redirect('/', '/settings/general')->name('index');
 
         Route::get('general', [GeneralSettingsController::class, 'edit'])->name('general.edit');
+
+        Route::get('pexels', [PexelsSettingsController::class, 'edit'])->name('pexels.edit');
+        Route::post('pexels', [PexelsSettingsController::class, 'update'])->name('pexels.update');
 
         Route::get('google-drive', [GoogleDriveController::class, 'edit'])->name('google-drive.edit');
         Route::get('google-drive/connect', [GoogleDriveController::class, 'connect'])->name('google-drive.connect');
