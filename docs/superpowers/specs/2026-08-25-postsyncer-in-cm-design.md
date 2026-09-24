@@ -5,6 +5,8 @@
 **Repo:** content-machine  
 **Related:** `docs/architecture/posts-videos-api.md`, personal-content `docs/postsyncer-setup.md`, `web/publish_postsyncer.py`
 
+> Historical design snapshot, not a current specification. Implementation has since added publish recovery, video publishing, rescheduling, and scheduled-status synchronization. The original non-goal below about polling was superseded by `postsyncer:sync-scheduled`. See the [current architecture](../../architecture/overview.md), [API guide](../../guides/api.md), and [PostSyncer operations guide](../../guides/postsyncer.md). The API guide lists the verified remaining API gaps as of baseline `fafde1e` (2026-09-24).
+
 ## Goal
 
 Make Content Machine the place that configures PostSyncer and schedules/publishes **posts and videos**. The Tailscale Script Studio app stops owning publish after cutover. Pipeline status updates live on CM records.
@@ -65,7 +67,7 @@ PostSyncer remains the system that actually posts to Facebook / Instagram / etc.
 
 ### Workspace `settings.postsyncer`
 
-Stored on `workspaces.settings` (JSON). Secrets encrypted at rest (Laravel encrypted cast or dedicated encrypted column — implementation detail in the plan).
+Stored on `workspaces.settings` (JSON). Secrets encrypted at rest (Laravel encrypted cast or dedicated encrypted column, implementation detail in the plan).
 
 ```text
 postsyncer:
@@ -207,7 +209,7 @@ seconds.
 
 ### Link upload
 
-Use PostSyncer’s URL/link media registration (not Tailscale multipart). Exact endpoint/payload verified against current PostSyncer docs at implementation time; personal-content today only implements file upload — CM adds the link path as new client code in Laravel.
+Use PostSyncer’s URL/link media registration (not Tailscale multipart). The endpoint and payload were verified against PostSyncer docs at implementation time. Personal-content then implemented file upload only; CM added the link path in Laravel.
 
 ## List UI (status tabs)
 

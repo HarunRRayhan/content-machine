@@ -65,10 +65,13 @@ scattered `if` statements across the codebase.
 ### 5. Testing
 
 Pest (`tests/`). Every Action, every DTO's boundary-crossing constructor, every policy/gate, and
-every non-trivial trait gets a test. `./vendor/bin/pest --parallel` must pass before any commit,
+every non-trivial trait gets a test. `./vendor/bin/pest` must pass before any commit,
 same for `./vendor/bin/pint --test` and `./vendor/bin/phpstan analyse --memory-limit=1G`
 (Larastan level 7). CI enforces all three; don't rely on CI to catch what you can catch locally
 first.
+
+Use a dedicated PostgreSQL test database. Run Pest serially, matching CI: parallel workers
+race migrations when they share a schema. See `docs/getting-started/local.md` for setup.
 
 ## Where things live
 
