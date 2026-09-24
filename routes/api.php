@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\GoogleDriveApiController;
 use App\Http\Controllers\Api\V1\IdeasApiController;
 use App\Http\Controllers\Api\V1\MediaApiController;
 use App\Http\Controllers\Api\V1\MediaUrlsApiController;
+use App\Http\Controllers\Api\V1\NotificationsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
@@ -93,6 +94,15 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('media-urls/check', [MediaUrlsApiController::class, 'check'])
         ->middleware('auth.workspace-token:media:read')
         ->name('media-urls.check');
+
+    Route::post('notifications/telegram', [NotificationsApiController::class, 'store'])
+        ->middleware('auth.workspace-token:notifications:write')
+        ->name('notifications.telegram.store');
+
+    Route::get('notifications/telegram/{key}', [NotificationsApiController::class, 'show'])
+        ->where('key', '[A-Za-z0-9._:-]{1,120}')
+        ->middleware('auth.workspace-token:notifications:read')
+        ->name('notifications.telegram.show');
 
     Route::get('google-drive/files', [GoogleDriveApiController::class, 'files'])
         ->middleware('auth.workspace-token:drive:read')

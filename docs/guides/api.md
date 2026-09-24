@@ -2,7 +2,7 @@
 
 External clients, including personal-content tools, use Content Machine's
 workspace-token JSON API under `/api/v1`. The API covers Scratch Pad entries,
-ideas, posts, videos, media, Drive access, publishing, and operational recovery.
+ideas, posts, videos, media, Drive access, notifications, publishing, and operational recovery.
 The same workspace token can call the Streamable HTTP MCP endpoint at `/mcp`.
 
 ## Authentication
@@ -35,6 +35,8 @@ request reads as `401`). Abilities:
 | `posts:write` | create/update posts, upload post images, queue a PostSyncer publish |
 | `drive:read` | browse the connected workspace Google Drive |
 | `drive:write` | add an Anyone-with-the-link reader permission to a selected Drive file |
+| `notifications:read` | read status for notifications created by this token owner |
+| `notifications:write` | queue Telegram notifications to this token owner's linked private chat |
 
 Missing ability → `403`. Bad or revoked token → `401`.
 
@@ -64,6 +66,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/videos` | videos:write | create; pass `human_id`+`number` for idempotent import |
 | PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … (publish metadata is read-only). Drive URLs must be public Google Drive file links. |
 | POST | `/api/v1/media-urls/check` | any token | probe a Drive URL: `{ url }` → `{ accessible, message, file_id, share_url, fetch_url }` |
+| POST | `/api/v1/notifications/telegram` | `notifications:write` | body: `{ "key": "stable-caller-key", "text": "message" }`; queues through the durable Telegram outbox |
+| GET | `/api/v1/notifications/telegram/{key}` | `notifications:read` | status for this token owner's key in this workspace |
 | GET | `/api/v1/google-drive/files` | `drive:read` | list the connected Drive folder; optional `folder_id` and `q` |
 | POST | `/api/v1/google-drive/files/{file_id}/make-public` | `drive:write` | add a public reader permission and return the share URL |
 | POST | `/api/v1/videos/{human_id}/publish` | videos:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). The video needs a Video Drive URL. Always send `when` to schedule. Retries preserve the original options; an uncertain create requires `postsyncer:reconcile-video` before retrying. |
@@ -86,6 +90,22 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 Captures made through the API are recorded with `source: api`. The history tables
 attribute status transitions and field changes to the token name, as they do for
 dashboard changes.
+
+### Telegram notifications
+
+The caller supplies a stable `key` (1–120 ASCII letters, digits, `.`, `_`, `:`, or `-`)
+and `text` (1–10,000 characters). A new request returns `202`; an identical retry
+returns `200` and the original record. Reusing the same key with different text or
+after the owner's linked Telegram chat changes returns `409`. The key is scoped to
+the token owner and current workspace. A response contains only `key`, `status`,
+`created_at`, and `sent_at`; it never returns the chat id or the dispatcher's internal
+error. Status is one of `pending`, `sending`, `sent`, `failed`, `uncertain`, or
+`discarded`. Poll the GET endpoint to observe delivery.
+
+The current token owner must still belong to the workspace and have a linked private
+chat for the connected workspace bot when creating a notification. The API never
+accepts a recipient. Existing tokens do not gain notification abilities implicitly;
+mint a token with `notifications:write` and `notifications:read` selected.
 
 ## Example
 
