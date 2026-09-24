@@ -7,17 +7,29 @@ use App\Data\Posts\AttachPostDocumentData;
 use App\Models\Attachment;
 use App\Models\MediaAsset;
 use App\Models\Post;
+use App\Models\Transcription;
 use App\Models\User;
 use App\Models\Workspace;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\DatabaseTruncation;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class AttachPostDocumentActionTest extends TestCase
 {
-    use RefreshDatabase;
+    use DatabaseTruncation;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->beforeApplicationDestroyed(static function (): void {
+            RefreshDatabaseState::$migrated = false;
+        });
+    }
 
     public function test_it_stores_a_pdf_and_attaches_it_as_a_linkedin_document(): void
     {
@@ -93,7 +105,6 @@ class AttachPostDocumentActionTest extends TestCase
             new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('old.pdf', 'old pdf bytes')),
         );
         $oldAsset = MediaAsset::sole();
-        $oldPath = $oldAsset->path;
 
         $action->handle(
             $post->fresh(),
@@ -104,7 +115,162 @@ class AttachPostDocumentActionTest extends TestCase
         $this->assertSame(1, MediaAsset::count());
         $this->assertSame(1, Attachment::count());
         $this->assertSame('new.pdf', MediaAsset::sole()->original_filename);
+        $this->assertDatabaseMissing('media_assets', ['id' => $oldAsset->id]);
+    }
+
+    public function test_an_outer_transaction_rollback_keeps_previous_document_reachable(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $action = new AttachPostDocumentAction;
+        $action->handle(
+            $post,
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('old.pdf', 'old pdf bytes')),
+        );
+
+        $oldAsset = MediaAsset::sole();
+        $oldPath = $oldAsset->path;
+
+        DB::beginTransaction();
+
+        try {
+            $action->handle(
+                $post->fresh(),
+                null,
+                new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('new.pdf', 'new pdf bytes')),
+            );
+        } finally {
+            DB::rollBack();
+        }
+
+        $this->assertDatabaseHas('media_assets', ['id' => $oldAsset->id]);
+        $this->assertDatabaseHas('attachments', [
+            'attachable_type' => $post->getMorphClass(),
+            'attachable_id' => $post->id,
+            'media_asset_id' => $oldAsset->id,
+            'role' => 'document',
+        ]);
+        Storage::disk('scratchpad')->assertExists($oldPath);
+    }
+
+    public function test_a_committed_replacement_deletes_the_unreferenced_old_file(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $action = new AttachPostDocumentAction;
+
+        $action->handle(
+            $post,
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('old.pdf', 'old pdf bytes')),
+        );
+        $oldAsset = MediaAsset::sole();
+        $oldPath = $oldAsset->path;
+
+        $action->handle(
+            $post->fresh(),
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('new.pdf', 'new pdf bytes')),
+        );
+
+        $this->assertDatabaseMissing('media_assets', ['id' => $oldAsset->id]);
+        $this->assertDatabaseMissing('attachments', ['media_asset_id' => $oldAsset->id]);
         Storage::disk('scratchpad')->assertMissing($oldPath);
+    }
+
+    public function test_an_outer_commit_waits_to_delete_the_previous_file(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $action = new AttachPostDocumentAction;
+        $action->handle(
+            $post,
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('old.pdf', 'old pdf bytes')),
+        );
+
+        $oldAsset = MediaAsset::sole();
+        $oldPath = $oldAsset->path;
+
+        DB::beginTransaction();
+        $action->handle(
+            $post->fresh(),
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('new.pdf', 'new pdf bytes')),
+        );
+
+        Storage::disk('scratchpad')->assertExists($oldPath);
+        DB::commit();
+
+        $this->assertDatabaseMissing('media_assets', ['id' => $oldAsset->id]);
+        Storage::disk('scratchpad')->assertMissing($oldPath);
+    }
+
+    public function test_a_replacement_keeps_an_old_file_that_still_has_an_attachment(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $otherPost = Post::factory()->for($workspace)->create();
+        $action = new AttachPostDocumentAction;
+
+        $action->handle(
+            $post,
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('shared.pdf', 'shared pdf bytes')),
+        );
+        $oldAsset = MediaAsset::sole();
+        $oldPath = $oldAsset->path;
+        $otherAttachment = Attachment::factory()->for($otherPost, 'attachable')->for($oldAsset)->create([
+            'role' => 'document',
+            'platform' => 'linkedin',
+        ]);
+
+        $action->handle(
+            $post->fresh(),
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('new.pdf', 'new pdf bytes')),
+        );
+
+        $this->assertDatabaseHas('media_assets', ['id' => $oldAsset->id]);
+        $this->assertDatabaseHas('attachments', ['id' => $otherAttachment->id]);
+        Storage::disk('scratchpad')->assertExists($oldPath);
+    }
+
+    public function test_a_replacement_keeps_an_old_asset_that_still_has_a_transcription(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $action = new AttachPostDocumentAction;
+
+        $action->handle(
+            $post,
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('transcribed.pdf', 'pdf bytes')),
+        );
+        $oldAsset = MediaAsset::sole();
+        $oldPath = $oldAsset->path;
+        $transcription = Transcription::factory()->for($oldAsset, 'mediaAsset')->create();
+
+        $action->handle(
+            $post->fresh(),
+            null,
+            new AttachPostDocumentData(file: UploadedFile::fake()->createWithContent('new.pdf', 'new pdf bytes')),
+        );
+
+        $this->assertDatabaseHas('media_assets', ['id' => $oldAsset->id]);
+        $this->assertDatabaseHas('transcriptions', ['id' => $transcription->id]);
+        Storage::disk('scratchpad')->assertExists($oldPath);
     }
 
     public function test_it_rejects_an_upload_while_a_postsyncer_publish_is_in_progress(): void

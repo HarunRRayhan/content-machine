@@ -4,6 +4,7 @@ namespace App\Actions\Posts;
 
 use App\Actions\Scratchpad\Concerns\ResolvesMediaAsset;
 use App\Data\Posts\AttachPostDocumentData;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -78,10 +79,28 @@ class AttachPostDocumentAction
             $mediaAsset = $attachment->mediaAsset;
             $attachment->delete();
 
-            if ($mediaAsset !== null && ! $mediaAsset->attachments()->exists()) {
-                Storage::disk($mediaAsset->disk)->delete($mediaAsset->path);
-                $mediaAsset->delete();
+            if ($mediaAsset === null) {
+                continue;
             }
+
+            $lockedAsset = MediaAsset::query()
+                ->whereKey($mediaAsset->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedAsset === null
+                || $lockedAsset->attachments()->exists()
+                || $lockedAsset->transcriptions()->exists()) {
+                continue;
+            }
+
+            $disk = $lockedAsset->disk;
+            $path = $lockedAsset->path;
+            $lockedAsset->delete();
+
+            DB::afterCommit(static function () use ($disk, $path): void {
+                Storage::disk($disk)->delete($path);
+            });
         }
     }
 }
