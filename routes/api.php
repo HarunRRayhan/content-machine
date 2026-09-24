@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\IdeasApiController;
 use App\Http\Controllers\Api\V1\MediaApiController;
 use App\Http\Controllers\Api\V1\MediaUrlsApiController;
 use App\Http\Controllers\Api\V1\NotificationsApiController;
+use App\Http\Controllers\Api\V1\PexelsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
@@ -204,6 +205,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('media', [MediaApiController::class, 'index'])
         ->middleware('auth.workspace-token:media:read')
         ->name('media.index');
+
+    Route::get('pexels/search', [PexelsApiController::class, 'search'])
+        ->middleware('auth.workspace-token:media:read')
+        ->name('pexels.search');
+
+    Route::post('pexels/import', [PexelsApiController::class, 'import'])
+        ->middleware('auth.workspace-token:media:write')
+        ->name('pexels.import');
 
     Route::get('media/{mediaAsset:public_id}/file', [MediaApiController::class, 'file'])
         ->middleware('auth.workspace-token:media:read')
