@@ -49,6 +49,8 @@ class WorkspaceApiToken extends Model
         'media:write',
         'drive:read',
         'drive:write',
+        'notifications:read',
+        'notifications:write',
     ];
 
     /**
