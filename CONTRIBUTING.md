@@ -1,21 +1,19 @@
 # Contributing to content-machine
 
-Thanks for taking a look at this project. It's early: a fresh Laravel + Inertia +
-React scaffold, pre-alpha, nothing is wired up yet. That's actually a good time to
-get involved if you want to help shape the foundations.
+Thanks for taking a look at Content Machine. The app is in active development. Read
+the architecture overview and local setup guide before changing app behavior.
 
 Engineering conventions (Action pattern, DTOs, SOLID, DRY) are required for every PR,
-human or AI-assisted — see [`CLAUDE.md`](CLAUDE.md).
+human or AI-assisted. See [`CLAUDE.md`](CLAUDE.md).
 
 ## Local development
 
-There's no `compose.yaml` yet (that lands once the app actually needs Postgres/S3
-services locally), so for now everything runs against tools installed on your own
-machine:
+Install the required PHP and Node packages, then configure a local PostgreSQL
+database in `.env`:
 
 ```bash
 composer install
-npm install
+npm ci
 cp .env.example .env
 php artisan key:generate
 php artisan migrate
@@ -23,11 +21,10 @@ composer run dev
 ```
 
 `composer run dev` starts the Laravel server, the queue listener, and the Vite dev
-server together. You'll need PHP 8.3+ and a local Postgres instance (see
-`.env.example` for the connection defaults it expects).
-
-Once a `compose.yaml` exists, this section will be updated to point at `docker
-compose up` instead.
+server together. The app supports PHP 8.3+, while the current Pest 5 test suite
+needs PHP 8.4. See [local development](docs/getting-started/local.md) for the
+PostgreSQL setup used by CI. The app does not provide a local Docker Compose
+stack.
 
 ## Branch naming
 
@@ -49,7 +46,7 @@ npm run lint:check              # ESLint
 npm run format:check            # Prettier
 npx tsc --noEmit                # TypeScript
 npm run build                   # production build
-./vendor/bin/pest --parallel    # tests
+./vendor/bin/pest               # tests (PostgreSQL; do not run parallel against one schema)
 ```
 
 `composer run test` covers the PHP side of that list (style, static analysis,

@@ -1,6 +1,8 @@
-# Dashboard Content Parity Implementation Plan
+# Dashboard Content Parity: historical implementation plan
 
-> **For agentic workers:** Implement task-by-task. Checkbox syntax for tracking.
+> Historical snapshot from 2026-08-25. Its unchecked tasks were not maintained as work shipped, so they do not describe current completion or remaining work. The dashboard has since been implemented in the codebase at baseline `fafde1e` (2026-09-24). Check current controllers and pages before reviving any task.
+>
+> Current references: [architecture overview](../../architecture/overview.md), [posts and videos](../../architecture/posts-videos-api.md), [API guide](../../guides/api.md), and [PostSyncer guide](../../guides/postsyncer.md). The API guide lists the verified remaining API gaps. This plan does not claim those gaps are dashboard parity work.
 
 **Goal:** Content Machine dashboard videos/posts match Script Studio feature depth (script, captions, presentation, filters), backed by the database.
 
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Laravel Inertia React, existing Tabs UI, Reveal.js CDN for decks
 
-**Spec:** Chat-approved design 2026-08-25 — full Studio feature parity for videos + posts
+**Spec:** Chat-approved design 2026-08-25, full Studio feature parity for videos + posts
 
 ## Global Constraints
 
