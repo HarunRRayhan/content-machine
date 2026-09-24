@@ -255,6 +255,27 @@ class PostsApiTest extends TestCase
         $this->assertSame('E', Post::query()->where('human_id', 'P-63')->value('template'));
     }
 
+    public function test_store_and_patch_accept_active_g_and_h_catalog_templates(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-66',
+            'number' => 66,
+            'title' => 'DNS lookup',
+            'status' => 'draft',
+            'template' => 'g',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.template', 'G');
+
+        $this->acting()->patchJson('/api/v1/posts/P-66', [
+            'template' => 'H',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.template', 'H');
+
+        $this->assertSame('H', Post::query()->where('human_id', 'P-66')->value('template'));
+    }
+
     public function test_index_lists_posts(): void
     {
         Post::factory()->for($this->workspace)->create(['human_id' => 'P-1', 'number' => 1]);

@@ -97,7 +97,7 @@ final readonly class UpdatePostData
         }
 
         $letter = strtoupper(trim($raw));
-        if (! in_array($letter, PostDesignTemplate::LETTERS, true)) {
+        if (! in_array($letter, PostDesignTemplate::letters(), true)) {
             return null;
         }
 

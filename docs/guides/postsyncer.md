@@ -148,10 +148,8 @@ snapshot. It rechecks each remote post before marking the operation successful;
 it never creates a new PostSyncer post. Use `--confirm-failed` only when a saved
 group is already an operator-confirmed remote `FAILED` record.
 
-`PublishPostJob` has a 900-second timeout and the dedicated `postsyncer`
-database queue has a 960-second visibility window. Its row lease and overlap
-lock make duplicate dispatches harmless, while leaving the scheduled recovery
-sweep free to re-enqueue a job if queue insertion fails.
+`PublishPostJob`'s row lease and overlap lock make duplicate dispatches harmless.
+The scheduled recovery sweep can re-enqueue a job if queue insertion fails.
 
 ## Settings → PostSyncer
 
@@ -236,10 +234,10 @@ now**.
 
 The dialog lets you pick:
 
-- **When** — datetime in the workspace timezone (default Asia/Dhaka), or Now
-- **Platforms** — intersection of the record's platforms, configured accounts,
+- **When:** datetime in the workspace timezone (default Asia/Dhaka), or Now
+- **Platforms:** intersection of the record's platforms, configured accounts,
   and post-type rules
-- **Ask platforms** — English Twitter/Threads/Bluesky photo posts need an
+- **Ask platforms:** English Twitter/Threads/Bluesky photo posts need an
   explicit confirm checkbox (same gate as Script Studio)
 
 Bilingual posts auto-split into separate PostSyncer calls per language,
@@ -262,11 +260,11 @@ into publish-now or expand a partial retry to other platforms.
 
 On the video show page, before scheduling:
 
-- **Video Drive URL** (`video_drive_url`) — required. A live Google Drive file
+- **Video Drive URL** (`video_drive_url`): required. A live Google Drive file
   share link. CM checks that Anyone with the link can fetch it, then sends
   PostSyncer the download form (`drive.usercontent.google.com/download?id=…`).
   A folder link or a private file is rejected.
-- **Cover Drive URL** (`cover_drive_url`) — optional. Same public-file rule.
+- **Cover Drive URL** (`cover_drive_url`): optional. Same public-file rule.
   Used as `content[0].cover_image` for YouTube / Instagram / Facebook.
 
 Paste in the video overview, or push from local via
@@ -304,21 +302,6 @@ GOOGLE_DRIVE_REDIRECT_URI=https://cm.example/settings/google-drive/callback
 
 Register the exact redirect URI in Google Cloud Console. The OAuth consent
 screen must allow the Drive scope for the account you connect.
-
-### Reconcile an uncertain create
-
-If a worker loses the response after `POST /posts`, first find the created post
-in the matching PostSyncer workspace. Verify its content, media, platforms,
-and schedule against the failed operation, then run this on the Content Machine
-deployment:
-
-```bash
-php artisan postsyncer:reconcile-post WORKSPACE_ID P-68 POSTSYNCER_POST_ID
-```
-
-The command calls `GET /posts/{id}` and only records the id when the workspace
-and group payload match. Retry the post afterwards; the reconciled group is
-checkpointed and won't be created again.
 
 ## Status tabs
 

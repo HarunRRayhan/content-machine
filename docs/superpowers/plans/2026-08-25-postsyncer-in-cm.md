@@ -1,12 +1,14 @@
-# PostSyncer in Content Machine Implementation Plan
+# PostSyncer in Content Machine: historical implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical snapshot from 2026-08-25. This plan's checkboxes were not maintained as work shipped. They do not identify completed work or current backlog items. The implementation is present in the codebase at baseline `fafde1e` (2026-09-24).
+>
+> Current references: [architecture overview](../../architecture/overview.md), [posts and videos](../../architecture/posts-videos-api.md), [API guide](../../guides/api.md), and [PostSyncer guide](../../guides/postsyncer.md). The API guide lists the verified remaining API gaps: deck-package upload endpoints, idea promotion over the API, and rate limiting beyond the default throttle. Verify code and docs before reviving any task from this plan.
 
 **Goal:** Configure PostSyncer per workspace in Content Machine and schedule/publish posts and videos from the dashboard via queued jobs (Drive/attachment URL link-upload), with Studio-like status tabs including Ideation.
 
 **Architecture:** Workspace `settings.postsyncer` holds encrypted API key + Bangla/English account maps + post-type rules. A Laravel HTTP client talks to PostSyncer (`POST /media/upload/url`, `POST /posts`, `GET /accounts`). `PublishPostJob` / `PublishVideoJob` run group plans (ported bilingual split rules). Dashboard Schedule/Publish enqueues jobs; index pages use status tabs.
 
-**Tech Stack:** Laravel 12, Inertia React, PostgreSQL, queued jobs, `Illuminate\Support\Facades\Http`, `Crypt` for API key
+**Tech Stack at planning time:** Laravel 12, Inertia React, PostgreSQL, queued jobs, `Illuminate\Support\Facades\Http`, `Crypt` for API key
 
 **Spec:** `docs/superpowers/specs/2026-08-25-postsyncer-in-cm-design.md`
 
@@ -165,13 +167,13 @@ public function test_write_encrypts_api_key_and_read_decrypts(): void
 }
 ```
 
-- [ ] **Step 2: Run test — expect FAIL**
+- [ ] **Step 2: Run test (expect FAIL)**
 
 Run: `php artisan test --filter=PostsyncerConfigTest`
 
 - [ ] **Step 3: Implement PostsyncerConfig**
 
-- [ ] **Step 4: Run test — expect PASS**
+- [ ] **Step 4: Run test (expect PASS)**
 
 - [ ] **Step 5: Commit**
 
@@ -217,11 +219,11 @@ $this->assertSame([915], $ids);
 
 Also test createPost and error → `PostsyncerException`.
 
-- [ ] **Step 2: Run — FAIL**
+- [ ] **Step 2: Run (expect FAIL)**
 
 - [ ] **Step 3: Implement client**
 
-- [ ] **Step 4: Run — PASS**
+- [ ] **Step 4: Run (expect PASS)**
 
 - [ ] **Step 5: Commit**
 
@@ -239,9 +241,9 @@ git commit -m "feat: add PostSyncer HTTP client with URL media import"
 
 **Interfaces:**
 - Produces:
-  - `forPost(Post $post): array` — list of HTTPS URLs  
+  - `forPost(Post $post): array`: list of HTTPS URLs
     Prefer attachment `Storage::disk(...)->url(...)` when attachments exist; else `image_drive_urls`; empty array = text-only allowed later by planner
-  - `forVideo(Video $video): array{video: string, cover: ?string}` — requires `video_drive_url` or throws `InvalidArgumentException`
+  - `forVideo(Video $video): array{video: string, cover: ?string}`: requires `video_drive_url` or throws `InvalidArgumentException`
 
 - [ ] **Step 1–5:** TDD as above; commit `feat: resolve post/video media URLs for PostSyncer`
 
@@ -259,7 +261,7 @@ git commit -m "feat: add PostSyncer HTTP client with URL media import"
 - `PostPublishPlanner::plan(Post $post, PostsyncerConfig $config, array $options): array` returns `list<PublishGroup>`
   - `$options`: `when` (nullable datetime string), `platforms` (optional override), `confirm_ask` (bool)
 
-**v1 of this task:** one language only — if post `language` is `en` use english map, else bangla; one group with all selected platforms that are `on` for detected post type (photo if media, else text). Skip `unsupported` / `off`. If any selected platform is `ask` and `confirm_ask` false, throw.
+**v1 of this task:** one language only. If post `language` is `en`, use the English map, otherwise Bangla. Create one group with all selected platforms that are `on` for the detected post type (photo if media, otherwise text). Skip `unsupported` / `off`. If any selected platform is `ask` and `confirm_ask` is false, throw.
 
 - [ ] **Step 1–5:** TDD; commit `feat: plan single-language PostSyncer publish groups`
 
@@ -274,7 +276,7 @@ git commit -m "feat: add PostSyncer HTTP client with URL media import"
 
 **Behavior to port (minimum for parity):**
 - If captions have both Bangla and English platform sections (or `platforms` lists both langs), emit ≥2 groups targeting bangla/english workspace ids
-- Split Twitter thread into its own group when captions contain thread segments (`Tweet 2` / equivalent structure already stored in CM captions JSON — inspect real P-48 captions shape in DB/API before coding)
+- Split Twitter thread into its own group when captions contain thread segments (`Tweet 2` or equivalent structure already stored in CM captions JSON; inspect real P-48 captions shape in DB/API before coding)
 - Do not merge Threads into Twitter’s thread group
 - Different image sets per language → separate groups
 
@@ -355,11 +357,11 @@ media, cover, accounts, platforms, and schedule before recording an id.
 - Create: `app/Actions/Postsyncer/UpdatePostsyncerSettingsAction.php`
 - Create: `app/Http/Controllers/Settings/PostsyncerSettingsController.php`
 - Create: `app/Http/Requests/Settings/UpdatePostsyncerSettingsRequest.php`
-- Modify: `routes/dashboard.php` — add:
+- Modify: `routes/dashboard.php`, add:
   - `GET settings/postsyncer` → `edit` name `dashboard.postsyncer.edit`
   - `PUT settings/postsyncer` → `update`
   - `POST settings/postsyncer/refresh-accounts` → `refreshAccounts`
-- Modify: `resources/js/layouts/settings/layout.tsx` — nav item PostSyncer
+- Modify: `resources/js/layouts/settings/layout.tsx`, add PostSyncer nav item
 - Create: `resources/js/pages/settings/postsyncer.tsx`
 - Test: `tests/Feature/Settings/PostsyncerSettingsControllerTest.php`
 
@@ -400,10 +402,10 @@ php artisan postsyncer:seed {workspace_id} --workspaces=/path/to/workspaces.json
 - Modify: `routes/dashboard.php`
   - `POST posts/{post}/publish` name `dashboard.posts.publish`
   - `POST videos/{video}/publish` name `dashboard.videos.publish`
-- Modify: `app/Http/Controllers/Posts/PostsController.php` `presentDetail` — include drive urls, publish_state, publish_error, postsyncer, `postsyncer_ready` bool
+- Modify: `app/Http/Controllers/Posts/PostsController.php` `presentDetail`, include drive URLs, publish_state, publish_error, postsyncer, and `postsyncer_ready` boolean
 - Modify: `app/Http/Controllers/Videos/VideosController.php` similarly
-- Modify: `resources/js/pages/posts/show.tsx`, `videos/show.tsx` — Drive URL fields on update form; Schedule / Publish now dialog posting to publish routes
-- Test: `tests/Feature/Posts/PublishPostControllerTest.php` — asserts `PublishPostJob` dispatched (`Queue::fake`)
+- Modify: `resources/js/pages/posts/show.tsx`, `videos/show.tsx`, add Drive URL fields and Schedule / Publish now dialogs
+- Test: `tests/Feature/Posts/PublishPostControllerTest.php`, assert `PublishPostJob` dispatch (`Queue::fake`)
 
 Request body: `{ when: null|string, platforms?: string[], confirm_ask?: bool }`  
 Controller locks the post row, preserves the original options on a retry,
@@ -426,7 +428,7 @@ Disable buttons when `!postsyncer_ready` or `publish_state` in `queued|running`.
 **Behavior:**
 - Default `status` query = `draft` when missing (Studio default)
 - Tabs: ideation, draft, ready, scheduled, posted, archived, dropped
-- `status=ideation` → paginate `Idea::where(kind=post, status=open)` (confirm open status string in DB/factory — use whatever IdeaFactory uses for unpromoted ideas)
+- `status=ideation`: paginate `Idea::where(kind=post, status=open)` (confirm the open status string in the DB/factory)
 - Else filter posts by status
 - Pass `counts` map for tab badges (single aggregated query / multiple count queries)
 - Present ideation rows as `{ type: 'idea', id, human_id, title, score, trend }` vs posts `{ type: 'post', ... }`
@@ -452,8 +454,8 @@ Tabs: ideation, draft, pending, ready, recorded, scheduled, posted (label Publis
 ### Task 15: personal-content cutover + docs
 
 **Files:**
-- Modify: personal-content `web/server.py` — when env `CONTENT_MACHINE_PUBLISH=1` (or always after cutover), `/api/posts/publish` and video publish return 410 with message pointing to CM
-- Modify: personal-content publish UI in `web/build.py` / site JS — hide PostSyncer publish panel; link to CM
+- Modify: personal-content `web/server.py`, make `/api/posts/publish` and video publish return 410 with a message pointing to CM when `CONTENT_MACHINE_PUBLISH=1` (or always after cutover)
+- Modify: personal-content publish UI in `web/build.py` / site JS, hide PostSyncer publish panel and link to CM
 - Modify: `docs/postsyncer-setup.md` (personal-content) + CM `docs/guides/api.md` or new `docs/guides/postsyncer.md`
 - Modify: spec open points resolved in guide (API hosts confirmed)
 
@@ -483,7 +485,7 @@ Tabs: ideation, draft, pending, ready, recorded, scheduled, posted (label Publis
 
 ## Placeholder scan
 
-None intentional. Link-upload path locked to PostSyncer docs `POST /api/v1/media/upload/url`. Account list query param confirmed during Task 3 against https://docs.postsyncer.com — adjust client if docs differ; keep tests faked.
+None intentional. Link-upload path locked to PostSyncer docs `POST /api/v1/media/upload/url`. Account list query param was to be confirmed during Task 3 against https://docs.postsyncer.com. Keep tests faked.
 
 ## Type consistency
 

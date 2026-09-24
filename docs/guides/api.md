@@ -1,9 +1,9 @@
 # JSON API (v1)
 
-External clients (personal-content / Script Studio, an MCP server) talk to
-content-machine through a small token-authenticated JSON API under `/api/v1`.
-The first slice covers the Scratch Pad and Ideas: capture anywhere, pull
-entries, work on them, push updates back, triage them into ideas.
+External clients, including personal-content tools, use Content Machine's
+workspace-token JSON API under `/api/v1`. The API covers Scratch Pad entries,
+ideas, posts, videos, media, Drive access, publishing, and operational recovery.
+The same workspace token can call the Streamable HTTP MCP endpoint at `/mcp`.
 
 ## Authentication
 
@@ -19,8 +19,8 @@ entries, work on them, push updates back, triage them into ideas.
 Authorization: Bearer <your-token>
 ```
 
-A token is bound to exactly one workspace — there is no workspace header,
-by design. Revoking it in the dashboard takes effect immediately (the next
+Each token is bound to one workspace. Requests don't include a workspace header.
+Revoking a token in the dashboard takes effect immediately (the next
 request reads as `401`). Abilities:
 
 | Ability | Grants |
@@ -83,9 +83,9 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/posts/{human_id}/repair-account-mapping` | posts:write | repair one stale account in a failed partial publish; body: `{ "language", "platform", "from_account_id", "to_account_id" }`; verifies the target account in PostSyncer and rebases only the unfinished group |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
-Captures made through the API are recorded with `source: api`, and every
-status transition / field change they cause is attributed to the token by
-name in the history tables — the same audit trail the dashboard leaves.
+Captures made through the API are recorded with `source: api`. The history tables
+attribute status transitions and field changes to the token name, as they do for
+dashboard changes.
 
 ## Example
 

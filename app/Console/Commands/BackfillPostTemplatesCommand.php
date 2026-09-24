@@ -11,7 +11,7 @@ class BackfillPostTemplatesCommand extends Command
 {
     protected $signature = 'posts:backfill-templates {workspace? : Workspace id (default: all)}';
 
-    protected $description = 'Set posts.template from known human_id → letter map (Template A–F catalog).';
+    protected $description = 'Set posts.template from known human_id → letter map (post design template catalog).';
 
     /**
      * Known post → template letter from personal-content history.
@@ -71,7 +71,7 @@ class BackfillPostTemplatesCommand extends Command
             $this->line("{$post->human_id} → Template {$letter}");
         }
 
-        $this->info("Updated {$updated} post(s). Catalog letters: ".implode(', ', PostDesignTemplate::LETTERS));
+        $this->info("Updated {$updated} post(s). Catalog letters: ".implode(', ', PostDesignTemplate::letters()));
 
         if ($workspaceId === null) {
             $this->comment('Workspaces: '.Workspace::query()->count());

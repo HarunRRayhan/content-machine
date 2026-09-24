@@ -1,57 +1,51 @@
-# content-machine
+# Content Machine
 
-An open-source, self-hosted content pipeline: capture ideas anywhere, then write and schedule posts across platforms from one dashboard.
+Content Machine is a self-hosted, multi-workspace dashboard and API for capturing
+ideas and managing posts and videos. It publishes through PostSyncer. It also
+has Telegram capture, AI-assisted triage, Google Drive access, and a presentation
+player for video decks.
 
 [![CI](https://github.com/HarunRRayhan/content-machine/actions/workflows/ci.yml/badge.svg)](https://github.com/HarunRRayhan/content-machine/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 ![PHP](https://img.shields.io/badge/PHP-8.3%2B-777bb4)
 
-## What this is
+## What runs here
 
-content-machine replaces a private, markdown-file pipeline (a folder of
-scratch notes and a lot of manual scheduling) with a real multi-user app.
-Capture an idea the moment it hits you, starting with a Telegram bot, write
-it up, and schedule it across platforms. A database instead of a folder of
-files.
+- Laravel 13 app with a workspace-scoped dashboard and token-authenticated
+  `/api/v1` endpoints.
+- Scratch Pad capture from the dashboard and Telegram. Link resolution and voice
+  transcription run in the queue.
+- Ideas, posts, and videos stored in PostgreSQL. Posts and videos can be
+  scheduled or published through workspace-configured PostSyncer accounts.
+- Queued publishing with checkpoints and explicit recovery for uncertain
+  PostSyncer operations.
+- Google Drive integration for video exports and a presentation player for video
+  decks.
 
-## Status
+See [the architecture overview](docs/architecture/overview.md), [the API
+guide](docs/guides/api.md), and [the PostSyncer guide](docs/guides/postsyncer.md).
 
-Pre-alpha, building in public. Live today: multi-user teams/workspaces,
-Scratch Pad capture (text, photo, voice, link) from the dashboard and a
-Telegram bot, AI triage suggestions and transcription via Whisper,
-workspace-scoped AI model fallback chains, idea triage/promotion into
-draft shells, and a token-authenticated JSON API (`/api/v1`) over the
-scratchpad and ideas — see [`docs/guides/api.md`](docs/guides/api.md).
-Publishing/scheduling is not built yet.
+## Run locally
 
-## Getting started
+You'll need PHP 8.3+, Composer, Node.js, npm, and PostgreSQL. The test suite
+currently needs PHP 8.4 because Pest 5 requires it. Follow [local
+setup](docs/getting-started/local.md) for installation and database setup.
 
 ```bash
 composer install
-npm install
+npm ci
 cp .env.example .env
 php artisan key:generate
 php artisan migrate
 composer run dev
 ```
 
-`composer run dev` runs the app server, queue listener, and Vite dev server
-together. You'll need a local Postgres instance, see `.env.example` for the
-connection settings it expects. More detail in
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## Tech stack
-
-- Laravel 13
-- Inertia 3
-- React 19 + TypeScript
-- Tailwind CSS 4
-- PostgreSQL
-
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for local setup, branch naming, and
-what CI checks before a PR can merge.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for project conventions and checks.
+CI runs PHP tests against PostgreSQL 17. See [local
+setup](docs/getting-started/local.md#run-tests-against-a-disposable-postgresql-database)
+before running tests locally.
 
 ## Security
 

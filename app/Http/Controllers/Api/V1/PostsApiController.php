@@ -27,6 +27,7 @@ use App\Models\Workspace;
 use App\Rules\AccessibleDriveUrl;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -106,7 +107,7 @@ class PostsApiController extends Controller
             'number' => ['nullable', 'integer', 'min:1'],
             'language' => ['nullable', 'string', 'max:8'],
             'slug' => ['nullable', 'string', 'max:255'],
-            'template' => ['nullable', 'string', 'size:1', Rule::in(['A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f'])],
+            'template' => ['nullable', 'string', 'size:1', Rule::in(PostDesignTemplate::apiLetters())],
             'body' => ['nullable', 'string'],
             'captions' => ['nullable', 'array'],
             'platforms' => ['nullable', 'array'],
@@ -135,7 +136,7 @@ class PostsApiController extends Controller
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'language' => ['sometimes', 'nullable', 'string', 'max:8'],
             'slug' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'template' => ['sometimes', 'nullable', 'string', 'size:1', Rule::in(['A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f'])],
+            'template' => ['sometimes', 'nullable', 'string', 'size:1', Rule::in(PostDesignTemplate::apiLetters())],
             'body' => ['sometimes', 'nullable', 'string'],
             'captions' => ['sometimes', 'nullable', 'array'],
             'platforms' => ['sometimes', 'nullable', 'array'],
