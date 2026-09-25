@@ -18,6 +18,9 @@ attached to content with `Attachment` records. Video decks have a manifest used
 by the presentation player. Google Drive links are stored for publishable media
 that remains in Drive.
 
+Old unreferenced local uploads can be inspected and conservatively quarantined
+with the operator-only [`cm:cleanup-orphan-media` command](../operations/orphan-media.md).
+
 ## Request paths
 
 - Authenticated dashboard pages use Inertia and React. Posts, videos, Scratch
