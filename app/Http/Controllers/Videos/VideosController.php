@@ -134,7 +134,7 @@ class VideosController extends Controller
 
         abort_if($video->workspace_id !== $workspace->id, 404);
 
-        $video->load(['attachments.mediaAsset']);
+        $video->load(['attachments.mediaAsset', 'series.videos']);
 
         return Inertia::render('videos/show', [
             'video' => $this->presentDetail($video, $request, $workspace),
@@ -312,6 +312,16 @@ class VideosController extends Controller
             'video_publish_enabled' => $postsyncerConfig->videoPublishEnabled(),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
+            'series' => $video->series === null ? null : [
+                'slug' => $video->series->slug,
+                'title' => $video->series->title,
+                'part' => $video->series_part,
+                'videos' => $video->series->videos->map(fn (Video $part) => [
+                    'human_id' => $part->human_id,
+                    'title' => $part->title,
+                    'part' => $part->series_part,
+                ])->all(),
+            ],
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),
         ];

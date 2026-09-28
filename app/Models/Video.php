@@ -91,6 +91,8 @@ class Video extends Model
         'publish_error',
         'status',
         'created_by_user_id',
+        'series_id',
+        'series_part',
     ];
 
     /**
@@ -163,6 +165,12 @@ class Video extends Model
     public function idea(): BelongsTo
     {
         return $this->belongsTo(Idea::class);
+    }
+
+    /** @return BelongsTo<VideoSeries, $this> */
+    public function series(): BelongsTo
+    {
+        return $this->belongsTo(VideoSeries::class, 'series_id');
     }
 
     /**

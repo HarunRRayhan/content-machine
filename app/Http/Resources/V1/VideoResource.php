@@ -79,6 +79,11 @@ class VideoResource extends JsonResource
                 : 'Publishing failed. Inspect the dashboard for details.',
             'postsyncer' => $this->postsyncer,
             'idea_id' => $this->idea_id,
+            'series' => $this->whenLoaded('series', fn () => $this->series === null ? null : [
+                'slug' => $this->series->slug,
+                'title' => $this->series->title,
+                'part' => $this->series_part,
+            ]),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];
