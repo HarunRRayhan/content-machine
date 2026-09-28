@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\PexelsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
+use App\Http\Controllers\Api\V1\VideoSeriesApiController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -117,6 +118,18 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('videos', [VideosApiController::class, 'index'])
         ->middleware('auth.workspace-token:videos:read')
         ->name('videos.index');
+
+    Route::get('series', [VideoSeriesApiController::class, 'index'])
+        ->middleware('auth.workspace-token:videos:read')
+        ->name('series.index');
+
+    Route::put('series/{slug}', [VideoSeriesApiController::class, 'save'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('series.save');
+
+    Route::get('series/{slug}', [VideoSeriesApiController::class, 'show'])
+        ->middleware('auth.workspace-token:videos:read')
+        ->name('series.show');
 
     Route::post('videos', [VideosApiController::class, 'store'])
         ->middleware('auth.workspace-token:videos:write')

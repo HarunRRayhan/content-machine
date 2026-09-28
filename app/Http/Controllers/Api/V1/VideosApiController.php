@@ -73,7 +73,7 @@ class VideosApiController extends Controller
     {
         request()->attributes->set('api_include', IncludeFields::full());
 
-        return new VideoResource($this->resolveVideo($humanId));
+        return new VideoResource($this->resolveVideo($humanId)->load('series'));
     }
 
     public function store(Request $request, CreateVideoAction $action): JsonResponse

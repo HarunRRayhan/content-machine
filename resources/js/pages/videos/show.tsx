@@ -64,6 +64,12 @@ type VideoDetail = {
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
+    series: {
+        slug: string;
+        title: string;
+        part: number;
+        videos: Array<{ human_id: string; title: string; part: number }>;
+    } | null;
 };
 
 type PageProps = {
@@ -119,6 +125,36 @@ export default function VideoShow({ video }: PageProps) {
                         <h2>{video.title}</h2>
                     </div>
                 </div>
+
+                <details className="series-menu">
+                    <summary>
+                        Series
+                        {video.series
+                            ? `: ${video.series.title} (Part ${video.series.part})`
+                            : ''}
+                    </summary>
+                    <div className="series-menu-content">
+                        <Link href="/series">All series</Link>
+                        {video.series && (
+                            <>
+                                <Link href={`/series/${video.series.slug}`}>
+                                    Open {video.series.title}
+                                </Link>
+                                <ol>
+                                    {video.series.videos.map((part) => (
+                                        <li key={part.human_id}>
+                                            <Link
+                                                href={`/videos/${part.human_id}`}
+                                            >
+                                                Part {part.part}: {part.title}
+                                            </Link>
+                                        </li>
+                                    ))}
+                                </ol>
+                            </>
+                        )}
+                    </div>
+                </details>
 
                 {video.idea_id && (
                     <p className="text-sm text-[var(--ink-soft)]">
