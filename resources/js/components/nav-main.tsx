@@ -11,6 +11,7 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuLabel,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -119,9 +120,16 @@ function NavItemWithChildren({ item }: { item: NavItem }) {
                             }
                         }}
                     >
-                        <DropdownMenuLabel>{item.title}</DropdownMenuLabel>
+                        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                            {item.title}
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator />
                         {children.map((child) => (
-                            <DropdownMenuItem key={child.title} asChild>
+                            <DropdownMenuItem
+                                key={child.title}
+                                asChild
+                                className="cursor-pointer"
+                            >
                                 <Link
                                     href={child.href}
                                     prefetch
