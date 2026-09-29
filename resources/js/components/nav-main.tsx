@@ -43,7 +43,11 @@ function NavItemWithChildren({ item }: { item: NavItem }) {
     const [flyoutOpen, setFlyoutOpen] = useState(false);
     const closeTimer = useRef<number | null>(null);
     const children = item.children ?? [];
-    const parentActive = isCurrentOrParentUrl(item.href);
+    const parentActive =
+        isCurrentOrParentUrl(item.href) ||
+        children.some((child) =>
+            childIsActive(child, isCurrentUrl, isCurrentOrParentUrl),
+        );
     const collapsed = state === 'collapsed' && !isMobile;
 
     function clearCloseTimer() {
