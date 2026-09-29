@@ -42,6 +42,7 @@ import {
 } from '@/routes/media';
 import { index as postsIndex } from '@/routes/posts';
 import { index as scratchpadIndex } from '@/routes/scratchpad';
+import { index as seriesIndex } from '@/routes/series';
 import { index as settingsIndex } from '@/routes/settings';
 import { index as aiProvidersIndex } from '@/routes/settings/ai-providers';
 import { edit as editGeneral } from '@/routes/settings/general';
@@ -70,6 +71,19 @@ const mainNavItems: NavItem[] = [
         title: 'Videos',
         href: videosIndex(),
         icon: Clapperboard,
+        matchPrefix: true,
+        children: [
+            {
+                title: 'All videos',
+                href: videosIndex(),
+                matchPrefix: true,
+            },
+            {
+                title: 'Series',
+                href: seriesIndex(),
+                matchPrefix: true,
+            },
+        ],
     },
     {
         title: 'Calendar',
