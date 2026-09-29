@@ -17,8 +17,27 @@ class VideoSeriesController extends Controller
         return Inertia::render('videos/series/index', [
             'series' => VideoSeries::query()
                 ->withCount('videos')
+                ->with('videos:id,series_id,title,series_part')
                 ->orderBy('title')
-                ->get(['id', 'slug', 'title']),
+                ->get(['id', 'slug', 'title'])
+                ->map(function (VideoSeries $series): array {
+                    $preview = [];
+
+                    foreach ($series->videos->take(3) as $video) {
+                        $preview[] = [
+                            'part' => $video->series_part,
+                            'title' => $video->title,
+                        ];
+                    }
+
+                    return [
+                        'id' => $series->id,
+                        'slug' => $series->slug,
+                        'title' => $series->title,
+                        'videos_count' => $series->videos_count,
+                        'preview' => $preview,
+                    ];
+                }),
         ]);
     }
 
