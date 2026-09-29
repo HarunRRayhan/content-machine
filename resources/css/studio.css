@@ -2685,6 +2685,7 @@
 
 .studio-page .series-catalog {
     display: grid;
+    grid-template-columns: 1fr;
     gap: 1.25rem;
     margin-top: clamp(2.5rem, 5vw, 4rem);
     padding: 0;
@@ -2693,9 +2694,9 @@
 
 .studio-page .series-catalog-card {
     display: grid;
-    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-    min-height: 17rem;
-    gap: clamp(1.5rem, 4vw, 4rem);
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    gap: 1.25rem;
     padding: clamp(1.5rem, 3vw, 2.4rem);
     border: 1px solid var(--line-strong);
     border-radius: 1.1rem;
@@ -2784,8 +2785,8 @@
 
 .studio-page .series-catalog-preview {
     min-width: 0;
-    padding-left: clamp(1.5rem, 3vw, 3rem);
-    border-left: 1px solid var(--line);
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
 }
 
 .studio-page .series-catalog-preview-heading {
@@ -3011,6 +3012,22 @@
     color: var(--accent);
 }
 
+@media (min-width: 64rem) {
+    .studio-page.series-index-page .series-shell {
+        width: min(100%, 88rem);
+    }
+
+    .studio-page .series-catalog {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 96rem) {
+    .studio-page .series-catalog {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
 @media (max-width: 640px) {
     .studio-page .series-page-heading,
     .studio-page .series-show-heading {
@@ -3030,18 +3047,6 @@
 
     .studio-page .series-show-count strong {
         font-size: 2rem;
-    }
-
-    .studio-page .series-catalog-card {
-        grid-template-columns: 1fr;
-        min-height: 0;
-    }
-
-    .studio-page .series-catalog-preview {
-        padding-top: 1.25rem;
-        padding-left: 0;
-        border-top: 1px solid var(--line);
-        border-left: 0;
     }
 
     .studio-page .series-timeline a {
