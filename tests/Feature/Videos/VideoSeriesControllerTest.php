@@ -26,7 +26,11 @@ class VideoSeriesControllerTest extends TestCase
             ->component('videos/series/index')
             ->has('series', 1)
             ->where('series.0.title', 'VPN')
-            ->where('series.0.videos_count', 2));
+            ->where('series.0.videos_count', 2)
+            ->where('series.0.preview.0.part', 1)
+            ->where('series.0.preview.0.title', 'VPN intro')
+            ->where('series.0.preview.1.part', 2)
+            ->where('series.0.preview.1.title', 'VPN tunnel'));
 
         $this->get('/series/vpn')->assertInertia(fn (Assert $page) => $page
             ->component('videos/series/show')
