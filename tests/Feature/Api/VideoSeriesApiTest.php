@@ -16,8 +16,8 @@ class VideoSeriesApiTest extends TestCase
     public function test_saves_and_reads_ordered_series_with_workspace_token(): void
     {
         $workspace = Workspace::factory()->create();
-        Video::factory()->for($workspace)->create(['human_id' => 'V-85']);
-        Video::factory()->for($workspace)->create(['human_id' => 'V-86']);
+        Video::factory()->for($workspace)->declaresSeries()->create(['human_id' => 'V-85']);
+        Video::factory()->for($workspace)->declaresSeries()->create(['human_id' => 'V-86']);
         $token = (new CreateWorkspaceApiTokenAction)->handle(
             $workspace,
             null,

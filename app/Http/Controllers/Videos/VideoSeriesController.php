@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Videos;
 use App\Http\Controllers\Controller;
 use App\Models\VideoSeries;
 use App\Models\Workspace;
+use App\Support\Videos\VideoScriptSeries;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -16,14 +17,14 @@ class VideoSeriesController extends Controller
 
         return Inertia::render('videos/series/index', [
             'series' => VideoSeries::query()
-                ->withCount('videos')
-                ->with('videos:id,series_id,title,series_part')
+                ->with('videos:id,series_id,title,series_part,script_markdown')
                 ->orderBy('title')
                 ->get(['id', 'slug', 'title'])
                 ->map(function (VideoSeries $series): array {
+                    $videos = VideoScriptSeries::qualifying($series->videos);
                     $preview = [];
 
-                    foreach ($series->videos->take(3) as $video) {
+                    foreach ($videos->take(3) as $video) {
                         $preview[] = [
                             'part' => $video->series_part,
                             'title' => $video->title,
@@ -34,10 +35,12 @@ class VideoSeriesController extends Controller
                         'id' => $series->id,
                         'slug' => $series->slug,
                         'title' => $series->title,
-                        'videos_count' => $series->videos_count,
+                        'videos_count' => $videos->count(),
                         'preview' => $preview,
                     ];
-                }),
+                })
+                ->filter(fn (array $series): bool => $series['videos_count'] > 0)
+                ->values(),
         ]);
     }
 
@@ -51,7 +54,7 @@ class VideoSeriesController extends Controller
             'series' => [
                 'slug' => $series->slug,
                 'title' => $series->title,
-                'videos' => $series->videos->map(fn ($video) => [
+                'videos' => VideoScriptSeries::qualifying($series->videos)->map(fn ($video) => [
                     'human_id' => $video->human_id,
                     'title' => $video->title,
                     'part' => $video->series_part,

@@ -1,4 +1,4 @@
-import { Form, router } from '@inertiajs/react';
+import { Form, Link, router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 import GoogleDrivePicker from '@/components/google-drive-picker';
 import type { GoogleDriveFile } from '@/components/google-drive-picker';
@@ -88,6 +88,13 @@ async function checkDriveUrl(url: string): Promise<DriveCheck> {
 
 const MANUAL_STATUSES = new Set(['pending', 'ready', 'recorded', 'archived']);
 
+export type VideoSeriesInfo = {
+    slug: string;
+    title: string;
+    part: number | null;
+    videos: Array<{ human_id: string; title: string; part: number | null }>;
+};
+
 type Props = {
     videoId: number;
     title: string;
@@ -114,6 +121,7 @@ type Props = {
     publishRetryable: boolean;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
+    series?: VideoSeriesInfo | null;
 };
 
 function publishGroups(
@@ -244,6 +252,7 @@ export default function VideoOverview({
     publishRetryable,
     needsConfirmAsk,
     postsyncer,
+    series = null,
 }: Props) {
     const [checks, setChecks] = useState<Set<number>>(() =>
         readChecks(storageKey),
@@ -371,6 +380,30 @@ export default function VideoOverview({
 
     return (
         <div className="overview">
+            {series && (
+                <section className="pane series-detail">
+                    <div className="pane-head">
+                        <span className="k">{series.title}</span>
+                        <span>Part {series.part}</span>
+                    </div>
+                    <ol>
+                        {series.videos.map((part) => (
+                            <li key={part.human_id}>
+                                <Link
+                                    href={`/videos/${part.human_id}`}
+                                    aria-current={
+                                        part.human_id === storageKey
+                                            ? 'page'
+                                            : undefined
+                                    }
+                                >
+                                    Part {part.part}: {part.title}
+                                </Link>
+                            </li>
+                        ))}
+                    </ol>
+                </section>
+            )}
             <section className="pane">
                 <div className="pane-head">
                     <span className="k">Status</span>

@@ -7,6 +7,7 @@ use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Content\PresentationManifest;
 use App\Support\CurrentApiToken;
+use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -79,11 +80,17 @@ class VideoResource extends JsonResource
                 : 'Publishing failed. Inspect the dashboard for details.',
             'postsyncer' => $this->postsyncer,
             'idea_id' => $this->idea_id,
-            'series' => $this->whenLoaded('series', fn () => $this->series === null ? null : [
-                'slug' => $this->series->slug,
-                'title' => $this->series->title,
-                'part' => $this->series_part,
-            ]),
+            'series' => $this->whenLoaded('series', function () {
+                if ($this->series === null || ! VideoScriptSeries::includesSeries($this->script_markdown)) {
+                    return null;
+                }
+
+                return [
+                    'slug' => $this->series->slug,
+                    'title' => $this->series->title,
+                    'part' => $this->series_part,
+                ];
+            }),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

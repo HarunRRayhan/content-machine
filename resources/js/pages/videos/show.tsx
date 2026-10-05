@@ -126,36 +126,6 @@ export default function VideoShow({ video }: PageProps) {
                     </div>
                 </div>
 
-                <details className="series-menu">
-                    <summary>
-                        Series
-                        {video.series
-                            ? `: ${video.series.title} (Part ${video.series.part})`
-                            : ''}
-                    </summary>
-                    <div className="series-menu-content">
-                        <Link href="/series">All series</Link>
-                        {video.series && (
-                            <>
-                                <Link href={`/series/${video.series.slug}`}>
-                                    Open {video.series.title}
-                                </Link>
-                                <ol>
-                                    {video.series.videos.map((part) => (
-                                        <li key={part.human_id}>
-                                            <Link
-                                                href={`/videos/${part.human_id}`}
-                                            >
-                                                Part {part.part}: {part.title}
-                                            </Link>
-                                        </li>
-                                    ))}
-                                </ol>
-                            </>
-                        )}
-                    </div>
-                </details>
-
                 {video.idea_id && (
                     <p className="text-sm text-[var(--ink-soft)]">
                         Promoted from{' '}
@@ -246,6 +216,7 @@ export default function VideoShow({ video }: PageProps) {
                         publishRetryable={video.publish_retryable}
                         needsConfirmAsk={video.needs_confirm_ask}
                         postsyncer={video.postsyncer}
+                        series={video.series}
                     />
                 )}
 
@@ -299,6 +270,18 @@ export default function VideoShow({ video }: PageProps) {
                         title={video.title}
                         src={`/videos/${video.id}/presentation?embed=1`}
                     />
+                )}
+
+                {video.series && (
+                    <div className="series-badge-row">
+                        <Link
+                            href={`/series/${video.series.slug}`}
+                            className="series-badge"
+                        >
+                            {video.series.title}
+                            <span>Part {video.series.part}</span>
+                        </Link>
+                    </div>
                 )}
             </div>
         </>

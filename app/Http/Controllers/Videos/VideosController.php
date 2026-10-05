@@ -18,6 +18,7 @@ use App\Support\Content\PresentationManifest;
 use App\Support\GoogleDrive\GoogleDriveConfig;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
+use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -312,16 +313,7 @@ class VideosController extends Controller
             'video_publish_enabled' => $postsyncerConfig->videoPublishEnabled(),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
-            'series' => $video->series === null ? null : [
-                'slug' => $video->series->slug,
-                'title' => $video->series->title,
-                'part' => $video->series_part,
-                'videos' => $video->series->videos->map(fn (Video $part) => [
-                    'human_id' => $part->human_id,
-                    'title' => $part->title,
-                    'part' => $part->series_part,
-                ])->all(),
-            ],
+            'series' => VideoScriptSeries::forVideo($video),
             'created_at' => $video->created_at?->toIso8601String(),
             'updated_at' => $video->updated_at?->toIso8601String(),
         ];

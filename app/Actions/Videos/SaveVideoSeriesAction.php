@@ -6,6 +6,7 @@ use App\Data\Videos\SaveVideoSeriesData;
 use App\Models\Video;
 use App\Models\VideoSeries;
 use App\Models\Workspace;
+use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -39,6 +40,9 @@ class SaveVideoSeriesAction
                 $video = $videos[$humanId];
                 if ($video->series_id !== null && $video->series_id !== $series->id) {
                     throw ValidationException::withMessages(['videos' => "{$humanId} already belongs to another series."]);
+                }
+                if (! VideoScriptSeries::includesSeries($video->script_markdown)) {
+                    throw ValidationException::withMessages(['videos' => "{$humanId} does not include a series."]);
                 }
             }
 
