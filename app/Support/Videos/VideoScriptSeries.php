@@ -57,11 +57,11 @@ final class VideoScriptSeries
             'slug' => $series->slug,
             'title' => $series->title,
             'part' => $video->series_part,
-            'videos' => self::qualifying($series->videos)->map(fn (Video $part): array => [
+            'videos' => array_values(self::qualifying($series->videos)->map(fn (Video $part): array => [
                 'human_id' => $part->human_id,
                 'title' => $part->title,
                 'part' => $part->series_part,
-            ])->all(),
+            ])->all()),
         ];
     }
 }
