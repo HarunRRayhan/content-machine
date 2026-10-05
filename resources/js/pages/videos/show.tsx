@@ -91,7 +91,9 @@ export default function VideoShow({ video }: PageProps) {
     const validTabs = useMemo<readonly TabKey[]>(() => {
         const tabs: TabKey[] = ['overview'];
 
-        tabs.push('script');
+        if (!hasDeck) {
+            tabs.push('script');
+        }
 
         if (hasCaptions) {
             tabs.push('captions');
@@ -108,7 +110,16 @@ export default function VideoShow({ video }: PageProps) {
         return tabs;
     }, [hasCaptions, hasFacts, hasDeck]);
 
-    const [tab, setTab] = useStudioTab(validTabs, 'overview');
+    const tabAliases = useMemo(
+        () =>
+            hasDeck
+                ? ({ script: 'presentation' } as Partial<
+                      Record<string, TabKey>
+                  >)
+                : {},
+        [hasDeck],
+    );
+    const [tab, setTab] = useStudioTab(validTabs, 'overview', tabAliases);
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
 
     return (
@@ -165,14 +176,16 @@ export default function VideoShow({ video }: PageProps) {
                     >
                         📋 Overview
                     </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={activeTab === 'script'}
-                        onClick={() => setTab('script')}
-                    >
-                        📄 Script
-                    </button>
+                    {!hasDeck && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'script'}
+                            onClick={() => setTab('script')}
+                        >
+                            📄 Script
+                        </button>
+                    )}
                     {hasCaptions && (
                         <button
                             type="button"
