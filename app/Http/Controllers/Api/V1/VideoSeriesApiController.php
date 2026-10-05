@@ -7,6 +7,7 @@ use App\Data\Videos\SaveVideoSeriesData;
 use App\Http\Controllers\Controller;
 use App\Models\VideoSeries;
 use App\Models\Workspace;
+use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,9 +18,22 @@ class VideoSeriesApiController extends Controller
         abort_if(Workspace::current() === null, 404);
 
         return response()->json(['data' => VideoSeries::query()
-            ->withCount('videos')
+            ->with('videos:id,series_id,script_markdown')
             ->orderBy('title')
-            ->get(['id', 'slug', 'title'])]);
+            ->get(['id', 'workspace_id', 'slug', 'title', 'created_at', 'updated_at'])
+            ->map(function (VideoSeries $series): array {
+                return [
+                    'id' => $series->id,
+                    'workspace_id' => $series->workspace_id,
+                    'slug' => $series->slug,
+                    'title' => $series->title,
+                    'created_at' => $series->created_at,
+                    'updated_at' => $series->updated_at,
+                    'videos_count' => VideoScriptSeries::qualifying($series->videos)->count(),
+                ];
+            })
+            ->filter(fn (array $series): bool => $series['videos_count'] > 0)
+            ->values()]);
     }
 
     public function show(string $slug): JsonResponse
@@ -48,7 +62,7 @@ class VideoSeriesApiController extends Controller
         return [
             'slug' => $series->slug,
             'title' => $series->title,
-            'videos' => $series->videos->map(fn ($video) => [
+            'videos' => VideoScriptSeries::qualifying($series->videos)->map(fn ($video) => [
                 'human_id' => $video->human_id,
                 'title' => $video->title,
                 'part' => $video->series_part,

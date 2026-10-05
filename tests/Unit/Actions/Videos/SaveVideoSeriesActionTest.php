@@ -17,8 +17,8 @@ class SaveVideoSeriesActionTest extends TestCase
     public function test_creates_and_reorders_a_series_atomically(): void
     {
         $workspace = Workspace::factory()->create();
-        $first = Video::factory()->for($workspace)->create(['human_id' => 'V-85']);
-        $second = Video::factory()->for($workspace)->create(['human_id' => 'V-86']);
+        $first = Video::factory()->for($workspace)->declaresSeries()->create(['human_id' => 'V-85']);
+        $second = Video::factory()->for($workspace)->declaresSeries()->create(['human_id' => 'V-86']);
         $action = new SaveVideoSeriesAction;
 
         $series = $action->handle($workspace, new SaveVideoSeriesData('vpn', 'VPN', ['V-85', 'V-86']));
@@ -52,10 +52,28 @@ class SaveVideoSeriesActionTest extends TestCase
     public function test_rejects_a_video_already_in_another_series(): void
     {
         $workspace = Workspace::factory()->create();
-        Video::factory()->for($workspace)->create(['human_id' => 'V-85']);
+        Video::factory()->for($workspace)->declaresSeries()->create(['human_id' => 'V-85']);
         (new SaveVideoSeriesAction)->handle($workspace, new SaveVideoSeriesData('vpn', 'VPN', ['V-85']));
 
         $this->expectException(ValidationException::class);
         (new SaveVideoSeriesAction)->handle($workspace, new SaveVideoSeriesData('other', 'Other', ['V-85']));
+    }
+
+    public function test_rejects_a_script_that_does_not_include_a_series(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $video = Video::factory()->for($workspace)->create([
+            'human_id' => 'V-90',
+            'script_markdown' => "**Format:** Standalone beginner explainer\n",
+        ]);
+
+        try {
+            (new SaveVideoSeriesAction)->handle($workspace, new SaveVideoSeriesData('vpn', 'VPN', ['V-90']));
+            $this->fail('Expected validation error.');
+        } catch (ValidationException $exception) {
+            $this->assertSame('V-90 does not include a series.', $exception->errors()['videos'][0]);
+            $this->assertNull($video->fresh()->series_id);
+            $this->assertDatabaseCount('video_series', 0);
+        }
     }
 }
