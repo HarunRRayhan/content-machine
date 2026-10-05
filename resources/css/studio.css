@@ -2608,8 +2608,9 @@
 .studio-page .series-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.65rem;
-    max-width: 100%;
+    gap: 0.45rem;
+    max-width: min(100%, 22rem);
+    min-width: 0;
     border: 1px solid var(--line);
     border-radius: 999px;
     background: var(--bg2);
@@ -2617,6 +2618,19 @@
     font-weight: 700;
     padding: 0.45rem 0.95rem;
     text-decoration: none;
+}
+
+.studio-page .series-badge-label {
+    flex: none;
+    color: var(--ink-soft);
+    font-weight: 600;
+}
+
+.studio-page .series-badge-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .studio-page.series-page {

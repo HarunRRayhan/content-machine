@@ -277,8 +277,12 @@ export default function VideoShow({ video }: PageProps) {
                         <Link
                             href={`/series/${video.series.slug}`}
                             className="series-badge"
+                            title={video.series.title}
                         >
-                            {video.series.title}
+                            <span className="series-badge-label">Series</span>
+                            <span className="series-badge-name">
+                                {video.series.title}
+                            </span>
                         </Link>
                     </div>
                 )}
