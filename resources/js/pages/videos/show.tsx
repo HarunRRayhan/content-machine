@@ -124,6 +124,18 @@ export default function VideoShow({ video }: PageProps) {
                         <span className="no">Video #{video.number}</span>
                         <h2>{video.title}</h2>
                     </div>
+                    {video.series && (
+                        <Link
+                            href={`/series/${video.series.slug}`}
+                            className="series-badge"
+                            title={video.series.title}
+                        >
+                            <span className="series-badge-label">Series</span>
+                            <span className="series-badge-name">
+                                {video.series.title}
+                            </span>
+                        </Link>
+                    )}
                 </div>
 
                 {video.idea_id && (
@@ -270,21 +282,6 @@ export default function VideoShow({ video }: PageProps) {
                         title={video.title}
                         src={`/videos/${video.id}/presentation?embed=1`}
                     />
-                )}
-
-                {video.series && (
-                    <div className="series-badge-row">
-                        <Link
-                            href={`/series/${video.series.slug}`}
-                            className="series-badge"
-                            title={video.series.title}
-                        >
-                            <span className="series-badge-label">Series</span>
-                            <span className="series-badge-name">
-                                {video.series.title}
-                            </span>
-                        </Link>
-                    </div>
                 )}
             </div>
         </>
