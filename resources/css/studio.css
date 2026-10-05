@@ -2619,11 +2619,6 @@
     text-decoration: none;
 }
 
-.studio-page .series-badge span {
-    color: var(--ink-soft);
-    font-weight: 600;
-}
-
 .studio-page.series-page {
     width: 100%;
     min-height: 100%;

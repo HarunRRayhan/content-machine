@@ -279,7 +279,6 @@ export default function VideoShow({ video }: PageProps) {
                             className="series-badge"
                         >
                             {video.series.title}
-                            <span>Part {video.series.part}</span>
                         </Link>
                     </div>
                 )}
