@@ -5,28 +5,41 @@ import { useCallback, useLayoutEffect, useState } from 'react';
  * Keep a Studio show-page tab in sync with `?tab=` so shared links open the
  * right panel (e.g. /posts/P-59?tab=captions).
  */
+const NO_TAB_ALIASES: Partial<Record<string, string>> = {};
+
 export function useStudioTab<T extends string>(
     validTabs: readonly T[],
     fallback: T,
+    aliases: Partial<Record<string, T>> = NO_TAB_ALIASES as Partial<
+        Record<string, T>
+    >,
 ): [T, (next: T) => void] {
     const page = usePage();
     const currentUrl = browserUrl(page.url);
     const [selection, setSelection] = useState<{ pageUrl: string; tab: T }>(
         () => ({
             pageUrl: currentUrl,
-            tab: resolveTab(currentUrl, validTabs, fallback),
+            tab: resolveTab(currentUrl, validTabs, fallback, aliases),
         }),
     );
     const tab =
         selection.pageUrl === currentUrl && validTabs.includes(selection.tab)
             ? selection.tab
-            : resolveTab(currentUrl, validTabs, fallback);
+            : resolveTab(currentUrl, validTabs, fallback, aliases);
 
     useLayoutEffect(() => {
+        const alias = aliasedTab(currentUrl, validTabs, aliases);
+
+        if (alias) {
+            replaceTabQuery(alias, fallback);
+
+            return;
+        }
+
         if (hasInvalidTabQuery(currentUrl, validTabs)) {
             replaceTabQuery(fallback, fallback);
         }
-    }, [currentUrl, validTabs, fallback]);
+    }, [currentUrl, validTabs, fallback, aliases]);
 
     const setTab = useCallback(
         (next: T) => {
@@ -51,15 +64,15 @@ function resolveTab<T extends string>(
     pageUrl: string,
     validTabs: readonly T[],
     fallback: T,
+    aliases: Partial<Record<string, T>> = {},
 ): T {
     try {
-        const url = new URL(
-            pageUrl,
-            typeof window !== 'undefined'
-                ? window.location.origin
-                : 'http://localhost',
-        );
-        const raw = url.searchParams.get('tab');
+        const raw = readTab(pageUrl);
+        const alias = raw ? aliases[raw] : undefined;
+
+        if (alias && (validTabs as readonly string[]).includes(alias)) {
+            return alias;
+        }
 
         if (raw && (validTabs as readonly string[]).includes(raw)) {
             return raw as T;
@@ -69,6 +82,32 @@ function resolveTab<T extends string>(
     }
 
     return fallback;
+}
+
+function aliasedTab<T extends string>(
+    pageUrl: string,
+    validTabs: readonly T[],
+    aliases: Partial<Record<string, T>>,
+): T | null {
+    const raw = readTab(pageUrl);
+    const alias = raw ? aliases[raw] : undefined;
+
+    if (alias && (validTabs as readonly string[]).includes(alias)) {
+        return alias;
+    }
+
+    return null;
+}
+
+function readTab(pageUrl: string): string | null {
+    const url = new URL(
+        pageUrl,
+        typeof window !== 'undefined'
+            ? window.location.origin
+            : 'http://localhost',
+    );
+
+    return url.searchParams.get('tab');
 }
 
 function replaceTabQuery(tab: string, fallback: string): void {
