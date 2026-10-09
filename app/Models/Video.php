@@ -28,6 +28,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $language
  * @property string|null $slug
  * @property string|null $body
+ * @property list<array{url: string, label: string|null}>|null $source_links
+ * @property string|null $source_text
  * @property string|null $script_markdown
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $deck_manifest
@@ -79,6 +81,8 @@ class Video extends Model
         'language',
         'slug',
         'body',
+        'source_links',
+        'source_text',
         'script_markdown',
         'captions',
         'deck_manifest',
@@ -101,6 +105,7 @@ class Video extends Model
     protected function casts(): array
     {
         return [
+            'source_links' => 'array',
             'captions' => 'array',
             'deck_manifest' => 'array',
             'has_deck' => 'boolean',

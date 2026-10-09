@@ -4,6 +4,7 @@ namespace App\Data\Videos;
 
 use App\Http\Requests\Videos\UpdateVideoRequest;
 use App\Models\Video;
+use App\Support\Content\SourceFields;
 
 /**
  * Editable surface for a video. Dashboard updates title/body and API PATCH
@@ -15,6 +16,7 @@ final readonly class UpdateVideoData
      * @param  array<string, mixed>|null  $captions
      * @param  array<string, mixed>|null  $deckManifest
      * @param  array<string, mixed>|null  $postsyncer
+     * @param  list<array{url: string, label: string|null}>|null  $sourceLinks
      */
     public function __construct(
         public string $title,
@@ -44,6 +46,10 @@ final readonly class UpdateVideoData
         public bool $hasCaptions = false,
         public bool $hasDeckManifest = false,
         public bool $hasStatus = false,
+        public ?array $sourceLinks = null,
+        public ?string $sourceText = null,
+        public bool $hasSourceLinks = false,
+        public bool $hasSourceText = false,
     ) {}
 
     public static function fromRequest(UpdateVideoRequest $request): self
@@ -58,6 +64,10 @@ final readonly class UpdateVideoData
             hasVideoDriveUrl: $request->has('video_drive_url'),
             hasCoverDriveUrl: $request->has('cover_drive_url'),
             hasBody: true,
+            sourceLinks: SourceFields::normalizeLinks($request->input('source_links')),
+            sourceText: SourceFields::normalizeText($request->input('source_text')),
+            hasSourceLinks: $request->has('source_links'),
+            hasSourceText: $request->has('source_text'),
         );
     }
 
@@ -100,6 +110,10 @@ final readonly class UpdateVideoData
             hasPostsyncer: array_key_exists('postsyncer', $payload),
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
+            sourceLinks: SourceFields::normalizeLinks($payload['source_links'] ?? null),
+            sourceText: SourceFields::normalizeText($payload['source_text'] ?? null),
+            hasSourceLinks: array_key_exists('source_links', $payload),
+            hasSourceText: array_key_exists('source_text', $payload),
         );
     }
 }

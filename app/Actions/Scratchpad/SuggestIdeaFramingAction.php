@@ -2,6 +2,7 @@
 
 namespace App\Actions\Scratchpad;
 
+use App\Models\Idea;
 use App\Models\ScratchpadEntry;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiProviderCredentialResolver;
@@ -21,10 +22,12 @@ class SuggestIdeaFramingAction
         personal short-form video/post pipeline. Given the capture below,
         respond with ONLY a JSON object, no markdown fences and no other
         text, matching exactly this shape:
-        {"title": string, "score": integer from 0 to 1000, "trend": "evergreen" or "seasonal", "rationale": string}
+        {"title": string, "score": integer from 0 to 1000, "trend": "evergreen", "seasonal" or "short-trend", "rationale": string}
         "score" reflects how compelling and timely the idea is. "trend" is
         "evergreen" if it stays relevant indefinitely, "seasonal" if it's
-        tied to a moment. "rationale" is 1-2 plain sentences on why it
+        tied to a moment that lasts 1-2 months, "short-trend" if it's a
+        news item or viral moment that goes stale in about 7 days.
+        "rationale" is 1-2 plain sentences on why it
         belongs in the pipeline, in the same language as the capture.
         PROMPT;
 
@@ -105,7 +108,7 @@ class SuggestIdeaFramingAction
             return null;
         }
 
-        if (! in_array($trend, ['evergreen', 'seasonal'], true)) {
+        if (! in_array($trend, Idea::TRENDS, true)) {
             return null;
         }
 

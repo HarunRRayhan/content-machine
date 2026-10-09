@@ -53,6 +53,14 @@ class UpdateVideoAction
                 $attributes['publish_error'] = $data->publishError;
             }
 
+            if ($data->hasSourceLinks) {
+                $attributes['source_links'] = $data->sourceLinks;
+            }
+
+            if ($data->hasSourceText) {
+                $attributes['source_text'] = $data->sourceText;
+            }
+
             if (! $data->replaceExtended && $data->status !== null) {
                 $attributes['status'] = $data->status;
             }

@@ -155,6 +155,7 @@ class IdeasController extends Controller
             'trend' => $idea->trend,
             'status' => $idea->status,
             'created_at' => $idea->created_at?->toIso8601String(),
+            'expires_at' => $idea->expiresAt()?->toIso8601String(),
         ];
     }
 
@@ -173,6 +174,9 @@ class IdeasController extends Controller
             'trend' => $idea->trend,
             'rationale' => $idea->rationale,
             'body' => $idea->body,
+            'source_links' => $idea->source_links ?? [],
+            'source_text' => $idea->source_text,
+            'expires_at' => $idea->expiresAt()?->toIso8601String(),
             'status' => $idea->status,
             'drop_reason' => $idea->drop_reason,
             'created_at' => $idea->created_at?->toIso8601String(),

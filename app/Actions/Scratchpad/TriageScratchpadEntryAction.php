@@ -7,6 +7,7 @@ use App\Data\Scratchpad\TriageScratchpadEntryData;
 use App\Models\Idea;
 use App\Models\ScratchpadEntry;
 use App\Models\User;
+use App\Support\Content\SourceFields;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -85,6 +86,7 @@ class TriageScratchpadEntryAction
             'trend' => $data->trend,
             'rationale' => $data->rationale,
             'body' => $entry->body,
+            ...$this->sourceFor($entry),
             'status' => 'open',
             'scratchpad_entry_id' => $entry->id,
             'created_by_user_id' => $actor->id,
@@ -107,6 +109,24 @@ class TriageScratchpadEntryAction
         ])->save();
 
         $entry->recordStatusTransition($from, 'triaged');
+    }
+
+    /**
+     * The capture's original URL and raw text, so the idea keeps its
+     * provenance for later research even after the body is rewritten.
+     *
+     * @return array{source_links: list<array{url: string, label: string|null}>|null, source_text: string|null}
+     */
+    private function sourceFor(ScratchpadEntry $entry): array
+    {
+        $url = $entry->meta['url'] ?? null;
+
+        return [
+            'source_links' => is_string($url) && $url !== ''
+                ? SourceFields::normalizeLinks([['url' => $url, 'label' => $entry->title]])
+                : null,
+            'source_text' => SourceFields::normalizeText($entry->body),
+        ];
     }
 
     private function uniqueSlug(string $title, int $workspaceId, string $kind): string

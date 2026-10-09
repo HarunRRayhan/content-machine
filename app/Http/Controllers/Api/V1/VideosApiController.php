@@ -14,6 +14,7 @@ use App\Rules\AccessibleDriveUrl;
 use App\Rules\RenderablePresentationManifest;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Content\SourceFields;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -122,6 +123,7 @@ class VideosApiController extends Controller
             'video_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['sometimes', 'nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
+            ...SourceFields::rules(),
             'postsyncer' => ['prohibited'],
             'publish_state' => ['prohibited'],
             'publish_error' => ['prohibited'],

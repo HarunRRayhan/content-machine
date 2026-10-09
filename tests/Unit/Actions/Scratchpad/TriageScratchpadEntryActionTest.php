@@ -192,4 +192,43 @@ class TriageScratchpadEntryActionTest extends TestCase
             'actor_id' => $user->id,
         ]);
     }
+
+    public function test_filing_copies_the_url_and_raw_body_into_the_ideas_source()
+    {
+        $workspace = Workspace::factory()->create();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create([
+            'title' => 'Branko on CloudFront',
+            'body' => 'Raw captured text.',
+            'meta' => ['url' => 'https://x.com/branko/status/1'],
+        ]);
+
+        $this->action()->handle($entry, User::factory()->create(), new TriageScratchpadEntryData(
+            target: 'post_idea',
+            title: 'CloudFront savings',
+            trend: 'short-trend',
+        ));
+
+        $idea = Idea::sole();
+        $this->assertSame('short-trend', $idea->trend);
+        $this->assertSame(
+            [['url' => 'https://x.com/branko/status/1', 'label' => 'Branko on CloudFront']],
+            $idea->source_links,
+        );
+        $this->assertSame('Raw captured text.', $idea->source_text);
+    }
+
+    public function test_an_entry_without_a_url_leaves_source_links_empty()
+    {
+        $workspace = Workspace::factory()->create();
+        $entry = ScratchpadEntry::factory()->for($workspace)->create(['body' => 'Just a note.', 'meta' => []]);
+
+        $this->action()->handle($entry, User::factory()->create(), new TriageScratchpadEntryData(
+            target: 'video_idea',
+            title: 'A note',
+        ));
+
+        $idea = Idea::sole();
+        $this->assertNull($idea->source_links);
+        $this->assertSame('Just a note.', $idea->source_text);
+    }
 }

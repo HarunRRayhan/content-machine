@@ -29,6 +29,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string|null $trend
  * @property string|null $rationale
  * @property string|null $body
+ * @property list<array{url: string, label: string|null}>|null $source_links
+ * @property string|null $source_text
  * @property string|null $editorial_type
  * @property string $status
  * @property string|null $drop_reason
@@ -44,6 +46,12 @@ class Idea extends Model
 {
     /** @use HasFactory<IdeaFactory> */
     use BelongsToWorkspace, HasFactory, RecordsHistory;
+
+    /** Allowed ideas.trend values. */
+    public const TRENDS = ['evergreen', 'seasonal', 'short-trend'];
+
+    /** Shelf life in days per trend; evergreen (and unset) never expires. */
+    public const SHELF_LIFE_DAYS = ['short-trend' => 7, 'seasonal' => 60];
 
     /**
      * The attributes that are mass assignable.
@@ -61,6 +69,8 @@ class Idea extends Model
         'trend',
         'rationale',
         'body',
+        'source_links',
+        'source_text',
         'editorial_type',
         'status',
         'drop_reason',
@@ -79,8 +89,23 @@ class Idea extends Model
     protected function casts(): array
     {
         return [
+            'source_links' => 'array',
             'details' => 'array',
         ];
+    }
+
+    /**
+     * When this idea goes stale: created_at plus its trend's shelf life.
+     * Null for evergreen or untagged ideas. Informational only, nothing
+     * is dropped automatically.
+     */
+    public function expiresAt(): ?CarbonImmutable
+    {
+        $days = self::SHELF_LIFE_DAYS[$this->trend ?? ''] ?? null;
+
+        return $days === null || $this->created_at === null
+            ? null
+            : $this->created_at->addDays($days);
     }
 
     /**

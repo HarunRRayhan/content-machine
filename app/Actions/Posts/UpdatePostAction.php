@@ -88,6 +88,16 @@ class UpdatePostAction
                 $attributes['template'] = $data->template;
             }
 
+            // Source is research provenance, not publishable content: it
+            // never counts as a content change or invalidates approval.
+            if ($data->hasSourceLinks) {
+                $attributes['source_links'] = $data->sourceLinks;
+            }
+
+            if ($data->hasSourceText) {
+                $attributes['source_text'] = $data->sourceText;
+            }
+
             if ($data->status !== null) {
                 $attributes['status'] = $data->status;
             }

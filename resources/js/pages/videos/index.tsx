@@ -1,5 +1,6 @@
 import { Head, Link, router } from '@inertiajs/react';
 import type { MouseEvent } from 'react';
+import IdeaExpiryTag from '@/components/studio/idea-expiry-tag';
 import { videoShowUrl } from '@/lib/content-urls';
 import { scoreBand, trendKind, trendLabel } from '@/lib/studio-meta';
 import { home } from '@/routes/dashboard';
@@ -13,6 +14,7 @@ type IdeaRow = {
     title: string;
     score: number | null;
     trend: string | null;
+    expires_at: string | null;
 };
 
 type VideoRow = {
@@ -283,6 +285,11 @@ export default function VideosIndex({
                                                     className={`c-trend${kind ? ` trend-${kind}` : ''}`}
                                                 >
                                                     {trendLabel(row.trend)}
+                                                    <IdeaExpiryTag
+                                                        expiresAt={
+                                                            row.expires_at
+                                                        }
+                                                    />
                                                 </td>
                                                 <td className="c-status">
                                                     <span

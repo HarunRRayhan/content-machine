@@ -355,6 +355,9 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
                                                         <option value="seasonal">
                                                             Seasonal
                                                         </option>
+                                                        <option value="short-trend">
+                                                            Short trend
+                                                        </option>
                                                     </select>
                                                     <InputError
                                                         message={errors.trend}

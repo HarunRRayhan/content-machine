@@ -5,6 +5,7 @@ namespace Tests\Feature\Mcp;
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishPostJob;
+use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
@@ -164,6 +165,33 @@ class McpServerTest extends TestCase
         $this->assertIsString($listed);
         $this->assertStringContainsString($entry->public_id, $listed);
         $this->assertStringContainsString('MCP captured this', $listed);
+    }
+
+    public function test_update_idea_accepts_short_trend_and_source_fields(): void
+    {
+        $idea = Idea::factory()->for($this->workspace)->create(['kind' => 'post', 'human_id' => 'PI-9']);
+
+        $text = $this->mcp([
+            'jsonrpc' => '2.0',
+            'id' => 30,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => 'update_idea',
+                'arguments' => [
+                    'human_id' => 'PI-9',
+                    'title' => 'Updated',
+                    'trend' => 'short-trend',
+                    'source_links' => [['url' => 'https://example.com/x', 'label' => 'X']],
+                    'source_text' => 'raw',
+                ],
+            ],
+        ])->assertOk()->assertJsonMissingPath('result.isError')->json('result.content.0.text');
+
+        $this->assertIsString($text);
+        $idea->refresh();
+        $this->assertSame('short-trend', $idea->trend);
+        $this->assertSame('https://example.com/x', $idea->source_links[0]['url']);
+        $this->assertSame('raw', $idea->source_text);
     }
 
     public function test_missing_ability_is_a_tool_error_not_a_hard_401(): void

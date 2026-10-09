@@ -4,6 +4,7 @@ namespace App\Http\Requests\Videos;
 
 use App\Models\Video;
 use App\Rules\AccessibleDriveUrl;
+use App\Support\Content\SourceFields;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -23,6 +24,7 @@ class UpdateVideoRequest extends FormRequest
             'status' => ['sometimes', 'string', Rule::in(Video::STATUSES)],
             'video_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
             'cover_drive_url' => ['nullable', 'string', 'url', 'max:2048', new AccessibleDriveUrl],
+            ...SourceFields::rules(),
         ];
     }
 }

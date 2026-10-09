@@ -6,6 +6,7 @@ use App\Actions\Ids\ReserveContentIdAction;
 use App\Models\Idea;
 use App\Models\Post;
 use App\Models\Video;
+use App\Support\Content\SourceFields;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -48,6 +49,7 @@ class PromoteIdeaAction
                 'human_id' => $contentId->human_id,
                 'title' => $idea->title,
                 'body' => $idea->body,
+                ...SourceFields::inheritFrom($idea),
                 'status' => 'draft',
                 'created_by_user_id' => Auth::id(),
             ]);

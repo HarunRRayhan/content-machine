@@ -170,4 +170,32 @@ class SuggestIdeaFramingActionTest extends TestCase
         $this->assertStringContainsString('Considering this as a video idea.', $client->capturedUserContent);
         $this->assertStringContainsString('A spoken transcript.', $client->capturedUserContent);
     }
+
+    public function test_it_accepts_the_short_trend_value_and_the_prompt_explains_it()
+    {
+        $workspace = Workspace::factory()->create();
+        $entry = ScratchpadEntry::factory()->create(['workspace_id' => $workspace->id]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+
+        $client = new class implements AiCompletionClientContract
+        {
+            public ?string $capturedPrompt = null;
+
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
+            {
+                $this->capturedPrompt = $systemPrompt;
+
+                return AiCompletionResult::success(json_encode([
+                    'title' => 't', 'score' => 1, 'trend' => 'short-trend', 'rationale' => 'r',
+                ]));
+            }
+        };
+
+        $suggestion = (new SuggestIdeaFramingAction($client, new AiProviderCredentialResolver))->handle($entry, 'post');
+
+        $this->assertTrue($suggestion->successful);
+        $this->assertSame('short-trend', $suggestion->trend);
+        $this->assertStringContainsString('short-trend', $client->capturedPrompt);
+        $this->assertStringContainsString('7 days', $client->capturedPrompt);
+    }
 }

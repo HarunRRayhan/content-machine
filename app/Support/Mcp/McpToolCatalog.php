@@ -2,6 +2,7 @@
 
 namespace App\Support\Mcp;
 
+use App\Models\Idea;
 use App\Models\Post;
 use App\Models\Video;
 
@@ -90,7 +91,7 @@ final class McpToolCatalog
                     'target' => ['type' => 'string', 'enum' => ['post_idea', 'video_idea', 'drop']],
                     'title' => ['type' => 'string'],
                     'score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 1000],
-                    'trend' => ['type' => 'string', 'enum' => ['evergreen', 'seasonal']],
+                    'trend' => ['type' => 'string', 'enum' => Idea::TRENDS, 'description' => 'short-trend goes stale in ~7 days, seasonal in 1-2 months, evergreen never.'],
                     'rationale' => ['type' => 'string'],
                     'drop_reason' => ['type' => 'string'],
                 ], ['public_id', 'target']),
@@ -114,15 +115,17 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_idea',
-                'description' => 'Edit an idea title (required) and optionally score, trend, rationale, or body.',
+                'description' => 'Edit an idea title (required) and optionally score, trend, rationale, body, source_links, or source_text.',
                 'ability' => 'ideas:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
                     'title' => ['type' => 'string'],
                     'score' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 1000],
-                    'trend' => ['type' => 'string', 'enum' => ['evergreen', 'seasonal']],
+                    'trend' => ['type' => 'string', 'enum' => Idea::TRENDS, 'description' => 'short-trend goes stale in ~7 days, seasonal in 1-2 months, evergreen never.'],
                     'rationale' => ['type' => 'string'],
                     'body' => ['type' => 'string'],
+                    'source_links' => ['type' => ['array', 'null'], 'items' => ['type' => 'object', 'properties' => ['url' => ['type' => 'string'], 'label' => ['type' => 'string']], 'required' => ['url']], 'description' => 'Original links for later research, [{url, label}]. Replaces the list; null clears it.'],
+                    'source_text' => ['type' => ['string', 'null'], 'description' => 'Raw source text for later research. Null clears it.'],
                 ], ['human_id', 'title']),
             ],
             [
@@ -144,7 +147,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_video',
-                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url. Drive URLs must be publicly fetchable (Anyone with the link).',
+                'description' => 'Update an existing video. human_id required; optional title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url, source_links, source_text. Drive URLs must be publicly fetchable (Anyone with the link).',
                 'ability' => 'videos:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -157,6 +160,8 @@ final class McpToolCatalog
                     'status' => ['type' => 'string', 'enum' => Video::STATUSES],
                     'video_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the edited video.'],
                     'cover_drive_url' => ['type' => 'string', 'description' => 'Public Google Drive file link for the cover image.'],
+                    'source_links' => ['type' => ['array', 'null'], 'items' => ['type' => 'object', 'properties' => ['url' => ['type' => 'string'], 'label' => ['type' => 'string']], 'required' => ['url']], 'description' => 'Original links for later research, [{url, label}]. Replaces the list; null clears it.'],
+                    'source_text' => ['type' => ['string', 'null'], 'description' => 'Raw source text for later research. Null clears it.'],
                 ], ['human_id']),
             ],
             [
@@ -215,7 +220,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_post',
-                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status, image_drive_urls. Drive URLs must be publicly fetchable.',
+                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status, image_drive_urls, source_links, source_text. Drive URLs must be publicly fetchable.',
                 'ability' => 'posts:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -225,6 +230,8 @@ final class McpToolCatalog
                     'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'status' => ['type' => 'string', 'enum' => Post::STATUSES],
                     'image_drive_urls' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Public Google Drive file links for post images.'],
+                    'source_links' => ['type' => ['array', 'null'], 'items' => ['type' => 'object', 'properties' => ['url' => ['type' => 'string'], 'label' => ['type' => 'string']], 'required' => ['url']], 'description' => 'Original links for later research, [{url, label}]. Replaces the list; null clears it.'],
+                    'source_text' => ['type' => ['string', 'null'], 'description' => 'Raw source text for later research. Null clears it.'],
                 ], ['human_id']),
             ],
             [

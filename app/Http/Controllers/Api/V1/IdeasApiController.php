@@ -10,6 +10,7 @@ use App\Http\Requests\Ideas\UpdateIdeaRequest;
 use App\Http\Resources\V1\IdeaResource;
 use App\Models\Idea;
 use App\Models\Workspace;
+use App\Support\Content\SourceFields;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -53,12 +54,13 @@ class IdeasApiController extends Controller
             'number' => ['nullable', 'integer', 'min:1'],
             'slug' => ['nullable', 'string', 'max:255'],
             'score' => ['nullable', 'integer', 'min:0', 'max:1000'],
-            'trend' => ['nullable', 'string', 'max:64'],
+            'trend' => ['nullable', 'string', Rule::in(Idea::TRENDS)],
             'rationale' => ['nullable', 'string'],
             'body' => ['nullable', 'string'],
             'editorial_type' => ['nullable', 'string', 'max:64'],
             'status' => ['nullable', 'string', Rule::in(['open', 'promoted', 'dropped'])],
             'details' => ['nullable', 'array'],
+            ...SourceFields::rules(),
         ]);
 
         $idea = $action->handle($workspace, $payload);

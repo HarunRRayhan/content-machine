@@ -5,6 +5,7 @@ namespace App\Actions\Ideas;
 use App\Actions\Ids\ReserveContentIdAction;
 use App\Models\Idea;
 use App\Models\Workspace;
+use App\Support\Content\SourceFields;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -94,6 +95,8 @@ class CreateIdeaAction
                 'trend' => $attributes['trend'] ?? null,
                 'rationale' => $attributes['rationale'] ?? null,
                 'body' => $attributes['body'] ?? null,
+                'source_links' => SourceFields::normalizeLinks($attributes['source_links'] ?? null),
+                'source_text' => SourceFields::normalizeText($attributes['source_text'] ?? null),
                 'editorial_type' => $attributes['editorial_type'] ?? null,
                 'status' => $status,
                 'details' => $attributes['details'] ?? [],
