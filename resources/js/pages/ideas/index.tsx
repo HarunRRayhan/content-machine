@@ -2,6 +2,7 @@ import { Head, Link, router } from '@inertiajs/react';
 import Heading from '@/components/heading';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ideaExpiry, trendLabel } from '@/lib/studio-meta';
 import { home } from '@/routes/dashboard';
 import { index, show } from '@/routes/dashboard/ideas';
 
@@ -14,6 +15,7 @@ type IdeaSummary = {
     trend: string | null;
     status: string;
     created_at: string | null;
+    expires_at: string | null;
 };
 
 type PaginationLink = {
@@ -45,6 +47,7 @@ const statusVariant: Record<string, 'default' | 'secondary' | 'outline'> = {
 const trendVariant: Record<string, 'default' | 'secondary'> = {
     evergreen: 'default',
     seasonal: 'secondary',
+    'short-trend': 'secondary',
 };
 
 /**
@@ -55,6 +58,20 @@ const trendVariant: Record<string, 'default' | 'secondary'> = {
  */
 function paginationLabel(label: string): string {
     return label.replace('&laquo;', '«').replace('&raquo;', '»');
+}
+
+function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
+    const expiry = ideaExpiry(expiresAt);
+
+    if (!expiry) {
+        return null;
+    }
+
+    return (
+        <Badge variant={expiry.stale ? 'destructive' : 'outline'}>
+            {expiry.label}
+        </Badge>
+    );
 }
 
 export default function IdeasIndex({ ideas, filters }: PageProps) {
@@ -139,9 +156,10 @@ export default function IdeasIndex({ ideas, filters }: PageProps) {
                                                 'secondary'
                                             }
                                         >
-                                            {idea.trend}
+                                            {trendLabel(idea.trend)}
                                         </Badge>
                                     )}
+                                    <ExpiryBadge expiresAt={idea.expires_at} />
                                     <Badge
                                         variant={
                                             statusVariant[idea.status] ??

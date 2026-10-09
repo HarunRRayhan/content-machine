@@ -234,6 +234,7 @@ class PostsController extends Controller
             'title' => $idea->title,
             'score' => $idea->score,
             'trend' => $idea->trend,
+            'expires_at' => $idea->expiresAt()?->toIso8601String(),
         ];
     }
 
@@ -370,6 +371,8 @@ class PostsController extends Controller
             'number' => $post->number,
             'title' => $post->title,
             'body' => $post->body,
+            'source_links' => $post->source_links ?? [],
+            'source_text' => $post->source_text,
             'captions' => $captions,
             'platforms' => $post->platforms ?? [],
             'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),

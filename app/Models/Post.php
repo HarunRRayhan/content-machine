@@ -28,6 +28,8 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $slug
  * @property string|null $template
  * @property string|null $body
+ * @property list<array{url: string, label: string|null}>|null $source_links
+ * @property string|null $source_text
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $platforms
  * @property array<int, string>|null $image_drive_urls
@@ -85,6 +87,8 @@ class Post extends Model
         'slug',
         'template',
         'body',
+        'source_links',
+        'source_text',
         'captions',
         'platforms',
         'image_drive_urls',
@@ -107,6 +111,7 @@ class Post extends Model
     protected function casts(): array
     {
         return [
+            'source_links' => 'array',
             'captions' => 'array',
             'platforms' => 'array',
             'image_drive_urls' => 'array',

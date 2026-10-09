@@ -40,11 +40,14 @@ class IdeaResource extends JsonResource
             'trend' => $this->trend,
             'rationale' => $this->rationale,
             'body' => $this->body,
+            'source_links' => $this->source_links ?? [],
+            'source_text' => $this->source_text,
             'editorial_type' => $this->editorial_type,
             'details' => $this->details ?? [],
             'status' => $this->status,
             'drop_reason' => $this->drop_reason,
             'created_at' => $this->created_at?->toIso8601String(),
+            'expires_at' => $this->expiresAt()?->toIso8601String(),
             'promoted_to' => $this->presentPromotedEntity(),
         ];
     }

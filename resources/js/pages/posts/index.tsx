@@ -1,5 +1,6 @@
 import { Head, Link, router } from '@inertiajs/react';
 import TemplatePreview from '@/components/media/template-preview';
+import IdeaExpiryTag from '@/components/studio/idea-expiry-tag';
 import { IndexWorkspaceChips } from '@/components/studio/workspace-schedule';
 import type {
     PostsyncerGroup,
@@ -7,6 +8,7 @@ import type {
 } from '@/components/studio/workspace-schedule';
 import { postShowUrl } from '@/lib/content-urls';
 import { POST_STATUS_LABELS, studioPostStatus } from '@/lib/platform-meta';
+import { trendLabel } from '@/lib/studio-meta';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { show as showTemplate } from '@/routes/media/templates';
@@ -19,6 +21,7 @@ type IdeaRow = {
     title: string;
     score: number | null;
     trend: string | null;
+    expires_at: string | null;
 };
 
 type PostRow = {
@@ -235,7 +238,15 @@ export default function PostsIndex({
                                                         ? `${row.score}/1000`
                                                         : '—'}
                                                 </td>
-                                                <td>{row.trend ?? '—'}</td>
+                                                <td>
+                                                    {trendLabel(row.trend) ||
+                                                        '—'}
+                                                    <IdeaExpiryTag
+                                                        expiresAt={
+                                                            row.expires_at
+                                                        }
+                                                    />
+                                                </td>
                                                 <td className="c-act">
                                                     <Link
                                                         href={showIdea.url(

@@ -4,6 +4,8 @@ import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostDraftEditor from '@/components/studio/post-draft-editor';
 import PostOverview from '@/components/studio/post-overview';
+import SourcePanel from '@/components/studio/source-panel';
+import type { SourceLink } from '@/components/studio/source-panel';
 import type { WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { useStudioTab } from '@/hooks/use-studio-tab';
 import type { LangCode } from '@/lib/lang-meta';
@@ -18,6 +20,8 @@ type PostDetail = {
     number: number;
     title: string;
     body: string | null;
+    source_links: SourceLink[];
+    source_text: string | null;
     captions: Array<{
         part: string | null;
         lang?: string | null;
@@ -75,7 +79,7 @@ type PageProps = {
     post: PostDetail;
 };
 
-type TabKey = 'overview' | 'captions';
+type TabKey = 'overview' | 'captions' | 'source';
 
 export default function PostShow({ post }: PageProps) {
     const hasCaptions = post.captions.some(
@@ -152,6 +156,14 @@ export default function PostShow({ post }: PageProps) {
                     >
                         📣 Captions
                     </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === 'source'}
+                        onClick={() => setTab('source')}
+                    >
+                        🔗 Source
+                    </button>
                 </div>
 
                 {tab === 'overview' && (
@@ -174,6 +186,13 @@ export default function PostShow({ post }: PageProps) {
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
                         handles={post.handles}
+                    />
+                )}
+
+                {tab === 'source' && (
+                    <SourcePanel
+                        links={post.source_links}
+                        text={post.source_text}
                     />
                 )}
 

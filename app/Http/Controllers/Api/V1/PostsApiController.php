@@ -27,6 +27,7 @@ use App\Models\Workspace;
 use App\Rules\AccessibleDriveUrl;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Content\SourceFields;
 use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Http\JsonResponse;
@@ -143,6 +144,7 @@ class PostsApiController extends Controller
             'image_drive_urls' => ['sometimes', 'nullable', 'array'],
             'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
+            ...SourceFields::rules(),
             'postsyncer' => ['prohibited'],
             'publish_state' => ['prohibited'],
             'publish_error' => ['prohibited'],

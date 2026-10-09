@@ -1785,6 +1785,50 @@
     font-weight: 600;
 }
 
+/* Short trend: ~7-day shelf life, warmer than seasonal's accent. */
+.studio-page .vtable .c-trend.trend-short-trend {
+    color: var(--warn);
+    font-weight: 600;
+}
+
+.studio-page .source-links {
+    list-style: none;
+    margin: 0;
+    padding: 0 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.studio-page .source-links a {
+    color: var(--accent);
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.studio-page .source-links .source-url {
+    display: block;
+    font-size: 13px;
+    color: var(--ink-soft);
+    word-break: break-all;
+}
+
+.studio-page .source-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.studio-page .idea-expiry {
+    font-size: 13px;
+    white-space: nowrap;
+    color: var(--ink-soft);
+}
+
+.studio-page .idea-expiry.is-stale {
+    color: var(--bad);
+    font-weight: 600;
+}
+
 .studio-page .vtable .c-status {
     white-space: nowrap;
     width: 1%;

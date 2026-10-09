@@ -61,6 +61,8 @@ class PostResource extends JsonResource
                 'has_captions',
                 fn () => ! empty($this->captions),
             ),
+            'source_links' => $this->source_links ?? [],
+            'source_text' => $this->source_text,
             'platforms' => $this->platforms,
             'image_drive_urls' => $this->image_drive_urls,
             'status' => $this->status,

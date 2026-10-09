@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Scratchpad;
 
+use App\Models\Idea;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -22,7 +23,7 @@ class TriageScratchpadEntryRequest extends FormRequest
                 'nullable', 'string', 'max:255',
             ],
             'score' => ['nullable', 'integer', 'min:0', 'max:1000'],
-            'trend' => ['nullable', Rule::in(['evergreen', 'seasonal'])],
+            'trend' => ['nullable', Rule::in(Idea::TRENDS)],
             'rationale' => ['nullable', 'string', 'max:2000'],
             'drop_reason' => [
                 Rule::requiredIf(fn () => $this->input('target') === 'drop'),

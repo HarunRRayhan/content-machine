@@ -228,6 +228,7 @@ class VideosController extends Controller
             'title' => $idea->title,
             'score' => $idea->score,
             'trend' => $idea->trend,
+            'expires_at' => $idea->expiresAt()?->toIso8601String(),
         ];
     }
 
@@ -291,6 +292,8 @@ class VideosController extends Controller
             'number' => $video->number,
             'title' => $video->title,
             'body' => $video->body,
+            'source_links' => $video->source_links ?? [],
+            'source_text' => $video->source_text,
             'script_markdown' => $video->script_markdown,
             'parsed' => $parsed,
             'captions' => NormalizeCaptions::forDashboard($video->captions),

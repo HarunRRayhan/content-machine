@@ -1,8 +1,11 @@
 import { Form, Head, Link } from '@inertiajs/react';
 import IdeasController from '@/actions/App/Http/Controllers/Ideas/IdeasController';
 import InputError from '@/components/input-error';
+import SourcePanel from '@/components/studio/source-panel';
+import type { SourceLink } from '@/components/studio/source-panel';
+import { useStudioTab } from '@/hooks/use-studio-tab';
 import { postShowUrl, videoShowUrl } from '@/lib/content-urls';
-import { scoreBand, trendLabel } from '@/lib/studio-meta';
+import { ideaExpiry, scoreBand, trendLabel } from '@/lib/studio-meta';
 import { index as ideasIndex } from '@/routes/dashboard/ideas';
 import { index as postsIndex } from '@/routes/posts';
 import { index as videosIndex } from '@/routes/videos';
@@ -25,6 +28,9 @@ type IdeaDetail = {
     trend: string | null;
     rationale: string | null;
     body: string | null;
+    source_links: SourceLink[];
+    source_text: string | null;
+    expires_at: string | null;
     status: string;
     drop_reason: string | null;
     created_at: string | null;
@@ -34,6 +40,8 @@ type IdeaDetail = {
 type PageProps = {
     idea: IdeaDetail;
 };
+
+const IDEA_TABS = ['overview', 'source'] as const;
 
 function parentIndex(kind: string) {
     if (kind === 'video') {
@@ -97,6 +105,8 @@ export default function IdeaShow({ idea }: PageProps) {
     const added = addedLabel(idea.created_at);
     const why = idea.rationale?.trim() || '';
     const notes = scratchBlocks(idea.body);
+    const expiry = ideaExpiry(idea.expires_at);
+    const [tab, setTab] = useStudioTab(IDEA_TABS, 'overview');
 
     return (
         <>
@@ -115,223 +125,294 @@ export default function IdeaShow({ idea }: PageProps) {
                     </div>
                 </div>
 
-                <section className="pane">
-                    <div className="pane-head">
-                        <span className="k">
-                            💡 <b>Ideation</b>
-                        </span>
-                        <span className={`pill score ${scoreBand(idea.score)}`}>
-                            {idea.score !== null ? `${idea.score}/1000` : '-'}
-                        </span>
-                    </div>
-                    <div className="doc-chips">
-                        {idea.trend && (
-                            <span className="chip">
-                                {trendLabel(idea.trend)}
-                            </span>
-                        )}
-                        {added && <span className="chip">added {added}</span>}
-                        <span className="chip">{idea.status}</span>
-                    </div>
-                    {why && (
-                        <p className="idea-why">
-                            <strong>
-                                Why{' '}
-                                {idea.score !== null
-                                    ? `${idea.score}/1000`
-                                    : 'this score'}
-                                :
-                            </strong>{' '}
-                            {why}
-                        </p>
-                    )}
-                    {idea.promoted_to && (
-                        <p className="idea-after">
-                            Promoted to{' '}
-                            <Link
-                                href={
-                                    idea.promoted_to.kind === 'video'
-                                        ? videoShowUrl(
-                                              idea.promoted_to.human_id,
-                                          )
-                                        : postShowUrl(idea.promoted_to.human_id)
-                                }
-                            >
-                                {idea.promoted_to.human_id}:{' '}
-                                {idea.promoted_to.title}
-                            </Link>
-                        </p>
-                    )}
-                    {isDropped && idea.drop_reason && (
-                        <p className="idea-after">
-                            Dropped: {idea.drop_reason}
-                        </p>
-                    )}
-                </section>
+                <div className="tabbar" role="tablist">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === 'overview'}
+                        onClick={() => setTab('overview')}
+                    >
+                        📋 Overview
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === 'source'}
+                        onClick={() => setTab('source')}
+                    >
+                        🔗 Source
+                    </button>
+                </div>
 
-                <section className="pane">
-                    <div className="pane-head">
-                        <span className="k">
-                            📝 <b>Scratch</b>
-                        </span>
-                    </div>
-                    <div className="scratch">
-                        {notes.length === 0 ? (
-                            <p className="empty">Nothing scratched down yet.</p>
-                        ) : (
-                            notes.map((block) => <p key={block}>{block}</p>)
-                        )}
-                    </div>
-                </section>
-
-                {isOpen && (
-                    <section className="pane">
-                        <div className="pane-head">
-                            <span className="k">
-                                ↗ <b>Promote</b>
-                            </span>
-                        </div>
-                        <div className="studio-form">
-                            <p className="idea-why">
-                                Create a draft {idea.kind} shell from this idea.
-                            </p>
-                            <Form {...IdeasController.promote.form(idea.id)}>
-                                {({ processing }) => (
-                                    <button
-                                        type="submit"
-                                        className="advance"
-                                        disabled={processing}
-                                    >
-                                        {idea.kind === 'video'
-                                            ? 'Promote to video'
-                                            : 'Promote to post'}
-                                    </button>
-                                )}
-                            </Form>
-                        </div>
-                    </section>
+                {tab === 'source' && (
+                    <SourcePanel
+                        links={idea.source_links}
+                        text={idea.source_text}
+                    />
                 )}
 
-                <section className="pane">
-                    <div className="pane-head">
-                        <span className="k">
-                            ✎ <b>Edit</b>
-                        </span>
-                    </div>
-                    <Form
-                        {...IdeasController.update.form(idea.id)}
-                        className="studio-form"
-                    >
-                        {({ processing, errors }) => (
-                            <>
-                                <label htmlFor="title">Title</label>
-                                <input
-                                    id="title"
-                                    name="title"
-                                    required
-                                    defaultValue={idea.title}
-                                />
-                                <InputError message={errors.title} />
-
-                                <div className="studio-form-row">
-                                    <div>
-                                        <label htmlFor="score">
-                                            Score (0-1000)
-                                        </label>
-                                        <input
-                                            id="score"
-                                            type="number"
-                                            name="score"
-                                            min={0}
-                                            max={1000}
-                                            defaultValue={idea.score ?? ''}
-                                        />
-                                        <InputError message={errors.score} />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="trend">Trend</label>
-                                        <select
-                                            id="trend"
-                                            name="trend"
-                                            defaultValue={idea.trend ?? ''}
-                                        >
-                                            <option value="">Unset</option>
-                                            <option value="evergreen">
-                                                Evergreen
-                                            </option>
-                                            <option value="seasonal">
-                                                Seasonal
-                                            </option>
-                                        </select>
-                                        <InputError message={errors.trend} />
-                                    </div>
-                                </div>
-
-                                <label htmlFor="rationale">
-                                    Why this score
-                                </label>
-                                <textarea
-                                    id="rationale"
-                                    name="rationale"
-                                    rows={3}
-                                    defaultValue={idea.rationale ?? ''}
-                                />
-                                <InputError message={errors.rationale} />
-
-                                <label htmlFor="body">Scratch</label>
-                                <textarea
-                                    id="body"
-                                    name="body"
-                                    rows={6}
-                                    defaultValue={idea.body ?? ''}
-                                />
-                                <InputError message={errors.body} />
-
-                                <button
-                                    type="submit"
-                                    className="advance"
-                                    disabled={processing}
+                {tab === 'overview' && (
+                    <>
+                        <section className="pane">
+                            <div className="pane-head">
+                                <span className="k">
+                                    💡 <b>Ideation</b>
+                                </span>
+                                <span
+                                    className={`pill score ${scoreBand(idea.score)}`}
                                 >
-                                    Save changes
-                                </button>
-                            </>
-                        )}
-                    </Form>
-                </section>
-
-                {!isDropped && (
-                    <section className="pane">
-                        <div className="pane-head">
-                            <span className="k">
-                                ✕ <b>Drop</b>
-                            </span>
-                        </div>
-                        <Form
-                            {...IdeasController.drop.form(idea.id)}
-                            className="studio-form"
-                        >
-                            {({ processing, errors }) => (
-                                <>
-                                    <label htmlFor="drop_reason">Reason</label>
-                                    <textarea
-                                        id="drop_reason"
-                                        name="drop_reason"
-                                        required
-                                        rows={2}
-                                        placeholder="Why is this idea being dropped?"
-                                    />
-                                    <InputError message={errors.drop_reason} />
-                                    <button
-                                        type="submit"
-                                        className="advance is-danger"
-                                        disabled={processing}
-                                    >
-                                        Drop idea
-                                    </button>
-                                </>
+                                    {idea.score !== null
+                                        ? `${idea.score}/1000`
+                                        : '-'}
+                                </span>
+                            </div>
+                            <div className="doc-chips">
+                                {idea.trend && (
+                                    <span className="chip">
+                                        {trendLabel(idea.trend)}
+                                    </span>
+                                )}
+                                {added && (
+                                    <span className="chip">added {added}</span>
+                                )}
+                                <span className="chip">{idea.status}</span>
+                                {expiry && (
+                                    <span className="chip">{expiry.label}</span>
+                                )}
+                            </div>
+                            {why && (
+                                <p className="idea-why">
+                                    <strong>
+                                        Why{' '}
+                                        {idea.score !== null
+                                            ? `${idea.score}/1000`
+                                            : 'this score'}
+                                        :
+                                    </strong>{' '}
+                                    {why}
+                                </p>
                             )}
-                        </Form>
-                    </section>
+                            {idea.promoted_to && (
+                                <p className="idea-after">
+                                    Promoted to{' '}
+                                    <Link
+                                        href={
+                                            idea.promoted_to.kind === 'video'
+                                                ? videoShowUrl(
+                                                      idea.promoted_to.human_id,
+                                                  )
+                                                : postShowUrl(
+                                                      idea.promoted_to.human_id,
+                                                  )
+                                        }
+                                    >
+                                        {idea.promoted_to.human_id}:{' '}
+                                        {idea.promoted_to.title}
+                                    </Link>
+                                </p>
+                            )}
+                            {isDropped && idea.drop_reason && (
+                                <p className="idea-after">
+                                    Dropped: {idea.drop_reason}
+                                </p>
+                            )}
+                        </section>
+
+                        <section className="pane">
+                            <div className="pane-head">
+                                <span className="k">
+                                    📝 <b>Scratch</b>
+                                </span>
+                            </div>
+                            <div className="scratch">
+                                {notes.length === 0 ? (
+                                    <p className="empty">
+                                        Nothing scratched down yet.
+                                    </p>
+                                ) : (
+                                    notes.map((block) => (
+                                        <p key={block}>{block}</p>
+                                    ))
+                                )}
+                            </div>
+                        </section>
+
+                        {isOpen && (
+                            <section className="pane">
+                                <div className="pane-head">
+                                    <span className="k">
+                                        ↗ <b>Promote</b>
+                                    </span>
+                                </div>
+                                <div className="studio-form">
+                                    <p className="idea-why">
+                                        Create a draft {idea.kind} shell from
+                                        this idea.
+                                    </p>
+                                    <Form
+                                        {...IdeasController.promote.form(
+                                            idea.id,
+                                        )}
+                                    >
+                                        {({ processing }) => (
+                                            <button
+                                                type="submit"
+                                                className="advance"
+                                                disabled={processing}
+                                            >
+                                                {idea.kind === 'video'
+                                                    ? 'Promote to video'
+                                                    : 'Promote to post'}
+                                            </button>
+                                        )}
+                                    </Form>
+                                </div>
+                            </section>
+                        )}
+
+                        <section className="pane">
+                            <div className="pane-head">
+                                <span className="k">
+                                    ✎ <b>Edit</b>
+                                </span>
+                            </div>
+                            <Form
+                                {...IdeasController.update.form(idea.id)}
+                                className="studio-form"
+                            >
+                                {({ processing, errors }) => (
+                                    <>
+                                        <label htmlFor="title">Title</label>
+                                        <input
+                                            id="title"
+                                            name="title"
+                                            required
+                                            defaultValue={idea.title}
+                                        />
+                                        <InputError message={errors.title} />
+
+                                        <div className="studio-form-row">
+                                            <div>
+                                                <label htmlFor="score">
+                                                    Score (0-1000)
+                                                </label>
+                                                <input
+                                                    id="score"
+                                                    type="number"
+                                                    name="score"
+                                                    min={0}
+                                                    max={1000}
+                                                    defaultValue={
+                                                        idea.score ?? ''
+                                                    }
+                                                />
+                                                <InputError
+                                                    message={errors.score}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label htmlFor="trend">
+                                                    Trend
+                                                </label>
+                                                <select
+                                                    id="trend"
+                                                    name="trend"
+                                                    defaultValue={
+                                                        idea.trend ?? ''
+                                                    }
+                                                >
+                                                    <option value="">
+                                                        Unset
+                                                    </option>
+                                                    <option value="evergreen">
+                                                        Evergreen
+                                                    </option>
+                                                    <option value="seasonal">
+                                                        Seasonal
+                                                    </option>
+                                                    <option value="short-trend">
+                                                        Short trend
+                                                    </option>
+                                                </select>
+                                                <InputError
+                                                    message={errors.trend}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <label htmlFor="rationale">
+                                            Why this score
+                                        </label>
+                                        <textarea
+                                            id="rationale"
+                                            name="rationale"
+                                            rows={3}
+                                            defaultValue={idea.rationale ?? ''}
+                                        />
+                                        <InputError
+                                            message={errors.rationale}
+                                        />
+
+                                        <label htmlFor="body">Scratch</label>
+                                        <textarea
+                                            id="body"
+                                            name="body"
+                                            rows={6}
+                                            defaultValue={idea.body ?? ''}
+                                        />
+                                        <InputError message={errors.body} />
+
+                                        <button
+                                            type="submit"
+                                            className="advance"
+                                            disabled={processing}
+                                        >
+                                            Save changes
+                                        </button>
+                                    </>
+                                )}
+                            </Form>
+                        </section>
+
+                        {!isDropped && (
+                            <section className="pane">
+                                <div className="pane-head">
+                                    <span className="k">
+                                        ✕ <b>Drop</b>
+                                    </span>
+                                </div>
+                                <Form
+                                    {...IdeasController.drop.form(idea.id)}
+                                    className="studio-form"
+                                >
+                                    {({ processing, errors }) => (
+                                        <>
+                                            <label htmlFor="drop_reason">
+                                                Reason
+                                            </label>
+                                            <textarea
+                                                id="drop_reason"
+                                                name="drop_reason"
+                                                required
+                                                rows={2}
+                                                placeholder="Why is this idea being dropped?"
+                                            />
+                                            <InputError
+                                                message={errors.drop_reason}
+                                            />
+                                            <button
+                                                type="submit"
+                                                className="advance is-danger"
+                                                disabled={processing}
+                                            >
+                                                Drop idea
+                                            </button>
+                                        </>
+                                    )}
+                                </Form>
+                            </section>
+                        )}
+                    </>
                 )}
             </div>
         </>

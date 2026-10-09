@@ -151,4 +151,48 @@ class IdeasApiTest extends TestCase
             ->assertJsonMissingPath('data.body')
             ->assertJsonMissingPath('data.details');
     }
+
+    public function test_short_trend_is_accepted_and_expires_in_seven_days(): void
+    {
+        $this->acting()->postJson('/api/v1/ideas', [
+            'kind' => 'post',
+            'title' => 'Breaking thing',
+            'trend' => 'short-trend',
+        ])->assertCreated()
+            ->assertJsonPath('data.trend', 'short-trend')
+            ->assertJsonPath(
+                'data.expires_at',
+                Idea::query()->sole()->created_at->addDays(7)->toIso8601String(),
+            );
+    }
+
+    public function test_expires_at_follows_the_trend_shelf_life(): void
+    {
+        $seasonal = Idea::factory()->for($this->workspace)->create(['kind' => 'post', 'human_id' => 'PI-1', 'trend' => 'seasonal']);
+        Idea::factory()->for($this->workspace)->create(['kind' => 'post', 'human_id' => 'PI-2', 'trend' => 'evergreen']);
+
+        $this->acting()->getJson('/api/v1/ideas/PI-1')
+            ->assertJsonPath('data.expires_at', $seasonal->created_at->addDays(60)->toIso8601String());
+        $this->acting()->getJson('/api/v1/ideas/PI-2')
+            ->assertJsonPath('data.expires_at', null);
+    }
+
+    public function test_an_unknown_trend_is_rejected(): void
+    {
+        Idea::factory()->for($this->workspace)->create(['kind' => 'post', 'human_id' => 'PI-3']);
+
+        $this->acting()->postJson('/api/v1/ideas', ['kind' => 'post', 'title' => 'x', 'trend' => 'urgent'])
+            ->assertUnprocessable();
+        $this->acting()->patchJson('/api/v1/ideas/PI-3', ['title' => 'x', 'trend' => 'urgent'])
+            ->assertUnprocessable();
+    }
+
+    public function test_update_can_set_short_trend(): void
+    {
+        Idea::factory()->for($this->workspace)->create(['kind' => 'post', 'human_id' => 'PI-4']);
+
+        $this->acting()->patchJson('/api/v1/ideas/PI-4', ['title' => 'x', 'trend' => 'short-trend'])
+            ->assertOk()
+            ->assertJsonPath('data.trend', 'short-trend');
+    }
 }

@@ -4,6 +4,8 @@ import type { CaptionGroup } from '@/components/content/captions-panel';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PresentationEmbed from '@/components/studio/presentation-embed';
 import ScriptPanel from '@/components/studio/script-panel';
+import SourcePanel from '@/components/studio/source-panel';
+import type { SourceLink } from '@/components/studio/source-panel';
 import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
 import VideoOverview from '@/components/studio/video-overview';
 import { useStudioTab } from '@/hooks/use-studio-tab';
@@ -27,6 +29,8 @@ type VideoDetail = {
     number: number;
     title: string;
     body: string | null;
+    source_links: SourceLink[];
+    source_text: string | null;
     script_markdown: string | null;
     parsed: {
         lang: string;
@@ -76,7 +80,8 @@ type PageProps = {
     video: VideoDetail;
 };
 
-type TabKey = 'overview' | 'script' | 'captions' | 'facts' | 'presentation';
+type TabKey =
+    'overview' | 'script' | 'captions' | 'facts' | 'presentation' | 'source';
 
 export default function VideoShow({ video }: PageProps) {
     const hasCaptions = video.captions.some(
@@ -106,6 +111,8 @@ export default function VideoShow({ video }: PageProps) {
         if (hasDeck) {
             tabs.push('presentation');
         }
+
+        tabs.push('source');
 
         return tabs;
     }, [hasCaptions, hasFacts, hasDeck]);
@@ -216,6 +223,14 @@ export default function VideoShow({ video }: PageProps) {
                             🎬 Presentation
                         </button>
                     )}
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'source'}
+                        onClick={() => setTab('source')}
+                    >
+                        🔗 Source
+                    </button>
                 </div>
 
                 {activeTab === 'overview' && (
@@ -250,6 +265,13 @@ export default function VideoShow({ video }: PageProps) {
                         scripts={video.parsed.scripts}
                         videoNumber={video.number}
                         storageKey={video.human_id}
+                    />
+                )}
+
+                {activeTab === 'source' && (
+                    <SourcePanel
+                        links={video.source_links}
+                        text={video.source_text}
                     />
                 )}
 

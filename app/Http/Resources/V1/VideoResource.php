@@ -56,6 +56,8 @@ class VideoResource extends JsonResource
                 $include->wants('deck_manifest'),
                 $this->deck_manifest,
             ),
+            'source_links' => $this->source_links ?? [],
+            'source_text' => $this->source_text,
             'has_script' => PresenceFlags::bool(
                 $this->resource,
                 'has_script',

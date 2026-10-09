@@ -31,6 +31,7 @@ use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Content\PresentationManifest;
+use App\Support\Content\SourceFields;
 use App\Support\CurrentApiToken;
 use App\Support\GoogleDrive\GoogleDriveClient;
 use App\Support\GoogleDrive\GoogleDriveLinkChecker;
@@ -291,6 +292,7 @@ final class McpToolDispatcher
     {
         $idea = $this->findIdea($this->stringArg($arguments, 'human_id'));
         $score = $arguments['score'] ?? null;
+        $source = $this->sourcePayload($arguments);
 
         $data = new UpdateIdeaData(
             title: $this->stringArg($arguments, 'title'),
@@ -298,6 +300,10 @@ final class McpToolDispatcher
             trend: $this->optionalString($arguments, 'trend') ?? $idea->trend,
             rationale: $this->optionalString($arguments, 'rationale') ?? $idea->rationale,
             body: $this->optionalString($arguments, 'body') ?? $idea->body,
+            sourceLinks: $source['source_links'] ?? null,
+            sourceText: $source['source_text'] ?? null,
+            hasSourceLinks: array_key_exists('source_links', $source),
+            hasSourceText: array_key_exists('source_text', $source),
         );
 
         return $this->presentIdea($this->updateIdeaAction->handle($idea, $data));
@@ -346,6 +352,7 @@ final class McpToolDispatcher
             'video_drive_url',
             'cover_drive_url',
         ]);
+        $payload += $this->sourcePayload($arguments);
 
         if (array_key_exists('deck_manifest', $arguments)) {
             $manifest = $arguments['deck_manifest'];
@@ -361,7 +368,7 @@ final class McpToolDispatcher
         }
 
         if ($payload === []) {
-            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url.');
+            throw new RuntimeException('Send at least one of title, language, slug, body, script_markdown, deck_manifest, status, video_drive_url, cover_drive_url, source_links, source_text.');
         }
 
         $this->assertAllowedStatus($payload, Video::STATUSES, 'video');
@@ -450,7 +457,7 @@ final class McpToolDispatcher
     private function updatePost(array $arguments): array
     {
         $post = $this->findPost($this->stringArg($arguments, 'human_id'));
-        $payload = $this->optionalPayload($arguments, ['title', 'body', 'status']);
+        $payload = $this->optionalPayload($arguments, ['title', 'body', 'status']) + $this->sourcePayload($arguments);
 
         if (array_key_exists('captions', $arguments)) {
             $captions = $arguments['captions'];
@@ -487,7 +494,7 @@ final class McpToolDispatcher
         }
 
         if ($payload === []) {
-            throw new RuntimeException('Send at least one of title, body, captions, platforms, status, image_drive_urls.');
+            throw new RuntimeException('Send at least one of title, body, captions, platforms, status, image_drive_urls, source_links, source_text.');
         }
 
         $this->assertAllowedStatus($payload, Post::STATUSES, 'post');
@@ -631,6 +638,45 @@ final class McpToolDispatcher
         }
 
         return $post;
+    }
+
+    /**
+     * Validated, normalised source_links / source_text, only for keys present.
+     *
+     * @param  array<string, mixed>  $arguments
+     * @return array<string, mixed>
+     */
+    private function sourcePayload(array $arguments): array
+    {
+        $payload = [];
+
+        if (array_key_exists('source_links', $arguments)) {
+            $links = $arguments['source_links'];
+
+            if ($links !== null && ! is_array($links)) {
+                throw new RuntimeException('source_links must be an array of {url, label}.');
+            }
+
+            foreach (is_array($links) ? $links : [] as $link) {
+                if (! is_array($link) || ! is_string($link['url'] ?? null) || filter_var($link['url'], FILTER_VALIDATE_URL) === false) {
+                    throw new RuntimeException('Each source_links item needs a valid url.');
+                }
+            }
+
+            $payload['source_links'] = SourceFields::normalizeLinks($links);
+        }
+
+        if (array_key_exists('source_text', $arguments)) {
+            $text = $arguments['source_text'];
+
+            if ($text !== null && ! is_string($text)) {
+                throw new RuntimeException('source_text must be a string.');
+            }
+
+            $payload['source_text'] = SourceFields::normalizeText($text);
+        }
+
+        return $payload;
     }
 
     /**

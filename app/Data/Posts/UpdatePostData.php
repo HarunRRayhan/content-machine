@@ -4,6 +4,7 @@ namespace App\Data\Posts;
 
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
+use App\Support\Content\SourceFields;
 use App\Support\Media\PostDesignTemplate;
 
 /**
@@ -17,6 +18,7 @@ final readonly class UpdatePostData
      * @param  array<string, mixed>|null  $platforms
      * @param  array<int, string>|null  $imageDriveUrls
      * @param  array<string, mixed>|null  $postsyncer
+     * @param  list<array{url: string, label: string|null}>|null  $sourceLinks
      */
     public function __construct(
         public string $title,
@@ -39,6 +41,10 @@ final readonly class UpdatePostData
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
         public bool $hasTemplate = false,
+        public ?array $sourceLinks = null,
+        public ?string $sourceText = null,
+        public bool $hasSourceLinks = false,
+        public bool $hasSourceText = false,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -55,6 +61,10 @@ final readonly class UpdatePostData
             hasBody: $request->has('body'),
             hasCaptions: $request->has('captions'),
             hasImageDriveUrls: $request->has('image_drive_urls'),
+            sourceLinks: SourceFields::normalizeLinks($request->input('source_links')),
+            sourceText: SourceFields::normalizeText($request->input('source_text')),
+            hasSourceLinks: $request->has('source_links'),
+            hasSourceText: $request->has('source_text'),
         );
     }
 
@@ -140,6 +150,10 @@ final readonly class UpdatePostData
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
             hasTemplate: array_key_exists('template', $payload),
+            sourceLinks: SourceFields::normalizeLinks($payload['source_links'] ?? null),
+            sourceText: SourceFields::normalizeText($payload['source_text'] ?? null),
+            hasSourceLinks: array_key_exists('source_links', $payload),
+            hasSourceText: array_key_exists('source_text', $payload),
         );
     }
 }
