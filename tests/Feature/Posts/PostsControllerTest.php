@@ -9,7 +9,9 @@ use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -341,6 +343,54 @@ class PostsControllerTest extends TestCase
                 ->component('posts/show')
                 ->where('post.needs_confirm_ask', false)
             );
+    }
+
+    public function test_show_renders_when_captions_name_images_with_no_attachment(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['photo' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['facebook'],
+            'captions' => [
+                'main' => [
+                    'facebook' => [
+                        'caption' => 'Facebook caption',
+                        'images' => ['missing-cover.png'],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.needs_confirm_ask', false)
+            );
+
+        // The publish path must still refuse (P-57).
+        $this->expectException(PostsyncerException::class);
+        app(PostPublishPlanner::class)->plan(
+            $post,
+            PostsyncerConfig::fromWorkspace($workspace->refresh()),
+            ['confirm_ask' => false],
+        );
     }
 
     public function test_show_does_not_reask_for_a_confirmed_retry(): void

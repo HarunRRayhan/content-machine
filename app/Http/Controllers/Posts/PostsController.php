@@ -17,6 +17,7 @@ use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PostsyncerHandleDirectory;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -356,13 +357,20 @@ class PostsController extends Controller
             && is_array($post->publish_progress['options'] ?? null)
             ? $post->publish_progress['options']
             : [];
-        $needsConfirmAsk = $postsyncerConfig !== null
-            && app(PostPublishPlanner::class)->needsConfirmAsk(
-                $post,
-                $postsyncerConfig,
-                $publishOptions,
-            )
-            && ! (bool) ($publishOptions['confirm_ask'] ?? false);
+        $needsConfirmAsk = false;
+        if ($postsyncerConfig !== null) {
+            try {
+                $needsConfirmAsk = app(PostPublishPlanner::class)->needsConfirmAsk(
+                    $post,
+                    $postsyncerConfig,
+                    $publishOptions,
+                ) && ! (bool) ($publishOptions['confirm_ask'] ?? false);
+            } catch (PostsyncerException) {
+                // Captions name images with no attachment yet (P-57). The page
+                // must still render; PostPublishPlanner::plan() keeps refusing.
+                $needsConfirmAsk = false;
+            }
+        }
 
         return [
             'id' => $post->id,
