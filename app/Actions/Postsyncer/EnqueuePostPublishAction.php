@@ -7,20 +7,31 @@ use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use Throwable;
 
 class EnqueuePostPublishAction
 {
+    public function __construct(
+        private readonly ?PostPublishPlanner $planner = null,
+    ) {}
+
     /**
      * Queue a PostSyncer publish for a post. The worker runs PublishPostJob.
      *
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options
+     * `append_missing` (set only by trusted callers) lets a post that already has
+     * PostSyncer groups schedule additional (language, platform) pairs without
+     * touching the existing groups. See appendMissingPlan().
+     *
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int, append_missing?: bool}  $options
      */
     public function handle(Post $post, Workspace $workspace, array $options = []): Post
     {
@@ -63,14 +74,26 @@ class EnqueuePostPublishAction
                 ]);
             }
 
+            $baseGroups = null;
+
             if ($this->alreadyPublishedOnPostsyncer($lockedPost)) {
-                throw ValidationException::withMessages([
-                    'publish' => __('This post already has PostSyncer posts. Republish is not supported yet.'),
-                ]);
+                if ($this->isResumableAppend($lockedPost)) {
+                    // A failed append resumes with its stored options; the
+                    // existing groups are untouched until it finalizes.
+                } elseif (($filtered['append_missing'] ?? false) === true) {
+                    $baseGroups = $this->appendMissingPlan($lockedPost, $workspace, $filtered);
+                } else {
+                    throw ValidationException::withMessages([
+                        'publish' => __('This post already has PostSyncer posts. Republish is not supported yet.'),
+                    ]);
+                }
+            } else {
+                // Nothing to append to: behave exactly like a first publish.
+                unset($filtered['append_missing']);
             }
 
-            $isRetry = $lockedPost->publish_state === 'failed';
-            $progress = $lockedPost->publish_progress;
+            $isRetry = $lockedPost->publish_state === 'failed' && $baseGroups === null;
+            $progress = $baseGroups !== null ? null : $lockedPost->publish_progress;
             $runToken = (string) Str::uuid();
 
             if ($progress !== null) {
@@ -88,6 +111,10 @@ class EnqueuePostPublishAction
                 [$filtered, $progress] = $this->resumeOptions($lockedPost, $filtered);
             } else {
                 $progress = $this->newProgress($filtered, $runToken);
+
+                if ($baseGroups !== null) {
+                    $progress['base_groups'] = $baseGroups;
+                }
             }
 
             $this->lockTelegramBotConfig($lockedPost, $filtered, $isRetry);
@@ -129,6 +156,117 @@ class EnqueuePostPublishAction
         });
 
         return $queued->fresh() ?? $queued;
+    }
+
+    /**
+     * @return bool true when the post failed mid-way through an append operation
+     */
+    private function isResumableAppend(Post $post): bool
+    {
+        $progress = $post->publish_progress;
+
+        return $post->publish_state === 'failed'
+            && is_array($progress)
+            && is_array($progress['options'] ?? null)
+            && ($progress['options']['append_missing'] ?? false) === true
+            && is_array($progress['base_groups'] ?? null);
+    }
+
+    /**
+     * Validate an append-only publish for a post that already has PostSyncer
+     * groups and return the snapshot of those groups to preserve.
+     *
+     * Rules: explicit platforms and a schedule are required; the post must be
+     * settled (succeeded/idle) so no failed or uncertain operation is
+     * overwritten; at least one requested (language, platform) pair must be
+     * new, and every requested platform must produce a group, otherwise the
+     * whole request is refused naming the platforms that are already
+     * scheduled or not publishable.
+     *
+     * @param  array<string, mixed>  $options
+     * @return list<array<string, mixed>>
+     */
+    private function appendMissingPlan(Post $post, Workspace $workspace, array $options): array
+    {
+        $fail = static fn (string $key, string $message) => ValidationException::withMessages([$key => $message]);
+
+        $when = $options['when'] ?? null;
+        if (! is_string($when) || trim($when) === '') {
+            throw $fail('when', __('Adding platforms to an already-scheduled post requires an explicit schedule time (when).'));
+        }
+
+        $platforms = $options['platforms'] ?? null;
+        if (! is_array($platforms) || $platforms === []) {
+            throw $fail('platforms', __('Specify the platforms to add to this already-scheduled post.'));
+        }
+
+        if (! in_array($post->publish_state, ['succeeded', 'idle', null], true)) {
+            throw $fail('publish', __('Resolve the post\'s current publish state before adding platforms.'));
+        }
+
+        $requested = array_values(array_unique(array_map(
+            fn (mixed $platform): string => strtolower(trim((string) $platform)),
+            $platforms,
+        )));
+
+        $planner = $this->planner ?? app(PostPublishPlanner::class);
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        try {
+            $existing = $planner->existingPairs($post);
+            $candidates = $planner->candidatePairs($post, ['platforms' => $requested]);
+            $groups = $planner->plan($post, $config, $options);
+        } catch (PostsyncerException|InvalidArgumentException $exception) {
+            throw $fail('publish', $exception->getMessage());
+        }
+
+        $planned = [];
+        foreach ($groups as $group) {
+            foreach ($group->platforms as $platform) {
+                $planned[$platform] = true;
+            }
+        }
+
+        $already = [];
+        $unavailable = [];
+        foreach ($requested as $platform) {
+            if (isset($planned[$platform])) {
+                continue;
+            }
+
+            $pairs = array_filter($candidates, fn (array $pair): bool => $pair[1] === $platform);
+            $covered = $pairs !== [] && array_filter(
+                $pairs,
+                fn (array $pair): bool => ! isset($existing[$pair[0]."\0".$pair[1]]),
+            ) === [];
+
+            if ($covered) {
+                $already[] = $platform;
+            } else {
+                $unavailable[] = $platform;
+            }
+        }
+
+        if ($already !== [] || $unavailable !== []) {
+            $parts = [];
+            if ($already !== []) {
+                $parts[] = __('already scheduled on PostSyncer: :platforms', ['platforms' => implode(', ', $already)]);
+            }
+            if ($unavailable !== []) {
+                $parts[] = __('not publishable (no caption, disabled, or gated off): :platforms', ['platforms' => implode(', ', $unavailable)]);
+            }
+
+            throw $fail('platforms', __('Nothing was scheduled. Requested platforms are :reasons.', ['reasons' => implode('; ', $parts)]));
+        }
+
+        if ($groups === []) {
+            throw $fail('platforms', __('No new PostSyncer groups could be planned for the requested platforms.'));
+        }
+
+        /** @var list<array<string, mixed>> $base */
+        $base = array_values($post->postsyncer['groups']);
+
+        return $base;
     }
 
     private function assertAtomicQueueConfiguration(): void
