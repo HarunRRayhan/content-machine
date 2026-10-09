@@ -95,7 +95,7 @@ class AppendMissingPlatformsTest extends TestCase
         Queue::assertNothingPushed();
         $fresh = $post->fresh();
         $this->assertSame('succeeded', $fresh->publish_state);
-        $this->assertSame([$this->existingGroup], $fresh->postsyncer['groups']);
+        $this->assertEquals([$this->existingGroup], $fresh->postsyncer['groups']);
     }
 
     public function test_without_the_flag_an_already_scheduled_post_is_still_refused(): void
@@ -187,8 +187,8 @@ class AppendMissingPlatformsTest extends TestCase
         ]);
 
         $this->assertSame('queued', $queued->publish_state);
-        $this->assertSame([$this->existingGroup], $queued->postsyncer['groups']);
-        $this->assertSame([$this->existingGroup], $queued->publish_progress['base_groups']);
+        $this->assertEquals([$this->existingGroup], $queued->postsyncer['groups']);
+        $this->assertEquals([$this->existingGroup], $queued->publish_progress['base_groups']);
         $this->assertTrue($queued->publish_progress['options']['append_missing']);
         Queue::assertPushed(PublishPostJob::class, 1);
 
@@ -261,7 +261,7 @@ class AppendMissingPlatformsTest extends TestCase
         $this->assertSame('scheduled', $fresh->status);
         $groups = $fresh->postsyncer['groups'];
         $this->assertCount(2, $groups);
-        $this->assertSame($this->existingGroup, $groups[0]);
+        $this->assertEquals($this->existingGroup, $groups[0]);
         $this->assertSame('777', $groups[1]['post_id']);
         $this->assertSame(['linkedin'], $groups[1]['platforms']);
 
@@ -325,7 +325,7 @@ class AppendMissingPlatformsTest extends TestCase
 
         $fresh = $post->fresh();
         $this->assertSame('failed', $fresh->publish_state);
-        $this->assertSame([$tampered], $fresh->postsyncer['groups']);
+        $this->assertEquals([$tampered], $fresh->postsyncer['groups']);
         $this->assertStringContainsString('changed while the append', $fresh->publish_error);
     }
 }

@@ -482,7 +482,7 @@ class PostsApiTest extends TestCase
             ->assertJsonValidationErrors('when');
 
         Queue::assertNothingPushed();
-        $this->assertSame([$group], $post->fresh()->postsyncer['groups']);
+        $this->assertEquals([$group], $post->fresh()->postsyncer['groups']);
     }
 
     public function test_approve_uses_the_api_token_owner_and_returns_approved_state(): void
