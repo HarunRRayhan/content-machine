@@ -437,6 +437,54 @@ class PostsApiTest extends TestCase
         });
     }
 
+    public function test_publish_on_a_scheduled_post_only_appends_when_platforms_are_explicit(): void
+    {
+        Queue::fake();
+        $this->configurePostsyncer();
+
+        $group = [
+            'post_id' => '500',
+            'status' => 'SCHEDULED',
+            'scheduled_at' => '2026-10-10T08:00:00+06:00',
+            'platforms' => ['facebook'],
+            'language' => 'bangla',
+        ];
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-144',
+            'number' => 144,
+            'status' => 'scheduled',
+            'publish_state' => 'succeeded',
+            'platforms' => ['facebook', 'linkedin'],
+            'captions' => ['facebook' => 'FB', 'linkedin' => 'LI'],
+            'postsyncer' => ['groups' => [$group]],
+        ]);
+
+        // No explicit platforms: legacy refusal is unchanged.
+        $this->acting()->postJson('/api/v1/posts/P-144/publish', [
+            'when' => '2026-10-10T09:00:00+06:00',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish');
+
+        // Already-scheduled platform is refused and named.
+        $this->acting()->postJson('/api/v1/posts/P-144/publish', [
+            'when' => '2026-10-10T09:00:00+06:00',
+            'platforms' => ['facebook'],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('platforms');
+
+        // Missing `when` is refused.
+        $this->acting()->postJson('/api/v1/posts/P-144/publish', [
+            'platforms' => ['linkedin'],
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('when');
+
+        Queue::assertNothingPushed();
+        $this->assertSame([$group], $post->fresh()->postsyncer['groups']);
+    }
+
     public function test_approve_uses_the_api_token_owner_and_returns_approved_state(): void
     {
         $post = Post::factory()->for($this->workspace)->create([

@@ -48,7 +48,62 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
+     * (language, platform) pairs already covered by a PostSyncer group on the
+     * post, keyed "language\0platform". A group without a language or platforms
+     * cannot be placed, so append-only planning fails closed on it.
+     *
+     * @return array<string, true>
+     */
+    public function existingPairs(Post $post): array
+    {
+        $pairs = [];
+
+        foreach ($post->postsyncer['groups'] ?? [] as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $language = $group['language'] ?? null;
+            $platforms = $group['platforms'] ?? null;
+
+            if (! is_string($language) || $language === '' || ! is_array($platforms) || $platforms === []) {
+                throw new PostsyncerException(
+                    'An existing PostSyncer group has no language or platforms; cannot safely add platforms.'
+                );
+            }
+
+            foreach ($platforms as $platform) {
+                $pairs[$language."\0".strtolower((string) $platform)] = true;
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * (language, platform) pairs that have a caption for the selected platforms.
+     *
+     * @param  array{platforms?: list<string>}  $options
+     * @return list<array{0: string, 1: string}>
+     */
+    public function candidatePairs(Post $post, array $options): array
+    {
+        $selected = $this->selectedPlatforms($post, $options);
+        $pairs = [];
+
+        foreach ($this->captionsByLanguage($post) as $language => $platformCaptions) {
+            foreach ($selected as $platform) {
+                if (array_key_exists($platform, $platformCaptions)) {
+                    $pairs[] = [$language, $platform];
+                }
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool}  $options
      * @return list<PublishGroup>
      */
     public function plan(Post $post, PostsyncerConfig $config, array $options): array
@@ -58,6 +113,11 @@ class PostPublishPlanner
         $selected = $this->selectedPlatforms($post, $options);
         $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
         $byLanguage = $this->captionsByLanguage($post);
+
+        // Append-only mode: never plan a pair that already has a PostSyncer group.
+        $existing = ($options['append_missing'] ?? false) === true
+            ? $this->existingPairs($post)
+            : [];
 
         $groups = [];
         foreach ($byLanguage as $language => $platformCaptions) {
@@ -73,6 +133,10 @@ class PostPublishPlanner
             $included = [];
             foreach ($selected as $platform) {
                 if (! array_key_exists($platform, $platformCaptions)) {
+                    continue;
+                }
+
+                if (isset($existing[$language."\0".$platform])) {
                     continue;
                 }
 

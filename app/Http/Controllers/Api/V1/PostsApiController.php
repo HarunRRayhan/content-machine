@@ -212,6 +212,13 @@ class PostsApiController extends Controller
                 : null,
         ], fn ($value) => $value !== null);
 
+        // Explicit platforms on an already-scheduled post mean "add these".
+        // The action enforces append-only rules and ignores this flag when
+        // the post has no PostSyncer groups yet.
+        if (is_array($options['platforms'] ?? null) && $options['platforms'] !== []) {
+            $options['append_missing'] = true;
+        }
+
         $post = $action->handle($post, $this->currentWorkspace(), $options);
 
         return new PostResource($post->load(['attachments.mediaAsset']));

@@ -84,7 +84,7 @@ class PublishPostAction
             $progress = $post->publish_progress;
             $claimLeaseId = $post->publish_lease_id;
             $post->loadMissing('workspace');
-            $this->assertFirstPublish($post);
+            $this->assertFirstPublish($post, $options);
             $config = PostsyncerConfig::fromWorkspace($post->workspace);
             if (! $config->publishEnabled()) {
                 throw new PostsyncerException('PostSyncer publishing is disabled in Settings.');
@@ -1687,6 +1687,8 @@ class PublishPostAction
                 );
             }
 
+            $publishedGroups = $this->withBaseGroups($lockedPost, $progress, $publishedGroups);
+
             $lockedPost->forceFill([
                 'postsyncer' => ['groups' => $publishedGroups],
                 'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
@@ -2594,6 +2596,7 @@ class PublishPostAction
             $latestConfig = PostsyncerConfig::fromWorkspace($locked->workspace);
             $latestGroups = $this->planner->plan($locked, $latestConfig, $options);
             $latestPlan = $this->planMetadata($latestConfig, $latestGroups, $options);
+            $publishedGroups = $this->withBaseGroups($locked, $progress, $publishedGroups);
 
             if ($latestPlan['hash'] !== ($progress['plan_hash'] ?? null)
                 || $latestPlan['groups'] !== ($progress['planned_groups'] ?? null)
@@ -2943,8 +2946,59 @@ class PublishPostAction
         return true;
     }
 
-    private function assertFirstPublish(Post $post): void
+    /**
+     * For an append-only operation, prepend the untouched base groups to the
+     * newly created ones. Fails closed if the stored groups changed since the
+     * operation was validated, so a concurrent edit is never overwritten.
+     *
+     * @param  array<string, mixed>  $progress
+     * @param  list<array<string, mixed>>  $newGroups
+     * @return list<array<string, mixed>>
+     */
+    private function withBaseGroups(Post $locked, array $progress, array $newGroups): array
     {
+        if (($progress['options']['append_missing'] ?? false) !== true) {
+            return $newGroups;
+        }
+
+        $base = $progress['base_groups'] ?? null;
+        $current = $locked->postsyncer['groups'] ?? null;
+
+        if (! is_array($base) || $base === [] || ! is_array($current)
+            || $this->canonicalJson(['g' => array_values($current)])
+                !== $this->canonicalJson(['g' => array_values($base)])) {
+            throw new PostsyncerException(
+                'The existing PostSyncer groups changed while the append was running. '
+                .'The new groups were not finalized in Content Machine.'
+            );
+        }
+
+        return [...array_values($base), ...$newGroups];
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private function assertFirstPublish(Post $post, array $options = []): void
+    {
+        if (($options['append_missing'] ?? false) === true) {
+            // Append-only: existing groups are expected, but the operation
+            // must carry the snapshot it was validated against and a schedule.
+            $progress = $post->publish_progress;
+            if (! is_array($progress)
+                || ! is_array($progress['base_groups'] ?? null)
+                || ! is_string($options['when'] ?? null)
+                || trim($options['when']) === ''
+                || ! is_array($options['platforms'] ?? null)
+                || $options['platforms'] === []) {
+                throw new PostsyncerException(
+                    'An append-only publish requires explicit platforms, a schedule, and a base group snapshot.'
+                );
+            }
+
+            return;
+        }
+
         if ($this->hasExistingPublicGroup($post)) {
             throw new PostsyncerException(
                 'This post already has PostSyncer posts. Republish is not supported yet.'
@@ -3706,6 +3760,11 @@ class PublishPostAction
                 : [];
             sort($platforms);
             $normalized['platforms'] = $platforms;
+        }
+
+        // Only present when true so existing operations keep their plan hash.
+        if (($options['append_missing'] ?? false) === true) {
+            $normalized['append_missing'] = true;
         }
 
         $telegramRequestId = $this->telegramRequestId($options);
