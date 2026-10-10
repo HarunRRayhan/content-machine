@@ -495,6 +495,120 @@ class PublishVideoAction
     }
 
     /**
+     * Mark an uncertain create as absent after an operator verified that
+     * PostSyncer created no matching post. Keep the registered media ids and
+     * the stored options so the next retry creates the post without uploading
+     * the media again.
+     */
+    public function reconcileCreateAbsent(Video $video): void
+    {
+        $video->refresh();
+        $progress = $video->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This video has no PostSyncer progress to reconcile.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if (($progress['state'] ?? null) !== 'uncertain'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'creating') {
+            throw new PostsyncerException(
+                'This video does not have an uncertain PostSyncer create to reconcile.'
+            );
+        }
+
+        if ($this->hasRecordedPostId($video, $progress)) {
+            throw new PostsyncerException(
+                'This video already has a PostSyncer post id. Reconcile that post instead of marking the create absent.'
+            );
+        }
+
+        if (! is_array($current['expected_payload'] ?? null)) {
+            throw new PostsyncerException(
+                'This video has no saved PostSyncer create payload to retry safely.'
+            );
+        }
+
+        $normalizedMediaIds = $this->normalizeMediaIds($current['media_ids'] ?? []);
+
+        $video->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($video->workspace);
+        $options = $progress['options'];
+        $groups = $this->planner->plan($video, $config, $options);
+        $plan = $this->planMetadata($config, $groups, $options);
+        $index = $current['index'];
+        $group = $groups[$index] ?? null;
+
+        if (($progress['plan_hash'] ?? null) !== $plan['hash']
+            || ($progress['planned_groups'] ?? null) !== $plan['groups']) {
+            throw new PostsyncerException(
+                'The stored PostSyncer plan no longer matches this video. Reconcile it before retrying.'
+            );
+        }
+
+        if (! $group instanceof PublishGroup
+            || ($current['group_key'] ?? null) !== $this->groupKey($config, $group)
+            || (is_array($current['media_urls'] ?? null)
+                && $this->canonicalMediaUrls($current['media_urls'])
+                    !== $this->canonicalMediaUrls($group->mediaUrls))) {
+            throw new PostsyncerException(
+                'The PostSyncer create checkpoint no longer matches this publish plan.'
+            );
+        }
+
+        $checkpointHasMedia = is_array($current['media_urls'] ?? null) && $current['media_urls'] !== [];
+
+        if ($normalizedMediaIds === [] && ($group->mediaUrls !== [] || $checkpointHasMedia)) {
+            // An empty retryable checkpoint would be treated as a text-only
+            // create, so refuse until the registered media ids are known.
+            throw new PostsyncerException(
+                'This video create has no registered PostSyncer media ids. Reconcile the media upload first.'
+            );
+        }
+
+        DB::transaction(function () use ($video, $progress, $current, $normalizedMediaIds): void {
+            $lockedVideo = Video::query()
+                ->whereKey($video->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedVideo->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($latestProgress['state'] ?? null) !== 'uncertain'
+                || ($latestProgress['current']['index'] ?? null) !== $current['index']
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'creating'
+                || array_map('strval', $latestProgress['current']['media_ids'] ?? [])
+                    !== $normalizedMediaIds) {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while create reconciliation was running.'
+                );
+            }
+
+            $latestProgress['current']['phase'] = 'retryable';
+            $latestProgress['current']['media_ids'] = $normalizedMediaIds;
+            $latestProgress['state'] = 'failed';
+            $latestProgress['create_recovery'] = [
+                'mode' => 'operator_confirmed_absent',
+                'confirmed_at' => now()->toISOString(),
+                'media_count' => count($normalizedMediaIds),
+            ];
+
+            $lockedVideo->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'PostSyncer create was verified absent. Retry the publish to create it with the existing media.',
+                'publish_progress' => $latestProgress,
+            ])->save();
+        });
+
+        $video->refresh();
+    }
+
+    /**
      * Recover an operation whose local content or settings drifted after all
      * of its external groups were created. This is deliberately separate from
      * normal retry: the operator is accepting the persisted old payload.
@@ -2182,6 +2296,26 @@ class PublishVideoAction
         }
 
         return $canonical !== '' ? $canonical : $url;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function hasRecordedPostId(Video $video, array $progress): bool
+    {
+        foreach ($video->postsyncer['groups'] ?? [] as $group) {
+            if (is_array($group) && $this->hasExistingPostId($group['post_id'] ?? null)) {
+                return true;
+            }
+        }
+
+        foreach ($progress['completed_groups'] ?? [] as $group) {
+            if (is_array($group) && $this->hasExistingPostId($group['post_id'] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function hasExistingPostId(mixed $postId): bool
