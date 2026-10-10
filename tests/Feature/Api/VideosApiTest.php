@@ -510,4 +510,24 @@ class VideosApiTest extends TestCase
         $this->assertSame('succeeded', $video->publish_state);
         $this->assertNull($video->publish_error);
     }
+
+    public function test_reconcile_create_absent_requires_confirmation_and_an_uncertain_create(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-CA',
+            'number' => 201,
+            'publish_state' => 'failed',
+            'publish_progress' => null,
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-CA/reconcile-create-absent', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('confirmed_absent');
+
+        $this->acting()->postJson('/api/v1/videos/BV-CA/reconcile-create-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('confirmed_absent');
+    }
 }

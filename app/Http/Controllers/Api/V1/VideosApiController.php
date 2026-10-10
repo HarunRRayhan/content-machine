@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Postsyncer\EnqueueVideoPublishAction;
+use App\Actions\Postsyncer\PublishVideoAction;
 use App\Actions\Videos\CreateVideoAction;
 use App\Actions\Videos\UpdateVideoAction;
 use App\Data\Videos\UpdateVideoData;
@@ -14,10 +15,12 @@ use App\Rules\AccessibleDriveUrl;
 use App\Rules\RenderablePresentationManifest;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * CRUD for videos over the workspace token API. human_id (V-12 / BV-53)
@@ -154,6 +157,25 @@ class VideosApiController extends Controller
         $video = $action->handle($video, $this->currentWorkspace(), $options);
 
         return new VideoResource($video);
+    }
+
+    public function reconcileCreateAbsent(Request $request, string $humanId, PublishVideoAction $action): VideoResource
+    {
+        $video = $this->resolveVideo($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileCreateAbsent($video);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new VideoResource($video->fresh());
     }
 
     private function resolveVideo(string $humanId): Video

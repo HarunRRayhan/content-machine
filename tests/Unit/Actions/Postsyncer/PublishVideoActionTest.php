@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Actions\Postsyncer;
 
+use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Models\Video;
 use App\Models\Workspace;
@@ -11,6 +12,7 @@ use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -1231,6 +1233,161 @@ class PublishVideoActionTest extends TestCase
         $this->assertSame(0, $video->publish_progress['current']['index']);
         $this->assertSame('creating', $video->publish_progress['current']['phase']);
         $this->assertNull($video->postsyncer);
+    }
+
+    /**
+     * Leave a video with an uncertain create (the create response was lost)
+     * and return it with its media already registered.
+     */
+    private function uncertainCreateVideo(Workspace $workspace): Video
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'gateway timeout',
+            ], 500),
+        ]);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+
+        return $video;
+    }
+
+    public function test_verified_absent_create_can_be_reconciled_without_reuploading_media(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainCreateVideo($workspace);
+        $options = [
+            'platforms' => ['facebook'],
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ];
+        $uploadCalls = 0;
+        $createCalls = 0;
+
+        // Replace the stubs used to produce the uncertain create. No new upload
+        // is expected: the retry reuses the media registered before the 500.
+        Http::swap(new Factory);
+        Http::fake(function ($request) use (&$uploadCalls, &$createCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                $uploadCalls++;
+
+                return Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                $createCalls++;
+
+                return Http::response([
+                    'id' => 42,
+                    'status' => 'scheduled',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'REELS',
+                        'caption' => 'Reel caption',
+                    ]]],
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $this->action->reconcileCreateAbsent($video);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertSame('retryable', $video->publish_progress['current']['phase']);
+        $this->assertSame(['915'], $video->publish_progress['current']['media_ids']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $video->publish_progress['create_recovery']['mode'],
+        );
+        $this->assertStringContainsString('verified absent', (string) $video->publish_error);
+        $this->assertTrue($video->canRetryPublish());
+
+        $resume = new \ReflectionMethod(EnqueueVideoPublishAction::class, 'resumeOptions');
+        $resumed = $resume->invoke(app(EnqueueVideoPublishAction::class), $video, []);
+        $this->assertIsArray($resumed);
+
+        $this->action->handle($video, $options);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(0, $uploadCalls);
+        $this->assertSame(1, $createCalls);
+    }
+
+    public function test_create_absent_reconciliation_is_refused_when_a_post_id_exists(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainCreateVideo($workspace);
+        $video->forceFill(['postsyncer' => ['groups' => [['post_id' => '42']]]])->save();
+
+        try {
+            $this->action->reconcileCreateAbsent($video);
+            $this->fail('Expected create-absent reconciliation to be refused.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('already has a PostSyncer post id', $exception->getMessage());
+        }
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+        $this->assertFalse($video->canRetryPublish());
+    }
+
+    public function test_create_absent_reconciliation_requires_an_uncertain_create(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainCreateVideo($workspace);
+
+        $progress = $video->publish_progress;
+        $progress['state'] = 'failed';
+        $video->forceFill(['publish_state' => 'failed', 'publish_progress' => $progress])->save();
+
+        try {
+            $this->action->reconcileCreateAbsent($video);
+            $this->fail('Expected create-absent reconciliation to require an uncertain create.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('does not have an uncertain PostSyncer create', $exception->getMessage());
+        }
+
+        $video->refresh();
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+        $this->assertArrayNotHasKey('create_recovery', $video->publish_progress);
     }
 
     public function test_confirm_failed_reconciliation_requires_the_explicit_flag(): void
