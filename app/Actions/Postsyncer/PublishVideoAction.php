@@ -534,16 +534,6 @@ class PublishVideoAction
 
         $normalizedMediaIds = $this->normalizeMediaIds($current['media_ids'] ?? []);
 
-        if (is_array($current['media_urls'] ?? null)
-            && $current['media_urls'] !== []
-            && $normalizedMediaIds === []) {
-            // An empty retryable checkpoint would be treated as a text-only
-            // create, so refuse until the registered media ids are known.
-            throw new PostsyncerException(
-                'This video create has no registered PostSyncer media ids. Reconcile the media upload first.'
-            );
-        }
-
         $video->loadMissing('workspace');
         $config = PostsyncerConfig::fromWorkspace($video->workspace);
         $options = $progress['options'];
@@ -566,6 +556,16 @@ class PublishVideoAction
                     !== $this->canonicalMediaUrls($group->mediaUrls))) {
             throw new PostsyncerException(
                 'The PostSyncer create checkpoint no longer matches this publish plan.'
+            );
+        }
+
+        $checkpointHasMedia = is_array($current['media_urls'] ?? null) && $current['media_urls'] !== [];
+
+        if ($normalizedMediaIds === [] && ($group->mediaUrls !== [] || $checkpointHasMedia)) {
+            // An empty retryable checkpoint would be treated as a text-only
+            // create, so refuse until the registered media ids are known.
+            throw new PostsyncerException(
+                'This video create has no registered PostSyncer media ids. Reconcile the media upload first.'
             );
         }
 

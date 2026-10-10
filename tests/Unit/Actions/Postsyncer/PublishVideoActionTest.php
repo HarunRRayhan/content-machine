@@ -1390,6 +1390,40 @@ class PublishVideoActionTest extends TestCase
         $this->assertArrayNotHasKey('create_recovery', $video->publish_progress);
     }
 
+    public function test_create_absent_reconciliation_refuses_empty_media_ids_when_the_group_has_media(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainCreateVideo($workspace);
+
+        // Case 1: media_urls missing from the checkpoint, planned group still has media.
+        $progress = $video->publish_progress;
+        unset($progress['current']['media_urls']);
+        $progress['current']['media_ids'] = [];
+        $video->forceFill(['publish_progress' => $progress])->save();
+
+        try {
+            $this->action->reconcileCreateAbsent($video);
+            $this->fail('Expected refusal when the planned group has media but no media ids are stored.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('no registered PostSyncer media ids', $exception->getMessage());
+        }
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+        $this->assertArrayNotHasKey('create_recovery', $video->publish_progress);
+
+        // Case 2: media_urls present but media ids empty.
+        $progress = $video->publish_progress;
+        $progress['current']['media_ids'] = [];
+        $video->forceFill(['publish_progress' => $progress])->save();
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('no registered PostSyncer media ids');
+        $this->action->reconcileCreateAbsent($video);
+    }
+
     public function test_confirm_failed_reconciliation_requires_the_explicit_flag(): void
     {
         $workspace = Workspace::factory()->create();
