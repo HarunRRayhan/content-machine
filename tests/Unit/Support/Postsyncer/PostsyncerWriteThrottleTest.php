@@ -221,26 +221,53 @@ class PostsyncerWriteThrottleTest extends TestCase
         $holder = Cache::lock(self::LOCK_KEY, 900);
         $this->assertTrue($holder->get());
 
-        // A 40-second job leaves 10 seconds after its safety margin.
+        // A 360-second job leaves 30 seconds after the HTTP timeout and margin.
         $throttle = $this->throttle();
         try {
-            $throttle->withinJobBudget(40, fn () => $throttle->run(fn (): bool => true));
+            $throttle->withinJobBudget(360, fn () => $throttle->run(fn (): bool => true));
             $this->fail('Expected the job budget to stop the wait.');
         } catch (PostsyncerException $exception) {
             $this->assertTrue($exception->notSent);
         }
 
-        $this->assertSame(10.0, array_sum($this->sleeps));
+        $this->assertSame(30.0, array_sum($this->sleeps));
 
         $holder->release();
     }
 
-    public function test_wait_ceiling_plus_margin_fits_inside_every_publish_job_timeout(): void
+    public function test_a_job_budget_smaller_than_the_reserve_refuses_without_waiting(): void
     {
-        $budget = PostsyncerWriteThrottle::MAX_WAIT_CEILING + PostsyncerWriteThrottle::JOB_SAFETY_MARGIN;
+        $holder = Cache::lock(self::LOCK_KEY, 900);
+        $this->assertTrue($holder->get());
 
-        $this->assertLessThan(PublishVideoJob::TIMEOUT_SECONDS, $budget);
-        $this->assertLessThan(PublishPostJob::TIMEOUT_SECONDS, $budget);
+        $throttle = $this->throttle();
+        try {
+            $throttle->withinJobBudget(180, fn () => $throttle->run(fn (): bool => true));
+            $this->fail('Expected a short job budget to refuse the wait.');
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->notSent);
+        }
+
+        $this->assertSame([], $this->sleeps);
+
+        $holder->release();
+    }
+
+    public function test_publish_jobs_leave_room_for_one_write_after_the_wait_budget(): void
+    {
+        $reserve = PostsyncerClient::HTTP_TIMEOUT_SECONDS + PostsyncerWriteThrottle::JOB_SAFETY_MARGIN;
+
+        $this->assertLessThan(PublishVideoJob::TIMEOUT_SECONDS, $reserve);
+        $this->assertLessThan(PublishPostJob::TIMEOUT_SECONDS, $reserve);
+        // The full wait ceiling must fit inside the budget of every publish job.
+        $this->assertGreaterThanOrEqual(
+            PostsyncerWriteThrottle::MAX_WAIT_CEILING,
+            PublishVideoJob::TIMEOUT_SECONDS - $reserve,
+        );
+        $this->assertGreaterThanOrEqual(
+            PostsyncerWriteThrottle::MAX_WAIT_CEILING,
+            PublishPostJob::TIMEOUT_SECONDS - $reserve,
+        );
     }
 
     public function test_the_lock_outlives_one_legitimate_write(): void

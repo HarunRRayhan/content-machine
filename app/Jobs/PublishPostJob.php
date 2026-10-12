@@ -90,6 +90,16 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
         ];
     }
 
+    /**
+     * Throttled PostSyncer waits release the job without using a try, so the
+     * job's own deadline bounds them. Real failures are counted by
+     * PostsyncerJobWriteBudget against $tries.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addSeconds(PostsyncerJobWriteBudget::RETRY_UNTIL_SECONDS);
+    }
+
     public function uniqueId(): string
     {
         return 'post:'.$this->post->getKey().':run:'.($this->runTokenOrNull() ?? 'legacy');

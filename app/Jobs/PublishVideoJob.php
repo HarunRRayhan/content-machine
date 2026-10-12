@@ -19,11 +19,12 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public const TIMEOUT_SECONDS = 180;
+    // Matches PublishPostJob and the worker --timeout=900 (retry_after 960).
+    public const TIMEOUT_SECONDS = 900;
 
     public const UNIQUE_FOR_SECONDS = 3600;
 
-    public const OVERLAP_EXPIRES_AFTER_SECONDS = 240;
+    public const OVERLAP_EXPIRES_AFTER_SECONDS = 1020;
 
     public int $timeout = self::TIMEOUT_SECONDS;
 
@@ -65,6 +66,16 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
             ))->shared(),
             new PostsyncerJobWriteBudget(self::TIMEOUT_SECONDS),
         ];
+    }
+
+    /**
+     * Throttled PostSyncer waits release the job without using a try, so the
+     * job's own deadline bounds them. Real failures are counted by
+     * PostsyncerJobWriteBudget against $tries.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addSeconds(PostsyncerJobWriteBudget::RETRY_UNTIL_SECONDS);
     }
 
     public function uniqueId(): string

@@ -17,11 +17,11 @@ use Throwable;
  *   client's HTTP timeout. A lock leaked by a killed process clears by itself
  *   after LOCK_SECONDS.
  * - A write waits for its slot at most MAX_WAIT_CEILING seconds, and never past
- *   the job budget (job timeout minus JOB_SAFETY_MARGIN) inside a queue job.
- *   Waiting happens before a write is sent, but after publish progress is
- *   checkpointed, so a job killed mid-wait would leave an uncertain checkpoint.
- *   Keeping MAX_WAIT_CEILING + JOB_SAFETY_MARGIN below every publish job
- *   timeout prevents that.
+ *   the job budget (job timeout minus HTTP_TIMEOUT_SECONDS minus
+ *   JOB_SAFETY_MARGIN) inside a queue job. Publish progress is checkpointed
+ *   before a write, so a job killed mid-wait or mid-write would leave an
+ *   uncertain checkpoint. Both publish jobs use a timeout well above the
+ *   budget reserve, which keeps the job alive until its own write ends.
  * - Synchronous web requests use SHORT_WAIT_CEILING so they never block for long.
  *
  * Failures of the throttle itself (cache errors, a busy slot) are raised as
@@ -123,8 +123,12 @@ final class PostsyncerWriteThrottle
      */
     public function withinJobBudget(int $jobTimeoutSeconds, Closure $callback): mixed
     {
+        // The wait must end early enough that one full write (up to the HTTP
+        // timeout) and the margin still finish before the job is killed.
+        $reserve = PostsyncerClient::HTTP_TIMEOUT_SECONDS + self::JOB_SAFETY_MARGIN;
+
         $previous = $this->budgetDeadline;
-        $this->budgetDeadline = $this->now() + max(0, $jobTimeoutSeconds - self::JOB_SAFETY_MARGIN);
+        $this->budgetDeadline = $this->now() + max(0, $jobTimeoutSeconds - $reserve);
 
         try {
             return $callback();

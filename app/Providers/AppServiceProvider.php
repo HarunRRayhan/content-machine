@@ -16,6 +16,7 @@ use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ProcessLinkResolver;
 use App\Support\Pexels\HttpPexelsProvider;
 use App\Support\Pexels\PexelsConfig;
+use App\Support\Postsyncer\PostsyncerWriteThrottle;
 use App\Support\Telegram\HttpTelegramClient;
 use App\Support\Telegram\TelegramClientContract;
 use Carbon\CarbonImmutable;
@@ -34,6 +35,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(CurrentWorkspace::class);
+        // Scoped: one throttle per job or request, shared by the job middleware,
+        // the PostSyncer client, and synchronous web writes. Its budget state is
+        // restored in finally blocks and reset with the scope.
+        $this->app->scoped(PostsyncerWriteThrottle::class);
         $this->app->singleton(CurrentApiToken::class);
         $this->app->bind(LinkResolverContract::class, ProcessLinkResolver::class);
         $this->app->bind(AiProviderVerifierContract::class, HttpAiProviderVerifier::class);
