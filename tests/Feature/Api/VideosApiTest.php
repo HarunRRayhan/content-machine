@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -593,6 +594,69 @@ class VideosApiTest extends TestCase
         $this->assertSame(
             'operator_confirmed_absent',
             $video->publish_progress['create_recovery']['mode'],
+        );
+        $this->assertTrue($video->canRetryPublish());
+    }
+
+    public function test_reconcile_media_absent_endpoint_resets_verified_empty_upload(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['reel' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $video = Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-MEDIA-ABSENT-API',
+            'number' => 203,
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'message' => 'temporary outage',
+            ], 503),
+        ]);
+
+        try {
+            app(PublishVideoAction::class)->handle($video, [
+                'platforms' => ['facebook'],
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+        } catch (PostsyncerException) {
+            // The uncertain upload is checkpointed before the exception surfaces.
+        }
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('uploading', $video->publish_progress['current']['phase']);
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-media-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed');
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $video->publish_progress['media_upload_recovery']['mode'],
         );
         $this->assertTrue($video->canRetryPublish());
     }
