@@ -7,6 +7,7 @@ use App\Actions\Postsyncer\PublishVideoAction;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\MediaUrlResolver;
+use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\VideoPublishPlanner;
@@ -1621,6 +1622,86 @@ class PublishVideoActionTest extends TestCase
         $this->assertNull($video->publish_progress['current']);
         $this->assertFalse($video->hasUncertainPublish());
         Http::assertNothingSent();
+    }
+
+    public function test_get_requests_bypass_the_write_throttle(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        // Another write holds the slot. Reads must still go through.
+        $holder = Cache::lock('postsyncer:write-throttle:lock', 900);
+        $this->assertTrue($holder->get());
+        config([
+            'postsyncer.write_throttle.enabled' => true,
+            'postsyncer.write_throttle.min_interval_seconds' => 20,
+            'postsyncer.write_throttle.max_wait_seconds' => 0,
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/posts/42' => Http::response(['id' => 42, 'status' => 'SCHEDULED'], 200),
+        ]);
+
+        $client = new PostsyncerClient(
+            PostsyncerConfig::fromWorkspace($workspace),
+        );
+
+        $this->assertSame(42, $client->getPost(42)['id']);
+
+        $holder->release();
+    }
+
+    public function test_publish_runs_with_the_write_throttle_on_and_spaces_writes(): void
+    {
+        config([
+            'postsyncer.write_throttle.enabled' => true,
+            'postsyncer.write_throttle.min_interval_seconds' => 1,
+            'postsyncer.write_throttle.max_wait_seconds' => 60,
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                return Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response([
+                    'id' => 42,
+                    'status' => 'scheduled',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 201);
+            }
+
+            return Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS',
+                    'caption' => 'Reel caption',
+                ]]],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2099-09-03T09:00:00+06:00',
+            ], 200);
+        });
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
     }
 
     public function test_confirm_failed_reconciliation_requires_the_explicit_flag(): void

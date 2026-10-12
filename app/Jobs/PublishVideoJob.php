@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Actions\Postsyncer\PublishVideoAction;
+use App\Jobs\Middleware\PostsyncerJobWriteBudget;
 use App\Models\Video;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -62,6 +63,7 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
                 60,
                 self::OVERLAP_EXPIRES_AFTER_SECONDS,
             ))->shared(),
+            new PostsyncerJobWriteBudget(self::TIMEOUT_SECONDS),
         ];
     }
 

@@ -14,6 +14,7 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -2481,6 +2482,50 @@ class PublishPostActionTest extends TestCase
         $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
         $this->assertSame(1, $uploadCalls);
         $this->assertSame(2, $createCalls);
+    }
+
+    public function test_a_throttled_post_write_is_not_recorded_as_an_uncertain_outcome(): void
+    {
+        config([
+            'postsyncer.write_throttle.enabled' => true,
+            'postsyncer.write_throttle.min_interval_seconds' => 20,
+            'postsyncer.write_throttle.max_wait_seconds' => 0,
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        // Another write holds the slot, so this write must be refused before sending.
+        $holder = Cache::lock('postsyncer:write-throttle:lock', 900);
+        $this->assertTrue($holder->get());
+        Http::fake();
+
+        try {
+            $this->action->handle($post, [
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+            $this->fail('Expected the throttled write to surface a retryable failure.');
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->notSent);
+            $this->assertTrue($exception->retryable);
+        }
+
+        $holder->release();
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertNull($post->publish_progress['current']);
+        $this->assertFalse($post->hasUncertainPublish());
+        Http::assertNothingSent();
     }
 
     public function test_sets_running_before_api_calls(): void

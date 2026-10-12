@@ -3,28 +3,52 @@
 namespace App\Support\Postsyncer;
 
 use Closure;
+use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Serializes and spaces PostSyncer writes across every Content Machine process
- * that shares the application cache (web and worker). The lock is held for the
- * whole write, so two writes never overlap, and the start of each write is at
- * least the configured interval after the previous start.
+ * that shares the application cache (web and worker).
  *
- * A write that cannot get its slot within the bounded wait throws before any
- * request is sent. That exception is marked notSent, so publish progress is not
- * recorded as an unknown outcome.
+ * Timing invariants (enforced by PostsyncerWriteThrottleTest):
+ * - The lock is held for one whole write, so LOCK_SECONDS must exceed the
+ *   client's HTTP timeout. A lock leaked by a killed process clears by itself
+ *   after LOCK_SECONDS.
+ * - A write waits for its slot at most MAX_WAIT_CEILING seconds, and never past
+ *   the job budget (job timeout minus JOB_SAFETY_MARGIN) inside a queue job.
+ *   Waiting happens before a write is sent, but after publish progress is
+ *   checkpointed, so a job killed mid-wait would leave an uncertain checkpoint.
+ *   Keeping MAX_WAIT_CEILING + JOB_SAFETY_MARGIN below every publish job
+ *   timeout prevents that.
+ * - Synchronous web requests use SHORT_WAIT_CEILING so they never block for long.
+ *
+ * Failures of the throttle itself (cache errors, a busy slot) are raised as
+ * notSent exceptions before any request is sent. A failure of the lock release
+ * after a finished write is logged and does not replace the write's result.
  */
 final class PostsyncerWriteThrottle
 {
+    public const MAX_WAIT_CEILING = 60;
+
+    public const SHORT_WAIT_CEILING = 5;
+
+    public const JOB_SAFETY_MARGIN = 30;
+
     private const LOCK_KEY = 'postsyncer:write-throttle:lock';
 
     private const LAST_START_KEY = 'postsyncer:write-throttle:last-start';
 
-    // Longer than the client's 300-second HTTP timeout, so a held lock cannot expire mid-write.
-    private const LOCK_SECONDS = 900;
+    // One write holds the lock, so this must exceed the client's HTTP timeout
+    // (300 seconds) with a margin. A leaked lock then clears quickly.
+    private const LOCK_SECONDS = PostsyncerClient::HTTP_TIMEOUT_SECONDS + 30;
 
     private const POLL_MICROSECONDS = 250_000;
+
+    private ?float $budgetDeadline = null;
+
+    private ?int $waitCeiling = null;
 
     /**
      * @param  (Closure(): float)|null  $clock
@@ -36,6 +60,8 @@ final class PostsyncerWriteThrottle
     ) {}
 
     /**
+     * Run a write once it holds the PostSyncer slot.
+     *
      * @template T
      *
      * @param  Closure(): T  $write
@@ -49,17 +75,87 @@ final class PostsyncerWriteThrottle
             return $write();
         }
 
-        $deadline = $this->now() + max(0, (int) config('postsyncer.write_throttle.max_wait_seconds', 240));
-        $lock = Cache::lock(self::LOCK_KEY, self::LOCK_SECONDS);
+        $now = $this->now();
+        $waitUntil = $now + $this->effectiveWaitSeconds();
 
-        while (! $lock->get()) {
-            if ($this->now() >= $deadline) {
-                throw $this->notSent('Another PostSyncer write is in progress.');
-            }
-
-            $this->pause(self::POLL_MICROSECONDS / 1_000_000);
+        if ($this->budgetDeadline !== null) {
+            $waitUntil = min($waitUntil, $this->budgetDeadline);
         }
 
+        $lock = $this->acquire($waitUntil);
+
+        try {
+            $this->reserveSlot($interval, $waitUntil);
+
+            return $write();
+        } finally {
+            $this->releaseQuietly($lock);
+        }
+    }
+
+    /**
+     * Bound waits for synchronous web requests to a few seconds.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    public function withShortWait(Closure $callback): mixed
+    {
+        $previous = $this->waitCeiling;
+        $this->waitCeiling = self::SHORT_WAIT_CEILING;
+
+        try {
+            return $callback();
+        } finally {
+            $this->waitCeiling = $previous;
+        }
+    }
+
+    /**
+     * Keep every wait inside a queue job's timeout budget.
+     *
+     * @template T
+     *
+     * @param  Closure(): T  $callback
+     * @return T
+     */
+    public function withinJobBudget(int $jobTimeoutSeconds, Closure $callback): mixed
+    {
+        $previous = $this->budgetDeadline;
+        $this->budgetDeadline = $this->now() + max(0, $jobTimeoutSeconds - self::JOB_SAFETY_MARGIN);
+
+        try {
+            return $callback();
+        } finally {
+            $this->budgetDeadline = $previous;
+        }
+    }
+
+    private function acquire(float $waitUntil): Lock
+    {
+        try {
+            $lock = Cache::lock(self::LOCK_KEY, self::LOCK_SECONDS);
+
+            while (! $lock->get()) {
+                if ($this->now() >= $waitUntil) {
+                    throw $this->notSent('Another PostSyncer write is in progress.');
+                }
+
+                $this->pause(self::POLL_MICROSECONDS / 1_000_000);
+            }
+
+            return $lock;
+        } catch (PostsyncerException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            throw $this->notSent('The PostSyncer write throttle is unavailable.', $exception);
+        }
+    }
+
+    private function reserveSlot(int $interval, float $waitUntil): void
+    {
         try {
             $lastStart = Cache::get(self::LAST_START_KEY);
 
@@ -68,8 +164,8 @@ final class PostsyncerWriteThrottle
                 $now = $this->now();
 
                 if ($slotAt > $now) {
-                    if ($slotAt > $deadline) {
-                        throw $this->notSent('PostSyncer write spacing wait exceeded the bounded limit.');
+                    if ($slotAt > $waitUntil) {
+                        throw $this->notSent('The PostSyncer write spacing wait exceeded its limit.');
                     }
 
                     $this->pause($slotAt - $now);
@@ -77,19 +173,42 @@ final class PostsyncerWriteThrottle
             }
 
             Cache::put(self::LAST_START_KEY, $this->now(), 3600);
-
-            return $write();
-        } finally {
-            $lock->release();
+        } catch (PostsyncerException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            throw $this->notSent('The PostSyncer write throttle is unavailable.', $exception);
         }
     }
 
-    private function notSent(string $reason): PostsyncerException
+    /**
+     * A release failure must not hide the write's result. The lock expires on
+     * its own after LOCK_SECONDS.
+     */
+    private function releaseQuietly(Lock $lock): void
+    {
+        try {
+            $lock->release();
+        } catch (Throwable $exception) {
+            Log::warning('PostSyncer write throttle could not release its lock. It expires on its own.', [
+                'exception' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function effectiveWaitSeconds(): float
+    {
+        $configured = max(0, (int) config('postsyncer.write_throttle.max_wait_seconds', 60));
+        $ceiling = $this->waitCeiling ?? self::MAX_WAIT_CEILING;
+
+        return (float) min($configured, $ceiling);
+    }
+
+    private function notSent(string $reason, ?Throwable $previous = null): PostsyncerException
     {
         return new PostsyncerException(
             'PostSyncer write was not sent: '.$reason.' It will be retried.',
             0,
-            null,
+            $previous,
             retryable: true,
             outcomeUnknown: false,
             responseReceived: false,

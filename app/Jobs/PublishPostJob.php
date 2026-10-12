@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Jobs\Middleware\PostsyncerJobWriteBudget;
 use App\Models\Post;
 use App\Models\TelegramPostRequest;
 use Illuminate\Bus\Queueable;
@@ -85,6 +86,7 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
                 60,
                 self::OVERLAP_EXPIRES_AFTER_SECONDS,
             ))->shared(),
+            new PostsyncerJobWriteBudget(self::TIMEOUT_SECONDS),
         ];
     }
 

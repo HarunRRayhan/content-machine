@@ -8,6 +8,9 @@ use Throwable;
 
 class PostsyncerClient
 {
+    // Longest single PostSyncer request. Multi-platform creates can take minutes.
+    public const HTTP_TIMEOUT_SECONDS = 300;
+
     private readonly PostsyncerWriteThrottle $throttle;
 
     public function __construct(
@@ -305,7 +308,7 @@ class PostsyncerClient
         $pending = Http::withToken($apiKey)
             // Multi-platform PostSyncer creates can take several minutes.
             // Keep the client below the queue worker's 900-second timeout.
-            ->timeout(300)
+            ->timeout(self::HTTP_TIMEOUT_SECONDS)
             ->acceptJson()
             ->withOptions(['allow_redirects' => false])
             ->withHeaders($headers);
