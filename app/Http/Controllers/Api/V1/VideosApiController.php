@@ -178,6 +178,25 @@ class VideosApiController extends Controller
         return new VideoResource($video->fresh());
     }
 
+    public function reconcileMediaAbsent(Request $request, string $humanId, PublishVideoAction $action): VideoResource
+    {
+        $video = $this->resolveVideo($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileMediaAbsent($video);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new VideoResource($video->fresh());
+    }
+
     private function resolveVideo(string $humanId): Video
     {
         $workspace = $this->currentWorkspace();

@@ -1424,6 +1424,160 @@ class PublishVideoActionTest extends TestCase
         $this->action->reconcileCreateAbsent($video);
     }
 
+    /**
+     * Leave a video with an uncertain media upload (the upload response was
+     * lost) so no media ids are checkpointed.
+     */
+    private function uncertainUploadVideo(Workspace $workspace): Video
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'message' => 'temporary outage',
+            ], 503),
+        ]);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        try {
+            $this->action->handle($video, [
+                'platforms' => ['facebook'],
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->retryable);
+        }
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('uploading', $video->publish_progress['current']['phase']);
+        $this->assertSame([], $video->publish_progress['current']['media_ids']);
+
+        return $video;
+    }
+
+    public function test_verified_absent_media_upload_is_reset_and_uploads_again_on_retry(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainUploadVideo($workspace);
+        $options = [
+            'platforms' => ['facebook'],
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ];
+        $uploadCalls = 0;
+
+        Http::swap(new Factory);
+        Http::fake(function ($request) use (&$uploadCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                $uploadCalls++;
+
+                return Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response([
+                    'id' => 42,
+                    'status' => 'scheduled',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Reel caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'REELS',
+                        'caption' => 'Reel caption',
+                    ]]],
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $this->action->reconcileMediaAbsent($video);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $video->publish_progress['media_upload_recovery']['mode'],
+        );
+        $this->assertStringContainsString('verified absent', (string) $video->publish_error);
+        $this->assertTrue($video->canRetryPublish());
+
+        $resume = new \ReflectionMethod(EnqueueVideoPublishAction::class, 'resumeOptions');
+        $this->assertIsArray($resume->invoke(app(EnqueueVideoPublishAction::class), $video, []));
+
+        $this->action->handle($video, $options);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(1, $uploadCalls);
+    }
+
+    public function test_media_absent_reset_is_refused_when_media_ids_are_recorded(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainUploadVideo($workspace);
+
+        $progress = $video->publish_progress;
+        $progress['current']['media_ids'] = ['915'];
+        $video->forceFill(['publish_progress' => $progress])->save();
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('checkpointed PostSyncer media ids');
+        $this->action->reconcileMediaAbsent($video);
+    }
+
+    public function test_media_absent_reset_requires_an_uncertain_upload_not_a_create(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainCreateVideo($workspace);
+
+        try {
+            $this->action->reconcileMediaAbsent($video);
+            $this->fail('Expected media-absent reset to refuse an uncertain create.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('does not have an uncertain PostSyncer media upload', $exception->getMessage());
+        }
+
+        $video->refresh();
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+        $this->assertArrayNotHasKey('media_upload_recovery', $video->publish_progress);
+    }
+
+    public function test_media_absent_reset_is_refused_when_the_state_is_not_uncertain(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = $this->uncertainUploadVideo($workspace);
+
+        $progress = $video->publish_progress;
+        $progress['state'] = 'failed';
+        $video->forceFill(['publish_state' => 'failed', 'publish_progress' => $progress])->save();
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('does not have an uncertain PostSyncer media upload');
+        $this->action->reconcileMediaAbsent($video);
+    }
+
     public function test_confirm_failed_reconciliation_requires_the_explicit_flag(): void
     {
         $workspace = Workspace::factory()->create();

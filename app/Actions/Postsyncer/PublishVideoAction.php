@@ -609,6 +609,115 @@ class PublishVideoAction
     }
 
     /**
+     * Reset an uncertain media upload after an operator verified that
+     * PostSyncer kept no media from it. No media ids were checkpointed, so the
+     * next publish attempt uploads the video again from its URLs.
+     */
+    public function reconcileMediaAbsent(Video $video): void
+    {
+        $video->refresh();
+        $progress = $video->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This video has no PostSyncer progress to reconcile.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if (($progress['state'] ?? null) !== 'uncertain'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'uploading') {
+            throw new PostsyncerException(
+                'This video does not have an uncertain PostSyncer media upload to reconcile.'
+            );
+        }
+
+        if (($current['media_ids'] ?? null) !== []) {
+            throw new PostsyncerException(
+                'This video has checkpointed PostSyncer media ids. Reconcile those ids instead.'
+            );
+        }
+
+        if ($this->hasRecordedPostId($video, $progress)) {
+            throw new PostsyncerException(
+                'This video already has a PostSyncer post id. Reconcile that post instead of resetting the media upload.'
+            );
+        }
+
+        if (! is_array($current['media_urls'] ?? null)
+            || $current['media_urls'] === []
+            || count(array_filter(
+                $current['media_urls'],
+                static fn (mixed $url): bool => is_string($url) && trim($url) !== '',
+            )) !== count($current['media_urls'])) {
+            throw new PostsyncerException(
+                'This video has no valid media-upload URLs to retry safely.'
+            );
+        }
+
+        $video->loadMissing('workspace');
+        $config = PostsyncerConfig::fromWorkspace($video->workspace);
+        $options = $progress['options'];
+        $groups = $this->planner->plan($video, $config, $options);
+        $plan = $this->planMetadata($config, $groups, $options);
+        $index = $current['index'];
+        $group = $groups[$index] ?? null;
+
+        if (($progress['plan_hash'] ?? null) !== $plan['hash']
+            || ($progress['planned_groups'] ?? null) !== $plan['groups']) {
+            throw new PostsyncerException(
+                'The stored PostSyncer plan no longer matches this video. Reconcile it before retrying.'
+            );
+        }
+
+        if (! $group instanceof PublishGroup
+            || ($current['group_key'] ?? null) !== $this->groupKey($config, $group)
+            || $this->canonicalMediaUrls($current['media_urls'])
+                !== $this->canonicalMediaUrls($group->mediaUrls)) {
+            throw new PostsyncerException(
+                'The PostSyncer media-upload checkpoint no longer matches this publish plan.'
+            );
+        }
+
+        DB::transaction(function () use ($video, $progress, $current): void {
+            $lockedVideo = Video::query()
+                ->whereKey($video->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedVideo->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || ($latestProgress['state'] ?? null) !== 'uncertain'
+                || ($latestProgress['current']['index'] ?? null) !== $current['index']
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'uploading'
+                || ($latestProgress['current']['media_ids'] ?? null) !== []) {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while media reconciliation was running.'
+                );
+            }
+
+            $latestProgress['current'] = null;
+            $latestProgress['state'] = 'failed';
+            $latestProgress['media_upload_recovery'] = [
+                'mode' => 'operator_confirmed_absent',
+                'confirmed_at' => now()->toISOString(),
+                'media_count' => count($current['media_urls']),
+            ];
+
+            $lockedVideo->forceFill([
+                'publish_state' => 'failed',
+                'publish_error' => 'PostSyncer media upload was verified absent. Retry the publish to upload it again.',
+                'publish_progress' => $latestProgress,
+            ])->save();
+        });
+
+        $video->refresh();
+    }
+
+    /**
      * Recover an operation whose local content or settings drifted after all
      * of its external groups were created. This is deliberately separate from
      * normal retry: the operator is accepting the persisted old payload.
