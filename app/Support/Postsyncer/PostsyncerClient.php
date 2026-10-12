@@ -8,9 +8,14 @@ use Throwable;
 
 class PostsyncerClient
 {
+    private readonly PostsyncerWriteThrottle $throttle;
+
     public function __construct(
         private readonly PostsyncerConfig $config,
-    ) {}
+        ?PostsyncerWriteThrottle $throttle = null,
+    ) {
+        $this->throttle = $throttle ?? app(PostsyncerWriteThrottle::class);
+    }
 
     /**
      * PostSyncer workspaces from GET /workspaces, including the display name.
@@ -305,13 +310,21 @@ class PostsyncerClient
             ->withOptions(['allow_redirects' => false])
             ->withHeaders($headers);
 
+        $send = fn (): Response => match ($method) {
+            'get' => $pending->get($url),
+            'post' => $pending->post($url, $body),
+            'put' => $pending->put($url, $body),
+            default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+        };
+
         try {
-            $response = match ($method) {
-                'get' => $pending->get($url),
-                'post' => $pending->post($url, $body),
-                'put' => $pending->put($url, $body),
-                default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
-            };
+            // Writes are spaced and serialized across processes. The throttle
+            // throws a notSent exception before any request if it cannot run.
+            $response = $method === 'get'
+                ? $send()
+                : $this->throttle->run($send);
+        } catch (PostsyncerException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             // A connection timeout may happen after PostSyncer accepted a
             // create. Keep it in the unknown-outcome path so retries cannot

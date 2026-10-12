@@ -13,6 +13,7 @@ use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -1576,6 +1577,50 @@ class PublishVideoActionTest extends TestCase
         $this->expectException(PostsyncerException::class);
         $this->expectExceptionMessage('does not have an uncertain PostSyncer media upload');
         $this->action->reconcileMediaAbsent($video);
+    }
+
+    public function test_a_throttled_write_is_not_recorded_as_an_uncertain_outcome(): void
+    {
+        config([
+            'postsyncer.write_throttle.enabled' => true,
+            'postsyncer.write_throttle.min_interval_seconds' => 20,
+            'postsyncer.write_throttle.max_wait_seconds' => 0,
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        // Another write holds the slot, so this write must be refused before sending.
+        $holder = Cache::lock('postsyncer:write-throttle:lock', 900);
+        $this->assertTrue($holder->get());
+        Http::fake();
+
+        try {
+            $this->action->handle($video, [
+                'platforms' => ['facebook'],
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+            $this->fail('Expected the throttled write to surface a retryable failure.');
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->notSent);
+            $this->assertTrue($exception->retryable);
+        }
+
+        $holder->release();
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertFalse($video->hasUncertainPublish());
+        Http::assertNothingSent();
     }
 
     public function test_confirm_failed_reconciliation_requires_the_explicit_flag(): void

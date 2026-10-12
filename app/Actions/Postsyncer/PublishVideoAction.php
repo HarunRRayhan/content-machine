@@ -1021,8 +1021,8 @@ class PublishVideoAction
     private function hasDefinitiveResponse(Throwable $exception): bool
     {
         return $exception instanceof PostsyncerException
-            && $exception->responseReceived
-            && ! $exception->outcomeUnknown;
+            && ($exception->notSent
+                || ($exception->responseReceived && ! $exception->outcomeUnknown));
     }
 
     /**
