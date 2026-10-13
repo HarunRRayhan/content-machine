@@ -218,13 +218,14 @@ class PostPublishPlanner
             );
         }
 
-        // YouTube's image set gets its own call: a rejected YouTube create must not
-        // fail the Facebook/Instagram/TikTok group that shares its media set.
+        // YouTube's image set goes last. Groups are created in order and a 4xx stops the loop,
+        // so a rejected YouTube create must not block the Facebook/Instagram/TikTok groups.
+        $youtubeGroup = null;
         if (isset($remaining['youtube'])) {
             $youtube = $remaining['youtube'];
             unset($remaining['youtube']);
 
-            $groups[] = new PublishGroup(
+            $youtubeGroup = new PublishGroup(
                 language: $language,
                 workspaceId: $workspaceId,
                 platforms: ['youtube'],
@@ -300,6 +301,10 @@ class PostPublishPlanner
                 publishNow: $when === null,
                 firstComment: $bucket['firstComment'] ?? null,
             );
+        }
+
+        if ($youtubeGroup !== null) {
+            $groups[] = $youtubeGroup;
         }
 
         return $groups;

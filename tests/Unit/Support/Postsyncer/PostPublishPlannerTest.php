@@ -342,6 +342,8 @@ class PostPublishPlannerTest extends TestCase
         $this->assertCount(2, $groups);
         $this->assertContains(['youtube'], $platforms);
         $this->assertContains(['instagram'], $platforms);
+        // Groups run in order and a 4xx stops the loop, so YouTube must not come before the rest.
+        $this->assertSame(['youtube'], end($platforms));
     }
 
     public function test_youtube_image_carousel_without_confirm_ask_is_refused(): void

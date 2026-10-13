@@ -515,6 +515,32 @@ class PostsApiTest extends TestCase
         $this->assertSame(0, Attachment::query()->count());
     }
 
+    public function test_reattaching_earlier_bytes_under_a_reused_name_makes_them_the_newest_copy(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-65',
+            'number' => 65,
+            'title' => 'Revert to earlier bytes',
+        ])->assertCreated();
+
+        $slide = fn (int $kb) => [
+            'file' => $this->mp4('slide-1.mp4', $kb),
+            'platform' => 'instagram',
+            'language' => 'en',
+        ];
+
+        $this->acting()->post('/api/v1/posts/P-65/videos', $slide(1))->assertCreated();
+        $this->acting()->post('/api/v1/posts/P-65/videos', $slide(2))->assertCreated();
+        $this->acting()->post('/api/v1/posts/P-65/videos', $slide(1))->assertCreated();
+
+        $newest = Attachment::query()->where('role', 'motion')->latest('id')->firstOrFail();
+        $firstAsset = MediaAsset::query()->orderBy('id')->firstOrFail();
+        $this->assertSame($firstAsset->id, $newest->media_asset_id);
+        $this->assertSame(3, Attachment::query()->where('role', 'motion')->count());
+    }
+
     public function test_motion_upload_refuses_identical_bytes_under_a_different_name(): void
     {
         Storage::fake('scratchpad');

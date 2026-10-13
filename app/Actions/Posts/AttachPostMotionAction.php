@@ -54,7 +54,15 @@ class AttachPostMotionAction
                 ->where('platform', $data->platform)
                 ->where('language', $data->language);
 
-            if ((clone $slot)->where('media_asset_id', $mediaAsset->id)->exists()) {
+            // Same bytes already in this slot and still the newest copy of the name: a no-op.
+            // If a newer copy exists, re-attaching these bytes must become the newest again.
+            $existing = (clone $slot)->where('media_asset_id', $mediaAsset->id)->latest('id')->first();
+            $superseded = $existing === null || (clone $slot)
+                ->where('id', '>', $existing->id)
+                ->whereHas('mediaAsset', fn ($query) => $query->where('original_filename', $data->filename))
+                ->exists();
+
+            if ($existing !== null && ! $superseded) {
                 return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
             }
 

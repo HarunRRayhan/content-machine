@@ -40,6 +40,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -447,13 +448,21 @@ class PostsApiController extends Controller
      * Stream a post image. Token-guarded; a media asset from another
      * workspace 404s rather than streaming.
      */
-    public function media(string $humanId, MediaAsset $mediaAsset): StreamedResponse
+    public function media(string $humanId, MediaAsset $mediaAsset): StreamedResponse|BinaryFileResponse
     {
         $workspace = $this->currentWorkspace();
 
         $post = $this->resolvePost($humanId);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
         abort_if(! $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
+
+        // Video needs Range support for Safari playback; see PostsController::media.
+        if (str_starts_with((string) $mediaAsset->mime, 'video/')) {
+            return response()->file(Storage::disk($mediaAsset->disk)->path($mediaAsset->path), [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,
