@@ -128,7 +128,7 @@ export default function VideosIndex({
             index.url({
                 query: {
                     ...tabQuery(merged, merged.status),
-                    sort: merged.sort,
+                    ...(isIdeation ? {} : { sort: merged.sort }),
                 },
             }),
             {},

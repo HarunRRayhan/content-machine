@@ -122,32 +122,64 @@ class VideosControllerTest extends TestCase
     }
 
     /**
-     * Three videos whose created_at order deliberately differs from number order.
+     * Three videos whose created_at order is the reverse of their id order
+     * (and of their number order), so an id-only or number-only sort fails.
      *
      * @return list<Video> oldest created_at first
      */
     private function createVideosWithMixedCreatedAt(Workspace $workspace, string $status): array
     {
-        return [
-            Video::factory()->for($workspace)->create([
-                'human_id' => 'BV-62',
-                'number' => 62,
-                'status' => $status,
-                'created_at' => now()->subDays(5),
-            ]),
-            Video::factory()->for($workspace)->create([
-                'human_id' => 'BV-65',
-                'number' => 65,
-                'status' => $status,
-                'created_at' => now()->subDays(2),
-            ]),
-            Video::factory()->for($workspace)->create([
-                'human_id' => 'BV-67',
-                'number' => 67,
-                'status' => $status,
-                'created_at' => now(),
-            ]),
-        ];
+        $newest = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-62',
+            'number' => 62,
+            'status' => $status,
+            'created_at' => now(),
+        ]);
+        $middle = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-65',
+            'number' => 65,
+            'status' => $status,
+            'created_at' => now()->subDays(2),
+        ]);
+        $oldest = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-67',
+            'number' => 67,
+            'status' => $status,
+            'created_at' => now()->subDays(5),
+        ]);
+
+        return [$oldest, $middle, $newest];
+    }
+
+    public function test_index_sort_persists_through_pagination_links(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Video::factory()->for($workspace)->count(21)->create(['status' => 'posted']);
+
+        $response = $this->get(route('videos.index', ['status' => 'posted', 'sort' => 'oldest']))
+            ->assertInertia(fn (Assert $page) => $page->where('filters.sort', 'oldest'));
+
+        $urls = array_filter(array_column($response->viewData('page')['props']['items']['links'], 'url'));
+
+        $this->assertNotEmpty($urls);
+        foreach ($urls as $url) {
+            $this->assertStringContainsString('sort=oldest', $url);
+        }
+    }
+
+    public function test_index_ignores_sort_on_the_ideation_tab(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Idea::factory()->for($workspace)->create(['kind' => 'video', 'status' => 'open', 'title' => 'Hot', 'score' => 900]);
+        Idea::factory()->for($workspace)->create(['kind' => 'video', 'status' => 'open', 'title' => 'Cold', 'score' => 100]);
+
+        $this->get(route('videos.index', ['status' => 'ideation', 'sort' => 'oldest']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('items.data.0.title', 'Hot')
+                ->where('items.data.1.title', 'Cold')
+            );
     }
 
     public function test_index_work_queue_tabs_default_to_oldest_first(): void
