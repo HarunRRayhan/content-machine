@@ -39,10 +39,10 @@
                         GitHub
                     </a>
                     <a
-                        href="{{ route('login') }}"
+                        href="{{ auth()->check() ? route('dashboard.home') : route('login') }}"
                         class="rounded-sm border border-cm-border px-4 py-1.5 text-cm-fg transition hover:border-cm-accent hover:text-cm-accent"
                     >
-                        Log in
+                        {{ auth()->check() ? 'Dashboard' : 'Log in' }}
                     </a>
                 </nav>
             </header>
@@ -73,10 +73,10 @@
                             Star on GitHub
                         </a>
                         <a
-                            href="{{ route('login') }}"
+                            href="{{ auth()->check() ? route('dashboard.home') : route('login') }}"
                             class="rounded-sm border border-cm-border px-6 py-3 text-sm text-cm-fg transition hover:border-cm-accent hover:text-cm-accent"
                         >
-                            Log in →
+                            {{ auth()->check() ? 'Dashboard' : 'Log in' }} →
                         </a>
                     </div>
                 </section>
