@@ -14,7 +14,7 @@ class ExampleTest extends TestCase
     {
         $response = $this->get(route('home'));
 
-        $response->assertOk();
+        $response->assertOk()->assertSee('Log in');
     }
 
     public function test_logged_in_user_stays_on_landing_by_default()
