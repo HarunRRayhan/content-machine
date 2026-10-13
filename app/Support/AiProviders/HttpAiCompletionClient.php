@@ -31,7 +31,8 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
 
     private const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
-    private const MAX_TOKENS = 1000;
+    // Reasoning models spend this budget on hidden reasoning too, so keep headroom.
+    private const MAX_TOKENS = 4000;
 
     public function __construct(
         private readonly ?PublicUrlGuard $urlGuard = null,
@@ -163,7 +164,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
             ])
             ->post($endpoint['url'].'/chat/completions', [
                 'model' => $model,
-                'max_completion_tokens' => self::MAX_TOKENS,
+                $this->openAiTokenLimitKey($credential) => self::MAX_TOKENS,
                 'messages' => [
                     ['role' => 'system', 'content' => $systemPrompt],
                     ['role' => 'user', 'content' => $userContent],
@@ -189,7 +190,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
             ...$endpoint['options'],
         ])->post($endpoint['url'].'/v1/messages', [
             'model' => $model,
-            'max_tokens' => 1000,
+            'max_tokens' => self::MAX_TOKENS,
             'system' => $systemPrompt,
             'messages' => [[
                 'role' => 'user',
@@ -226,7 +227,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
             ])
             ->post($endpoint['url'].'/chat/completions', [
                 'model' => $model,
-                'max_completion_tokens' => 1000,
+                $this->openAiTokenLimitKey($credential) => self::MAX_TOKENS,
                 'messages' => [
                     ['role' => 'system', 'content' => $systemPrompt],
                     [
@@ -243,6 +244,14 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
                     ],
                 ],
             ]);
+    }
+
+    // Newer OpenAI models reject max_tokens; other OpenAI-compatible hosts may not know the new name.
+    private function openAiTokenLimitKey(AiProviderCredential $credential): string
+    {
+        return $credential->base_url === null || str_contains($credential->base_url, 'api.openai.com')
+            ? 'max_completion_tokens'
+            : 'max_tokens';
     }
 
     private function baseUrl(): AiProviderBaseUrl
