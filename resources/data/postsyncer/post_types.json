@@ -17,7 +17,9 @@
             "reel": "on"
         },
         "youtube": {
-            "reel": "on"
+            "reel": "on",
+            "photo": "ask",
+            "carousel": "ask"
         },
         "twitter": {
             "text": "on",

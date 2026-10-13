@@ -297,7 +297,8 @@ class PostsController extends Controller
         $images = [];
         foreach ($post->attachments as $attachment) {
             $media = $attachment->mediaAsset;
-            if ($media === null) {
+            // Motion MP4s are previewed through motion_slides, never as still images.
+            if ($media === null || $attachment->role === 'motion') {
                 continue;
             }
 
@@ -317,6 +318,7 @@ class PostsController extends Controller
             NormalizeCaptions::forDashboard($post->captions),
             $images,
         );
+        $motionSlides = $this->presentMotionSlides($post, $captions);
 
         $captionImageNames = [];
         foreach ($captions as $group) {
@@ -375,6 +377,7 @@ class PostsController extends Controller
             'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),
             'images' => $images,
             'image_urls' => $imageUrls,
+            'motion_slides' => $motionSlides,
             'handles' => $handles,
             'caption_image_names' => array_keys($captionImageNames),
             'image_drive_urls' => $post->image_drive_urls ?? [],
@@ -396,6 +399,64 @@ class PostsController extends Controller
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Motion slides keyed "lang:platform". The newest upload per filename wins
+     * (duplicates are append-only). A caption's own `motion` list picks and
+     * orders its slides; without one, every slide in that slot shows in upload order.
+     *
+     * @param  list<array{lang: string|null, platforms: list<array{name: string, images?: list<string>, motion?: list<string>}>}>  $captions
+     * @return array<string, list<array{filename: string, url: string, mime: string|null}>>
+     */
+    private function presentMotionSlides(Post $post, array $captions): array
+    {
+        $latest = [];
+        foreach ($post->attachments as $attachment) {
+            $media = $attachment->mediaAsset;
+            if ($attachment->role !== 'motion' || $media === null) {
+                continue;
+            }
+
+            $filename = $media->original_filename ?: basename($media->path);
+            $slot = $attachment->language.':'.$attachment->platform;
+            $current = $latest[$slot][$filename] ?? null;
+
+            if ($current === null || $attachment->id > $current->id) {
+                $latest[$slot][$filename] = $attachment;
+            }
+        }
+
+        // Untagged caption groups belong to the post's own language, as the planner resolves them.
+        $fallbackLang = in_array(strtolower((string) $post->language), ['en', 'english'], true) ? 'en' : 'bn';
+        $slides = [];
+
+        foreach ($captions as $group) {
+            $lang = $group['lang'] ?? $fallbackLang;
+
+            foreach ($group['platforms'] as $platform) {
+                $slot = $lang.':'.strtolower($platform['name']);
+                if (isset($slides[$slot]) || ! isset($latest[$slot])) {
+                    continue;
+                }
+
+                $chosen = $latest[$slot];
+                $ordered = array_key_exists('motion', $platform)
+                    ? array_values(array_filter(array_map(
+                        fn (string $name): mixed => $chosen[$name] ?? null,
+                        $platform['motion'],
+                    )))
+                    : collect($chosen)->sortBy(fn ($attachment): array => [$attachment->position, $attachment->id])->values()->all();
+
+                $slides[$slot] = array_values(array_map(fn ($attachment): array => [
+                    'filename' => $attachment->mediaAsset->original_filename ?: basename($attachment->mediaAsset->path),
+                    'url' => route('posts.media', [$post, $attachment->mediaAsset]),
+                    'mime' => $attachment->mediaAsset->mime,
+                ], $ordered));
+            }
+        }
+
+        return $slides;
     }
 
     /**

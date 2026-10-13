@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property int $media_asset_id
  * @property string $role
  * @property string|null $platform
+ * @property string|null $language
  * @property int $position
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
@@ -40,6 +41,7 @@ class Attachment extends Model
         'media_asset_id',
         'role',
         'platform',
+        'language',
         'position',
     ];
 

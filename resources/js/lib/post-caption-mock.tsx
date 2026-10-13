@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { CaptionPlatform } from '@/components/content/captions-panel';
 import ImageLightbox from '@/components/studio/image-lightbox';
@@ -45,7 +45,7 @@ const PLATFORM_MOCKUP: Record<
     youtube: {
         label: 'YouTube',
         reactions: '👍 Like   💬 Comment   ↪ Share',
-        tip: 'Image posts are not supported on YouTube: video-only platform.',
+        tip: 'Image and carousel posts on YouTube are ask-gated: each publish needs explicit confirmation. PostSyncer support is unverified.',
     },
     twitter: {
         label: 'Twitter / X',
@@ -276,17 +276,108 @@ function MockLinkedInMedia({
     return <p className="empty mock-imgs-empty">No image on LinkedIn.</p>;
 }
 
+export type MotionSlide = {
+    filename: string;
+    url: string;
+    mime: string | null;
+};
+
+// Muted, looping MP4 slides. Each one plays only while it is at least
+// 60% on screen, so a swipe does not start every video at once.
+function MockMotionSlide({ slide }: { slide: MotionSlide }) {
+    const ref = useRef<HTMLVideoElement>(null);
+    const [muted, setMuted] = useState(true);
+    const [playing, setPlaying] = useState(false);
+
+    useEffect(() => {
+        const video = ref.current;
+
+        if (!video || typeof IntersectionObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    video.play().catch(() => undefined);
+                } else {
+                    video.pause();
+                }
+            },
+            { threshold: 0.6 },
+        );
+        observer.observe(video);
+
+        return () => observer.disconnect();
+    }, []);
+
+    const togglePlay = () => {
+        const video = ref.current;
+
+        if (!video) {
+            return;
+        }
+
+        if (video.paused) {
+            video.play().catch(() => undefined);
+        } else {
+            video.pause();
+        }
+    };
+
+    return (
+        <div className="mock-motion-slide">
+            <video
+                ref={ref}
+                src={slide.url}
+                muted={muted}
+                loop
+                playsInline
+                preload="metadata"
+                aria-label={slide.filename}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onClick={togglePlay}
+            />
+            <div className="mock-motion-ctl">
+                <button type="button" onClick={togglePlay}>
+                    {playing ? 'Pause' : 'Play'}
+                </button>
+                <button type="button" onClick={() => setMuted((m) => !m)}>
+                    {muted ? 'Sound on' : 'Sound off'}
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function MockMotion({ slides }: { slides: MotionSlide[] }) {
+    return (
+        <div className="mock-motion" aria-label="Motion carousel">
+            {slides.map((slide, index) => (
+                <MockMotionSlide
+                    key={`${slide.filename}-${index}`}
+                    slide={slide}
+                />
+            ))}
+        </div>
+    );
+}
+
 export function PostCaptionMock({
     platform,
     lang,
     handles,
     imageUrls,
+    motionSlides = [],
 }: {
     platform: CaptionPlatform;
     lang: LangCode;
     handles?: HandleDirectory;
     imageUrls: Record<string, string>;
+    motionSlides?: MotionSlide[];
 }) {
+    const [showStill, setShowStill] = useState(false);
     const key = normalizePlatformKey(platform.name);
     const meta = key ? PLATFORM_META[key] : null;
     const color = meta?.color ?? '#c23a22';
@@ -348,17 +439,46 @@ export function PostCaptionMock({
                         </p>
                     </div>
                 )}
-                {key === 'linkedin' ? (
+                {motionSlides.length > 0 && !showStill ? (
+                    <>
+                        <div className="mock-motion-toggle">
+                            <button
+                                type="button"
+                                onClick={() => setShowStill(true)}
+                            >
+                                Show still images
+                            </button>
+                        </div>
+                        <MockMotion slides={motionSlides} />
+                    </>
+                ) : key === 'linkedin' ? (
                     <MockLinkedInMedia
                         images={headImages}
                         imageUrls={imageUrls}
                     />
-                ) : headImages.length > 0 ? (
-                    <MockImages images={headImages} imageUrls={imageUrls} />
                 ) : (
-                    <p className="empty mock-imgs-empty">
-                        No image on {label}.
-                    </p>
+                    <>
+                        {motionSlides.length > 0 ? (
+                            <div className="mock-motion-toggle">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowStill(false)}
+                                >
+                                    Show motion carousel
+                                </button>
+                            </div>
+                        ) : null}
+                        {headImages.length > 0 ? (
+                            <MockImages
+                                images={headImages}
+                                imageUrls={imageUrls}
+                            />
+                        ) : (
+                            <p className="empty mock-imgs-empty">
+                                No image on {label}.
+                            </p>
+                        )}
+                    </>
                 )}
                 {reactions ? <div className="mock-bar">{reactions}</div> : null}
                 {threadTweets.length > 0 ? (

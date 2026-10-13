@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
+use App\Actions\Posts\AttachPostMotionAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
@@ -12,6 +13,7 @@ use App\Actions\Postsyncer\PublishPostAction;
 use App\Actions\Postsyncer\ReschedulePostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
+use App\Data\Posts\AttachPostMotionData;
 use App\Data\Posts\UpdatePostData;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Data\Postsyncer\ReschedulePostData;
@@ -19,6 +21,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\RepairPostAccountMappingRequest;
 use App\Http\Requests\Posts\StorePostDocumentRequest;
 use App\Http\Requests\Posts\StorePostImageRequest;
+use App\Http\Requests\Posts\StorePostMotionRequest;
 use App\Http\Resources\V1\PostResource;
 use App\Models\MediaAsset;
 use App\Models\Post;
@@ -165,6 +168,35 @@ class PostsApiController extends Controller
         $user = $user instanceof User ? $user : null;
 
         $post = $action->handle($post, $user, AttachPostImageData::fromApi($file));
+        $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
+        $created = $fresh->attachments()->count() > $alreadyAttached;
+
+        return (new PostResource($fresh))
+            ->response()
+            ->setStatusCode($created ? 201 : 200);
+    }
+
+    public function attachVideo(StorePostMotionRequest $request, string $humanId, AttachPostMotionAction $action): JsonResponse
+    {
+        $post = $this->resolvePost($humanId);
+        $alreadyAttached = $post->attachments()->count();
+
+        /** @var UploadedFile $file */
+        $file = $request->file('file');
+
+        $user = $request->user();
+        $user = $user instanceof User ? $user : null;
+
+        $filename = basename(trim((string) ($request->input('filename') ?: $file->getClientOriginalName())));
+        $order = $request->input('order');
+
+        $post = $action->handle($post, $user, new AttachPostMotionData(
+            file: $file,
+            filename: $filename,
+            platform: (string) $request->input('platform'),
+            language: (string) $request->input('language'),
+            order: $order === null ? null : (int) $order,
+        ));
         $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
         $created = $fresh->attachments()->count() > $alreadyAttached;
 
