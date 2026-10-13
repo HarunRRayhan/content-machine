@@ -1187,6 +1187,38 @@
     object-fit: contain;
 }
 
+.studio-page .mock-motion-toggle {
+    margin-bottom: 6px;
+}
+
+.studio-page .mock-motion {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    margin-bottom: 10px;
+}
+
+.studio-page .mock-motion-slide {
+    flex: 0 0 75%;
+    scroll-snap-align: start;
+    position: relative;
+}
+
+.studio-page .mock-motion-slide video {
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--line-strong);
+}
+
+.studio-page .mock-motion-ctl {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
 .studio-page .mock-imgs-empty {
     padding: 0;
     margin-bottom: 10px;

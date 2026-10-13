@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
+use App\Actions\Posts\AttachPostMotionAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
@@ -12,6 +13,7 @@ use App\Actions\Postsyncer\PublishPostAction;
 use App\Actions\Postsyncer\ReschedulePostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
+use App\Data\Posts\AttachPostMotionData;
 use App\Data\Posts\UpdatePostData;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Data\Postsyncer\ReschedulePostData;
@@ -19,6 +21,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\RepairPostAccountMappingRequest;
 use App\Http\Requests\Posts\StorePostDocumentRequest;
 use App\Http\Requests\Posts\StorePostImageRequest;
+use App\Http\Requests\Posts\StorePostMotionRequest;
 use App\Http\Resources\V1\PostResource;
 use App\Models\MediaAsset;
 use App\Models\Post;
@@ -37,6 +40,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -165,6 +169,36 @@ class PostsApiController extends Controller
         $user = $user instanceof User ? $user : null;
 
         $post = $action->handle($post, $user, AttachPostImageData::fromApi($file));
+        $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
+        $created = $fresh->attachments()->count() > $alreadyAttached;
+
+        return (new PostResource($fresh))
+            ->response()
+            ->setStatusCode($created ? 201 : 200);
+    }
+
+    public function attachVideo(StorePostMotionRequest $request, string $humanId, AttachPostMotionAction $action): JsonResponse
+    {
+        $post = $this->resolvePost($humanId);
+        $alreadyAttached = $post->attachments()->count();
+
+        /** @var UploadedFile $file */
+        $file = $request->file('file');
+
+        $user = $request->user();
+        $user = $user instanceof User ? $user : null;
+
+        $filename = basename(trim((string) ($request->input('filename') ?: $file->getClientOriginalName())));
+        $filename = $filename !== '' && $filename !== '.' ? $filename : $file->getClientOriginalName();
+        $order = $request->input('order');
+
+        $post = $action->handle($post, $user, new AttachPostMotionData(
+            file: $file,
+            filename: $filename,
+            platform: (string) $request->input('platform'),
+            language: (string) $request->input('language'),
+            order: $order === null ? null : (int) $order,
+        ));
         $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
         $created = $fresh->attachments()->count() > $alreadyAttached;
 
@@ -414,13 +448,21 @@ class PostsApiController extends Controller
      * Stream a post image. Token-guarded; a media asset from another
      * workspace 404s rather than streaming.
      */
-    public function media(string $humanId, MediaAsset $mediaAsset): StreamedResponse
+    public function media(string $humanId, MediaAsset $mediaAsset): StreamedResponse|BinaryFileResponse
     {
         $workspace = $this->currentWorkspace();
 
         $post = $this->resolvePost($humanId);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
         abort_if(! $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
+
+        // Video needs Range support for Safari playback; see PostsController::media.
+        if (str_starts_with((string) $mediaAsset->mime, 'video/')) {
+            return response()->file(Storage::disk($mediaAsset->disk)->path($mediaAsset->path), [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,

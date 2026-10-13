@@ -4,6 +4,8 @@ namespace Tests\Unit\Actions\Postsyncer;
 
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
+use App\Models\Attachment;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
@@ -15,6 +17,7 @@ use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PublishPostActionTest extends TestCase
@@ -1322,6 +1325,152 @@ class PublishPostActionTest extends TestCase
 
         $this->expectException(PostsyncerException::class);
         $this->action->handle($post, ['confirm_ask' => false]);
+    }
+
+    private function attachScratchpadFile(
+        Post $post,
+        Workspace $workspace,
+        string $filename,
+        string $kind,
+        string $role,
+        int $position,
+        ?string $platform = null,
+        ?string $language = null,
+    ): MediaAsset {
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'kind' => $kind,
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/'.$filename,
+            'original_filename' => $filename,
+            'mime' => $kind === 'video' ? 'video/mp4' : 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, $filename);
+        Attachment::factory()->for($post, 'attachable')->for($media)->create([
+            'role' => $role,
+            'platform' => $platform,
+            'language' => $language,
+            'position' => $position,
+        ]);
+
+        return $media;
+    }
+
+    public function test_publish_ignores_motion_slides_and_uploads_only_the_image_set(): void
+    {
+        Storage::fake('scratchpad');
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 42, 'status' => 'published'], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'IG caption', 'media' => [['id' => 915]]]],
+                'platforms' => [
+                    ['platform' => 'instagram', 'account_id' => 101, 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'IG caption',
+                    ]],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'platforms' => ['instagram'],
+            'captions' => ['main' => ['instagram' => ['caption' => 'IG caption']]],
+        ]);
+        $cover = $this->attachScratchpadFile($post, $workspace, 'cover.png', 'image', 'image', 0);
+        $slide = $this->attachScratchpadFile(
+            $post,
+            $workspace,
+            'slide-1.mp4',
+            'video',
+            'motion',
+            1,
+            'instagram',
+            'bn',
+        );
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+        $upload = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+        )->first();
+        $urls = $upload[0]->data()['urls'];
+
+        $this->assertCount(1, $urls);
+        $this->assertStringContainsString("/publish-media/posts/{$post->id}/{$cover->id}?", $urls[0]);
+        $this->assertStringNotContainsString("/{$slide->id}?", $urls[0]);
+    }
+
+    public function test_youtube_image_group_rejected_by_postsyncer_is_a_failed_group_not_a_blind_retry(): void
+    {
+        Storage::fake('scratchpad');
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915], ['id' => 916]],
+                'count_stored' => 2,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'YouTube rejected the image set',
+            ], 422),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'youtube' => ['account_id' => 103, 'handle' => '@harun'],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'youtube' => ['reel' => 'on', 'photo' => 'ask', 'carousel' => 'ask'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'platforms' => ['youtube'],
+            'captions' => [
+                'main' => [
+                    'youtube' => ['caption' => 'YT caption', 'images' => ['a.png', 'b.png']],
+                ],
+            ],
+        ]);
+        $this->attachScratchpadFile($post, $workspace, 'a.png', 'image', 'image', 0);
+        $this->attachScratchpadFile($post, $workspace, 'b.png', 'image', 'image', 1);
+
+        // Confirmed ask gate. The 422 must be recorded, not thrown back to the queue.
+        $this->action->handle($post, ['confirm_ask' => true]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('PostSyncer API error 422', (string) $post->publish_error);
+        $progress = $post->publish_progress;
+        $this->assertSame('failed', $progress['state']);
+        $this->assertSame([], $progress['completed_groups'] ?? []);
+        $this->assertSame(0, $progress['current']['index']);
+        $this->assertSame('retryable', $progress['current']['phase']);
+        Http::assertSentCount(2);
     }
 
     public function test_failure_leaves_pipeline_status_and_sets_publish_error(): void

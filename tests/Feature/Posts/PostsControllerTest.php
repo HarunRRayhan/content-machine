@@ -692,6 +692,101 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_show_previews_motion_slides_per_language_in_caption_order_with_the_newest_copy_winning(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Motion carousel',
+            'captions' => [
+                'English' => [
+                    'instagram' => [
+                        'caption' => 'EN caption',
+                        'images' => [],
+                        'motion' => ['slide-2.mp4', 'slide-1.mp4'],
+                    ],
+                ],
+                'Bangla' => [
+                    'instagram' => ['caption' => 'BN caption'],
+                ],
+            ],
+        ]);
+
+        $cover = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'image',
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/cover.png',
+            'original_filename' => 'cover.png',
+            'mime' => 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($cover->path, 'png');
+        Attachment::factory()->for($post, 'attachable')->for($cover)->create(['role' => 'image']);
+
+        $slides = [
+            ['slide-1.mp4', 'en', 0],
+            ['slide-1.mp4', 'en', 1],
+            ['slide-2.mp4', 'en', 2],
+            ['slide-1.mp4', 'bn', 0],
+        ];
+        $mediaById = [];
+        foreach ($slides as [$filename, $language, $position]) {
+            $media = MediaAsset::factory()->for($workspace)->create([
+                'kind' => 'video',
+                'disk' => 'scratchpad',
+                'path' => $workspace->id.'/'.uniqid('', true).'.mp4',
+                'original_filename' => $filename,
+                'mime' => 'video/mp4',
+            ]);
+            Storage::disk('scratchpad')->put($media->path, 'mp4');
+            Attachment::factory()->for($post, 'attachable')->for($media)->create([
+                'role' => 'motion',
+                'platform' => 'instagram',
+                'language' => $language,
+                'position' => $position,
+            ]);
+            $mediaById[] = $media;
+        }
+        $newestSlide1 = $mediaById[1];
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->has('post.motion_slides.en:instagram', 2)
+                ->where('post.motion_slides.en:instagram.0.filename', 'slide-2.mp4')
+                ->where('post.motion_slides.en:instagram.1.url', route('posts.media', [$post, $newestSlide1]))
+                ->missing('post.motion_slides.bn:instagram.1')
+                ->has('post.images', 1)
+                ->where('post.images.0.filename', 'cover.png')
+            );
+    }
+
+    public function test_media_serves_byte_ranges_for_an_attached_motion_video(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create(['title' => 'Motion range']);
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/range.mp4',
+            'original_filename' => 'range.mp4',
+            'mime' => 'video/mp4',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, '0123456789');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create([
+            'role' => 'motion',
+            'platform' => 'instagram',
+            'language' => 'en',
+        ]);
+
+        $this->get(route('posts.media', [$post, $media]), ['Range' => 'bytes=2-5'])
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 2-5/10')
+            ->assertHeader('Content-Type', 'video/mp4');
+    }
+
     public function test_media_streams_an_attached_image_for_the_current_workspace(): void
     {
         Storage::fake('scratchpad');

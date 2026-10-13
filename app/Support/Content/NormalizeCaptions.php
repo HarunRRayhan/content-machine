@@ -10,7 +10,7 @@ final class NormalizeCaptions
 {
     /**
      * @param  array<mixed>|null  $captions
-     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}>
+     * @return list<array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, motion?: list<string>, thread: list<mixed>}>}>
      */
     public static function forDashboard(?array $captions): array
     {
@@ -70,7 +70,7 @@ final class NormalizeCaptions
 
     /**
      * @param  array<mixed>  $group
-     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, thread: list<mixed>}>}
+     * @return array{part: string|null, lang: string|null, platforms: list<array{name: string, title: string, caption: string, first_comment: string, images?: list<string>, motion?: list<string>, thread: list<mixed>}>}
      */
     private static function normalizeGroup(array $group): array
     {
@@ -115,7 +115,7 @@ final class NormalizeCaptions
 
     /**
      * @param  array<mixed>  $fields
-     * @return array{name: string, title: string, caption: string, first_comment: string, thread: list<mixed>, images?: list<string>}
+     * @return array{name: string, title: string, caption: string, first_comment: string, thread: list<mixed>, images?: list<string>, motion?: list<string>}
      */
     private static function normalizePlatform(string $name, array $fields): array
     {
@@ -142,6 +142,13 @@ final class NormalizeCaptions
                 $images = [];
             }
             $result['images'] = array_values(array_map('strval', $images));
+        }
+
+        // Filenames of MP4 motion slides (role=motion) for this platform. Same rule as images:
+        // keep an explicit [] and drop the key when omitted.
+        if (array_key_exists('motion', $fields)) {
+            $motion = is_array($fields['motion']) ? $fields['motion'] : [];
+            $result['motion'] = array_values(array_map('strval', $motion));
         }
 
         return $result;

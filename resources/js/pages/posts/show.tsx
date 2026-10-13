@@ -7,7 +7,7 @@ import PostOverview from '@/components/studio/post-overview';
 import type { WorkspaceBucket } from '@/components/studio/workspace-schedule';
 import { useStudioTab } from '@/hooks/use-studio-tab';
 import type { LangCode } from '@/lib/lang-meta';
-import type { HandleDirectory } from '@/lib/post-caption-mock';
+import type { HandleDirectory, MotionSlide } from '@/lib/post-caption-mock';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
 import { index } from '@/routes/posts';
@@ -38,6 +38,7 @@ type PostDetail = {
         mime: string;
     }>;
     image_urls: Record<string, string>;
+    motion_slides: Record<string, MotionSlide[]>;
     handles?: HandleDirectory;
     language: string | null;
     slug: string | null;
@@ -184,6 +185,7 @@ export default function PostShow({ post }: PageProps) {
                                 groups={post.captions}
                                 platforms={post.platforms}
                                 imageUrls={post.image_urls}
+                                motionSlides={post.motion_slides}
                                 handles={post.handles}
                                 defaultLang={defaultLang}
                             />

@@ -405,6 +405,186 @@ class PostsApiTest extends TestCase
             ->assertHeader('Content-Type', $asset->mime);
     }
 
+    private function mp4(string $name, int $kilobytes = 1): UploadedFile
+    {
+        // An ftyp box on a real file, so the content-sniffed mimetypes rule sees MP4.
+        // Laravel's fake upload guesses its mime from the name and misses this.
+        $header = "\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom";
+        $path = tempnam(sys_get_temp_dir(), 'cm-mp4').'.mp4';
+        file_put_contents($path, $header.str_repeat("\0", max(0, $kilobytes * 1024 - strlen($header))));
+
+        return new UploadedFile($path, $name, 'video/mp4', null, true);
+    }
+
+    public function test_upload_motion_video_attaches_an_mp4_slide_for_one_platform_and_language(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-60',
+            'number' => 60,
+            'title' => 'Motion carousel',
+        ])->assertCreated();
+
+        $this->acting()->post('/api/v1/posts/P-60/videos', [
+            'file' => $this->mp4('upload-name.mp4'),
+            'filename' => 'slide-1.mp4',
+            'platform' => 'instagram',
+            'language' => 'en',
+            'order' => 3,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.attachments.0.role', 'motion')
+            ->assertJsonPath('data.attachments.0.platform', 'instagram')
+            ->assertJsonPath('data.attachments.0.language', 'en')
+            ->assertJsonPath('data.attachments.0.filename', 'slide-1.mp4');
+
+        $asset = MediaAsset::query()->sole();
+        $this->assertSame('video', $asset->kind);
+        $this->assertSame('video/mp4', $asset->mime);
+        Storage::disk('scratchpad')->assertExists($asset->path);
+        $this->assertSame(3, Attachment::query()->where('role', 'motion')->sole()->position);
+    }
+
+    public function test_motion_slide_is_idempotent_per_slot_and_separate_per_language(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-61',
+            'number' => 61,
+            'title' => 'Two languages',
+        ])->assertCreated();
+
+        $this->acting()->post('/api/v1/posts/P-61/videos', [
+            'file' => $this->mp4('slide-1.mp4'),
+            'platform' => 'instagram',
+            'language' => 'en',
+        ])->assertCreated();
+        $this->acting()->post('/api/v1/posts/P-61/videos', [
+            'file' => $this->mp4('slide-1.mp4'),
+            'platform' => 'instagram',
+            'language' => 'en',
+        ])->assertOk();
+        $this->acting()->post('/api/v1/posts/P-61/videos', [
+            'file' => $this->mp4('slide-1.mp4'),
+            'platform' => 'instagram',
+            'language' => 'bn',
+        ])->assertCreated();
+
+        $this->assertSame(1, MediaAsset::query()->count());
+        $this->assertSame(2, Attachment::query()->where('role', 'motion')->count());
+    }
+
+    public function test_motion_upload_rejects_non_mp4_oversize_and_unknown_slots(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-62',
+            'number' => 62,
+            'title' => 'Validation',
+        ])->assertCreated();
+
+        $json = ['Accept' => 'application/json'];
+
+        $this->acting()->withHeaders($json)->post('/api/v1/posts/P-62/videos', [
+            'file' => UploadedFile::fake()->image('cover.jpg'),
+            'platform' => 'instagram',
+            'language' => 'en',
+        ])->assertUnprocessable()->assertJsonValidationErrors('file');
+
+        $this->acting()->withHeaders($json)->post('/api/v1/posts/P-62/videos', [
+            'file' => $this->mp4('huge.mp4', 25601),
+            'platform' => 'instagram',
+            'language' => 'en',
+        ])->assertUnprocessable()->assertJsonValidationErrors('file');
+
+        $this->acting()->withHeaders($json)->post('/api/v1/posts/P-62/videos', [
+            'file' => $this->mp4('slide.mp4'),
+            'platform' => 'tiktok',
+            'language' => 'en',
+        ])->assertUnprocessable()->assertJsonValidationErrors('platform');
+
+        $this->acting()->withHeaders($json)->post('/api/v1/posts/P-62/videos', [
+            'file' => $this->mp4('slide.mp4'),
+            'platform' => 'instagram',
+            'language' => 'fr',
+        ])->assertUnprocessable()->assertJsonValidationErrors('language');
+
+        $this->assertSame(0, Attachment::query()->count());
+    }
+
+    public function test_reattaching_earlier_bytes_under_a_reused_name_makes_them_the_newest_copy(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-65',
+            'number' => 65,
+            'title' => 'Revert to earlier bytes',
+        ])->assertCreated();
+
+        $slide = fn (int $kb) => [
+            'file' => $this->mp4('slide-1.mp4', $kb),
+            'platform' => 'instagram',
+            'language' => 'en',
+        ];
+
+        $this->acting()->post('/api/v1/posts/P-65/videos', $slide(1))->assertCreated();
+        $this->acting()->post('/api/v1/posts/P-65/videos', $slide(2))->assertCreated();
+        $this->acting()->post('/api/v1/posts/P-65/videos', $slide(1))->assertCreated();
+
+        $newest = Attachment::query()->where('role', 'motion')->latest('id')->firstOrFail();
+        $firstAsset = MediaAsset::query()->orderBy('id')->firstOrFail();
+        $this->assertSame($firstAsset->id, $newest->media_asset_id);
+        $this->assertSame(3, Attachment::query()->where('role', 'motion')->count());
+    }
+
+    public function test_motion_upload_refuses_identical_bytes_under_a_different_name(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-64',
+            'number' => 64,
+            'title' => 'Name clash',
+        ])->assertCreated();
+
+        $this->acting()->post('/api/v1/posts/P-64/videos', [
+            'file' => $this->mp4('slide.mp4'),
+            'filename' => 'slide-en.mp4',
+            'platform' => 'instagram',
+            'language' => 'en',
+        ])->assertCreated();
+
+        $this->acting()->withHeaders(['Accept' => 'application/json'])->post('/api/v1/posts/P-64/videos', [
+            'file' => $this->mp4('slide.mp4'),
+            'filename' => 'slide-bn.mp4',
+            'platform' => 'instagram',
+            'language' => 'bn',
+        ])->assertUnprocessable()->assertJsonValidationErrors('file');
+
+        $this->assertSame(1, Attachment::query()->where('role', 'motion')->count());
+    }
+
+    public function test_motion_upload_accepts_a_slide_of_25_mb(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-63',
+            'number' => 63,
+            'title' => 'Largest slide',
+        ])->assertCreated();
+
+        $this->acting()->post('/api/v1/posts/P-63/videos', [
+            'file' => $this->mp4('largest.mp4', 25600),
+            'platform' => 'instagram',
+            'language' => 'bn',
+        ])->assertCreated();
+    }
+
     public function test_publish_dispatches_job_and_returns_queued_state(): void
     {
         Queue::fake();
