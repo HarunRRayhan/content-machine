@@ -121,39 +121,135 @@ class VideosControllerTest extends TestCase
             );
     }
 
-    public function test_index_orders_videos_by_number_desc_not_created_at(): void
+    /**
+     * Three videos whose created_at order deliberately differs from number order.
+     *
+     * @return list<Video> oldest created_at first
+     */
+    private function createVideosWithMixedCreatedAt(Workspace $workspace, string $status): array
+    {
+        return [
+            Video::factory()->for($workspace)->create([
+                'human_id' => 'BV-62',
+                'number' => 62,
+                'status' => $status,
+                'created_at' => now()->subDays(5),
+            ]),
+            Video::factory()->for($workspace)->create([
+                'human_id' => 'BV-65',
+                'number' => 65,
+                'status' => $status,
+                'created_at' => now()->subDays(2),
+            ]),
+            Video::factory()->for($workspace)->create([
+                'human_id' => 'BV-67',
+                'number' => 67,
+                'status' => $status,
+                'created_at' => now(),
+            ]),
+        ];
+    }
+
+    public function test_index_work_queue_tabs_default_to_oldest_first(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        Video::factory()->for($workspace)->create([
-            'human_id' => 'BV-65',
-            'number' => 65,
-            'title' => 'Older import, higher number',
-            'status' => 'pending',
-            'created_at' => now()->subDays(2),
-        ]);
-        Video::factory()->for($workspace)->create([
-            'human_id' => 'BV-67',
-            'number' => 67,
-            'title' => 'Newest import',
-            'status' => 'pending',
-            'created_at' => now(),
-        ]);
-        Video::factory()->for($workspace)->create([
-            'human_id' => 'BV-62',
-            'number' => 62,
-            'title' => 'Oldest import, lower number',
-            'status' => 'pending',
-            'created_at' => now()->subDays(5),
-        ]);
+        foreach (['pending', 'ready', 'recorded', 'scheduled'] as $status) {
+            [$oldest, $middle, $newest] = $this->createVideosWithMixedCreatedAt($workspace, $status);
 
-        $this->get(route('videos.index'))
+            $this->get(route('videos.index', ['status' => $status]))
+                ->assertInertia(fn (Assert $page) => $page
+                    ->component('videos/index')
+                    ->where('filters.sort', 'oldest')
+                    ->has('items.data', 3)
+                    ->where('items.data.0.id', $oldest->id)
+                    ->where('items.data.1.id', $middle->id)
+                    ->where('items.data.2.id', $newest->id)
+                );
+
+            Video::query()->where('workspace_id', $workspace->id)->delete();
+        }
+    }
+
+    public function test_index_other_tabs_default_to_latest_first(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        foreach (['posted', 'archived', 'dropped', 'draft'] as $status) {
+            [$oldest, $middle, $newest] = $this->createVideosWithMixedCreatedAt($workspace, $status);
+
+            $this->get(route('videos.index', ['status' => $status]))
+                ->assertInertia(fn (Assert $page) => $page
+                    ->component('videos/index')
+                    ->where('filters.sort', 'latest')
+                    ->has('items.data', 3)
+                    ->where('items.data.0.id', $newest->id)
+                    ->where('items.data.1.id', $middle->id)
+                    ->where('items.data.2.id', $oldest->id)
+                );
+
+            Video::query()->where('workspace_id', $workspace->id)->delete();
+        }
+    }
+
+    public function test_index_sort_query_param_overrides_the_status_default(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        [$oldest, $middle, $newest] = $this->createVideosWithMixedCreatedAt($workspace, 'pending');
+
+        $this->get(route('videos.index', ['status' => 'pending', 'sort' => 'latest']))
             ->assertInertia(fn (Assert $page) => $page
-                ->component('videos/index')
-                ->has('items.data', 3)
-                ->where('items.data.0.human_id', 'BV-67')
-                ->where('items.data.1.human_id', 'BV-65')
-                ->where('items.data.2.human_id', 'BV-62')
+                ->where('filters.sort', 'latest')
+                ->where('items.data.0.id', $newest->id)
+                ->where('items.data.2.id', $oldest->id)
+            );
+
+        Video::query()->where('workspace_id', $workspace->id)->update(['status' => 'posted']);
+
+        $this->get(route('videos.index', ['status' => 'posted', 'sort' => 'oldest']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('filters.sort', 'oldest')
+                ->where('items.data.0.id', $oldest->id)
+                ->where('items.data.2.id', $newest->id)
+            );
+    }
+
+    public function test_index_invalid_sort_query_param_falls_back_to_status_default(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        [$oldest, , $newest] = $this->createVideosWithMixedCreatedAt($workspace, 'pending');
+
+        $this->get(route('videos.index', ['status' => 'pending', 'sort' => 'bogus']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('filters.sort', 'oldest')
+                ->where('items.data.0.id', $oldest->id)
+                ->where('items.data.2.id', $newest->id)
+            );
+    }
+
+    public function test_index_breaks_created_at_ties_by_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $sameTime = now()->subDay();
+        $first = Video::factory()->for($workspace)->create(['status' => 'pending', 'created_at' => $sameTime]);
+        $second = Video::factory()->for($workspace)->create(['status' => 'pending', 'created_at' => $sameTime]);
+        $third = Video::factory()->for($workspace)->create(['status' => 'pending', 'created_at' => $sameTime]);
+
+        $this->get(route('videos.index', ['status' => 'pending']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('items.data.0.id', $first->id)
+                ->where('items.data.1.id', $second->id)
+                ->where('items.data.2.id', $third->id)
+            );
+
+        $this->get(route('videos.index', ['status' => 'pending', 'sort' => 'latest']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('items.data.0.id', $third->id)
+                ->where('items.data.1.id', $second->id)
+                ->where('items.data.2.id', $first->id)
             );
     }
 
