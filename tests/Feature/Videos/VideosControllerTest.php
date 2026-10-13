@@ -122,33 +122,33 @@ class VideosControllerTest extends TestCase
     }
 
     /**
-     * Three videos whose created_at order is the reverse of their id order
-     * (and of their number order), so an id-only or number-only sort fails.
+     * Three videos where number, created_at and id order all differ, so a
+     * sort on any single one of those keys fails. Ids ascend in creation order.
      *
-     * @return list<Video> oldest created_at first
+     * @return list<Video> number ascending (lowest number first)
      */
-    private function createVideosWithMixedCreatedAt(Workspace $workspace, string $status): array
+    private function createVideosWithMixedOrder(Workspace $workspace, string $status): array
     {
-        $newest = Video::factory()->for($workspace)->create([
-            'human_id' => 'BV-62',
-            'number' => 62,
+        $first = Video::factory()->for($workspace)->create([
+            'human_id' => 'V-300',
+            'number' => 300,
+            'status' => $status,
+            'created_at' => now()->subDay(),
+        ]);
+        $second = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-100',
+            'number' => 100,
             'status' => $status,
             'created_at' => now(),
         ]);
-        $middle = Video::factory()->for($workspace)->create([
-            'human_id' => 'BV-65',
-            'number' => 65,
-            'status' => $status,
-            'created_at' => now()->subDays(2),
-        ]);
-        $oldest = Video::factory()->for($workspace)->create([
-            'human_id' => 'BV-67',
-            'number' => 67,
+        $third = Video::factory()->for($workspace)->create([
+            'human_id' => 'BV-200',
+            'number' => 200,
             'status' => $status,
             'created_at' => now()->subDays(5),
         ]);
 
-        return [$oldest, $middle, $newest];
+        return [$second, $third, $first];
     }
 
     public function test_index_sort_persists_through_pagination_links(): void
@@ -187,16 +187,16 @@ class VideosControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
 
         foreach (['pending', 'ready', 'recorded', 'scheduled'] as $status) {
-            [$oldest, $middle, $newest] = $this->createVideosWithMixedCreatedAt($workspace, $status);
+            [$lowest, $middle, $highest] = $this->createVideosWithMixedOrder($workspace, $status);
 
             $this->get(route('videos.index', ['status' => $status]))
                 ->assertInertia(fn (Assert $page) => $page
                     ->component('videos/index')
                     ->where('filters.sort', 'oldest')
                     ->has('items.data', 3)
-                    ->where('items.data.0.id', $oldest->id)
+                    ->where('items.data.0.id', $lowest->id)
                     ->where('items.data.1.id', $middle->id)
-                    ->where('items.data.2.id', $newest->id)
+                    ->where('items.data.2.id', $highest->id)
                 );
 
             Video::query()->where('workspace_id', $workspace->id)->delete();
@@ -208,16 +208,16 @@ class VideosControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
 
         foreach (['posted', 'archived', 'dropped', 'draft'] as $status) {
-            [$oldest, $middle, $newest] = $this->createVideosWithMixedCreatedAt($workspace, $status);
+            [$lowest, $middle, $highest] = $this->createVideosWithMixedOrder($workspace, $status);
 
             $this->get(route('videos.index', ['status' => $status]))
                 ->assertInertia(fn (Assert $page) => $page
                     ->component('videos/index')
                     ->where('filters.sort', 'latest')
                     ->has('items.data', 3)
-                    ->where('items.data.0.id', $newest->id)
+                    ->where('items.data.0.id', $highest->id)
                     ->where('items.data.1.id', $middle->id)
-                    ->where('items.data.2.id', $oldest->id)
+                    ->where('items.data.2.id', $lowest->id)
                 );
 
             Video::query()->where('workspace_id', $workspace->id)->delete();
@@ -228,13 +228,13 @@ class VideosControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        [$oldest, $middle, $newest] = $this->createVideosWithMixedCreatedAt($workspace, 'pending');
+        [$lowest, $middle, $highest] = $this->createVideosWithMixedOrder($workspace, 'pending');
 
         $this->get(route('videos.index', ['status' => 'pending', 'sort' => 'latest']))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('filters.sort', 'latest')
-                ->where('items.data.0.id', $newest->id)
-                ->where('items.data.2.id', $oldest->id)
+                ->where('items.data.0.id', $highest->id)
+                ->where('items.data.2.id', $lowest->id)
             );
 
         Video::query()->where('workspace_id', $workspace->id)->update(['status' => 'posted']);
@@ -242,8 +242,8 @@ class VideosControllerTest extends TestCase
         $this->get(route('videos.index', ['status' => 'posted', 'sort' => 'oldest']))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('filters.sort', 'oldest')
-                ->where('items.data.0.id', $oldest->id)
-                ->where('items.data.2.id', $newest->id)
+                ->where('items.data.0.id', $lowest->id)
+                ->where('items.data.2.id', $highest->id)
             );
     }
 
@@ -251,24 +251,25 @@ class VideosControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        [$oldest, , $newest] = $this->createVideosWithMixedCreatedAt($workspace, 'pending');
+        [$lowest, , $highest] = $this->createVideosWithMixedOrder($workspace, 'pending');
 
         $this->get(route('videos.index', ['status' => 'pending', 'sort' => 'bogus']))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('filters.sort', 'oldest')
-                ->where('items.data.0.id', $oldest->id)
-                ->where('items.data.2.id', $newest->id)
+                ->where('items.data.0.id', $lowest->id)
+                ->where('items.data.2.id', $highest->id)
             );
     }
 
-    public function test_index_breaks_created_at_ties_by_id(): void
+    public function test_index_breaks_number_ties_by_id(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
-        $sameTime = now()->subDay();
-        $first = Video::factory()->for($workspace)->create(['status' => 'pending', 'created_at' => $sameTime]);
-        $second = Video::factory()->for($workspace)->create(['status' => 'pending', 'created_at' => $sameTime]);
-        $third = Video::factory()->for($workspace)->create(['status' => 'pending', 'created_at' => $sameTime]);
+        // Same number on different prefixes is allowed (human_id is the unique key).
+        // created_at runs opposite to id, so a created_at tie-break would fail.
+        $first = Video::factory()->for($workspace)->create(['human_id' => 'BV-42', 'number' => 42, 'status' => 'pending', 'created_at' => now()]);
+        $second = Video::factory()->for($workspace)->create(['human_id' => 'V-42', 'number' => 42, 'status' => 'pending', 'created_at' => now()->subDay()]);
+        $third = Video::factory()->for($workspace)->create(['human_id' => 'EV-42', 'number' => 42, 'status' => 'pending', 'created_at' => now()->subDays(2)]);
 
         $this->get(route('videos.index', ['status' => 'pending']))
             ->assertInertia(fn (Assert $page) => $page

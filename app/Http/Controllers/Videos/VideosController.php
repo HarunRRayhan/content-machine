@@ -56,8 +56,10 @@ class VideosController extends Controller
 
     /**
      * List the current workspace's videos (or video ideas on the Ideation
-     * tab). Videos are ordered by created_at, then id, in the direction from
-     * resolveSort(). Ideas are highest score first, with null scores last.
+     * tab). Videos are ordered by custom number, then id, in the direction
+     * from resolveSort(); created_at is not used because bulk imports carry
+     * timestamps unrelated to their numbers. Ideas are highest score first,
+     * with null scores last.
      * Filterable by status tab, language, and a free-text query over title /
      * human id.
      */
@@ -102,7 +104,7 @@ class VideosController extends Controller
                             ->orWhere('slug', 'ilike', $like);
                     });
                 })
-                ->orderBy('created_at', $direction)
+                ->orderBy('number', $direction)
                 ->orderBy('id', $direction);
 
             PresenceFlags::selectVideoSummary($videosQuery, [
