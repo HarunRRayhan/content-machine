@@ -515,6 +515,33 @@ class PostsApiTest extends TestCase
         $this->assertSame(0, Attachment::query()->count());
     }
 
+    public function test_motion_upload_refuses_identical_bytes_under_a_different_name(): void
+    {
+        Storage::fake('scratchpad');
+
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-64',
+            'number' => 64,
+            'title' => 'Name clash',
+        ])->assertCreated();
+
+        $this->acting()->post('/api/v1/posts/P-64/videos', [
+            'file' => $this->mp4('slide.mp4'),
+            'filename' => 'slide-en.mp4',
+            'platform' => 'instagram',
+            'language' => 'en',
+        ])->assertCreated();
+
+        $this->acting()->withHeaders(['Accept' => 'application/json'])->post('/api/v1/posts/P-64/videos', [
+            'file' => $this->mp4('slide.mp4'),
+            'filename' => 'slide-bn.mp4',
+            'platform' => 'instagram',
+            'language' => 'bn',
+        ])->assertUnprocessable()->assertJsonValidationErrors('file');
+
+        $this->assertSame(1, Attachment::query()->where('role', 'motion')->count());
+    }
+
     public function test_motion_upload_accepts_a_slide_of_25_mb(): void
     {
         Storage::fake('scratchpad');

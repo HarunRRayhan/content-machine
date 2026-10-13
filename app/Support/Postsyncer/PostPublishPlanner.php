@@ -218,6 +218,27 @@ class PostPublishPlanner
             );
         }
 
+        // YouTube's image set gets its own call: a rejected YouTube create must not
+        // fail the Facebook/Instagram/TikTok group that shares its media set.
+        if (isset($remaining['youtube'])) {
+            $youtube = $remaining['youtube'];
+            unset($remaining['youtube']);
+
+            $groups[] = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: ['youtube'],
+                mediaUrls: $this->resolveMediaUrls($post, $youtube, $defaultMediaUrls),
+                captions: ['youtube' => $youtube['caption']],
+                when: $when,
+                publishNow: $when === null,
+                firstComment: PublishGroup::supportsFirstComment('youtube')
+                    && $youtube['first_comment'] !== ''
+                    ? $youtube['first_comment']
+                    : null,
+            );
+        }
+
         // Twitter and Threads each get their own connected-thread PostSyncer call when
         // the caption block has Tweet N segments. Media is distributed one image per
         // tweet at publish time. Bluesky stays out: its API has no thread surface.

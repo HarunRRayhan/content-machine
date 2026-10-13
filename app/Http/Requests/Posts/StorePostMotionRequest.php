@@ -20,7 +20,8 @@ class StorePostMotionRequest extends FormRequest
             // PostSyncer allows one video per Instagram post, so motion slides are preview-only.
             'platform' => ['required', 'string', Rule::in(['instagram'])],
             'language' => ['required', 'string', Rule::in(['bn', 'en'])],
-            'order' => ['nullable', 'integer', 'min:0', 'max:32767'],
+            // attachments.position is a smallint shared with image/document rows: keep it far below the limit.
+            'order' => ['nullable', 'integer', 'min:0', 'max:1000'],
         ];
     }
 }

@@ -188,6 +188,7 @@ class PostsApiController extends Controller
         $user = $user instanceof User ? $user : null;
 
         $filename = basename(trim((string) ($request->input('filename') ?: $file->getClientOriginalName())));
+        $filename = $filename !== '' && $filename !== '.' ? $filename : $file->getClientOriginalName();
         $order = $request->input('order');
 
         $post = $action->handle($post, $user, new AttachPostMotionData(

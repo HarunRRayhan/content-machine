@@ -39,6 +39,16 @@ class AttachPostMotionAction
             }
 
             $mediaAsset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, 'video', $data->filename);
+
+            // Identical bytes reuse one MediaAsset that keeps its first name. A different
+            // name would silently miss the caption's motion list, so refuse it instead.
+            if ($mediaAsset->original_filename !== $data->filename) {
+                throw ValidationException::withMessages([
+                    'file' => __('These bytes are already stored as :name. Upload them under that name or send different bytes.', [
+                        'name' => $mediaAsset->original_filename,
+                    ]),
+                ]);
+            }
             $slot = $lockedPost->attachments()
                 ->where('role', 'motion')
                 ->where('platform', $data->platform)

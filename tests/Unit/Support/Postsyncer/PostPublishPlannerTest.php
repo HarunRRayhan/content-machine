@@ -287,6 +287,7 @@ class PostPublishPlannerTest extends TestCase
             'post_types' => [
                 'platforms' => [
                     'youtube' => ['reel' => 'on', 'photo' => 'ask', 'carousel' => 'ask'],
+                    'instagram' => ['photo' => 'on'],
                 ],
                 'overrides' => [],
             ],
@@ -318,6 +319,29 @@ class PostPublishPlannerTest extends TestCase
         $this->assertCount(1, $groups);
         $this->assertSame(['youtube'], $groups[0]->platforms);
         $this->assertCount(2, $groups[0]->mediaUrls);
+    }
+
+    public function test_youtube_gets_its_own_group_even_when_it_shares_the_image_set(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->youtubeConfigFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['instagram', 'youtube'],
+            'captions' => ['main' => [
+                'instagram' => ['caption' => 'IG caption'],
+                'youtube' => ['caption' => 'YT caption'],
+            ]],
+            'image_drive_urls' => ['https://drive.google.com/file/d/one/view'],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $platforms = array_map(fn (PublishGroup $group): array => $group->platforms, $groups);
+        $this->assertCount(2, $groups);
+        $this->assertContains(['youtube'], $platforms);
+        $this->assertContains(['instagram'], $platforms);
     }
 
     public function test_youtube_image_carousel_without_confirm_ask_is_refused(): void
