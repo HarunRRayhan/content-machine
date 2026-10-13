@@ -28,6 +28,9 @@ return [
 
     'env' => env('APP_ENV', 'production'),
 
+    // Send a logged-in visitor from the landing page straight to the dashboard.
+    'redirect_home_to_dashboard' => (bool) env('REDIRECT_HOME_TO_DASHBOARD', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Debug Mode

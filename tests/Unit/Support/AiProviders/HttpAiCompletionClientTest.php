@@ -66,7 +66,8 @@ class HttpAiCompletionClientTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://api.openai.com/v1/chat/completions'
             && $request->hasHeader('Authorization', 'Bearer sk-openai-test')
             && $request['model'] === 'gpt-4o'
-            && $request['max_tokens'] === 1000
+            && $request['max_completion_tokens'] === 1000
+            && ! isset($request['max_tokens'])
             && $request['messages'][0]['role'] === 'system'
             && $request['messages'][0]['content'] === 'system prompt'
             && $request['messages'][1]['content'] === 'user content');

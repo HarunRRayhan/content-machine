@@ -163,7 +163,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
             ])
             ->post($endpoint['url'].'/chat/completions', [
                 'model' => $model,
-                'max_tokens' => self::MAX_TOKENS,
+                'max_completion_tokens' => self::MAX_TOKENS,
                 'messages' => [
                     ['role' => 'system', 'content' => $systemPrompt],
                     ['role' => 'user', 'content' => $userContent],
@@ -226,7 +226,7 @@ final class HttpAiCompletionClient implements AiCompletionClientContract, AiVisi
             ])
             ->post($endpoint['url'].'/chat/completions', [
                 'model' => $model,
-                'max_tokens' => 1000,
+                'max_completion_tokens' => 1000,
                 'messages' => [
                     ['role' => 'system', 'content' => $systemPrompt],
                     [
