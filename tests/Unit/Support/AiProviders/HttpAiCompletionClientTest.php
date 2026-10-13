@@ -66,7 +66,8 @@ class HttpAiCompletionClientTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://api.openai.com/v1/chat/completions'
             && $request->hasHeader('Authorization', 'Bearer sk-openai-test')
             && $request['model'] === 'gpt-4o'
-            && $request['max_tokens'] === 1000
+            && $request['max_completion_tokens'] === 4000
+            && ! isset($request['max_tokens'])
             && $request['messages'][0]['role'] === 'system'
             && $request['messages'][0]['content'] === 'system prompt'
             && $request['messages'][1]['content'] === 'user content');
@@ -119,6 +120,19 @@ class HttpAiCompletionClientTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://api.openai.com/v1/chat/completions'
             && $request['messages'][1]['content'][0]['text'] === 'caption or instruction'
             && $request['messages'][1]['content'][1]['image_url']['url'] === 'data:image/png;base64,'.base64_encode('image-bytes'));
+    }
+
+    public function test_openai_compatible_custom_host_keeps_max_tokens()
+    {
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'ok']]]], 200)]);
+
+        $entry = $this->entry(['provider' => 'openai', 'base_url' => 'https://openrouter.ai/api/v1'], 'some/model');
+
+        (new HttpAiCompletionClient(new PublicUrlGuard(
+            fn (string $host): array => [['ip' => '1.1.1.1']],
+        )))->complete($entry, 'sys', 'user');
+
+        Http::assertSent(fn ($request) => $request['max_tokens'] === 4000 && ! isset($request['max_completion_tokens']));
     }
 
     public function test_a_custom_base_url_is_used_when_given()

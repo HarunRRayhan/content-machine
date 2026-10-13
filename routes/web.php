@@ -5,7 +5,11 @@ use App\Http\Controllers\TeamInvitationController;
 use App\Http\Controllers\Telegram\TelegramWebhookController;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'welcome')->name('home');
+Route::get('/', function () {
+    return config('app.redirect_home_to_dashboard') && auth()->check()
+        ? redirect()->route('dashboard.home')
+        : view('welcome');
+})->name('home');
 
 Route::get('invitations/{token}', [TeamInvitationController::class, 'show'])->name('invitations.show');
 Route::post('invitations/{token}', [TeamInvitationController::class, 'accept'])
