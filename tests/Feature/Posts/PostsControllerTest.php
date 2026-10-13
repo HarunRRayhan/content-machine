@@ -761,6 +761,32 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_media_serves_byte_ranges_for_an_attached_motion_video(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create(['title' => 'Motion range']);
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/range.mp4',
+            'original_filename' => 'range.mp4',
+            'mime' => 'video/mp4',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, '0123456789');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create([
+            'role' => 'motion',
+            'platform' => 'instagram',
+            'language' => 'en',
+        ]);
+
+        $this->get(route('posts.media', [$post, $media]), ['Range' => 'bytes=2-5'])
+            ->assertStatus(206)
+            ->assertHeader('Content-Range', 'bytes 2-5/10')
+            ->assertHeader('Content-Type', 'video/mp4');
+    }
+
     public function test_media_streams_an_attached_image_for_the_current_workspace(): void
     {
         Storage::fake('scratchpad');

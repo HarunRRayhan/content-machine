@@ -23,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PostsController extends Controller
@@ -150,7 +151,7 @@ class PostsController extends Controller
      * only way the dashboard <img> can load one: same-origin + session
      * cookie. A media asset outside the current workspace 404s.
      */
-    public function media(Request $request, Post $post, MediaAsset $mediaAsset): StreamedResponse
+    public function media(Request $request, Post $post, MediaAsset $mediaAsset): StreamedResponse|BinaryFileResponse
     {
         $workspace = $this->currentWorkspace($request);
 
@@ -160,6 +161,15 @@ class PostsController extends Controller
             $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(),
             404,
         );
+
+        // Video previews need HTTP Range support (Safari will not play a 200-only MP4).
+        // Storage::response() cannot serve ranges, so video goes through BinaryFileResponse.
+        if (str_starts_with((string) $mediaAsset->mime, 'video/')) {
+            return response()->file(Storage::disk($mediaAsset->disk)->path($mediaAsset->path), [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,
