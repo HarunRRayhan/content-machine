@@ -418,6 +418,39 @@ class UpdatePostActionTest extends TestCase
         }
     }
 
+    public function test_lowercase_group_statuses_and_a_checkpoint_only_failure_count_as_settled(): void
+    {
+        $lowercase = Post::factory()->create([
+            'status' => 'posted',
+            'postsyncer' => ['groups' => [['post_id' => '99', 'status' => 'published'], ['post_id' => '100', 'status' => 'failed']]],
+        ]);
+
+        (new UpdatePostAction)->handle($lowercase, UpdatePostData::fromApiPayload(['status' => 'blocked'], $lowercase));
+        $this->assertSame('blocked', $lowercase->refresh()->status);
+
+        $checkpointOnly = Post::factory()->create([
+            'status' => 'posted',
+            'publish_state' => 'failed',
+            'postsyncer' => null,
+            'publish_progress' => ['state' => 'failed', 'current' => ['phase' => 'create'], 'completed_groups' => []],
+        ]);
+
+        (new UpdatePostAction)->handle($checkpointOnly, UpdatePostData::fromApiPayload(['status' => 'blocked'], $checkpointOnly));
+        $this->assertSame('blocked', $checkpointOnly->refresh()->status);
+    }
+
+    public function test_a_group_with_an_array_status_is_not_settled(): void
+    {
+        $post = Post::factory()->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [['post_id' => '99', 'status' => ['PUBLISHED']]]],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['status' => 'blocked'], $post));
+    }
+
     public function test_a_blocked_post_with_groups_only_leaves_for_posted_or_archived(): void
     {
         $groups = [['post_id' => '99', 'status' => 'PUBLISHED']];

@@ -243,7 +243,8 @@ class UpdatePostAction
         $groups = is_array($post->postsyncer) ? ($post->postsyncer['groups'] ?? []) : [];
 
         foreach (is_array($groups) ? $groups : [] as $group) {
-            $status = is_array($group) ? strtoupper((string) ($group['status'] ?? '')) : '';
+            $rawStatus = is_array($group) ? ($group['status'] ?? null) : null;
+            $status = is_string($rawStatus) ? strtoupper($rawStatus) : '';
 
             if (! in_array($status, ['PUBLISHED', 'FAILED'], true)) {
                 return false;

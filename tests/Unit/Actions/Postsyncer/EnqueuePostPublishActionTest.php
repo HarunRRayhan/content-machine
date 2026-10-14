@@ -81,6 +81,10 @@ class EnqueuePostPublishActionTest extends TestCase
                 'when' => '2026-09-02T09:20:00+06:00',
                 'platforms' => ['facebook'],
             ]);
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('publish', $e->errors());
+            $this->assertStringContainsString('This post is blocked', $e->errors()['publish'][0]);
+            throw $e;
         } finally {
             Queue::assertNothingPushed();
             $this->assertNull($post->refresh()->publish_progress);
