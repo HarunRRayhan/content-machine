@@ -9,14 +9,17 @@ use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\ExecuteTelegramWorkspaceActionAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Actions\Telegram\ResolveTelegramIntentAction;
+use App\Actions\Telegram\ResolveTelegramWorkspaceActionAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\PublishPostJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Models\AiProviderCredential;
+use App\Models\Idea;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -72,6 +75,8 @@ class HandleTelegramUpdateActionTest extends TestCase
             new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
             new DeleteRecentScratchpadEntriesAction(new DeleteScratchpadEntryAction),
             $this->client,
+            resolveWorkspaceAction: new ResolveTelegramWorkspaceActionAction($completionClient, new AiProviderCredentialResolver),
+            executeWorkspaceAction: app(ExecuteTelegramWorkspaceActionAction::class),
         );
     }
 
@@ -325,6 +330,97 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertSame('Deleted 1 note.', $this->lastReply());
         $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    private function actionClient(?string $json): AiCompletionClientContract
+    {
+        return new class($json) implements AiCompletionClientContract
+        {
+            public function __construct(private readonly ?string $json) {}
+
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                if (str_contains($systemPrompt, 'Classify the user')) {
+                    return AiCompletionResult::success('none');
+                }
+
+                if ($this->json !== null && str_contains($systemPrompt, 'Scratch Pad or their post/video ideas')) {
+                    return AiCompletionResult::success($this->json);
+                }
+
+                return AiCompletionResult::success('none');
+            }
+        };
+    }
+
+    private function linkedAiConfig(): TelegramBotConfig
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => User::factory()->create()->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
+
+        return $config;
+    }
+
+    public function test_asking_to_save_a_post_idea_creates_it_in_the_workspace()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_idea","kind":"post","title":"Store money as integer cents","rationale":"Floats round wrong"}');
+
+        $this->action($client)->handle($config, $this->update(1, 'save a post idea: store money as cents'));
+
+        $idea = Idea::withoutGlobalScopes()->sole();
+        $this->assertSame($config->workspace_id, $idea->workspace_id);
+        $this->assertSame('post', $idea->kind);
+        $this->assertSame('Store money as integer cents', $idea->title);
+        $this->assertSame("Saved {$idea->human_id}: Store money as integer cents", $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_deleting_a_note_needs_a_yes_and_anything_else_cancels_it()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+        $client = $this->actionClient('{"action":"delete_scratchpad"}');
+
+        $this->action($client)->handle($config, $this->update(1, 'delete my last note'));
+        $this->assertStringContainsString('Reply "yes" to confirm', $this->lastReply());
+        $this->assertSame(1, ScratchpadEntry::count());
+
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'actually never mind'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame(1, ScratchpadEntry::count());
+
+        $this->action($client)->handle($config, $this->update(1, 'delete my last note'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame('Deleted the note.', $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_deleting_an_idea_drops_it_after_confirmation_and_ignores_other_workspaces()
+    {
+        $config = $this->linkedAiConfig();
+        $mine = Idea::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'video', 'human_id' => 'VI-9']);
+        $theirs = Idea::factory()->create(['kind' => 'video', 'human_id' => 'VI-10']);
+
+        $this->action($this->actionClient('{"action":"delete_idea","id":"VI-10"}'))->handle($config, $this->update(1, 'delete VI-10'));
+        $this->assertSame("I couldn't find that idea.", $this->lastReply());
+
+        $this->action($this->actionClient('{"action":"delete_idea","id":"VI-9"}'))->handle($config, $this->update(1, 'delete VI-9'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+
+        $this->assertSame('dropped', $mine->fresh()->status);
+        $this->assertNotSame('dropped', $theirs->fresh()->status);
+    }
+
+    public function test_an_unclear_model_answer_falls_through_to_normal_chat()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient('{"action":"delete_everything"}'))->handle($config, $this->update(1, 'hello'));
+
+        $this->assertSame(0, Idea::withoutGlobalScopes()->count());
+        $this->assertSame('none', $this->lastReply());
     }
 
     public function test_note_command_with_no_text_prompts_for_it()

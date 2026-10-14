@@ -9,10 +9,12 @@ use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\ExecuteTelegramWorkspaceActionAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Actions\Telegram\ResolveTelegramIntentAction;
+use App\Actions\Telegram\ResolveTelegramWorkspaceActionAction;
 use App\Jobs\ProcessTelegramUpdateJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -60,6 +62,8 @@ class ProcessTelegramUpdateJobTest extends TestCase
             new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
             new DeleteRecentScratchpadEntriesAction(new DeleteScratchpadEntryAction),
             $client,
+            resolveWorkspaceAction: new ResolveTelegramWorkspaceActionAction($completionClient, new AiProviderCredentialResolver),
+            executeWorkspaceAction: app(ExecuteTelegramWorkspaceActionAction::class),
         );
     }
 

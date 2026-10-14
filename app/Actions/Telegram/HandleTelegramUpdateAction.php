@@ -82,7 +82,7 @@ class HandleTelegramUpdateAction
 
     private const CAPTURE_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file, or just type, and I'll capture it to your Scratch Pad.";
 
-    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you. Use /note to capture text instead.";
+    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you, and you can ask me to save, edit, or delete Scratch Pad notes and post/video ideas (for example \"save a post idea: ...\"). Deletes ask you to confirm first. Use /note to capture text instead.";
 
     private const CHAT_FAILED_TEXT = "Couldn't generate a chat reply right now, so I saved this as a note instead.";
 
@@ -101,6 +101,8 @@ class HandleTelegramUpdateAction
         private readonly ?EnqueuePostPublishAction $enqueuePostPublishAction = null,
         private readonly ?CancelTelegramPostRequestAction $cancelTelegramPostRequestAction = null,
         private readonly ?QueueTelegramMessageAction $queueTelegramMessageAction = null,
+        private readonly ?ResolveTelegramWorkspaceActionAction $resolveWorkspaceAction = null,
+        private readonly ?ExecuteTelegramWorkspaceActionAction $executeWorkspaceAction = null,
     ) {}
 
     /**
@@ -199,6 +201,14 @@ class HandleTelegramUpdateAction
                 return;
             }
 
+            $pendingReply = $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text);
+
+            if ($pendingReply !== null) {
+                $this->replyToWorkspaceAction($config, $chatId, $pendingReply, $update, $dispatchLeaseId);
+
+                return;
+            }
+
             $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
 
             if ($intent !== null) {
@@ -223,6 +233,20 @@ class HandleTelegramUpdateAction
             if ($dispatchLeaseId !== null
                 && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
             ) {
+                return;
+            }
+
+            $workspaceAction = $this->resolveWorkspaceAction()->handle($config->workspace, $text);
+
+            if ($workspaceAction !== null) {
+                $this->replyToWorkspaceAction(
+                    $config,
+                    $chatId,
+                    $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction),
+                    $update,
+                    $dispatchLeaseId,
+                );
+
                 return;
             }
 
@@ -952,6 +976,41 @@ class HandleTelegramUpdateAction
         $message = collect($exception->errors())->flatten()->first();
 
         return is_string($message) && $message !== '' ? $message : 'The request could not be completed.';
+    }
+
+    /**
+     * Sends the reply for a Scratch Pad / idea action and marks the update
+     * processed in one transaction, same as handleClearNotes(), so a replay
+     * after a worker crash can't create or delete twice.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function replyToWorkspaceAction(
+        TelegramBotConfig $config,
+        int $chatId,
+        string $reply,
+        array $update,
+        ?string $dispatchLeaseId,
+    ): void {
+        DB::transaction(function () use ($config, $chatId, $reply, $update, $dispatchLeaseId): void {
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                return;
+            }
+
+            $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
+            $this->reply($config, $chatId, $reply);
+        });
+    }
+
+    private function resolveWorkspaceAction(): ResolveTelegramWorkspaceActionAction
+    {
+        return $this->resolveWorkspaceAction ?? app(ResolveTelegramWorkspaceActionAction::class);
+    }
+
+    private function executeWorkspaceAction(): ExecuteTelegramWorkspaceActionAction
+    {
+        return $this->executeWorkspaceAction ?? app(ExecuteTelegramWorkspaceActionAction::class);
     }
 
     private function startPostAction(): StartTelegramPostAction
