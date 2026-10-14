@@ -95,11 +95,10 @@ class PostsyncerConfig
         if (! ScriptStudioPostTypes::isEmpty($postTypes)) {
             $platforms = is_array($postTypes['platforms'] ?? null) ? $postTypes['platforms'] : [];
             $youtube = is_array($platforms['youtube'] ?? null) ? $platforms['youtube'] : [];
-            $bundledYoutube = ScriptStudioPostTypes::defaults()['platforms']['youtube'] ?? [];
 
             foreach (['photo', 'carousel'] as $postType) {
                 if (($youtube[$postType] ?? null) === null) {
-                    $youtube[$postType] = $bundledYoutube[$postType] ?? null;
+                    $youtube[$postType] = ScriptStudioPostTypes::defaults()['platforms']['youtube'][$postType] ?? null;
                 }
             }
 

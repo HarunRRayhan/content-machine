@@ -114,7 +114,7 @@ class PostsyncerConfigTest extends TestCase
         PostsyncerConfig::write($workspace, [
             'post_types' => [
                 'platforms' => [
-                    'youtube' => ['reel' => 'on', 'carousel' => 'off'],
+                    'youtube' => ['reel' => 'on', 'photo' => null, 'carousel' => 'off'],
                     'facebook' => ['text' => 'on'],
                 ],
             ],
