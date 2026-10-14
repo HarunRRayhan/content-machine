@@ -390,6 +390,18 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame('Saved '.$ideas->pluck('human_id')->implode(' and ').': Store money as integer cents', $this->lastReply());
     }
 
+    public function test_an_idea_with_no_kind_is_kept_in_the_scratch_pad_not_lost()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_idea","title":"Store money as cents","body":"Floats round wrong."}');
+
+        $this->action($client)->handle($config, $this->update(1, 'idea: store money as cents, floats round wrong'));
+
+        $this->assertSame("Store money as cents\n\nFloats round wrong.", ScratchpadEntry::withoutGlobalScopes()->sole()->body);
+        $this->assertSame(0, Idea::withoutGlobalScopes()->count());
+        $this->assertStringContainsString('Saved to the Scratch Pad', $this->lastReply());
+    }
+
     public function test_a_dictated_note_without_a_command_word_goes_to_the_scratch_pad()
     {
         $config = $this->linkedAiConfig();
