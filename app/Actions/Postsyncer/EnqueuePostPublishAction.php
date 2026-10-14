@@ -76,7 +76,7 @@ class EnqueuePostPublishAction
 
             if ($lockedPost->status === 'blocked') {
                 throw ValidationException::withMessages([
-                    'publish' => __('This post is blocked. Set its status to draft before publishing.'),
+                    'publish' => __('This post is blocked. Unblock it before publishing.'),
                 ]);
             }
 
