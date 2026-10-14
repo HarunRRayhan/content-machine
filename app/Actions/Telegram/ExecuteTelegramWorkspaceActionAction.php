@@ -185,18 +185,24 @@ class ExecuteTelegramWorkspaceActionAction
     {
         $kind = $action['kind'] ?? null;
 
-        if (! in_array($kind, ['post', 'video'], true)) {
-            throw ValidationException::withMessages(['kind' => 'Is it a post idea or a video idea?']);
+        if (! in_array($kind, ['post', 'video', 'both'], true)) {
+            // Dictated text is long; keep it in the Scratch Pad rather than make the user repeat it.
+            $note = trim($this->text($action, 'title', 255, required: true)."\n\n".$this->text($action, 'body', 20000));
+            $this->captureTextNote->handle($workspace, null, CaptureTextNoteData::fromTelegram($note));
+
+            return 'Saved to the Scratch Pad. Say "post idea", "video idea" or "both" next time to file it as an idea.';
         }
 
-        $idea = $this->createIdea->handle($workspace, [
-            'kind' => $kind,
+        $fields = [
             'title' => $this->text($action, 'title', 255, required: true),
             'rationale' => $this->text($action, 'rationale', 2000),
             'body' => $this->text($action, 'body', 20000),
-        ]);
+        ];
 
-        return "Saved {$idea->human_id}: {$idea->title}";
+        $ideas = collect($kind === 'both' ? ['post', 'video'] : [$kind])
+            ->map(fn (string $k) => $this->createIdea->handle($workspace, ['kind' => $k] + $fields));
+
+        return 'Saved '.$ideas->pluck('human_id')->implode(' and ').": {$fields['title']}";
     }
 
     /**
