@@ -9,8 +9,10 @@ use Illuminate\Support\Facades\Schema;
  * Adds the `blocked` post status (stuck on an external limit, not publishable
  * for now) with a nullable `blocked_reason`, and merges the `dropped` post
  * status into `archived`. Posts never recorded a drop reason, so the merge
- * keeps a status_transitions row per affected post. Rollback uses those rows
- * to restore `dropped` on exactly the posts this migration archived.
+ * keeps a status_transitions row per affected post. Rollback restores `dropped`
+ * on posts that still carry that marker and are archived. A post re-archived by
+ * hand after this migration also matches, so it reverts too. Rollback also
+ * drops blocked_reason, so those reasons are lost; the status_transitions rows stay.
  */
 return new class extends Migration
 {

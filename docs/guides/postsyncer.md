@@ -307,7 +307,7 @@ screen must allow the Drive scope for the account you connect.
 
 List pages mirror Script Studio's pipeline tabs with live counts.
 
-**Posts:** Ideation · Draft · Ready · Scheduled · Posted · Archived · Dropped
+**Posts:** Ideation · Draft · Ready · Scheduled · Posted · Blocked · Archived
 (default **Draft**). Ideation lists open post ideas (`kind = post`).
 
 **Videos:** Ideation · Draft · Pending · Ready · Recorded · Scheduled ·

@@ -56,6 +56,8 @@ class PostsController extends Controller
         $workspace = $this->currentWorkspace($request);
 
         $status = $request->string('status')->toString() ?: 'draft';
+        // Old bookmarks used the merged post status `dropped`.
+        $status = $status === 'dropped' ? 'archived' : $status;
         $language = $request->string('language')->toString() ?: null;
         $search = $request->string('q')->toString() ?: null;
 
