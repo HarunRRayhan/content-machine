@@ -10,6 +10,7 @@ type MotionLightboxProps = {
     slides: MotionLightboxSlide[];
     startIndex: number | null;
     onClose: () => void;
+    onCloseAutoFocus?: (event: Event) => void;
 };
 
 // Shares the image lightbox shell (overlay, bar, stage, nav) so both pop-ups look the same.
@@ -17,6 +18,7 @@ export default function MotionLightbox({
     slides,
     startIndex,
     onClose,
+    onCloseAutoFocus,
 }: MotionLightboxProps) {
     return (
         <Dialog.Root
@@ -33,6 +35,7 @@ export default function MotionLightbox({
                     slides={slides}
                     startIndex={startIndex}
                     onClose={onClose}
+                    onCloseAutoFocus={onCloseAutoFocus}
                 />
             ) : null}
         </Dialog.Root>
@@ -43,10 +46,12 @@ function MotionLightboxBody({
     slides,
     startIndex,
     onClose,
+    onCloseAutoFocus,
 }: {
     slides: MotionLightboxSlide[];
     startIndex: number;
     onClose: () => void;
+    onCloseAutoFocus?: (event: Event) => void;
 }) {
     const [index, setIndex] = useState(startIndex);
     const [muted, setMuted] = useState(true);
@@ -76,12 +81,11 @@ function MotionLightboxBody({
         return () => window.removeEventListener('keydown', onKey);
     }, [step]);
 
-    // Each step mounts a fresh <video> (keyed below). Cleanup pauses the
-    // outgoing element, and unmounting the dialog stops the last one.
+    // Autoplay comes from the attribute: the portal mounts after this effect
+    // would run, so the ref is still null on open. Cleanup pauses each
+    // outgoing element on step, and the last one on close.
     useEffect(() => {
         const video = videoRef.current;
-
-        video?.play().catch(() => undefined);
 
         return () => video?.pause();
     }, [index]);
@@ -96,6 +100,7 @@ function MotionLightboxBody({
             <Dialog.Content
                 className="image-lightbox"
                 aria-describedby={undefined}
+                onCloseAutoFocus={onCloseAutoFocus}
             >
                 <Dialog.Title className="sr-only">
                     {`Slide ${index + 1} of ${slides.length}`}
@@ -142,6 +147,7 @@ function MotionLightboxBody({
                             src={slide.url}
                             aria-label={slide.filename}
                             muted={muted}
+                            autoPlay
                             loop
                             playsInline
                             preload="auto"

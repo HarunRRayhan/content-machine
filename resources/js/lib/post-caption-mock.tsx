@@ -291,10 +291,12 @@ function MockMotionSlide({
     slide,
     suspended,
     onExpand,
+    expandRef,
 }: {
     slide: MotionSlide;
     suspended: boolean;
     onExpand: () => void;
+    expandRef: (el: HTMLButtonElement | null) => void;
 }) {
     const ref = useRef<HTMLVideoElement>(null);
     const [muted, setMuted] = useState(true);
@@ -364,6 +366,7 @@ function MockMotionSlide({
                     {muted ? 'Sound on' : 'Sound off'}
                 </button>
                 <button
+                    ref={expandRef}
                     type="button"
                     className="mock-motion-expand"
                     onClick={onExpand}
@@ -379,6 +382,8 @@ function MockMotionSlide({
 
 function MockMotion({ slides }: { slides: MotionSlide[] }) {
     const [openIndex, setOpenIndex] = useState<number | null>(null);
+    const expandButtons = useRef<(HTMLButtonElement | null)[]>([]);
+    const lastOpened = useRef(0);
 
     return (
         <>
@@ -388,7 +393,13 @@ function MockMotion({ slides }: { slides: MotionSlide[] }) {
                         key={`${slide.filename}-${index}`}
                         slide={slide}
                         suspended={openIndex !== null}
-                        onExpand={() => setOpenIndex(index)}
+                        onExpand={() => {
+                            lastOpened.current = index;
+                            setOpenIndex(index);
+                        }}
+                        expandRef={(el) => {
+                            expandButtons.current[index] = el;
+                        }}
                     />
                 ))}
             </div>
@@ -396,6 +407,10 @@ function MockMotion({ slides }: { slides: MotionSlide[] }) {
                 slides={slides}
                 startIndex={openIndex}
                 onClose={() => setOpenIndex(null)}
+                onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    expandButtons.current[lastOpened.current]?.focus();
+                }}
             />
         </>
     );
