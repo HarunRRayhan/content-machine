@@ -28,9 +28,9 @@ use RuntimeException;
  *
  * Updates and deletes are two-step: the first message only stores the
  * pending change and asks for confirmation; it is applied only when
- * confirmPending() sees an explicit yes next. Creates run immediately. An idea "delete" is a drop (rows are never
- * removed); a Scratch Pad delete is a real delete, refused for triaged
- * entries by DeleteScratchpadEntryAction.
+ * confirmPending() sees an explicit yes next. Creates run immediately. An idea "delete" is a drop (rows are never removed); a Scratch Pad delete
+ * is a real delete via DeleteScratchpadEntryAction, which keeps any idea
+ * made from that note and clears its source link.
  */
 class ExecuteTelegramWorkspaceActionAction
 {
