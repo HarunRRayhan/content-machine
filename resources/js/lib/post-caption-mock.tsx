@@ -1,7 +1,9 @@
+import { Maximize2 } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { CaptionPlatform } from '@/components/content/captions-panel';
 import ImageLightbox from '@/components/studio/image-lightbox';
+import MotionLightbox from '@/components/studio/motion-lightbox';
 import type { LangCode } from '@/lib/lang-meta';
 import type { PlatformKey } from '@/lib/platform-meta';
 import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
@@ -283,8 +285,17 @@ export type MotionSlide = {
 };
 
 // Muted, looping MP4 slides. Each one plays only while it is at least
-// 60% on screen, so a swipe does not start every video at once.
-function MockMotionSlide({ slide }: { slide: MotionSlide }) {
+// 60% on screen, so a swipe does not start every video at once. While the
+// pop-up is open (suspended) they stay paused.
+function MockMotionSlide({
+    slide,
+    suspended,
+    onExpand,
+}: {
+    slide: MotionSlide;
+    suspended: boolean;
+    onExpand: () => void;
+}) {
     const ref = useRef<HTMLVideoElement>(null);
     const [muted, setMuted] = useState(true);
     const [playing, setPlaying] = useState(false);
@@ -293,6 +304,12 @@ function MockMotionSlide({ slide }: { slide: MotionSlide }) {
         const video = ref.current;
 
         if (!video || typeof IntersectionObserver === 'undefined') {
+            return;
+        }
+
+        if (suspended) {
+            video.pause();
+
             return;
         }
 
@@ -309,7 +326,7 @@ function MockMotionSlide({ slide }: { slide: MotionSlide }) {
         observer.observe(video);
 
         return () => observer.disconnect();
-    }, []);
+    }, [suspended]);
 
     const togglePlay = () => {
         const video = ref.current;
@@ -346,21 +363,41 @@ function MockMotionSlide({ slide }: { slide: MotionSlide }) {
                 <button type="button" onClick={() => setMuted((m) => !m)}>
                     {muted ? 'Sound on' : 'Sound off'}
                 </button>
+                <button
+                    type="button"
+                    className="mock-motion-expand"
+                    onClick={onExpand}
+                    aria-label={`Expand ${slide.filename}`}
+                    title="Expand"
+                >
+                    <Maximize2 size={14} aria-hidden="true" />
+                </button>
             </div>
         </div>
     );
 }
 
 function MockMotion({ slides }: { slides: MotionSlide[] }) {
+    const [openIndex, setOpenIndex] = useState<number | null>(null);
+
     return (
-        <div className="mock-motion" aria-label="Motion carousel">
-            {slides.map((slide, index) => (
-                <MockMotionSlide
-                    key={`${slide.filename}-${index}`}
-                    slide={slide}
-                />
-            ))}
-        </div>
+        <>
+            <div className="mock-motion" aria-label="Motion carousel">
+                {slides.map((slide, index) => (
+                    <MockMotionSlide
+                        key={`${slide.filename}-${index}`}
+                        slide={slide}
+                        suspended={openIndex !== null}
+                        onExpand={() => setOpenIndex(index)}
+                    />
+                ))}
+            </div>
+            <MotionLightbox
+                slides={slides}
+                startIndex={openIndex}
+                onClose={() => setOpenIndex(null)}
+            />
+        </>
     );
 }
 
