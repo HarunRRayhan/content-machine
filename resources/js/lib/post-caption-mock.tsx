@@ -357,11 +357,8 @@ function MockMotion({ slides }: { slides: MotionSlide[] }) {
     return (
         <>
             <div
-                className={
-                    slides.length > 1
-                        ? 'mock-imgs mock-imgs-multi'
-                        : 'mock-imgs'
-                }
+                className="mock-imgs mock-imgs-multi"
+                role="group"
                 aria-label="Motion carousel"
             >
                 {slides.map((slide, index) => (
