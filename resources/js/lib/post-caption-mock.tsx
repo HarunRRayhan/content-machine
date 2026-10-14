@@ -439,6 +439,8 @@ export function PostCaptionMock({
     );
     const cfg = key ? PLATFORM_MOCKUP[key] : null;
     const noHashtags = cfg?.noHashtags === true;
+    // Instagram's scheduled media is the motion set, so it never shows stills. Other platforms keep stills one toggle away.
+    const motionOnly = key === 'instagram';
     const bangla = lang === 'bn';
     const caption = platform.caption.trim();
     const firstComment = platform.first_comment.trim();
@@ -457,6 +459,14 @@ export function PostCaptionMock({
     const capMax = key ? CAPLIM[key] : undefined;
     const over = capMax !== undefined && caption.length > capMax;
     const label = cfg?.label ?? platform.name;
+    const backToMotion =
+        motionSlides.length > 0 ? (
+            <div className="mock-motion-toggle">
+                <button type="button" onClick={() => setShowStill(false)}>
+                    Show motion carousel
+                </button>
+            </div>
+        ) : null;
 
     return (
         <div className="mock-wrap">
@@ -491,35 +501,31 @@ export function PostCaptionMock({
                         </p>
                     </div>
                 )}
-                {motionSlides.length > 0 && !showStill ? (
+                {motionSlides.length > 0 && (motionOnly || !showStill) ? (
                     <>
-                        <div className="mock-motion-toggle">
-                            <button
-                                type="button"
-                                onClick={() => setShowStill(true)}
-                            >
-                                Show still images
-                            </button>
-                        </div>
-                        <MockMotion slides={motionSlides} />
-                    </>
-                ) : key === 'linkedin' ? (
-                    <MockLinkedInMedia
-                        images={headImages}
-                        imageUrls={imageUrls}
-                    />
-                ) : (
-                    <>
-                        {motionSlides.length > 0 ? (
+                        {motionOnly ? null : (
                             <div className="mock-motion-toggle">
                                 <button
                                     type="button"
-                                    onClick={() => setShowStill(false)}
+                                    onClick={() => setShowStill(true)}
                                 >
-                                    Show motion carousel
+                                    Show still images
                                 </button>
                             </div>
-                        ) : null}
+                        )}
+                        <MockMotion slides={motionSlides} />
+                    </>
+                ) : key === 'linkedin' ? (
+                    <>
+                        {backToMotion}
+                        <MockLinkedInMedia
+                            images={headImages}
+                            imageUrls={imageUrls}
+                        />
+                    </>
+                ) : (
+                    <>
+                        {backToMotion}
                         {headImages.length > 0 ? (
                             <MockImages
                                 images={headImages}

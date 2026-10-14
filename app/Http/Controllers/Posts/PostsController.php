@@ -6,6 +6,7 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\UpdatePostRequest;
+use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
@@ -413,28 +414,27 @@ class PostsController extends Controller
 
     /**
      * Motion slides keyed "lang:platform". The newest upload per filename wins
-     * (duplicates are append-only). A caption's own `motion` list picks and
-     * orders its slides; without one, every slide in that slot shows in upload order.
+     * (duplicates are append-only). A caption's `motion` list picks and orders its
+     * slides by filename from anywhere in that language, whatever platform they were
+     * uploaded for. Without a list, the section shows its own platform's uploads in upload order.
      *
      * @param  list<array{lang: string|null, platforms: list<array{name: string, images?: list<string>, motion?: list<string>}>}>  $captions
      * @return array<string, list<array{filename: string, url: string, mime: string|null}>>
      */
     private function presentMotionSlides(Post $post, array $captions): array
     {
-        $latest = [];
-        foreach ($post->attachments as $attachment) {
-            $media = $attachment->mediaAsset;
-            if ($attachment->role !== 'motion' || $media === null) {
-                continue;
-            }
+        $motion = $post->attachments
+            ->where('role', 'motion')
+            ->filter(fn (Attachment $attachment): bool => $attachment->mediaAsset !== null)
+            ->sortBy('id');
 
-            $filename = $media->original_filename ?: basename($media->path);
-            $slot = $attachment->language.':'.$attachment->platform;
-            $current = $latest[$slot][$filename] ?? null;
-
-            if ($current === null || $attachment->id > $current->id) {
-                $latest[$slot][$filename] = $attachment;
-            }
+        // Ascending id, so the newest copy of each filename overwrites older ones.
+        $byLang = [];
+        $bySlot = [];
+        foreach ($motion as $attachment) {
+            $filename = $attachment->mediaAsset->original_filename ?: basename($attachment->mediaAsset->path);
+            $byLang[$attachment->language][$filename] = $attachment;
+            $bySlot[$attachment->language.':'.$attachment->platform][$filename] = $attachment;
         }
 
         // Untagged caption groups belong to the post's own language, as the planner resolves them.
@@ -445,18 +445,21 @@ class PostsController extends Controller
             $lang = $group['lang'] ?? $fallbackLang;
 
             foreach ($group['platforms'] as $platform) {
-                $slot = $lang.':'.strtolower($platform['name']);
-                if (isset($slides[$slot]) || ! isset($latest[$slot])) {
+                $slot = $lang.':'.strtolower(trim($platform['name']));
+                if (isset($slides[$slot])) {
                     continue;
                 }
 
-                $chosen = $latest[$slot];
                 $ordered = array_key_exists('motion', $platform)
                     ? array_values(array_filter(array_map(
-                        fn (string $name): mixed => $chosen[$name] ?? null,
+                        fn (string $name): mixed => $byLang[$lang][$name] ?? null,
                         $platform['motion'],
                     )))
-                    : collect($chosen)->sortBy(fn ($attachment): array => [$attachment->position, $attachment->id])->values()->all();
+                    : collect($bySlot[$slot] ?? [])->sortBy(fn ($attachment): array => [$attachment->position, $attachment->id])->values()->all();
+
+                if ($ordered === []) {
+                    continue;
+                }
 
                 $slides[$slot] = array_values(array_map(fn ($attachment): array => [
                     'filename' => $attachment->mediaAsset->original_filename ?: basename($attachment->mediaAsset->path),

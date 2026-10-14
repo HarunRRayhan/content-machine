@@ -761,6 +761,46 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_motion_list_on_another_platform_previews_slides_uploaded_for_instagram(): void
+    {
+        Storage::fake('scratchpad');
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'title' => 'Cross-platform motion',
+            'captions' => [
+                'English' => [
+                    'facebook' => ['caption' => 'EN caption', 'images' => [], 'motion' => ['slide-2.mp4', 'slide-1.mp4']],
+                ],
+            ],
+        ]);
+
+        foreach (['slide-1.mp4', 'slide-2.mp4'] as $position => $filename) {
+            $media = MediaAsset::factory()->for($workspace)->create([
+                'kind' => 'video',
+                'disk' => 'scratchpad',
+                'path' => $workspace->id.'/'.uniqid('', true).'.mp4',
+                'original_filename' => $filename,
+                'mime' => 'video/mp4',
+            ]);
+            Storage::disk('scratchpad')->put($media->path, 'mp4');
+            Attachment::factory()->for($post, 'attachable')->for($media)->create([
+                'role' => 'motion',
+                'platform' => 'instagram',
+                'language' => 'en',
+                'position' => $position,
+            ]);
+        }
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('post.motion_slides.en:facebook', 2)
+                ->where('post.motion_slides.en:facebook.0.filename', 'slide-2.mp4')
+                ->where('post.motion_slides.en:facebook.1.filename', 'slide-1.mp4')
+                ->missing('post.motion_slides.en:instagram')
+            );
+    }
+
     public function test_media_serves_byte_ranges_for_an_attached_motion_video(): void
     {
         Storage::fake('scratchpad');
