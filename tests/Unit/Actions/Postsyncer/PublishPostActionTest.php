@@ -1412,6 +1412,67 @@ class PublishPostActionTest extends TestCase
         $this->assertStringNotContainsString("/{$slide->id}?", $urls[0]);
     }
 
+    public function test_publish_with_a_facebook_motion_list_still_uploads_only_its_images(): void
+    {
+        Storage::fake('scratchpad');
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 42, 'status' => 'published'], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'FB caption', 'media' => [['id' => 915]]]],
+                'platforms' => [
+                    ['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'FB caption',
+                    ]],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['main' => ['facebook' => [
+                'caption' => 'FB caption',
+                'images' => ['cover.png'],
+                'motion' => ['slide-1.mp4'],
+            ]]],
+        ]);
+        $cover = $this->attachScratchpadFile($post, $workspace, 'cover.png', 'image', 'image', 0);
+        $slide = $this->attachScratchpadFile(
+            $post,
+            $workspace,
+            'slide-1.mp4',
+            'video',
+            'motion',
+            1,
+            'instagram',
+            'bn',
+        );
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+        $upload = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+        )->first();
+        $urls = $upload[0]->data()['urls'];
+
+        $this->assertCount(1, $urls);
+        $this->assertStringContainsString("/publish-media/posts/{$post->id}/{$cover->id}?", $urls[0]);
+        $this->assertStringNotContainsString("/{$slide->id}?", $urls[0]);
+    }
+
     public function test_youtube_image_group_rejected_by_postsyncer_is_a_failed_group_not_a_blind_retry(): void
     {
         Storage::fake('scratchpad');
