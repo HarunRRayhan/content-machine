@@ -459,6 +459,14 @@ export function PostCaptionMock({
     const capMax = key ? CAPLIM[key] : undefined;
     const over = capMax !== undefined && caption.length > capMax;
     const label = cfg?.label ?? platform.name;
+    const backToMotion =
+        motionSlides.length > 0 ? (
+            <div className="mock-motion-toggle">
+                <button type="button" onClick={() => setShowStill(false)}>
+                    Show motion carousel
+                </button>
+            </div>
+        ) : null;
 
     return (
         <div className="mock-wrap">
@@ -508,22 +516,16 @@ export function PostCaptionMock({
                         <MockMotion slides={motionSlides} />
                     </>
                 ) : key === 'linkedin' ? (
-                    <MockLinkedInMedia
-                        images={headImages}
-                        imageUrls={imageUrls}
-                    />
+                    <>
+                        {backToMotion}
+                        <MockLinkedInMedia
+                            images={headImages}
+                            imageUrls={imageUrls}
+                        />
+                    </>
                 ) : (
                     <>
-                        {motionSlides.length > 0 ? (
-                            <div className="mock-motion-toggle">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowStill(false)}
-                                >
-                                    Show motion carousel
-                                </button>
-                            </div>
-                        ) : null}
+                        {backToMotion}
                         {headImages.length > 0 ? (
                             <MockImages
                                 images={headImages}

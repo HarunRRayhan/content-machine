@@ -183,6 +183,7 @@ export default function PostCaptionsPanel({
 
                         {platform && (
                             <PostCaptionMock
+                                key={platform.name}
                                 platform={platform}
                                 lang={viewLang}
                                 handles={handles}

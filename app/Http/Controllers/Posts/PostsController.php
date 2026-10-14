@@ -445,7 +445,7 @@ class PostsController extends Controller
             $lang = $group['lang'] ?? $fallbackLang;
 
             foreach ($group['platforms'] as $platform) {
-                $slot = $lang.':'.strtolower($platform['name']);
+                $slot = $lang.':'.strtolower(trim($platform['name']));
                 if (isset($slides[$slot])) {
                     continue;
                 }
