@@ -209,8 +209,49 @@ class UpdatePostAction
 
     private function isSafePublishedStatusTransition(Post $post, ?string $nextStatus): bool
     {
-        return ($post->status === 'posted' && $nextStatus === 'archived')
-            || ($post->status === 'archived' && $nextStatus === 'posted');
+        if (($post->status === 'posted' && $nextStatus === 'archived')
+            || ($post->status === 'archived' && $nextStatus === 'posted')) {
+            return true;
+        }
+
+        if (! $this->publishSettled($post)) {
+            return false;
+        }
+
+        // Settled groups are all PUBLISHED or FAILED, so the only exit from
+        // blocked is posted or archived. draft would reopen groups that exist
+        // and scheduled would claim groups that are no longer pending.
+        return $nextStatus === 'blocked'
+            || ($post->status === 'blocked' && in_array($nextStatus, ['posted', 'archived'], true));
+    }
+
+    /**
+     * No publish job is in flight and every PostSyncer group is terminal.
+     * A post with no groups counts as settled.
+     */
+    private function publishSettled(Post $post): bool
+    {
+        if (in_array($post->publish_state, ['queued', 'running'], true)) {
+            return false;
+        }
+
+        $progressState = is_array($post->publish_progress) ? ($post->publish_progress['state'] ?? null) : null;
+        if (in_array($progressState, ['queued', 'running', 'uncertain'], true)) {
+            return false;
+        }
+
+        $groups = is_array($post->postsyncer) ? ($post->postsyncer['groups'] ?? []) : [];
+
+        foreach (is_array($groups) ? $groups : [] as $group) {
+            $rawStatus = is_array($group) ? ($group['status'] ?? null) : null;
+            $status = is_string($rawStatus) ? strtoupper($rawStatus) : '';
+
+            if (! in_array($status, ['PUBLISHED', 'FAILED'], true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function shouldResetFailedPublish(Post $post, bool $contentChanged, bool $publishLocked): bool

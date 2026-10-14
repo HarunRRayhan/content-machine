@@ -335,19 +335,159 @@ class UpdatePostActionTest extends TestCase
         $this->assertNull($post->blocked_reason);
     }
 
-    public function test_a_publish_locked_post_cannot_be_blocked(): void
+    public function test_a_publish_locked_post_with_only_terminal_groups_can_be_blocked_without_touching_its_groups(): void
+    {
+        $groups = [
+            ['post_id' => '99', 'platforms' => ['facebook'], 'status' => 'PUBLISHED'],
+            ['post_id' => '100', 'platforms' => ['youtube'], 'status' => 'FAILED'],
+        ];
+        $post = Post::factory()->create([
+            'status' => 'posted',
+            'publish_state' => 'failed',
+            'publish_error' => 'YouTube refused the upload.',
+            'postsyncer' => ['groups' => $groups],
+            'publish_progress' => ['state' => 'failed', 'current' => null, 'completed_groups' => []],
+        ]);
+        $before = $post->only(['postsyncer', 'publish_state', 'publish_error', 'publish_progress', 'captions', 'platforms']);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'status' => 'blocked',
+            'blocked_reason' => 'YouTube scheduler limit; revisit later.',
+        ], $post));
+
+        $post->refresh();
+        $this->assertSame('blocked', $post->status);
+        $this->assertSame('YouTube scheduler limit; revisit later.', $post->blocked_reason);
+        $this->assertEquals($before, $post->only(array_keys($before)));
+    }
+
+    public function test_a_publish_locked_post_with_a_pending_group_or_publish_in_flight_cannot_be_blocked(): void
+    {
+        $cases = [
+            'scheduled group' => [['post_id' => '99', 'status' => 'SCHEDULED']],
+            'in-queue group' => [['post_id' => '99', 'status' => 'IN_QUEUE']],
+            'pending group' => [['post_id' => '99', 'status' => 'PENDING']],
+            'in-progress group' => [['post_id' => '99', 'status' => 'IN_PROGRESS']],
+            'group without a status' => [['post_id' => '99']],
+            'published and pending groups' => [
+                ['post_id' => '99', 'status' => 'PUBLISHED'],
+                ['post_id' => '100', 'status' => 'SCHEDULED'],
+            ],
+        ];
+
+        foreach ($cases as $label => $groups) {
+            $post = Post::factory()->create([
+                'status' => 'scheduled',
+                'postsyncer' => ['groups' => $groups],
+            ]);
+
+            try {
+                (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+                    'status' => 'blocked',
+                    'blocked_reason' => 'Too early.',
+                ], $post));
+                $this->fail("Expected [{$label}] to be refused.");
+            } catch (ValidationException) {
+                $this->assertSame('scheduled', $post->refresh()->status, $label);
+            }
+        }
+
+        $inFlight = [
+            'publish_state queued' => ['publish_state' => 'queued', 'publish_progress' => null],
+            'publish_state running' => ['publish_state' => 'running', 'publish_progress' => null],
+            'progress running' => ['publish_state' => 'failed', 'publish_progress' => ['state' => 'running', 'current' => ['phase' => 'create']]],
+            'progress queued' => ['publish_state' => 'failed', 'publish_progress' => ['state' => 'queued', 'current' => null]],
+            'progress uncertain' => ['publish_state' => 'failed', 'publish_progress' => ['state' => 'uncertain', 'current' => ['phase' => 'create']]],
+        ];
+
+        foreach ($inFlight as $label => $attributes) {
+            $post = Post::factory()->create(array_merge([
+                'status' => 'posted',
+                'postsyncer' => ['groups' => [['post_id' => '99', 'status' => 'PUBLISHED']]],
+            ], $attributes));
+
+            try {
+                (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+                    'status' => 'blocked',
+                    'blocked_reason' => 'Too early.',
+                ], $post));
+                $this->fail("Expected [{$label}] to be refused.");
+            } catch (ValidationException) {
+                $this->assertSame('posted', $post->refresh()->status, $label);
+            }
+        }
+    }
+
+    public function test_lowercase_group_statuses_and_a_checkpoint_only_failure_count_as_settled(): void
+    {
+        $lowercase = Post::factory()->create([
+            'status' => 'posted',
+            'postsyncer' => ['groups' => [['post_id' => '99', 'status' => 'published'], ['post_id' => '100', 'status' => 'failed']]],
+        ]);
+
+        (new UpdatePostAction)->handle($lowercase, UpdatePostData::fromApiPayload(['status' => 'blocked'], $lowercase));
+        $this->assertSame('blocked', $lowercase->refresh()->status);
+
+        $checkpointOnly = Post::factory()->create([
+            'status' => 'posted',
+            'publish_state' => 'failed',
+            'postsyncer' => null,
+            'publish_progress' => ['state' => 'failed', 'current' => ['phase' => 'create'], 'completed_groups' => []],
+        ]);
+
+        (new UpdatePostAction)->handle($checkpointOnly, UpdatePostData::fromApiPayload(['status' => 'blocked'], $checkpointOnly));
+        $this->assertSame('blocked', $checkpointOnly->refresh()->status);
+    }
+
+    public function test_a_group_with_an_array_status_is_not_settled(): void
     {
         $post = Post::factory()->create([
             'status' => 'scheduled',
-            'postsyncer' => ['groups' => [['post_id' => '99']]],
+            'postsyncer' => ['groups' => [['post_id' => '99', 'status' => ['PUBLISHED']]]],
         ]);
 
         $this->expectException(ValidationException::class);
 
-        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['status' => 'blocked'], $post));
+    }
+
+    public function test_a_blocked_post_with_groups_only_leaves_for_posted_or_archived(): void
+    {
+        $groups = [['post_id' => '99', 'status' => 'PUBLISHED']];
+        $post = Post::factory()->create([
             'status' => 'blocked',
-            'blocked_reason' => 'Too late.',
-        ], $post));
+            'blocked_reason' => 'Scheduler limit.',
+            'postsyncer' => ['groups' => $groups],
+        ]);
+
+        foreach (['draft', 'scheduled'] as $refused) {
+            try {
+                (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['status' => $refused], $post));
+                $this->fail("Expected a move to [{$refused}] to be refused.");
+            } catch (ValidationException) {
+                $this->assertSame('blocked', $post->refresh()->status);
+            }
+        }
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['status' => 'posted'], $post));
+
+        $post->refresh();
+        $this->assertSame('posted', $post->status);
+        $this->assertNull($post->blocked_reason);
+        $this->assertEquals($groups, $post->postsyncer['groups']);
+    }
+
+    public function test_a_blocked_post_with_a_pending_group_cannot_be_unblocked(): void
+    {
+        $post = Post::factory()->create([
+            'status' => 'blocked',
+            'blocked_reason' => 'Scheduler limit.',
+            'postsyncer' => ['groups' => [['post_id' => '99', 'status' => 'SCHEDULED']]],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['status' => 'archived'], $post));
     }
 
     public function test_published_posts_can_be_archived_and_unarchived(): void

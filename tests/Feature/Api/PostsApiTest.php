@@ -257,6 +257,43 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.blocked_reason', null);
     }
 
+    public function test_patch_blocks_a_publish_locked_post_and_leaves_its_groups_alone(): void
+    {
+        $groups = [
+            ['post_id' => '501', 'platforms' => ['facebook', 'instagram'], 'status' => 'PUBLISHED'],
+            ['post_id' => '502', 'platforms' => ['youtube'], 'status' => 'FAILED'],
+        ];
+        Post::factory()->for($this->workspace)->create([
+            'human_id' => 'P-62',
+            'number' => 62,
+            'status' => 'posted',
+            'postsyncer' => ['groups' => $groups],
+            'publish_state' => 'succeeded',
+        ]);
+
+        $this->acting()->patchJson('/api/v1/posts/P-62', [
+            'status' => 'blocked',
+            'blocked_reason' => 'YouTube scheduler limit; revisit later.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'blocked')
+            ->assertJsonPath('data.blocked_reason', 'YouTube scheduler limit; revisit later.');
+
+        $post = Post::query()->where('human_id', 'P-62')->firstOrFail();
+        $this->assertEquals($groups, $post->postsyncer['groups']);
+        $this->assertSame('succeeded', $post->publish_state);
+
+        $this->acting()->patchJson('/api/v1/posts/P-62', ['status' => 'draft'])
+            ->assertUnprocessable();
+        $this->assertSame('blocked', $post->refresh()->status);
+
+        $this->acting()->patchJson('/api/v1/posts/P-62', ['status' => 'posted'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'posted')
+            ->assertJsonPath('data.blocked_reason', null);
+        $this->assertEquals($groups, $post->refresh()->postsyncer['groups']);
+    }
+
     public function test_patch_refuses_the_retired_dropped_status(): void
     {
         $this->acting()->postJson('/api/v1/posts', [

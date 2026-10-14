@@ -1565,6 +1565,10 @@ class PublishPostAction
 
         $this->assertProgressShape($progress);
 
+        if ($post->status === 'blocked') {
+            throw new PostsyncerException('This post is blocked; unblock it before recovering a publish.');
+        }
+
         if (($progress['state'] ?? null) !== 'failed'
             || ($progress['current'] ?? null) !== null
             || $this->completedGroups($progress) === []) {
