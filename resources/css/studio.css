@@ -1191,32 +1191,19 @@
     margin-bottom: 6px;
 }
 
-.studio-page .mock-motion {
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    margin-bottom: 10px;
+/* The button is the click target; the video under it ignores pointer events. */
+.studio-page .mock-motion-open {
+    width: 100%;
 }
 
-.studio-page .mock-motion-slide {
-    flex: 0 0 75%;
-    scroll-snap-align: start;
-    position: relative;
-}
-
-.studio-page .mock-motion-slide video {
+.studio-page .mock-motion-open video {
+    display: block;
     width: 100%;
     aspect-ratio: 4 / 5;
     object-fit: cover;
     border-radius: 8px;
     background: var(--line-strong);
-}
-
-.studio-page .mock-motion-ctl {
-    display: flex;
-    gap: 6px;
-    margin-top: 4px;
+    pointer-events: none;
 }
 
 .studio-page .mock-imgs-empty {
