@@ -82,7 +82,7 @@ class HandleTelegramUpdateAction
 
     private const CAPTURE_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file, or just type, and I'll capture it to your Scratch Pad.";
 
-    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you. Use /note to capture text instead.";
+    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you, and you can ask me to save, edit, or delete Scratch Pad notes and post/video ideas (for example \"save a post idea: ...\"). Deletes ask you to confirm first. Use /note to capture text instead.";
 
     private const CHAT_FAILED_TEXT = "Couldn't generate a chat reply right now, so I saved this as a note instead.";
 
@@ -101,6 +101,8 @@ class HandleTelegramUpdateAction
         private readonly ?EnqueuePostPublishAction $enqueuePostPublishAction = null,
         private readonly ?CancelTelegramPostRequestAction $cancelTelegramPostRequestAction = null,
         private readonly ?QueueTelegramMessageAction $queueTelegramMessageAction = null,
+        private readonly ?ResolveTelegramWorkspaceActionAction $resolveWorkspaceAction = null,
+        private readonly ?ExecuteTelegramWorkspaceActionAction $executeWorkspaceAction = null,
     ) {}
 
     /**
@@ -199,6 +201,12 @@ class HandleTelegramUpdateAction
                 return;
             }
 
+            if ($this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+                fn () => $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text))
+            ) {
+                return;
+            }
+
             $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
 
             if ($intent !== null) {
@@ -223,6 +231,15 @@ class HandleTelegramUpdateAction
             if ($dispatchLeaseId !== null
                 && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
             ) {
+                return;
+            }
+
+            $workspaceAction = $this->resolveWorkspaceAction()->handle($config->workspace, $text);
+
+            if ($workspaceAction !== null) {
+                $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+                    fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction));
+
                 return;
             }
 
@@ -952,6 +969,53 @@ class HandleTelegramUpdateAction
         $message = collect($exception->errors())->flatten()->first();
 
         return is_string($message) && $message !== '' ? $message : 'The request could not be completed.';
+    }
+
+    /**
+     * Runs a Scratch Pad / idea action and sends its reply inside one
+     * transaction that first re-checks the dispatch lease, same as
+     * handleClearNotes(), so a stale worker can't create/update/delete and a
+     * replay after a crash can't repeat it. $run returns the reply, or null
+     * for "nothing to do" (returns false so the caller carries on). Returns
+     * true when the update is handled, including when the lease was lost.
+     *
+     * @param  array<string, mixed>  $update
+     * @param  \Closure(): ?string  $run
+     */
+    private function runLeased(
+        TelegramBotConfig $config,
+        int $chatId,
+        array $update,
+        ?string $dispatchLeaseId,
+        \Closure $run,
+    ): bool {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId, $run): bool {
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                return true;
+            }
+
+            $reply = $run();
+
+            if ($reply === null) {
+                return false;
+            }
+
+            $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
+            $this->reply($config, $chatId, $reply);
+
+            return true;
+        });
+    }
+
+    private function resolveWorkspaceAction(): ResolveTelegramWorkspaceActionAction
+    {
+        return $this->resolveWorkspaceAction ?? app(ResolveTelegramWorkspaceActionAction::class);
+    }
+
+    private function executeWorkspaceAction(): ExecuteTelegramWorkspaceActionAction
+    {
+        return $this->executeWorkspaceAction ?? app(ExecuteTelegramWorkspaceActionAction::class);
     }
 
     private function startPostAction(): StartTelegramPostAction
