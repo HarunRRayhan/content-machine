@@ -1,4 +1,3 @@
-import { Maximize2 } from 'lucide-react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { CaptionPlatform } from '@/components/content/captions-panel';
@@ -284,23 +283,22 @@ export type MotionSlide = {
     mime: string | null;
 };
 
-// Muted, looping MP4 slides. Each one plays only while it is at least
-// 60% on screen, so a swipe does not start every video at once. While the
-// pop-up is open (suspended) they stay paused.
+// Muted, looping MP4 thumbnails in the same grid as the still images. The whole
+// thumbnail is the button that opens the pop-up; the video ignores pointer events.
+// Each one plays only while it is at least 60% on screen. While the pop-up is
+// open (suspended) they stay paused.
 function MockMotionSlide({
     slide,
     suspended,
-    onExpand,
-    expandRef,
+    onOpen,
+    buttonRef,
 }: {
     slide: MotionSlide;
     suspended: boolean;
-    onExpand: () => void;
-    expandRef: (el: HTMLButtonElement | null) => void;
+    onOpen: () => void;
+    buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
     const ref = useRef<HTMLVideoElement>(null);
-    const [muted, setMuted] = useState(true);
-    const [playing, setPlaying] = useState(false);
 
     useEffect(() => {
         const video = ref.current;
@@ -330,75 +328,53 @@ function MockMotionSlide({
         return () => observer.disconnect();
     }, [suspended]);
 
-    const togglePlay = () => {
-        const video = ref.current;
-
-        if (!video) {
-            return;
-        }
-
-        if (video.paused) {
-            video.play().catch(() => undefined);
-        } else {
-            video.pause();
-        }
-    };
-
     return (
-        <div className="mock-motion-slide">
+        <button
+            ref={buttonRef}
+            type="button"
+            className="mock-img-open mock-motion-open"
+            aria-label={`Open ${slide.filename}`}
+            onClick={onOpen}
+        >
             <video
                 ref={ref}
                 src={slide.url}
-                muted={muted}
+                muted
                 loop
                 playsInline
                 preload="metadata"
-                aria-label={slide.filename}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                onClick={togglePlay}
+                aria-hidden="true"
             />
-            <div className="mock-motion-ctl">
-                <button type="button" onClick={togglePlay}>
-                    {playing ? 'Pause' : 'Play'}
-                </button>
-                <button type="button" onClick={() => setMuted((m) => !m)}>
-                    {muted ? 'Sound on' : 'Sound off'}
-                </button>
-                <button
-                    ref={expandRef}
-                    type="button"
-                    className="mock-motion-expand"
-                    onClick={onExpand}
-                    aria-label={`Expand ${slide.filename}`}
-                    title="Expand"
-                >
-                    <Maximize2 size={14} aria-hidden="true" />
-                </button>
-            </div>
-        </div>
+        </button>
     );
 }
 
 function MockMotion({ slides }: { slides: MotionSlide[] }) {
     const [openIndex, setOpenIndex] = useState<number | null>(null);
-    const expandButtons = useRef<(HTMLButtonElement | null)[]>([]);
+    const thumbButtons = useRef<(HTMLButtonElement | null)[]>([]);
     const lastOpened = useRef(0);
 
     return (
         <>
-            <div className="mock-motion" aria-label="Motion carousel">
+            <div
+                className={
+                    slides.length > 1
+                        ? 'mock-imgs mock-imgs-multi'
+                        : 'mock-imgs'
+                }
+                aria-label="Motion carousel"
+            >
                 {slides.map((slide, index) => (
                     <MockMotionSlide
                         key={`${slide.filename}-${index}`}
                         slide={slide}
                         suspended={openIndex !== null}
-                        onExpand={() => {
+                        onOpen={() => {
                             lastOpened.current = index;
                             setOpenIndex(index);
                         }}
-                        expandRef={(el) => {
-                            expandButtons.current[index] = el;
+                        buttonRef={(el) => {
+                            thumbButtons.current[index] = el;
                         }}
                     />
                 ))}
@@ -409,7 +385,7 @@ function MockMotion({ slides }: { slides: MotionSlide[] }) {
                 onClose={() => setOpenIndex(null)}
                 onCloseAutoFocus={(event) => {
                     event.preventDefault();
-                    expandButtons.current[lastOpened.current]?.focus();
+                    thumbButtons.current[lastOpened.current]?.focus();
                 }}
             />
         </>
