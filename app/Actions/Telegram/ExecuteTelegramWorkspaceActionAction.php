@@ -50,13 +50,13 @@ class ExecuteTelegramWorkspaceActionAction
     /**
      * @param  array<string, mixed>  $action
      */
-    public function handle(Workspace $workspace, int $chatId, array $action): string
+    public function handle(Workspace $workspace, int $chatId, array $action, ?string $original = null): string
     {
         Cache::forget($this->pendingKey($workspace, $chatId));
 
         try {
             return match ($action['action'] ?? null) {
-                'create_scratchpad' => $this->createScratchpad($workspace, $action),
+                'create_scratchpad' => $this->createScratchpad($workspace, $action, $original),
                 'update_scratchpad' => $this->askToUpdateScratchpad($workspace, $chatId, $action),
                 'delete_scratchpad' => $this->askToDeleteScratchpad($workspace, $chatId),
                 'create_idea' => $this->saveIdea($workspace, $action),
@@ -70,6 +70,15 @@ class ExecuteTelegramWorkspaceActionAction
         } catch (RuntimeException $e) {
             return $e->getMessage();
         }
+    }
+
+    /**
+     * Drops any pending confirmation, so a later bare "ok" can't hit it after
+     * the user moved on (a slash command, photo, link, etc.).
+     */
+    public function forgetPending(Workspace $workspace, int $chatId): void
+    {
+        Cache::forget($this->pendingKey($workspace, $chatId));
     }
 
     /**
@@ -149,9 +158,10 @@ class ExecuteTelegramWorkspaceActionAction
     /**
      * @param  array<string, mixed>  $action
      */
-    private function createScratchpad(Workspace $workspace, array $action): string
+    private function createScratchpad(Workspace $workspace, array $action, ?string $original): string
     {
-        $body = $this->text($action, 'body', 20000, required: true);
+        // If the model returned no usable body, keep what the user actually sent.
+        $body = $this->text($action, 'body', 20000) ?? $this->text(['body' => $original], 'body', 20000, required: true);
 
         $this->captureTextNote->handle($workspace, null, CaptureTextNoteData::fromTelegram($body));
 

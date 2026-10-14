@@ -153,6 +153,10 @@ class HandleTelegramUpdateAction
 
         $text = $this->messageText($message);
 
+        if ($text === null || str_starts_with($text, '/') || ! $this->isChatEligible($message, $text)) {
+            $this->executeWorkspaceAction()->forgetPending($config->workspace, $chatId);
+        }
+
         if ($text !== null && str_starts_with($text, '/')) {
             $this->handleCommand($config, $chatId, $fromUserId, $fromUsername, $text, $update, $telegramUpdateKey, $dispatchLeaseId);
 
@@ -238,7 +242,7 @@ class HandleTelegramUpdateAction
 
             if ($workspaceAction !== null) {
                 $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
-                    fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction));
+                    fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text));
 
                 return;
             }

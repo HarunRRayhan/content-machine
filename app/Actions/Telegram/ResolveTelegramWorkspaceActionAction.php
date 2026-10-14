@@ -96,7 +96,8 @@ class ResolveTelegramWorkspaceActionAction
     private function parse(string $text): ?array
     {
         $json = trim(preg_replace('/^```(?:json)?\s*|\s*```$/i', '', trim($text)) ?? '');
-        $action = json_decode($json, true);
+        // Dictated bodies can carry raw line breaks, which make the JSON invalid.
+        $action = json_decode($json, true) ?? json_decode(preg_replace('/[\x00-\x1F]+/', ' ', $json) ?? '', true);
 
         if (! is_array($action) || ! in_array($action['action'] ?? null, self::ACTIONS, true)) {
             return null;
