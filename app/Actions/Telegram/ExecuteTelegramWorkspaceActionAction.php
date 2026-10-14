@@ -26,9 +26,9 @@ use RuntimeException;
  * workspace, and returns the reply text. Nothing else is reachable from
  * here. The model's arguments are untrusted: every field is checked below.
  *
- * Deletes are two-step: the first message only stores a pending delete and
- * asks for confirmation; deleting happens only when confirmPending() sees
- * an explicit yes next. An idea "delete" is a drop (rows are never
+ * Updates and deletes are two-step: the first message only stores the
+ * pending change and asks for confirmation; it is applied only when
+ * confirmPending() sees an explicit yes next. Creates run immediately. An idea "delete" is a drop (rows are never
  * removed); a Scratch Pad delete is a real delete, refused for triaged
  * entries by DeleteScratchpadEntryAction.
  */
@@ -57,10 +57,10 @@ class ExecuteTelegramWorkspaceActionAction
         try {
             return match ($action['action'] ?? null) {
                 'create_scratchpad' => $this->createScratchpad($workspace, $action),
-                'update_scratchpad' => $this->updateScratchpad($workspace, $action),
+                'update_scratchpad' => $this->askToUpdateScratchpad($workspace, $chatId, $action),
                 'delete_scratchpad' => $this->askToDeleteScratchpad($workspace, $chatId),
                 'create_idea' => $this->saveIdea($workspace, $action),
-                'update_idea' => $this->editIdea($workspace, $action),
+                'update_idea' => $this->askToEditIdea($workspace, $chatId, $action),
                 'delete_idea' => $this->askToDropIdea($workspace, $chatId, $action),
                 'list_ideas' => $this->listIdeas($workspace, $action),
                 default => "I can't do that one.",
@@ -86,28 +86,64 @@ class ExecuteTelegramWorkspaceActionAction
         }
 
         try {
-            if ($pending['type'] === 'scratchpad') {
-                $entry = ScratchpadEntry::query()
-                    ->where('workspace_id', $workspace->id)
-                    ->where('public_id', $pending['id'])
-                    ->first();
-
-                if ($entry === null) {
-                    return 'That note is already gone.';
-                }
-
-                $this->deleteScratchpadEntry->handle($entry);
-
-                return 'Deleted the note.';
-            }
-
-            $idea = $this->findIdea($workspace, $pending['id']);
-            $this->dropIdea->handle($idea, new DropIdeaData('Dropped from Telegram.'));
-
-            return "Dropped {$idea->human_id}.";
+            return match ($pending['type']) {
+                'update_scratchpad', 'delete_scratchpad' => $this->confirmScratchpad($workspace, $pending),
+                default => $this->confirmIdea($workspace, $pending),
+            };
         } catch (RuntimeException $e) {
             return $e->getMessage();
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $pending
+     */
+    private function confirmScratchpad(Workspace $workspace, array $pending): string
+    {
+        $entry = ScratchpadEntry::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('public_id', $pending['id'])
+            ->first();
+
+        if ($entry === null) {
+            return 'That note is already gone.';
+        }
+
+        if ($pending['type'] === 'update_scratchpad') {
+            $this->updateScratchpadEntry->handle($entry, new UpdateScratchpadEntryData(title: null, body: $pending['changes']['body'], language: null));
+
+            return 'Updated the note.';
+        }
+
+        $this->deleteScratchpadEntry->handle($entry);
+
+        return 'Deleted the note.';
+    }
+
+    /**
+     * @param  array<string, mixed>  $pending
+     */
+    private function confirmIdea(Workspace $workspace, array $pending): string
+    {
+        $idea = $this->findIdea($workspace, $pending['id']);
+
+        if ($pending['type'] === 'update_idea') {
+            $changes = $pending['changes'];
+
+            $this->updateIdea->handle($idea, new UpdateIdeaData(
+                title: $changes['title'] ?? $idea->title,
+                score: $changes['score'] ?? $idea->score,
+                trend: $idea->trend,
+                rationale: $changes['rationale'] ?? $idea->rationale,
+                body: $changes['body'] ?? $idea->body,
+            ));
+
+            return "Updated {$idea->human_id}.";
+        }
+
+        $this->dropIdea->handle($idea, new DropIdeaData('Dropped from Telegram.'));
+
+        return "Dropped {$idea->human_id}.";
     }
 
     /**
@@ -125,20 +161,19 @@ class ExecuteTelegramWorkspaceActionAction
     /**
      * @param  array<string, mixed>  $action
      */
-    private function updateScratchpad(Workspace $workspace, array $action): string
+    private function askToUpdateScratchpad(Workspace $workspace, int $chatId, array $action): string
     {
         $entry = $this->latestScratchpad($workspace);
         $body = $this->text($action, 'body', 20000, required: true);
+        $this->storePending($workspace, $chatId, 'update_scratchpad', $entry->public_id, ['body' => $body]);
 
-        $this->updateScratchpadEntry->handle($entry, new UpdateScratchpadEntryData(title: null, body: $body, language: null));
-
-        return 'Updated your latest note.';
+        return 'Replace your latest note with this? Reply "yes" to confirm.'."\n\n".Str::limit($body, 120);
     }
 
     private function askToDeleteScratchpad(Workspace $workspace, int $chatId): string
     {
         $entry = $this->latestScratchpad($workspace);
-        $this->storePending($workspace, $chatId, 'scratchpad', $entry->public_id);
+        $this->storePending($workspace, $chatId, 'delete_scratchpad', $entry->public_id);
 
         return 'Delete this note? Reply "yes" to confirm.'."\n\n".Str::limit($entry->title ?? $entry->body ?? '(no preview)', 120);
     }
@@ -167,7 +202,7 @@ class ExecuteTelegramWorkspaceActionAction
     /**
      * @param  array<string, mixed>  $action
      */
-    private function editIdea(Workspace $workspace, array $action): string
+    private function askToEditIdea(Workspace $workspace, int $chatId, array $action): string
     {
         $idea = $this->findIdea($workspace, $action['id'] ?? null);
 
@@ -177,15 +212,20 @@ class ExecuteTelegramWorkspaceActionAction
             throw ValidationException::withMessages(['score' => 'Score must be a whole number from 0 to 1000.']);
         }
 
-        $this->updateIdea->handle($idea, new UpdateIdeaData(
-            title: $this->text($action, 'title', 255) ?? $idea->title,
-            score: $score ?? $idea->score,
-            trend: $idea->trend,
-            rationale: $this->text($action, 'rationale', 2000) ?? $idea->rationale,
-            body: $this->text($action, 'body', 20000) ?? $idea->body,
-        ));
+        $changes = array_filter([
+            'title' => $this->text($action, 'title', 255),
+            'rationale' => $this->text($action, 'rationale', 2000),
+            'body' => $this->text($action, 'body', 20000),
+            'score' => $score,
+        ], fn ($value) => $value !== null);
 
-        return "Updated {$idea->human_id}.";
+        if ($changes === []) {
+            throw new RuntimeException('What should I change on '.$idea->human_id.'?');
+        }
+
+        $this->storePending($workspace, $chatId, 'update_idea', $idea->human_id, $changes);
+
+        return "Update {$idea->human_id} ({$idea->title}): ".implode(', ', array_keys($changes)).'? Reply "yes" to confirm.';
     }
 
     /**
@@ -194,7 +234,7 @@ class ExecuteTelegramWorkspaceActionAction
     private function askToDropIdea(Workspace $workspace, int $chatId, array $action): string
     {
         $idea = $this->findIdea($workspace, $action['id'] ?? null);
-        $this->storePending($workspace, $chatId, 'idea', $idea->human_id);
+        $this->storePending($workspace, $chatId, 'delete_idea', $idea->human_id);
 
         return "Drop {$idea->human_id}: {$idea->title}? Reply \"yes\" to confirm.";
     }
@@ -260,9 +300,12 @@ class ExecuteTelegramWorkspaceActionAction
         return Str::limit($value, $max, '');
     }
 
-    private function storePending(Workspace $workspace, int $chatId, string $type, string $id): void
+    /**
+     * @param  array<string, mixed>  $changes
+     */
+    private function storePending(Workspace $workspace, int $chatId, string $type, string $id, array $changes = []): void
     {
-        Cache::put($this->pendingKey($workspace, $chatId), ['type' => $type, 'id' => $id], self::PENDING_TTL_SECONDS);
+        Cache::put($this->pendingKey($workspace, $chatId), ['type' => $type, 'id' => $id, 'changes' => $changes], self::PENDING_TTL_SECONDS);
     }
 
     private function pendingKey(Workspace $workspace, int $chatId): string

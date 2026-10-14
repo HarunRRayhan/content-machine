@@ -413,6 +413,24 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertNotSame('dropped', $theirs->fresh()->status);
     }
 
+    public function test_updates_only_apply_after_a_yes()
+    {
+        $config = $this->linkedAiConfig();
+        $entry = ScratchpadEntry::factory()->for($config->workspace)->create(['body' => 'old body']);
+        $idea = Idea::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'post', 'human_id' => 'PI-7', 'title' => 'Old title']);
+
+        $this->action($this->actionClient('{"action":"update_scratchpad","body":"new body"}'))->handle($config, $this->update(1, 'change my last note'));
+        $this->assertSame('old body', $entry->fresh()->body);
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame('new body', $entry->fresh()->body);
+
+        $this->action($this->actionClient('{"action":"update_idea","id":"PI-7","title":"New title","score":700}'))->handle($config, $this->update(1, 'retitle PI-7'));
+        $this->assertSame('Old title', $idea->fresh()->title);
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame('New title', $idea->fresh()->title);
+        $this->assertSame(700, $idea->fresh()->score);
+    }
+
     public function test_an_unclear_model_answer_falls_through_to_normal_chat()
     {
         $config = $this->linkedAiConfig();

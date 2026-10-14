@@ -201,11 +201,9 @@ class HandleTelegramUpdateAction
                 return;
             }
 
-            $pendingReply = $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text);
-
-            if ($pendingReply !== null) {
-                $this->replyToWorkspaceAction($config, $chatId, $pendingReply, $update, $dispatchLeaseId);
-
+            if ($this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+                fn () => $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text))
+            ) {
                 return;
             }
 
@@ -239,13 +237,8 @@ class HandleTelegramUpdateAction
             $workspaceAction = $this->resolveWorkspaceAction()->handle($config->workspace, $text);
 
             if ($workspaceAction !== null) {
-                $this->replyToWorkspaceAction(
-                    $config,
-                    $chatId,
-                    $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction),
-                    $update,
-                    $dispatchLeaseId,
-                );
+                $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+                    fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction));
 
                 return;
             }
@@ -979,27 +972,39 @@ class HandleTelegramUpdateAction
     }
 
     /**
-     * Sends the reply for a Scratch Pad / idea action and marks the update
-     * processed in one transaction, same as handleClearNotes(), so a replay
-     * after a worker crash can't create or delete twice.
+     * Runs a Scratch Pad / idea action and sends its reply inside one
+     * transaction that first re-checks the dispatch lease, same as
+     * handleClearNotes(), so a stale worker can't create/update/delete and a
+     * replay after a crash can't repeat it. $run returns the reply, or null
+     * for "nothing to do" (returns false so the caller carries on). Returns
+     * true when the update is handled, including when the lease was lost.
      *
      * @param  array<string, mixed>  $update
+     * @param  \Closure(): ?string  $run
      */
-    private function replyToWorkspaceAction(
+    private function runLeased(
         TelegramBotConfig $config,
         int $chatId,
-        string $reply,
         array $update,
         ?string $dispatchLeaseId,
-    ): void {
-        DB::transaction(function () use ($config, $chatId, $reply, $update, $dispatchLeaseId): void {
+        \Closure $run,
+    ): bool {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId, $run): bool {
             if ($dispatchLeaseId !== null
                 && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                return;
+                return true;
+            }
+
+            $reply = $run();
+
+            if ($reply === null) {
+                return false;
             }
 
             $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
             $this->reply($config, $chatId, $reply);
+
+            return true;
         });
     }
 
