@@ -344,7 +344,7 @@ class HandleTelegramUpdateActionTest extends TestCase
                     return AiCompletionResult::success('none');
                 }
 
-                if ($this->json !== null && str_contains($systemPrompt, 'Scratch Pad or their post/video ideas')) {
+                if ($this->json !== null && str_contains($systemPrompt, 'reply with ONLY a JSON object')) {
                     return AiCompletionResult::success($this->json);
                 }
 
@@ -375,6 +375,30 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame('Store money as integer cents', $idea->title);
         $this->assertSame("Saved {$idea->human_id}: Store money as integer cents", $this->lastReply());
         $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_both_creates_a_post_idea_and_a_video_idea()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_idea","kind":"both","title":"Store money as integer cents"}');
+
+        $this->action($client)->handle($config, $this->update(1, 'this should be both a post and a video idea, store money as cents'));
+
+        $ideas = Idea::withoutGlobalScopes()->orderBy('id')->get();
+        $this->assertSame(['post', 'video'], $ideas->pluck('kind')->all());
+        $this->assertSame(2, $ideas->where('workspace_id', $config->workspace_id)->count());
+        $this->assertSame('Saved '.$ideas->pluck('human_id')->implode(' and ').': Store money as integer cents', $this->lastReply());
+    }
+
+    public function test_a_dictated_note_without_a_command_word_goes_to_the_scratch_pad()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_scratchpad","body":"Dollars are stored as cents and Bitcoin as satoshis."}');
+
+        $this->action($client)->handle($config, $this->update(1, 'so i always keep dollars as cents and bitcoin as satoshis put that in the scratch pad'));
+
+        $this->assertSame('Dollars are stored as cents and Bitcoin as satoshis.', ScratchpadEntry::withoutGlobalScopes()->sole()->body);
+        $this->assertSame(0, Idea::withoutGlobalScopes()->count());
     }
 
     public function test_deleting_a_note_needs_a_yes_and_anything_else_cancels_it()

@@ -185,18 +185,20 @@ class ExecuteTelegramWorkspaceActionAction
     {
         $kind = $action['kind'] ?? null;
 
-        if (! in_array($kind, ['post', 'video'], true)) {
+        if (! in_array($kind, ['post', 'video', 'both'], true)) {
             throw ValidationException::withMessages(['kind' => 'Is it a post idea or a video idea?']);
         }
 
-        $idea = $this->createIdea->handle($workspace, [
-            'kind' => $kind,
+        $fields = [
             'title' => $this->text($action, 'title', 255, required: true),
             'rationale' => $this->text($action, 'rationale', 2000),
             'body' => $this->text($action, 'body', 20000),
-        ]);
+        ];
 
-        return "Saved {$idea->human_id}: {$idea->title}";
+        $ideas = collect($kind === 'both' ? ['post', 'video'] : [$kind])
+            ->map(fn (string $k) => $this->createIdea->handle($workspace, ['kind' => $k] + $fields));
+
+        return 'Saved '.$ideas->pluck('human_id')->implode(' and ').": {$fields['title']}";
     }
 
     /**
