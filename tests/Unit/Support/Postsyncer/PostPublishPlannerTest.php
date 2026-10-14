@@ -346,6 +346,38 @@ class PostPublishPlannerTest extends TestCase
         $this->assertSame(['youtube'], end($platforms));
     }
 
+    public function test_youtube_image_post_is_planned_from_matrix_saved_before_youtube_photo_existed(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'youtube' => ['reel' => 'on'],
+                    'instagram' => ['photo' => 'on'],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['youtube'],
+            'captions' => ['main' => ['youtube' => ['caption' => 'YT caption']]],
+            'image_drive_urls' => ['https://drive.google.com/file/d/one/view'],
+        ]);
+
+        $this->assertTrue($this->planner->needsConfirmAsk($post, $config));
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['youtube'], $groups[0]->platforms);
+    }
+
     public function test_youtube_image_carousel_without_confirm_ask_is_refused(): void
     {
         $workspace = Workspace::factory()->create();
