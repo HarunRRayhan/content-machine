@@ -234,6 +234,43 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.image_drive_urls.0', 'https://drive.google.com/file/d/photoOne/view');
     }
 
+    public function test_patch_sets_blocked_with_a_reason_and_clears_it_on_unblock(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-60',
+            'number' => 60,
+            'title' => 'Carousel',
+            'status' => 'draft',
+        ])->assertCreated();
+
+        $this->acting()->patchJson('/api/v1/posts/P-60', [
+            'status' => 'blocked',
+            'blocked_reason' => 'Scheduler cannot publish video carousels.',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'blocked')
+            ->assertJsonPath('data.blocked_reason', 'Scheduler cannot publish video carousels.');
+
+        $this->acting()->patchJson('/api/v1/posts/P-60', ['status' => 'draft'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'draft')
+            ->assertJsonPath('data.blocked_reason', null);
+    }
+
+    public function test_patch_refuses_the_retired_dropped_status(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-61',
+            'number' => 61,
+            'title' => 'Old idea',
+            'status' => 'draft',
+        ])->assertCreated();
+
+        $this->acting()->patchJson('/api/v1/posts/P-61', ['status' => 'dropped'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('status');
+    }
+
     public function test_store_and_patch_accept_template_letter(): void
     {
         $this->acting()->postJson('/api/v1/posts', [

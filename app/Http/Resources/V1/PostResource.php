@@ -64,6 +64,7 @@ class PostResource extends JsonResource
             'platforms' => $this->platforms,
             'image_drive_urls' => $this->image_drive_urls,
             'status' => $this->status,
+            'blocked_reason' => $this->blocked_reason,
             'publish_state' => $this->publish_state,
             'publish_error' => $this->publish_error === null
                 ? null

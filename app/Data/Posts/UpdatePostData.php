@@ -39,6 +39,8 @@ final readonly class UpdatePostData
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
         public bool $hasTemplate = false,
+        public ?string $blockedReason = null,
+        public bool $hasBlockedReason = false,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -140,6 +142,10 @@ final readonly class UpdatePostData
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
             hasTemplate: array_key_exists('template', $payload),
+            blockedReason: array_key_exists('blocked_reason', $payload)
+                ? ($payload['blocked_reason'] !== null ? (string) $payload['blocked_reason'] : null)
+                : null,
+            hasBlockedReason: array_key_exists('blocked_reason', $payload),
         );
     }
 }
