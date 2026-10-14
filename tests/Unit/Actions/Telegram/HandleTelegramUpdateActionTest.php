@@ -433,6 +433,27 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame(0, ScratchpadEntry::count());
     }
 
+    public function test_a_command_between_the_ask_and_the_yes_cancels_the_pending_delete()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handle($config, $this->update(1, 'delete my last note'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, '/help'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
+    public function test_a_scratch_pad_save_with_no_body_keeps_the_original_message()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient('{"action":"create_scratchpad"}'))->handle($config, $this->update(1, 'put this in the scratch pad: dollars are cents'));
+
+        $this->assertSame('put this in the scratch pad: dollars are cents', ScratchpadEntry::withoutGlobalScopes()->sole()->body);
+    }
+
     public function test_deleting_an_idea_drops_it_after_confirmation_and_ignores_other_workspaces()
     {
         $config = $this->linkedAiConfig();

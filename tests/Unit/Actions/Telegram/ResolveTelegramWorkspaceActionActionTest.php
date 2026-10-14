@@ -40,6 +40,14 @@ class ResolveTelegramWorkspaceActionActionTest extends TestCase
         $this->assertSame(['action' => 'create_scratchpad', 'body' => 'hi'], $action);
     }
 
+    public function test_raw_line_breaks_in_a_dictated_body_do_not_break_parsing()
+    {
+        $action = $this->resolve("{\"action\":\"create_scratchpad\",\"body\":\"line one\nline two\"}");
+
+        $this->assertSame('create_scratchpad', $action['action']);
+        $this->assertSame('line one line two', $action['body']);
+    }
+
     public function test_none_prose_and_unknown_actions_return_null()
     {
         $this->assertNull($this->resolve('none'));
