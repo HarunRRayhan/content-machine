@@ -29,6 +29,7 @@ type Props = {
     postId: number;
     title: string;
     status: string;
+    blockedReason: string | null;
     platforms: string[];
     language?: string | null;
     templateMeta: {
@@ -217,6 +218,7 @@ export default function PostOverview({
     postId,
     title,
     status,
+    blockedReason,
     platforms,
     language,
     templateMeta,
@@ -279,7 +281,7 @@ export default function PostOverview({
     const awaitingApproval = approvalState === 'pending';
     const scheduledAt = earliestWhen(groups, effectiveTimezone);
 
-    function advanceStatus(nextStatus: 'archived' | 'posted') {
+    function advanceStatus(nextStatus: 'archived' | 'draft' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {
             return;
         }
@@ -441,6 +443,23 @@ export default function PostOverview({
                                     onClick={() => advanceStatus('archived')}
                                 >
                                     🗄️ Archive
+                                </button>
+                            </>
+                        ) : studioStatus === 'blocked' ? (
+                            <>
+                                <span className="badge">⛔ Blocked</span>
+                                {blockedReason && (
+                                    <p className="schedule-it-hint">
+                                        {blockedReason}
+                                    </p>
+                                )}
+                                <button
+                                    type="button"
+                                    className="undo"
+                                    disabled={busy}
+                                    onClick={() => advanceStatus('draft')}
+                                >
+                                    ↩︎ Unblock
                                 </button>
                             </>
                         ) : showPublishControls ? (

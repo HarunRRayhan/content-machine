@@ -311,6 +311,45 @@ class UpdatePostActionTest extends TestCase
         $this->assertSame('pending', $post->approval_state);
     }
 
+    public function test_blocked_status_keeps_its_reason_until_the_post_leaves_blocked(): void
+    {
+        $post = Post::factory()->create(['title' => 'Stuck', 'status' => 'draft']);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'status' => 'blocked',
+            'blocked_reason' => 'Scheduler cannot publish carousels.',
+        ], $post));
+
+        $post->refresh();
+        $this->assertSame('blocked', $post->status);
+        $this->assertSame('Scheduler cannot publish carousels.', $post->blocked_reason);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['title' => 'Still stuck'], $post));
+
+        $this->assertSame('Scheduler cannot publish carousels.', $post->refresh()->blocked_reason);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['status' => 'draft'], $post));
+
+        $post->refresh();
+        $this->assertSame('draft', $post->status);
+        $this->assertNull($post->blocked_reason);
+    }
+
+    public function test_a_publish_locked_post_cannot_be_blocked(): void
+    {
+        $post = Post::factory()->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [['post_id' => '99']]],
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'status' => 'blocked',
+            'blocked_reason' => 'Too late.',
+        ], $post));
+    }
+
     public function test_published_posts_can_be_archived_and_unarchived(): void
     {
         $post = Post::factory()->create([

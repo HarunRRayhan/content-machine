@@ -41,6 +41,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property CarbonImmutable|null $approved_at
  * @property int|null $approved_by_user_id
  * @property string $status
+ * @property string|null $blocked_reason
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
@@ -55,8 +56,8 @@ class Post extends Model
         'ready',
         'scheduled',
         'posted',
+        'blocked',
         'archived',
-        'dropped',
     ];
 
     public const PUBLISH_STATES = [
@@ -98,6 +99,7 @@ class Post extends Model
         'approved_at',
         'approved_by_user_id',
         'status',
+        'blocked_reason',
         'created_by_user_id',
     ];
 

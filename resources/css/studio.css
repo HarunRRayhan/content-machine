@@ -1919,6 +1919,12 @@
     border-color: var(--line);
 }
 
+.studio-page .pill.st-blocked {
+    color: var(--bad);
+    background: color-mix(in srgb, var(--bad) 12%, transparent);
+    border-color: color-mix(in srgb, var(--bad) 32%, transparent);
+}
+
 .studio-page .pill.score {
     font-family: var(--font-cue);
     font-size: 11px;

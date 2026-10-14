@@ -180,8 +180,32 @@ class PostsControllerTest extends TestCase
                 ->where('counts.ready', 1)
                 ->where('counts.scheduled', 1)
                 ->where('counts.posted', 0)
+                ->where('counts.blocked', 0)
                 ->where('counts.archived', 0)
-                ->where('counts.dropped', 0)
+                ->missing('counts.dropped')
+            );
+    }
+
+    public function test_index_lists_blocked_posts_with_their_reason(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Post::factory()->for($workspace)->create([
+            'title' => 'Stuck one',
+            'status' => 'blocked',
+            'blocked_reason' => 'Scheduler rejects the carousel.',
+        ]);
+        Post::factory()->for($workspace)->create(['title' => 'Draft one', 'status' => 'draft']);
+
+        $this->get(route('posts.index', ['status' => 'blocked']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/index')
+                ->has('items.data', 1)
+                ->where('items.data.0.title', 'Stuck one')
+                ->where('items.data.0.status', 'blocked')
+                ->where('items.data.0.blocked_reason', 'Scheduler rejects the carousel.')
+                ->where('counts.blocked', 1)
+                ->where('filters.status', 'blocked')
             );
     }
 

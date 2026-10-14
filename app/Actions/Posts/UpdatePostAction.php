@@ -92,6 +92,16 @@ class UpdatePostAction
                 $attributes['status'] = $data->status;
             }
 
+            // The reason only means something while blocked; leaving the
+            // state clears it so a stale blocker never outlives the block.
+            if ($data->hasBlockedReason) {
+                $attributes['blocked_reason'] = $data->blockedReason;
+            }
+
+            if (($data->status ?? $post->status) !== 'blocked') {
+                $attributes['blocked_reason'] = null;
+            }
+
             if ($post->approval_state === 'approved' && $contentChanged) {
                 $post->invalidateApproval();
             }
@@ -200,8 +210,7 @@ class UpdatePostAction
     private function isSafePublishedStatusTransition(Post $post, ?string $nextStatus): bool
     {
         return ($post->status === 'posted' && $nextStatus === 'archived')
-            || (in_array($post->status, ['archived', 'dropped'], true)
-                && $nextStatus === 'posted');
+            || ($post->status === 'archived' && $nextStatus === 'posted');
     }
 
     private function shouldResetFailedPublish(Post $post, bool $contentChanged, bool $publishLocked): bool

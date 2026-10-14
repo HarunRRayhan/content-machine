@@ -41,8 +41,8 @@ class PostsController extends Controller
         'ready',
         'scheduled',
         'posted',
+        'blocked',
         'archived',
-        'dropped',
     ];
 
     /**
@@ -56,6 +56,8 @@ class PostsController extends Controller
         $workspace = $this->currentWorkspace($request);
 
         $status = $request->string('status')->toString() ?: 'draft';
+        // Old bookmarks used the merged post status `dropped`.
+        $status = $status === 'dropped' ? 'archived' : $status;
         $language = $request->string('language')->toString() ?: null;
         $search = $request->string('q')->toString() ?: null;
 
@@ -80,8 +82,7 @@ class PostsController extends Controller
             $postsQuery = Post::query()
                 ->where('workspace_id', $workspace->id)
                 ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
-                ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
-                ->when(in_array($status, ['scheduled', 'posted', 'ready'], true), fn ($builder) => $builder->where('status', $status))
+                ->when(in_array($status, ['scheduled', 'posted', 'ready', 'blocked', 'archived'], true), fn ($builder) => $builder->where('status', $status))
                 ->when($language, fn ($builder) => $builder->where('language', $language))
                 ->when($search, function ($builder) use ($search) {
                     $like = '%'.$search.'%';
@@ -102,6 +103,7 @@ class PostsController extends Controller
                 'title',
                 'template',
                 'status',
+                'blocked_reason',
                 'publish_state',
                 'approval_state',
                 'language',
@@ -262,6 +264,7 @@ class PostsController extends Controller
             'template' => $post->template,
             'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
             'status' => $post->status,
+            'blocked_reason' => $post->blocked_reason,
             'publish_state' => $post->publish_state,
             'approval_state' => $post->approval_state ?? 'approved',
             'language' => $post->language,
@@ -397,6 +400,7 @@ class PostsController extends Controller
             'template' => $post->template,
             'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
             'status' => $post->status,
+            'blocked_reason' => $post->blocked_reason,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
             'publish_retryable' => $post->canRetryPublish(),

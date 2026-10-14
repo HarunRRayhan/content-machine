@@ -147,6 +147,7 @@ class PostsApiController extends Controller
             'image_drive_urls' => ['sometimes', 'nullable', 'array'],
             'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
+            'blocked_reason' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'postsyncer' => ['prohibited'],
             'publish_state' => ['prohibited'],
             'publish_error' => ['prohibited'],
