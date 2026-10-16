@@ -56,8 +56,8 @@
         },
         "bangla": {
             "twitter": {
-                "text": "off",
-                "photo": "off",
+                "text": "on",
+                "photo": "on",
                 "thread": "off"
             },
             "linkedin": {
