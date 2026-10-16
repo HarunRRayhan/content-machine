@@ -622,6 +622,7 @@ class PublishPostAction
                 when: $group->when,
                 publishNow: $group->publishNow,
                 threadTweets: $group->threadTweets,
+                mediaPerTweet: $group->mediaPerTweet,
                 firstComment: PublishGroup::supportsFirstComment($platform)
                     ? $group->firstComment
                     : null,
@@ -1721,8 +1722,9 @@ class PublishPostAction
             $contentItems = [];
             foreach ($threadTweets as $index => $tweet) {
                 $item = ['text' => $tweet];
-                if (array_key_exists($index, $mediaIds)) {
-                    $item['media'] = [$mediaIds[$index]];
+                $media = array_slice($mediaIds, $index * $group->mediaPerTweet, $group->mediaPerTweet);
+                if ($media !== []) {
+                    $item['media'] = $media;
                 }
                 $contentItems[] = $item;
             }

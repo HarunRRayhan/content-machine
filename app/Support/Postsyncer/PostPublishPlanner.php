@@ -13,6 +13,9 @@ use InvalidArgumentException;
  */
 class PostPublishPlanner
 {
+    /** X allows at most four images in one tweet. */
+    private const X_MAX_IMAGES = 4;
+
     public function __construct(
         private readonly MediaUrlResolver $mediaUrlResolver,
     ) {}
@@ -266,6 +269,35 @@ class PostPublishPlanner
                 publishNow: $when === null,
                 threadTweets: $threadTweets,
             );
+        }
+
+        // X caps a tweet at four images: a longer set becomes a thread of four-image
+        // tweets (caption first, then "2/N" markers). Same rule for every language.
+        if (isset($remaining['twitter'])) {
+            $mediaUrls = $this->resolveMediaUrls($post, $remaining['twitter'], $defaultMediaUrls);
+
+            if (count($mediaUrls) > self::X_MAX_IMAGES) {
+                $twitter = $remaining['twitter'];
+                unset($remaining['twitter']);
+
+                $tweetCount = (int) ceil(count($mediaUrls) / self::X_MAX_IMAGES);
+                $tweets = [$twitter['caption']];
+                for ($n = 2; $n <= $tweetCount; $n++) {
+                    $tweets[] = "{$n}/{$tweetCount}";
+                }
+
+                $groups[] = new PublishGroup(
+                    language: $language,
+                    workspaceId: $workspaceId,
+                    platforms: ['twitter'],
+                    mediaUrls: $mediaUrls,
+                    captions: ['twitter' => $twitter['caption']],
+                    when: $when,
+                    publishNow: $when === null,
+                    threadTweets: $tweets,
+                    mediaPerTweet: self::X_MAX_IMAGES,
+                );
+            }
         }
 
         $buckets = [];

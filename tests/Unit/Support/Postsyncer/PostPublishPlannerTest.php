@@ -560,6 +560,34 @@ class PostPublishPlannerTest extends TestCase
         $this->assertNull($threadsGroup->threadTweets);
     }
 
+    public function test_twitter_images_over_four_become_a_thread_of_four_image_tweets(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => ['platforms' => ['twitter' => ['text' => 'on', 'photo' => 'on']]],
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $images = array_map(fn (int $n) => "https://drive.google.com/file/d/img{$n}/view", range(1, 9));
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['twitter'],
+            'captions' => ['Bangla' => ['twitter' => ['caption' => 'Main tweet', 'images' => $images]]],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['Main tweet', '2/3', '3/3'], $groups[0]->threadTweets);
+        $this->assertSame(4, $groups[0]->mediaPerTweet);
+        $this->assertCount(9, $groups[0]->mediaUrls);
+    }
+
     public function test_threads_with_tweet_segments_gets_own_thread_group(): void
     {
         $workspace = Workspace::factory()->create();

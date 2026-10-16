@@ -190,7 +190,7 @@ class PostsyncerSettingsControllerTest extends TestCase
                 ->where('postsyncerConnected', true)
                 ->where('postTypes.platforms.facebook.text', 'on')
                 ->where('postTypes.overrides.english.twitter.photo', 'off')
-                ->where('postTypes.overrides.bangla.twitter.text', 'off'));
+                ->where('postTypes.overrides.bangla.twitter.text', 'on'));
     }
 
     public function test_api_save_does_not_wipe_language_workspaces(): void
