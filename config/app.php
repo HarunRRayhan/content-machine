@@ -167,4 +167,14 @@ return [
         FILTER_VALIDATE_BOOLEAN,
     ),
 
+    // Deploy fingerprint for GET /api/version. Railway injects these at runtime.
+    'deploy' => [
+        'commit' => env('RAILWAY_GIT_COMMIT_SHA'),
+        'message' => env('RAILWAY_GIT_COMMIT_MESSAGE'),
+        'branch' => env('RAILWAY_GIT_BRANCH'),
+        'deployment_id' => env('RAILWAY_DEPLOYMENT_ID'),
+        'environment' => env('RAILWAY_ENVIRONMENT_NAME'),
+        'service' => env('RAILWAY_SERVICE_NAME'),
+    ],
+
 ];
