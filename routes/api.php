@@ -10,7 +10,11 @@ use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
 use App\Http\Controllers\Api\V1\VideoSeriesApiController;
+use App\Http\Controllers\Api\VersionController;
 use Illuminate\Support\Facades\Route;
+
+// Public, unauthenticated deploy fingerprint (commit, branch, deployment id).
+Route::get('version', VersionController::class)->name('api.version');
 
 /*
 |--------------------------------------------------------------------------
