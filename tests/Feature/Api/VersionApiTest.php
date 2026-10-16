@@ -14,6 +14,6 @@ class VersionApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('commit', '0b5c436ebcf64a5cd4c8289970a5648642624246')
             ->assertJsonPath('short', '0b5c436')
-            ->assertJsonStructure(['branch', 'deployment_id', 'environment', 'service', 'php', 'laravel']);
+            ->assertJsonStructure(['branch', 'deployment_id', 'environment', 'service']);
     }
 }

@@ -20,13 +20,11 @@ class VersionController extends Controller
         return response()->json([
             'commit' => $commit,
             'short' => $commit === null ? null : substr($commit, 0, 7),
-            'message' => $deploy['message'] ?? null,
+            'message' => strtok((string) ($deploy['message'] ?? ''), "\n") ?: null,
             'branch' => $deploy['branch'] ?? null,
             'deployment_id' => $deploy['deployment_id'] ?? null,
             'environment' => $deploy['environment'] ?? app()->environment(),
             'service' => $deploy['service'] ?? null,
-            'php' => PHP_VERSION,
-            'laravel' => app()->version(),
         ]);
     }
 }

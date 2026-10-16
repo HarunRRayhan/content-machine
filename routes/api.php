@@ -14,7 +14,7 @@ use App\Http\Controllers\Api\VersionController;
 use Illuminate\Support\Facades\Route;
 
 // Public, unauthenticated deploy fingerprint (commit, branch, deployment id).
-Route::get('version', VersionController::class)->name('api.version');
+Route::get('version', VersionController::class)->middleware('throttle:60,1')->name('api.version');
 
 /*
 |--------------------------------------------------------------------------
