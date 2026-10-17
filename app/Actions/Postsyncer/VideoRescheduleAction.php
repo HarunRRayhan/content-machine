@@ -24,6 +24,8 @@ use Throwable;
  */
 final class VideoRescheduleAction
 {
+    private const LEASE_MINUTES = 15;
+
     public function __construct(
         private readonly PostsyncerPostVerifier $verifier,
     ) {}
@@ -59,22 +61,17 @@ final class VideoRescheduleAction
             throw new PostsyncerException('This video has no completed PostSyncer publish to reschedule.');
         }
 
-        $existing = $progress['reschedule'] ?? null;
-        if (is_array($existing) && ! CarbonImmutable::parse($existing['target_when'])->equalTo($when)) {
-            throw new PostsyncerException(
-                'A previous reschedule is unfinished. Retry it with its original target time first.',
-            );
-        }
-
         $completed = $this->completedGroups($video, $progress);
-        $publicGroups = $video->postsyncer['groups'];
 
-        $this->markReschedule($video, $when, 'running', null);
+        // Every group is checked against its own last verified payload, so a
+        // new target can replace an unfinished one. A group whose remote time
+        // matches neither is refused by the verifier before any PUT.
+        $this->setMarker($video, $when, 'running', null);
 
         $client = new PostsyncerClient($config);
 
         try {
-            foreach ($completed as $index => $group) {
+            foreach ($completed as $group) {
                 $postId = (string) $group['post_id'];
                 $source = $group['expected_payload'];
                 $platforms = array_values(array_map('strval', $group['platforms']));
@@ -91,23 +88,19 @@ final class VideoRescheduleAction
                     $verified = $this->putAndVerify($client, $targetPayload, $platforms, $groupTarget, $postId);
                 }
 
-                $completed[$index]['expected_payload'] = $targetPayload;
-                $completed[$index]['scheduled_at'] = (string) ($verified['scheduled_at'] ?? '');
-                $publicGroups = $this->replacePublicGroup($publicGroups, $postId, $verified);
-
-                $this->checkpoint($video, $completed, $publicGroups, $when, 'running', null);
+                $this->checkpointGroup($video, $postId, $targetPayload, $verified);
             }
         } catch (Throwable $exception) {
             $state = $exception instanceof PostsyncerException && $exception->outcomeUnknown
                 ? 'uncertain'
                 : 'failed';
 
-            $this->markReschedule($video, $when, $state, $exception->getMessage());
+            $this->setMarker($video, $when, $state, $exception->getMessage());
 
             throw $exception;
         }
 
-        $this->checkpoint($video, $completed, $publicGroups, $when, null, null);
+        $this->finish($video);
 
         return $video->fresh() ?? $video;
     }
@@ -220,55 +213,47 @@ final class VideoRescheduleAction
     }
 
     /**
-     * @param  list<array<string, mixed>>  $publicGroups
+     * Write one verified group back under a row lock. Reads the latest row, so
+     * a concurrent change to another group is never overwritten.
+     *
+     * @param  array<string, mixed>  $payload
      * @param  array<string, mixed>  $remote
-     * @return list<array<string, mixed>>
      */
-    private function replacePublicGroup(array $publicGroups, string $postId, array $remote): array
+    private function checkpointGroup(Video $video, string $postId, array $payload, array $remote): void
     {
-        foreach ($publicGroups as $index => $group) {
-            if ((string) ($group['post_id'] ?? '') === $postId) {
-                $publicGroups[$index]['status'] = strtoupper((string) ($remote['status'] ?? ''));
-                $publicGroups[$index]['scheduled_at'] = (string) ($remote['scheduled_at'] ?? '');
+        $scheduledAt = (string) ($remote['scheduled_at'] ?? '');
+        $status = strtoupper((string) ($remote['status'] ?? ''));
 
-                return $publicGroups;
-            }
-        }
-
-        throw new PostsyncerException('The PostSyncer group is missing from Content Machine.');
-    }
-
-    /**
-     * @param  list<array<string, mixed>>  $completed
-     * @param  list<array<string, mixed>>  $publicGroups
-     */
-    private function checkpoint(
-        Video $video,
-        array $completed,
-        array $publicGroups,
-        CarbonImmutable $when,
-        ?string $state,
-        ?string $error,
-    ): void {
-        DB::transaction(function () use ($video, $completed, $publicGroups, $when, $state, $error): void {
+        DB::transaction(function () use ($video, $postId, $payload, $scheduledAt, $status): void {
             $locked = Video::query()->whereKey($video->getKey())->lockForUpdate()->firstOrFail();
             $progress = $locked->publish_progress;
+            $postsyncer = is_array($locked->postsyncer) ? $locked->postsyncer : [];
 
-            if (! is_array($progress)) {
+            if (! is_array($progress) || ! is_array($postsyncer['groups'] ?? null)) {
                 throw new PostsyncerException('The video publish progress changed while rescheduling.');
             }
 
-            $progress['completed_groups'] = $completed;
-            $progress['reschedule'] = $state === null
-                ? null
-                : ['target_when' => $when->toIso8601String(), 'state' => $state, 'error' => $error];
-
-            if ($progress['reschedule'] === null) {
-                unset($progress['reschedule']);
+            $inProgress = 0;
+            foreach ($progress['completed_groups'] ?? [] as $i => $group) {
+                if (is_array($group) && (string) ($group['post_id'] ?? '') === $postId) {
+                    $progress['completed_groups'][$i]['expected_payload'] = $payload;
+                    $progress['completed_groups'][$i]['scheduled_at'] = $scheduledAt;
+                    $inProgress++;
+                }
             }
 
-            $postsyncer = is_array($locked->postsyncer) ? $locked->postsyncer : [];
-            $postsyncer['groups'] = $publicGroups;
+            $inPublic = 0;
+            foreach ($postsyncer['groups'] as $i => $group) {
+                if (is_array($group) && (string) ($group['post_id'] ?? '') === $postId) {
+                    $postsyncer['groups'][$i]['status'] = $status;
+                    $postsyncer['groups'][$i]['scheduled_at'] = $scheduledAt;
+                    $inPublic++;
+                }
+            }
+
+            if ($inProgress !== 1 || $inPublic !== 1) {
+                throw new PostsyncerException('The PostSyncer group is missing from Content Machine.');
+            }
 
             $locked->forceFill([
                 'publish_progress' => $progress,
@@ -279,7 +264,26 @@ final class VideoRescheduleAction
         $video->refresh();
     }
 
-    private function markReschedule(Video $video, CarbonImmutable $when, string $state, ?string $error): void
+    private function finish(Video $video): void
+    {
+        DB::transaction(function () use ($video): void {
+            $locked = Video::query()->whereKey($video->getKey())->lockForUpdate()->firstOrFail();
+            $progress = $locked->publish_progress;
+
+            if (is_array($progress)) {
+                unset($progress['reschedule']);
+                $locked->forceFill(['publish_progress' => $progress])->save();
+            }
+        });
+
+        $video->refresh();
+    }
+
+    /**
+     * Records the reschedule marker. A running marker is a lease: a second
+     * request is refused until it expires, so two calls cannot interleave PUTs.
+     */
+    private function setMarker(Video $video, CarbonImmutable $when, string $state, ?string $error): void
     {
         DB::transaction(function () use ($video, $when, $state, $error): void {
             $locked = Video::query()->whereKey($video->getKey())->lockForUpdate()->firstOrFail();
@@ -289,9 +293,18 @@ final class VideoRescheduleAction
                 throw new PostsyncerException('The video publish progress changed while rescheduling.');
             }
 
+            $existing = $progress['reschedule'] ?? null;
+            if ($state === 'running'
+                && is_array($existing)
+                && ($existing['state'] ?? null) === 'running'
+                && CarbonImmutable::parse($existing['started_at'])->addMinutes(self::LEASE_MINUTES)->isFuture()) {
+                throw new PostsyncerException('Another reschedule is already running for this video.');
+            }
+
             $progress['reschedule'] = [
                 'target_when' => $when->toIso8601String(),
                 'state' => $state,
+                'started_at' => CarbonImmutable::now()->toIso8601String(),
                 'error' => $error,
             ];
 

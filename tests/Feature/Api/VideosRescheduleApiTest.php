@@ -130,19 +130,28 @@ class VideosRescheduleApiTest extends TestCase
         $this->assertSame($this->target->format('Y-m-d H:i'), $video->postsyncer['groups'][0]['scheduled_at']);
         $this->assertSame($this->source->format('Y-m-d H:i'), $video->postsyncer['groups'][1]['scheduled_at']);
 
-        // A different target is refused while the first attempt is unfinished.
+        // A retry may choose a new target: each group is checked against the time it last had.
         $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reschedule', [
             'when' => $this->target->addHour()->toIso8601String(),
-        ])->assertUnprocessable()->assertJsonValidationErrors('when');
-
-        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reschedule', [
-            'when' => $this->target->toIso8601String(),
         ])->assertOk();
 
-        $this->assertSame(1, $this->puts['42']);
+        $this->assertSame(2, $this->puts['42']);
         $this->assertSame(2, $this->puts['43']);
         $video->refresh();
         $this->assertArrayNotHasKey('reschedule', $video->publish_progress);
+        $this->assertSame($this->target->addHour()->format('Y-m-d H:i'), $video->postsyncer['groups'][1]['scheduled_at']);
+    }
+
+    public function test_a_remote_post_that_no_longer_matches_is_refused_before_any_put(): void
+    {
+        $video = $this->scheduledVideo(['42']);
+        $this->remote['42']['remote_text'] = 'Edited in PostSyncer';
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reschedule', [
+            'when' => $this->target->toIso8601String(),
+        ])->assertUnprocessable();
+
+        $this->assertSame(0, $this->puts['42'] ?? 0);
     }
 
     public function test_a_lost_put_response_is_resolved_by_verifying_the_remote_time(): void
@@ -189,6 +198,19 @@ class VideosRescheduleApiTest extends TestCase
         $video->refresh();
         $this->assertSame('scheduled', $video->status);
         $this->assertCount(2, $video->postsyncer['groups']);
+    }
+
+    public function test_reconcile_groups_deleted_refuses_when_postsyncer_errors(): void
+    {
+        $video = $this->scheduledVideo(['42']);
+        Http::fake(['postsyncer.com/api/v1/posts/42' => Http::response(['message' => 'unavailable'], 500)]);
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-groups-deleted', [
+            'confirmed_deleted' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('confirmed_deleted');
+
+        $video->refresh();
+        $this->assertSame('scheduled', $video->status);
     }
 
     public function test_reconcile_groups_deleted_requires_confirmation(): void
@@ -296,7 +318,7 @@ class VideosRescheduleApiTest extends TestCase
         return [
             'id' => (int) $id,
             'workspace_id' => 15211,
-            'content' => [['text' => 'Hello', 'media' => [['id' => 915]]]],
+            'content' => [['text' => $payload['remote_text'] ?? 'Hello', 'media' => [['id' => 915]]]],
             'platforms' => [[
                 'platform' => 'facebook',
                 'account_id' => 100,
