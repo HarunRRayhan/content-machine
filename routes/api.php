@@ -159,6 +159,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.reconcile-media-absent');
 
+    Route::post('videos/{human_id}/reschedule', [VideosApiController::class, 'reschedule'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reschedule');
+
+    Route::post('videos/{human_id}/reconcile-groups-deleted', [VideosApiController::class, 'reconcileGroupsDeleted'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-groups-deleted');
+
     Route::get('posts', [PostsApiController::class, 'index'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.index');
