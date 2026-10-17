@@ -13,11 +13,14 @@ use Throwable;
 /**
  * After the owner deletes a video's PostSyncer posts, clear the stored groups
  * so the normal publish route can schedule the video again. Only runs when a
- * read-only GET confirms every stored post is gone (404).
+ * read-only GET confirms every stored post is gone (404). With
+ * $ownerRemovedPublished, a post still PUBLISHED is also accepted, because the
+ * owner has confirmed the live content was removed from the platforms.
+ * Cleared groups are kept under postsyncer.cleared_groups for audit.
  */
 final class ReconcileVideoGroupsDeletedAction
 {
-    public function handle(Video $video, Workspace $workspace): Video
+    public function handle(Video $video, Workspace $workspace, bool $ownerRemovedPublished = false): Video
     {
         abort_if($video->workspace_id !== $workspace->id, 404);
 
@@ -44,20 +47,41 @@ final class ReconcileVideoGroupsDeletedAction
         $config = PostsyncerConfig::fromWorkspace($workspace);
         $client = new PostsyncerClient($config);
 
+        $verified = [];
         foreach ($groups as $group) {
             $postId = (string) ($group['post_id'] ?? '');
             if ($postId === '') {
                 throw new PostsyncerException('A stored PostSyncer group has no post id.');
             }
 
-            $this->assertDeleted($client, $postId);
+            $verified[] = [
+                'group' => $group,
+                'remote_status' => $this->assertCleared($client, $postId, $ownerRemovedPublished),
+            ];
         }
 
-        DB::transaction(function () use ($video): void {
+        DB::transaction(function () use ($video, $groups, $verified, $ownerRemovedPublished): void {
             $locked = Video::query()->whereKey($video->getKey())->lockForUpdate()->firstOrFail();
 
             if ($locked->isPublishInProgress() || $locked->publish_state !== 'succeeded') {
                 throw new PostsyncerException('The video publish state changed while reconciling. Retry.');
+            }
+
+            if (($locked->postsyncer['groups'] ?? null) !== $groups) {
+                throw new PostsyncerException('The stored PostSyncer groups changed while reconciling. Retry.');
+            }
+
+            $postsyncer = $locked->postsyncer;
+            $clearedAt = now()->toIso8601String();
+            $cleared = is_array($postsyncer['cleared_groups'] ?? null) ? $postsyncer['cleared_groups'] : [];
+
+            foreach ($verified as $entry) {
+                $cleared[] = [
+                    'group' => $entry['group'],
+                    'remote_status' => $entry['remote_status'],
+                    'owner_removed_published' => $ownerRemovedPublished,
+                    'cleared_at' => $clearedAt,
+                ];
             }
 
             $locked->forceFill([
@@ -65,20 +89,23 @@ final class ReconcileVideoGroupsDeletedAction
                 'publish_state' => 'idle',
                 'publish_error' => null,
                 'publish_progress' => null,
-                'postsyncer' => ['groups' => []],
+                'postsyncer' => ['groups' => [], 'cleared_groups' => $cleared],
             ])->save();
         });
 
         return $video->fresh() ?? $video;
     }
 
-    private function assertDeleted(PostsyncerClient $client, string $postId): void
+    /**
+     * @return string 'DELETED' when PostSyncer returns 404, otherwise the live status ('PUBLISHED')
+     */
+    private function assertCleared(PostsyncerClient $client, string $postId, bool $ownerRemovedPublished): string
     {
         try {
-            $client->getPost($postId);
+            $remote = $client->getPost($postId);
         } catch (PostsyncerException $exception) {
             if ($exception->getCode() === 404) {
-                return;
+                return 'DELETED';
             }
 
             throw new PostsyncerException(
@@ -92,6 +119,13 @@ final class ReconcileVideoGroupsDeletedAction
                 0,
                 $exception,
             );
+        }
+
+        $body = is_array($remote['data'] ?? null) ? $remote['data'] : $remote;
+        $status = strtoupper((string) ($body['status'] ?? ''));
+
+        if ($ownerRemovedPublished && $status === 'PUBLISHED') {
+            return 'PUBLISHED';
         }
 
         throw new PostsyncerException("PostSyncer post {$postId} still exists. Delete it in PostSyncer first.");
