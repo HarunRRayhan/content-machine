@@ -71,21 +71,6 @@ class PublishPostAction
             return;
         }
 
-        // An abandoned retry is terminal for this post: refuse before claiming so no run state is left behind.
-        if (is_array($progress) && ($progress['abandoned'] ?? []) !== []) {
-            DB::transaction(function () use ($post): void {
-                $locked = Post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
-
-                if ($locked->publish_state !== 'running') {
-                    $locked->forceFill([
-                        'publish_error' => 'This post has an abandoned PostSyncer retry and cannot be published again.',
-                    ])->save();
-                }
-            });
-
-            return;
-        }
-
         $claimLeaseId = null;
 
         try {
@@ -136,6 +121,11 @@ class PublishPostAction
                         return;
                     }
                     $groupKey = $this->groupKey($config, $group);
+                    if ($this->isAbandonedGroup($progress, $groupKey)) {
+                        throw new PostsyncerException(
+                            'This PostSyncer group was abandoned and cannot be created again.'
+                        );
+                    }
                     $idempotencyKey = $this->idempotencyKey(
                         (string) $progress['operation_id'],
                         $index,
@@ -2486,6 +2476,17 @@ class PublishPostAction
                 return null;
             }
 
+            // Terminal for this post. Checked under the row lock, before any run state is written.
+            if (is_array($progress) && ($progress['abandoned'] ?? []) !== []) {
+                if ($locked->publish_state !== 'running') {
+                    $locked->forceFill([
+                        'publish_error' => 'This post has an abandoned PostSyncer retry and cannot be published again.',
+                    ])->save();
+                }
+
+                return null;
+            }
+
             $legacyAccountFailure = LegacyPublishProgress::isMissingAccountFailure(
                 $locked->publish_error,
                 is_array($progress) ? $progress : null,
@@ -3908,6 +3909,20 @@ class PublishPostAction
         ksort($canonical);
 
         return $canonical;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function isAbandonedGroup(array $progress, string $groupKey): bool
+    {
+        foreach ($progress['abandoned'] ?? [] as $abandoned) {
+            if (is_array($abandoned) && ($abandoned['group_key'] ?? null) === $groupKey) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
