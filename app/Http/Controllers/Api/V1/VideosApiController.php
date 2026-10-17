@@ -233,10 +233,15 @@ class VideosApiController extends Controller
 
         $request->validate([
             'confirmed_deleted' => ['required', 'accepted'],
+            'owner_removed_published' => ['sometimes', 'boolean'],
         ]);
 
         try {
-            $video = $action->handle($video, $this->currentWorkspace());
+            $video = $action->handle(
+                $video,
+                $this->currentWorkspace(),
+                $request->boolean('owner_removed_published'),
+            );
         } catch (PostsyncerException $exception) {
             throw ValidationException::withMessages([
                 'confirmed_deleted' => $exception->getMessage(),

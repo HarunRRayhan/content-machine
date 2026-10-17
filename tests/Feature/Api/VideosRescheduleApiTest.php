@@ -11,6 +11,7 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class VideosRescheduleApiTest extends TestCase
@@ -26,6 +27,9 @@ class VideosRescheduleApiTest extends TestCase
 
     /** @var array<string, int> PUT calls per post id */
     private array $puts = [];
+
+    /** @var array<string, string> Post id to remote status, when not SCHEDULED */
+    private array $remoteStatus = [];
 
     /** @var array<string, string> Post id to failure mode for its next PUT: "reject" (4xx) or "lost" (applied, 503 returned) */
     private array $failNextPut = [];
@@ -223,6 +227,85 @@ class VideosRescheduleApiTest extends TestCase
             ->assertJsonValidationErrors('confirmed_deleted');
     }
 
+    public function test_reconcile_groups_deleted_accepts_published_posts_when_owner_removed_them(): void
+    {
+        $video = $this->scheduledVideo(['42', '43']);
+        unset($this->remote['42']);
+        $this->remoteStatus['43'] = 'PUBLISHED';
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-groups-deleted', [
+            'confirmed_deleted' => true,
+            'owner_removed_published' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'recorded')
+            ->assertJsonPath('data.publish_state', 'idle')
+            ->assertJsonPath('data.postsyncer.groups', []);
+
+        $video->refresh();
+        $cleared = $video->postsyncer['cleared_groups'];
+        $this->assertCount(2, $cleared);
+        $this->assertSame(['DELETED', 'PUBLISHED'], [$cleared[0]['remote_status'], $cleared[1]['remote_status']]);
+        $this->assertSame('43', $cleared[1]['group']['post_id']);
+        $this->assertTrue($cleared[1]['owner_removed_published']);
+        $this->assertNotNull($cleared[1]['cleared_at']);
+    }
+
+    public function test_reconcile_groups_deleted_refuses_published_posts_without_the_owner_flag(): void
+    {
+        $video = $this->scheduledVideo(['42']);
+        $this->remoteStatus['42'] = 'PUBLISHED';
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-groups-deleted', [
+            'confirmed_deleted' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('confirmed_deleted');
+
+        $this->assertSame('scheduled', $video->refresh()->status);
+    }
+
+    public function test_reconcile_groups_deleted_refuses_scheduled_posts_even_with_the_owner_flag(): void
+    {
+        $video = $this->scheduledVideo(['42', '43']);
+        unset($this->remote['42']);
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-groups-deleted', [
+            'confirmed_deleted' => true,
+            'owner_removed_published' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('confirmed_deleted');
+
+        $video->refresh();
+        $this->assertSame('scheduled', $video->status);
+        $this->assertCount(2, $video->postsyncer['groups']);
+    }
+
+    public function test_reconcile_groups_deleted_refuses_failed_posts_even_with_the_owner_flag(): void
+    {
+        $video = $this->scheduledVideo(['42']);
+        $this->remoteStatus['42'] = 'FAILED';
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-groups-deleted', [
+            'confirmed_deleted' => true,
+            'owner_removed_published' => true,
+        ])->assertUnprocessable()->assertJsonValidationErrors('confirmed_deleted');
+
+        $this->assertSame('scheduled', $video->refresh()->status);
+    }
+
+    public function test_publish_is_allowed_again_after_groups_are_reconciled(): void
+    {
+        Queue::fake();
+        $video = $this->scheduledVideo(['42']);
+        unset($this->remote['42']);
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-groups-deleted', [
+            'confirmed_deleted' => true,
+        ])->assertOk();
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/publish', [
+            'when' => $this->target->toIso8601String(),
+        ])->assertOk();
+    }
+
     /**
      * @param  list<string>  $postIds
      */
@@ -324,7 +407,7 @@ class VideosRescheduleApiTest extends TestCase
                 'account_id' => 100,
                 'settings' => ['post_type' => 'REEL'],
             ]],
-            'status' => 'SCHEDULED',
+            'status' => $this->remoteStatus[$id] ?? 'SCHEDULED',
             'scheduled_at' => $schedule['date'].' '.$schedule['time'],
         ];
     }
