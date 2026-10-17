@@ -32,7 +32,9 @@ class PublishVideoActionTest extends TestCase
                 'facebook' => ['reel' => 'on'],
                 'instagram' => ['reel' => 'on'],
             ],
-            'overrides' => [],
+            'overrides' => [
+                'bangla' => ['twitter' => ['reel' => 'on']],
+            ],
         ];
     }
 
@@ -48,6 +50,7 @@ class PublishVideoActionTest extends TestCase
                     'platforms' => [
                         'facebook' => ['account_id' => 100, 'handle' => '@harun'],
                         'instagram' => ['account_id' => 101, 'handle' => '@harun.ig'],
+                        'twitter' => ['account_id' => 102, 'handle' => '@harun_x'],
                     ],
                 ],
             ],
@@ -170,6 +173,92 @@ class PublishVideoActionTest extends TestCase
         $this->assertStringEndsWith(':media', $mediaKey);
         $this->assertStringEndsWith(':post', $postKey);
         $this->assertNotSame($mediaKey, $postKey);
+    }
+
+    public function test_bangla_x_leg_publishes_as_a_second_video_only_group(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::sequence()
+                ->push(['media' => [['id' => 915], ['id' => 916]], 'count_stored' => 2], 200)
+                ->push(['media' => [['id' => 917]], 'count_stored' => 1], 200),
+            'postsyncer.com/api/v1/posts' => Http::sequence()
+                ->push(['id' => 42, 'status' => 'published'], 201)
+                ->push(['id' => 43, 'status' => 'published'], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'FB reel caption',
+                    'media' => [['id' => 915]],
+                    'cover_image' => ['thumbnail' => ['id' => 916]],
+                ]],
+                'platforms' => [
+                    ['platform' => 'facebook', 'settings' => ['post_type' => 'REELS']],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+            'postsyncer.com/api/v1/posts/43' => Http::response([
+                'id' => 43,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'X caption',
+                    'media' => [['id' => 917]],
+                ]],
+                'platforms' => [
+                    ['platform' => 'twitter', 'settings' => ['text' => 'X caption']],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+            'postsyncer.com/api/v1/analytics/posts/42' => Http::response([
+                'accounts' => [['platform' => 'facebook', 'account_id' => 100]],
+            ], 200),
+            'postsyncer.com/api/v1/analytics/posts/43' => Http::response([
+                'accounts' => [['platform' => 'twitter', 'account_id' => 102]],
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/cover/view',
+            'captions' => [
+                'main' => [
+                    'facebook' => ['caption' => 'FB reel caption'],
+                    'twitter' => ['caption' => 'X caption'],
+                ],
+            ],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook', 'twitter'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state, (string) $video->publish_error);
+        $this->assertCount(2, $video->postsyncer['groups']);
+        $this->assertSame(['facebook'], $video->postsyncer['groups'][0]['platforms']);
+        $this->assertSame(['twitter'], $video->postsyncer['groups'][1]['platforms']);
+
+        $uploads = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+        );
+        $this->assertCount(2, $uploads);
+        $this->assertCount(2, $uploads->first()[0]->data()['urls']);
+        $this->assertCount(1, $uploads->last()[0]->data()['urls']);
+
+        $xPost = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts'
+                && ($request->data()['accounts'][0]['id'] ?? null) === 102,
+        )->first();
+        $this->assertNotNull($xPost);
+        $this->assertSame([917], $xPost[0]->data()['content'][0]['media']);
+        $this->assertArrayNotHasKey('cover_image', $xPost[0]->data()['content'][0]);
     }
 
     public function test_worker_fails_closed_when_video_publishing_is_disabled(): void

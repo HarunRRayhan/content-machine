@@ -8,7 +8,8 @@ use Carbon\CarbonImmutable;
 use InvalidArgumentException;
 
 /**
- * Builds PostSyncer publish groups for a video: one reel group with Drive media URLs.
+ * Builds PostSyncer publish groups for a video: one reel group with Drive media URLs,
+ * plus a video-only group for X.
  */
 class VideoPublishPlanner
 {
@@ -100,20 +101,46 @@ class VideoPublishPlanner
             return [];
         }
 
-        $platforms = array_keys($included);
+        // X takes one video or up to four images per tweet, and PostSyncer has no
+        // cover option for X, so the X leg gets its own video-only group.
+        $xCaption = $included['twitter'] ?? null;
+        unset($included['twitter']);
+
+        $groups = [];
+        if ($included !== []) {
+            $groups[] = $this->publishGroup($language, $workspaceId, $included, $mediaUrls, $when);
+        }
+
+        if ($xCaption !== null) {
+            $groups[] = $this->publishGroup($language, $workspaceId, ['twitter' => $xCaption], [$media['video']], $when);
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param  array<string, string>  $captions
+     * @param  list<string>  $mediaUrls
+     */
+    private function publishGroup(
+        string $language,
+        string $workspaceId,
+        array $captions,
+        array $mediaUrls,
+        ?CarbonImmutable $when,
+    ): PublishGroup {
+        $platforms = array_keys($captions);
         sort($platforms);
 
-        return [
-            new PublishGroup(
-                language: $language,
-                workspaceId: $workspaceId,
-                platforms: $platforms,
-                mediaUrls: $mediaUrls,
-                captions: $included,
-                when: $when,
-                publishNow: $when === null,
-            ),
-        ];
+        return new PublishGroup(
+            language: $language,
+            workspaceId: $workspaceId,
+            platforms: $platforms,
+            mediaUrls: $mediaUrls,
+            captions: $captions,
+            when: $when,
+            publishNow: $when === null,
+        );
     }
 
     /**
