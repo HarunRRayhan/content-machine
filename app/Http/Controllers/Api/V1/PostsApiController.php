@@ -32,6 +32,7 @@ use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Postsyncer\PostsyncerWriteThrottle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -283,11 +284,12 @@ class PostsApiController extends Controller
         ]);
 
         try {
-            $post = $action->handle(
+            // This runs inside a web request, so PostSyncer waits stay short.
+            $post = app(PostsyncerWriteThrottle::class)->withShortWait(fn () => $action->handle(
                 $post,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),
-            );
+            ));
         } catch (InvalidArgumentException|PostsyncerException $exception) {
             throw ValidationException::withMessages([
                 'when' => $exception->getMessage(),

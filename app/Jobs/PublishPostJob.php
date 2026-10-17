@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Jobs\Middleware\PostsyncerJobWriteBudget;
 use App\Models\Post;
 use App\Models\TelegramPostRequest;
 use Illuminate\Bus\Queueable;
@@ -85,7 +86,18 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
                 60,
                 self::OVERLAP_EXPIRES_AFTER_SECONDS,
             ))->shared(),
+            new PostsyncerJobWriteBudget(self::TIMEOUT_SECONDS),
         ];
+    }
+
+    /**
+     * Throttled PostSyncer waits release the job without using a try, so the
+     * job's own deadline bounds them. Real failures are counted by
+     * PostsyncerJobWriteBudget against $tries.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addSeconds(PostsyncerJobWriteBudget::RETRY_UNTIL_SECONDS);
     }
 
     public function uniqueId(): string
