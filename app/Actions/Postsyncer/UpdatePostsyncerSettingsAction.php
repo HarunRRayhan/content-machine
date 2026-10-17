@@ -60,14 +60,37 @@ class UpdatePostsyncerSettingsAction
                     continue;
                 }
 
-                if (($record->publish_progress['current'] ?? null) !== null
-                    || ($record->publish_progress['completed_groups'] ?? []) !== []) {
+                if ($this->blocksSettings($record->publish_progress)) {
                     return true;
                 }
             }
         }
 
         return false;
+    }
+
+    /**
+     * Completed groups block settings unless the last abandon covers exactly
+     * this operation and snapshot. Any later group or checkpoint blocks again.
+     *
+     * @param  array<string, mixed>  $progress
+     */
+    private function blocksSettings(array $progress): bool
+    {
+        if (($progress['current'] ?? null) !== null) {
+            return true;
+        }
+
+        if (($progress['completed_groups'] ?? []) === []) {
+            return false;
+        }
+
+        $abandoned = $progress['abandoned'] ?? [];
+        $last = is_array($abandoned) ? end($abandoned) : false;
+
+        return ! (is_array($last)
+            && ($last['operation_id'] ?? null) === ($progress['operation_id'] ?? null)
+            && ($last['snapshot'] ?? null) === PublishPostAction::abandonedSnapshot($progress));
     }
 
     private function repairLegacyAccountFailures(Workspace $workspace): void

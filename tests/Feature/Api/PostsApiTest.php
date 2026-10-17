@@ -1157,6 +1157,78 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.publish_progress.current.media_ids.0', '9001');
     }
 
+    public function test_abandon_retry_endpoint_drops_a_retryable_checkpoint_and_keeps_completed_groups(): void
+    {
+        $post = $this->failedPostWithCheckpoint('P-ABANDON-RETRY', 'retryable', 'failed');
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/abandon-retry', [
+            'confirmed_absent' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.current', null)
+            ->assertJsonPath('data.publish_progress.abandoned.0.group_key', 'group-retry')
+            ->assertJsonPath('data.publish_progress.abandoned.0.media_ids.0', '915')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '135500');
+    }
+
+    public function test_abandon_retry_endpoint_refuses_an_uncertain_checkpoint(): void
+    {
+        $post = $this->failedPostWithCheckpoint('P-ABANDON-UNCERTAIN', 'creating', 'uncertain');
+
+        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/abandon-retry', [
+            'confirmed_absent' => true,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('publish');
+
+        $this->assertSame('creating', $post->fresh()->publish_progress['current']['phase']);
+    }
+
+    private function failedPostWithCheckpoint(string $humanId, string $phase, string $state): Post
+    {
+        $post = Post::factory()->for($this->workspace)->create([
+            'human_id' => $humanId,
+            'number' => random_int(1000, 99999),
+            'status' => 'ready',
+            'language' => 'en',
+            'platforms' => ['facebook', 'youtube'],
+        ]);
+
+        $post->forceFill([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-'.$humanId,
+                'run_token' => 'run-'.$humanId,
+                'options' => ['when' => '2099-01-01T09:00:00+06:00', 'confirm_ask' => false],
+                'plan_hash' => 'plan-'.$humanId,
+                'planned_groups' => [
+                    ['index' => 0, 'group_key' => 'group-done'],
+                    ['index' => 1, 'group_key' => 'group-retry'],
+                ],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => 'group-done',
+                    'post_id' => '135500',
+                    'status' => 'PUBLISHED',
+                    'platforms' => ['facebook'],
+                ]],
+                'current' => [
+                    'index' => 1,
+                    'group_key' => 'group-retry',
+                    'phase' => $phase,
+                    'idempotency_key' => 'key-'.$humanId,
+                    'media_ids' => [915],
+                    'media_urls' => ['https://example.com/media.png'],
+                ],
+                'state' => $state,
+            ],
+        ])->save();
+
+        return $post;
+    }
+
     public function test_repair_account_mapping_endpoint_rebases_a_partial_publish(): void
     {
         Http::fake([

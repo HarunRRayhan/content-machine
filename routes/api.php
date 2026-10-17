@@ -219,6 +219,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile-create-absent');
 
+    Route::post('posts/{human_id}/abandon-retry', [PostsApiController::class, 'abandonRetry'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.abandon-retry');
+
     Route::post('posts/{human_id}/rebase-retry-publish-now', [PostsApiController::class, 'rebaseRetryToPublishNow'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.rebase-retry-publish-now');

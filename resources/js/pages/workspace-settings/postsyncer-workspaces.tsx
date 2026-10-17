@@ -445,6 +445,7 @@ export default function PostsyncerWorkspaceSettings({
                                 </div>
 
                                 <InputError message={errors.default_language} />
+                                <InputError message={errors.postsyncer} />
 
                                 {(workspaceIds[selectedDefault] ?? '') !==
                                     '' && (
