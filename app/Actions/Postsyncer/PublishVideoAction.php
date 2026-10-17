@@ -247,7 +247,7 @@ class PublishVideoAction
                 }
 
                 $lockedVideo->forceFill([
-                    'postsyncer' => ['groups' => $publishedGroups],
+                    'postsyncer' => array_merge($lockedVideo->postsyncer ?? [], ['groups' => $publishedGroups]),
                     'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
                     'publish_state' => 'succeeded',
                     'publish_error' => null,
@@ -852,7 +852,7 @@ class PublishVideoAction
             }
 
             $lockedVideo->forceFill([
-                'postsyncer' => ['groups' => $publishedGroups],
+                'postsyncer' => array_merge($lockedVideo->postsyncer ?? [], ['groups' => $publishedGroups]),
                 'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
                 'publish_state' => 'succeeded',
                 'publish_error' => null,

@@ -502,6 +502,67 @@ class PublishVideoActionTest extends TestCase
             && $request['schedule_for']['timezone'] === 'Asia/Dhaka');
     }
 
+    public function test_schedule_keeps_audit_of_groups_cleared_after_reconcile(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'id' => 99,
+                'status' => 'scheduled',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
+            ], 201),
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [[
+                    'text' => 'Scheduled reel caption',
+                    'media' => [['id' => 915]],
+                ]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'REELS',
+                    'caption' => 'Scheduled reel caption',
+                ]]],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2026-08-26T09:12:00+06:00',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Scheduled reel caption'],
+            'postsyncer' => [
+                'groups' => [],
+                'cleared_groups' => [['group' => ['post_id' => '42'], 'remote_status' => 'PUBLISHED']],
+            ],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+            'when' => '2026-08-26T09:12:00+06:00',
+        ]);
+
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('scheduled', $video->status);
+        $this->assertSame('SCHEDULED', $video->postsyncer['groups'][0]['status']);
+        $this->assertSame('42', $video->postsyncer['cleared_groups'][0]['group']['post_id']);
+        $this->assertSame('2026-08-26T09:12:00+06:00', $video->postsyncer['groups'][0]['scheduled_at']);
+
+        Http::assertSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts'
+            && $request['schedule_type'] === 'schedule'
+            && $request['schedule_for']['date'] === '2026-08-26'
+            && $request['schedule_for']['timezone'] === 'Asia/Dhaka');
+    }
+
     public function test_naive_when_sends_workspace_timezone_on_schedule_for(): void
     {
         Http::fake([
