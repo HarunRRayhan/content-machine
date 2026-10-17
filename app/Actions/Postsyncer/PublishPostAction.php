@@ -71,6 +71,21 @@ class PublishPostAction
             return;
         }
 
+        // An abandoned retry is terminal for this post: refuse before claiming so no run state is left behind.
+        if (is_array($progress) && ($progress['abandoned'] ?? []) !== []) {
+            DB::transaction(function () use ($post): void {
+                $locked = Post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
+
+                if ($locked->publish_state !== 'running') {
+                    $locked->forceFill([
+                        'publish_error' => 'This post has an abandoned PostSyncer retry and cannot be published again.',
+                    ])->save();
+                }
+            });
+
+            return;
+        }
+
         $claimLeaseId = null;
 
         try {
@@ -1059,13 +1074,15 @@ class PublishPostAction
                 );
             }
 
+            $latestProgress['current'] = null;
             $latestProgress['abandoned'][] = [
+                'operation_id' => $latestProgress['operation_id'],
                 'index' => $current['index'],
                 'group_key' => $current['group_key'],
                 'media_ids' => $this->normalizeMediaIds($current['media_ids'] ?? []),
+                'snapshot' => self::abandonedSnapshot($latestProgress),
                 'abandoned_at' => now()->toISOString(),
             ];
-            $latestProgress['current'] = null;
 
             $lockedPost->forceFill([
                 'publish_error' => 'Abandoned a retryable PostSyncer group. No create was sent for it; completed groups were kept.',
@@ -3849,14 +3866,29 @@ class PublishPostAction
     }
 
     /**
-     * @param  array<string, mixed>  $value
+     * Hash of the progress an abandon covers. Any later completed group,
+     * supplemental group, or current checkpoint changes it.
+     *
+     * @param  array<string, mixed>  $progress
      */
-    private function canonicalJson(array $value): string
+    public static function abandonedSnapshot(array $progress): string
     {
-        return json_encode($this->canonicalValue($value), JSON_THROW_ON_ERROR);
+        return hash('sha256', self::canonicalJson([
+            'completed_groups' => $progress['completed_groups'] ?? [],
+            'supplemental_groups' => $progress['supplemental_groups'] ?? [],
+            'current' => $progress['current'] ?? null,
+        ]));
     }
 
-    private function canonicalValue(mixed $value): mixed
+    /**
+     * @param  array<string, mixed>  $value
+     */
+    private static function canonicalJson(array $value): string
+    {
+        return json_encode(self::canonicalValue($value), JSON_THROW_ON_ERROR);
+    }
+
+    private static function canonicalValue(mixed $value): mixed
     {
         if (! is_array($value)) {
             return $value;
@@ -3864,14 +3896,14 @@ class PublishPostAction
 
         if (array_is_list($value)) {
             return array_map(
-                fn (mixed $item): mixed => $this->canonicalValue($item),
+                fn (mixed $item): mixed => self::canonicalValue($item),
                 $value,
             );
         }
 
         $canonical = [];
         foreach ($value as $key => $item) {
-            $canonical[(string) $key] = $this->canonicalValue($item);
+            $canonical[(string) $key] = self::canonicalValue($item);
         }
         ksort($canonical);
 
