@@ -58,7 +58,8 @@
             "twitter": {
                 "text": "on",
                 "photo": "on",
-                "thread": "off"
+                "thread": "off",
+                "reel": "on"
             },
             "linkedin": {
                 "text": null,
