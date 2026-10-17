@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Settings;
 
+use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Video;
@@ -60,6 +61,81 @@ class PostsyncerSettingsControllerTest extends TestCase
             ->assertRedirect('/settings/postsyncer');
         $this->get('/settings/postsyncer/bangla')
             ->assertRedirect('/settings/postsyncer/workspaces');
+    }
+
+    public function test_settings_update_succeeds_after_a_retryable_checkpoint_is_abandoned(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceOwner();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => null]],
+                ],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_error' => 'PostSyncer create failed.',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-abandon',
+                'run_token' => 'run-abandon',
+                'options' => ['when' => null, 'confirm_ask' => false],
+                'plan_hash' => 'plan-abandon',
+                'planned_groups' => [
+                    ['index' => 0, 'group_key' => 'group-done'],
+                    ['index' => 1, 'group_key' => 'group-retry'],
+                ],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => 'group-done',
+                    'post_id' => '10',
+                    'status' => 'PUBLISHED',
+                    'platforms' => ['facebook'],
+                ]],
+                'current' => [
+                    'index' => 1,
+                    'group_key' => 'group-retry',
+                    'phase' => 'retryable',
+                    'idempotency_key' => 'key-abandon',
+                    'media_ids' => [915],
+                    'media_urls' => ['https://example.com/media'],
+                ],
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'page' => 'workspaces',
+            'languages' => [
+                'bangla' => ['platforms' => ['facebook' => ['account_id' => '100']]],
+            ],
+        ])->assertSessionHasErrors('postsyncer');
+        $this->assertNull(
+            PostsyncerConfig::fromWorkspace($workspace->fresh())
+                ->language('bangla')['platforms']['facebook']['account_id'],
+        );
+
+        app(PublishPostAction::class)->abandonRetry($post);
+
+        $this->put(route('settings.postsyncer.update'), [
+            'page' => 'workspaces',
+            'languages' => [
+                'bangla' => ['platforms' => ['facebook' => ['account_id' => '100']]],
+            ],
+        ])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('settings.postsyncer.workspaces'));
+
+        $this->assertSame(
+            '100',
+            (string) PostsyncerConfig::fromWorkspace($workspace->fresh())
+                ->language('bangla')['platforms']['facebook']['account_id'],
+        );
     }
 
     public function test_owner_can_update_publish_enabled(): void

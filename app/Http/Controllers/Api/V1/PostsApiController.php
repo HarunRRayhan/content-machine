@@ -408,6 +408,25 @@ class PostsApiController extends Controller
         return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
+    public function abandonRetry(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->abandonRetry($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'publish' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     public function rebaseRetryToPublishNow(string $humanId, PublishPostAction $action): PostResource
     {
         $post = $this->resolvePost($humanId);

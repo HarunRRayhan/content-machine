@@ -60,8 +60,10 @@ class UpdatePostsyncerSettingsAction
                     continue;
                 }
 
+                // An abandoned retry keeps its completed groups for audit but must not keep blocking settings.
                 if (($record->publish_progress['current'] ?? null) !== null
-                    || ($record->publish_progress['completed_groups'] ?? []) !== []) {
+                    || (($record->publish_progress['completed_groups'] ?? []) !== []
+                        && ($record->publish_progress['abandoned'] ?? []) === [])) {
                     return true;
                 }
             }

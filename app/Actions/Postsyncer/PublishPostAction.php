@@ -1014,6 +1014,71 @@ class PublishPostAction
     }
 
     /**
+     * Drop a retryable checkpoint whose PostSyncer create an operator confirmed
+     * will not be sent. Completed groups stay; the audit trail keeps the
+     * abandoned group and its uploaded media ids, and the checkpoint no longer
+     * blocks PostSyncer settings.
+     */
+    public function abandonRetry(Post $post): void
+    {
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to abandon.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if ($post->publish_state !== 'failed'
+            || ($progress['state'] ?? null) !== 'failed'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'retryable') {
+            throw new PostsyncerException(
+                'Only a failed, retryable PostSyncer group can be abandoned.',
+            );
+        }
+
+        DB::transaction(function () use ($post, $progress, $current): void {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || $lockedPost->publish_state !== 'failed'
+                || ($latestProgress['state'] ?? null) !== 'failed'
+                || ($latestProgress['current']['index'] ?? null) !== $current['index']
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'retryable') {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while abandoning the retry.',
+                );
+            }
+
+            $latestProgress['abandoned'][] = [
+                'index' => $current['index'],
+                'group_key' => $current['group_key'],
+                'media_ids' => $this->normalizeMediaIds($current['media_ids'] ?? []),
+                'abandoned_at' => now()->toISOString(),
+            ];
+            $latestProgress['current'] = null;
+
+            $lockedPost->forceFill([
+                'publish_error' => 'Abandoned a retryable PostSyncer group. No create was sent for it; completed groups were kept.',
+                'publish_progress' => $latestProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
      * Rebase a failed partial schedule whose requested time has passed onto a
      * publish-now retry. This is deliberately narrower than changing publish
      * options: every completed group must still be remotely verifiable as the
