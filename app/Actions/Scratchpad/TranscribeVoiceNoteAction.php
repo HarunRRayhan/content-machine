@@ -4,6 +4,7 @@ namespace App\Actions\Scratchpad;
 
 use App\Actions\Telegram\ClaimTelegramPostWorkAction;
 use App\Actions\Telegram\QueueTelegramMessageAction;
+use App\Jobs\ChatVoiceNoteJob;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\GistVoiceNoteJob;
 use App\Models\ScratchpadEntry;
@@ -27,9 +28,11 @@ use League\Flysystem\UnableToReadFile;
  * this app already uses for link resolution and Telegram capture.
  *
  * A successful transcription backfills scratchpad_entries.language when
- * it wasn't already set, and — only for a Telegram-sourced entry — sends
+ * it wasn't already set, and, only for a Telegram-sourced entry, sends
  * the transcript back as a second bot message, since the "captured" reply
- * already went out before this job could possibly have finished.
+ * already went out before this job could possibly have finished. With
+ * AI chat on, that entry's transcript is then answered like a typed
+ * message (ChatVoiceNoteJob) instead of getting a gist.
  */
 class TranscribeVoiceNoteAction
 {
@@ -160,8 +163,20 @@ class TranscribeVoiceNoteAction
                 }
                 $this->queueTelegramPostRequests($entry, $workRequestId, $workLeaseId);
 
+                // A Telegram voice note not consumed by /post is answered like a
+                // typed message when AI chat is on; it then gets no gist at all.
+                $answerAsChat = ! $cancelledRequest
+                    && $config?->ai_chat_enabled === true
+                    && $entry->source === 'telegram'
+                    && trim((string) $result->text) !== ''
+                    && ! TelegramPostRequest::query()->where('source_scratchpad_entry_id', $entry->id)->exists();
+
                 // After commit, so a slow LLM never holds these locks.
-                GistVoiceNoteJob::dispatch($lockedTranscription)->afterCommit();
+                if ($answerAsChat) {
+                    ChatVoiceNoteJob::dispatch($lockedTranscription)->afterCommit();
+                } else {
+                    GistVoiceNoteJob::dispatch($lockedTranscription)->afterCommit();
+                }
             });
 
             return;

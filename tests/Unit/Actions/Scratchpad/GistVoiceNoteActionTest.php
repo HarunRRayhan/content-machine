@@ -3,12 +3,16 @@
 namespace Tests\Unit\Actions\Scratchpad;
 
 use App\Actions\Scratchpad\TranscribeVoiceNoteAction;
+use App\Actions\Telegram\HandleTelegramUpdateAction;
+use App\Jobs\ChatVoiceNoteJob;
 use App\Jobs\GistVoiceNoteJob;
 use App\Models\AiProviderCredential;
 use App\Models\MediaAsset;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
+use App\Models\TelegramBotLink;
 use App\Models\TelegramOutboundMessage;
+use App\Models\TelegramPostRequest;
 use App\Models\Transcription;
 use App\Models\Workspace;
 use App\Support\AiProviders\AiCompletionClientContract;
@@ -126,6 +130,74 @@ class GistVoiceNoteActionTest extends TestCase
 
         $this->assertSame('failed', $this->transcription->refresh()->status);
         Queue::assertNotPushed(GistVoiceNoteJob::class);
+    }
+
+    public function test_with_ai_chat_on_the_transcript_is_answered_like_a_typed_message_without_a_gist(): void
+    {
+        $config = $this->enableAiChat();
+        $completion = $this->bindCompletion(AiCompletionResult::success('You have 3 notes.'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
+
+        $this->assertSame('how many notes are in my scratch pad', $completion->userContent);
+        $this->assertArrayNotHasKey('gist', $this->entry->refresh()->meta);
+        $messages = TelegramOutboundMessage::query()->orderBy('id')->get();
+        $this->assertCount(2, $messages);
+        $this->assertSame('📝 Transcript: how many notes are in my scratch pad', $messages[0]->chunks[0]);
+        $this->assertSame('telegram:update:voice-transcription:'.$this->transcription->id.':reply:0', $messages[1]->logical_key);
+        $this->assertSame('You have 3 notes.', $messages[1]->chunks[0]);
+        $this->assertSame(555, $messages[1]->chat_id);
+        $this->assertSame($config->id, $messages[1]->telegram_bot_config_id);
+
+        // A duplicate delivery of the chat job, or a re-run of the transcription, does nothing.
+        $calls = $completion->calls;
+        (new ChatVoiceNoteJob($this->transcription))->handle(app(HandleTelegramUpdateAction::class));
+        $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
+        $this->assertSame($calls, $completion->calls);
+        $this->assertSame(2, TelegramOutboundMessage::query()->count());
+    }
+
+    public function test_a_voice_note_consumed_by_post_is_not_answered_as_chat(): void
+    {
+        Queue::fake();
+        $config = $this->enableAiChat();
+        TelegramPostRequest::factory()->for($this->workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'source_scratchpad_entry_id' => $this->entry->id,
+            'telegram_user_id' => 555,
+            'telegram_chat_id' => 555,
+            'webhook_generation' => $config->webhook_generation,
+            'state' => TelegramPostRequest::GENERATING,
+        ]);
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'post about caching', language: 'en', model: 'whisper-1'));
+
+        Queue::assertNotPushed(ChatVoiceNoteJob::class);
+        Queue::assertPushed(GistVoiceNoteJob::class);
+    }
+
+    public function test_with_ai_chat_on_an_unlinked_sender_gets_only_the_transcript(): void
+    {
+        $this->enableAiChat(linked: false);
+        $completion = $this->bindCompletion(AiCompletionResult::success('unused'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'show my notes', language: 'en', model: 'whisper-1'));
+
+        $this->assertSame(0, $completion->calls);
+        $this->assertSame(1, TelegramOutboundMessage::query()->count());
+    }
+
+    private function enableAiChat(bool $linked = true): TelegramBotConfig
+    {
+        $config = TelegramBotConfig::query()->where('workspace_id', $this->workspace->id)->sole();
+        $config->forceFill(['ai_chat_enabled' => true])->save();
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $this->workspace->id]);
+
+        if ($linked) {
+            TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'telegram_user_id' => 555]);
+        }
+
+        return $config;
     }
 
     private function transcribe(AiTranscriptionResult $result): void
