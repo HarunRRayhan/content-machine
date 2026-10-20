@@ -72,7 +72,7 @@ class HandleTelegramUpdateAction
         /link CODE: link your Content Machine account
         /videos: your workspace's most recent videos
         /posts: your workspace's most recent posts
-        /notes: your workspace's most recent Scratch Pad captures
+        /notes: your Scratch Pad note count and most recent captures
         /note <text>: save a Scratch Pad note
         /post <text>: create a draft, or send the next photo/voice/audio
         /approve P-123: approve a generated draft
@@ -1166,7 +1166,16 @@ class HandleTelegramUpdateAction
             return 'No Scratch Pad captures yet.';
         }
 
-        return $entries->map(function (ScratchpadEntry $entry) {
+        // The list is capped at 10, so the total comes from the database, never from $entries.
+        $byStatus = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)
+            ->selectRaw('status, count(*) as aggregate')->groupBy('status')->orderBy('status')
+            ->pluck('aggregate', 'status');
+        $total = (int) $byStatus->sum();
+        $breakdown = $byStatus->map(fn ($count, $status) => "{$count} {$status}")->implode(', ');
+        $header = 'You have '.$total.' Scratch Pad '.Str::plural('note', $total)." ({$breakdown}).";
+        $header .= $total > $entries->count() ? " Latest {$entries->count()}:" : '';
+
+        return $header."\n".$entries->map(function (ScratchpadEntry $entry) {
             $preview = $entry->title ?? $entry->body;
             $preview = $preview === null ? '(no preview)' : Str::limit($preview, 60);
 
