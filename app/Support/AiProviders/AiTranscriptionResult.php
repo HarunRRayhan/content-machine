@@ -6,7 +6,7 @@ namespace App\Support\AiProviders;
  * What AiTranscriptionClientContract::transcribe() found out. $error is a
  * message safe to store in transcriptions.error_message and show back to
  * the user. $language is whatever the provider reports (often a language
- * name like "bengali", not an ISO code) — stored as-is, matching how
+ * name like "bengali", not an ISO code), stored as-is, matching how
  * scratchpad_entries.language is already just a free-text string. $model
  * is the transcription model that actually produced the text.
  */
