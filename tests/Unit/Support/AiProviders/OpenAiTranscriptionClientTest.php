@@ -14,11 +14,10 @@ class OpenAiTranscriptionClientTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_a_successful_transcription_hits_the_default_base_url_with_the_right_model()
+    public function test_gpt_4o_transcribe_is_tried_first_and_infers_bengali()
     {
         Http::fake(['api.openai.com/*' => Http::response([
             'text' => 'ওয়েবহুক পাঠায় না, পোলিং করে।',
-            'language' => 'bengali',
         ], 200)]);
 
         $credential = AiProviderCredential::factory()->openai()->make(['api_key' => 'sk-openai-test']);
@@ -28,10 +27,71 @@ class OpenAiTranscriptionClientTest extends TestCase
         $this->assertTrue($result->successful);
         $this->assertSame('ওয়েবহুক পাঠায় না, পোলিং করে।', $result->text);
         $this->assertSame('bengali', $result->language);
+        $this->assertSame('gpt-4o-transcribe', $result->model);
+        Http::assertSentCount(1);
         Http::assertSent(fn ($request) => $request->url() === 'https://api.openai.com/v1/audio/transcriptions'
             && $request->hasHeader('Authorization', 'Bearer sk-openai-test')
-            && str_contains((string) $request->body(), 'whisper-1')
+            && str_contains((string) $request->body(), 'gpt-4o-transcribe')
+            && ! str_contains((string) $request->body(), 'verbose_json'));
+    }
+
+    public function test_gpt_4o_transcribe_infers_english_without_bengali_script()
+    {
+        Http::fake(['*' => Http::response(['text' => 'hello there'], 200)]);
+
+        $credential = AiProviderCredential::factory()->openai()->make();
+
+        $result = (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
+
+        $this->assertSame('english', $result->language);
+        $this->assertSame('gpt-4o-transcribe', $result->model);
+    }
+
+    public function test_a_gpt_4o_transcribe_failure_falls_back_to_whisper_1()
+    {
+        Http::fake(fn ($request) => str_contains((string) $request->body(), 'gpt-4o-transcribe')
+            ? Http::response(['error' => ['message' => 'model unavailable']], 503)
+            : Http::response(['text' => 'whisper text', 'language' => 'bengali'], 200));
+
+        $credential = AiProviderCredential::factory()->openai()->make();
+
+        $result = (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
+
+        $this->assertTrue($result->successful);
+        $this->assertSame('whisper text', $result->text);
+        $this->assertSame('bengali', $result->language);
+        $this->assertSame('whisper-1', $result->model);
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request) => str_contains((string) $request->body(), 'whisper-1')
             && str_contains((string) $request->body(), 'verbose_json'));
+    }
+
+    public function test_empty_gpt_4o_transcribe_text_falls_back_to_whisper_1()
+    {
+        Http::fake(fn ($request) => str_contains((string) $request->body(), 'gpt-4o-transcribe')
+            ? Http::response(['text' => ''], 200)
+            : Http::response(['text' => 'whisper text', 'language' => 'english'], 200));
+
+        $credential = AiProviderCredential::factory()->openai()->make();
+
+        $result = (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
+
+        $this->assertSame('whisper-1', $result->model);
+    }
+
+    public function test_when_both_models_fail_the_first_error_is_returned()
+    {
+        Http::fake(fn ($request) => str_contains((string) $request->body(), 'gpt-4o-transcribe')
+            ? Http::response(['error' => ['message' => '4o is down']], 500)
+            : Http::response(['error' => ['message' => 'whisper is down']], 500));
+
+        $credential = AiProviderCredential::factory()->openai()->make();
+
+        $result = (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('4o is down', $result->error);
+        Http::assertSentCount(2);
     }
 
     public function test_a_custom_base_url_is_used_when_given()
@@ -114,15 +174,18 @@ class OpenAiTranscriptionClientTest extends TestCase
         $this->assertSame('Could not reach the transcription provider.', $result->error);
     }
 
-    public function test_a_missing_language_is_left_null()
+    public function test_a_missing_whisper_language_is_left_null()
     {
-        Http::fake(['*' => Http::response(['text' => 'hello there'], 200)]);
+        Http::fake(fn ($request) => str_contains((string) $request->body(), 'gpt-4o-transcribe')
+            ? Http::response([], 500)
+            : Http::response(['text' => 'hello there'], 200));
 
         $credential = AiProviderCredential::factory()->openai()->make();
 
         $result = (new OpenAiTranscriptionClient)->transcribe($credential, 'raw-audio-bytes', 'note.ogg', 'audio/ogg');
 
         $this->assertTrue($result->successful);
+        $this->assertSame('whisper-1', $result->model);
         $this->assertNull($result->language);
     }
 }

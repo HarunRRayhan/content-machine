@@ -7,7 +7,8 @@ namespace App\Support\AiProviders;
  * message safe to store in transcriptions.error_message and show back to
  * the user. $language is whatever the provider reports (often a language
  * name like "bengali", not an ISO code) — stored as-is, matching how
- * scratchpad_entries.language is already just a free-text string.
+ * scratchpad_entries.language is already just a free-text string. $model
+ * is the transcription model that actually produced the text.
  */
 final readonly class AiTranscriptionResult
 {
@@ -16,11 +17,12 @@ final readonly class AiTranscriptionResult
         public ?string $text = null,
         public ?string $language = null,
         public ?string $error = null,
+        public ?string $model = null,
     ) {}
 
-    public static function success(string $text, ?string $language): self
+    public static function success(string $text, ?string $language, string $model): self
     {
-        return new self(successful: true, text: $text, language: $language);
+        return new self(successful: true, text: $text, language: $language, model: $model);
     }
 
     public static function failure(string $error): self

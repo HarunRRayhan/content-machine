@@ -140,7 +140,7 @@ class TranscribeVoiceNoteAction
                 $lockedTranscription->forceFill([
                     'status' => 'done',
                     'provider' => 'openai',
-                    'model' => 'whisper-1',
+                    'model' => $result->model,
                     'language' => $result->language,
                     'text' => $result->text,
                 ])->save();

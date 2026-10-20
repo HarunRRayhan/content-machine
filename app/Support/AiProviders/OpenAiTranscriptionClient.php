@@ -8,16 +8,26 @@ use Illuminate\Support\Facades\Http;
 use Throwable;
 
 /**
- * Calls OpenAI's audio transcription endpoint directly (whisper-1, the
- * most broadly available and cheapest transcription model), independent
- * of $credential->model: that field is for chat/completion models, a
+ * Calls OpenAI's audio transcription endpoint directly, independent of
+ * $credential->model: that field is for chat/completion models, a
  * different concern from which model transcribes audio.
+ *
+ * Tries gpt-4o-transcribe first (much better at Bangla), then falls back
+ * to whisper-1 on the same credential when that call fails (non-2xx,
+ * network error, or empty text). gpt-4o-transcribe only accepts
+ * response_format=json and reports no language, so its language is
+ * inferred from the script ("bengali" or "english", whisper's naming).
+ * If both fail, the first model's error is returned.
  */
 final class OpenAiTranscriptionClient implements AiTranscriptionClientContract
 {
     private const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
-    private const MODEL = 'whisper-1';
+    /** Model => response_format, in the order they are tried. */
+    private const MODELS = [
+        'gpt-4o-transcribe' => 'json',
+        'whisper-1' => 'verbose_json',
+    ];
 
     public function __construct(
         private readonly ?PublicUrlGuard $urlGuard = null,
@@ -32,7 +42,31 @@ final class OpenAiTranscriptionClient implements AiTranscriptionClientContract
                 $credential->base_url,
                 self::DEFAULT_BASE_URL,
             );
+        } catch (Throwable) {
+            return AiTranscriptionResult::failure('Could not reach the transcription provider.');
+        }
 
+        $firstFailure = null;
+
+        foreach (self::MODELS as $model => $format) {
+            $result = $this->attempt($credential, $endpoint, $model, $format, $audioContents, $filename, $mimeType);
+
+            if ($result->successful) {
+                return $result;
+            }
+
+            $firstFailure ??= $result;
+        }
+
+        return $firstFailure;
+    }
+
+    /**
+     * @param  array{url: string, options: array<string, mixed>}  $endpoint
+     */
+    private function attempt(AiProviderCredential $credential, array $endpoint, string $model, string $format, string $audioContents, string $filename, string $mimeType): AiTranscriptionResult
+    {
+        try {
             $response = Http::withToken($credential->api_key)
                 ->timeout(60)
                 ->withOptions([
@@ -41,8 +75,8 @@ final class OpenAiTranscriptionClient implements AiTranscriptionClientContract
                 ])
                 ->attach('file', $audioContents, $filename, ['Content-Type' => $mimeType])
                 ->post($endpoint['url'].'/audio/transcriptions', [
-                    'model' => self::MODEL,
-                    'response_format' => 'verbose_json',
+                    'model' => $model,
+                    'response_format' => $format,
                 ]);
         } catch (Throwable) {
             return AiTranscriptionResult::failure('Could not reach the transcription provider.');
@@ -62,11 +96,17 @@ final class OpenAiTranscriptionClient implements AiTranscriptionClientContract
             return AiTranscriptionResult::failure('The transcription provider returned no text.');
         }
 
+        $text = trim($text);
         $language = $response->json('language');
 
+        if ($format === 'json') {
+            $language = preg_match('/[\x{0980}-\x{09FF}]/u', $text) === 1 ? 'bengali' : 'english';
+        }
+
         return AiTranscriptionResult::success(
-            text: trim($text),
+            text: $text,
             language: is_string($language) && $language !== '' ? $language : null,
+            model: $model,
         );
     }
 }
