@@ -293,11 +293,7 @@ class HandleTelegramUpdateAction
                 return true;
             }
 
-            if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId)) {
-                return true;
-            }
-
-            $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
+            $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $this->intentReply($config, $link, $intent));
 
             return true;
         }
@@ -321,22 +317,31 @@ class HandleTelegramUpdateAction
         $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
 
         if ($chatReply !== null) {
+            $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $chatReply);
+
+            return true;
+        }
+
+        return ! $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, self::CHAT_FAILED_TEXT);
+    }
+
+    /**
+     * Check ownership and queue the reply in one transaction, so the locks
+     * the check takes are held while the outbound row is written.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function replyIfOwned(TelegramBotConfig $config, int $chatId, array $update, ?string $dispatchLeaseId, string $text): bool
+    {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId, $text): bool {
             if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId)) {
-                return true;
+                return false;
             }
 
-            $this->reply($config, $chatId, $chatReply);
+            $this->reply($config, $chatId, $text);
 
             return true;
-        }
-
-        if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId)) {
-            return true;
-        }
-
-        $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
-
-        return false;
+        });
     }
 
     /**
