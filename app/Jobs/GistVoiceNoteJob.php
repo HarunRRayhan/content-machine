@@ -14,6 +14,11 @@ class GistVoiceNoteJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    // A gist is optional: never retry the LLM call, and drop the job if the entry is gone.
+    public int $tries = 1;
+
+    public bool $deleteWhenMissingModels = true;
+
     public function __construct(
         public readonly Transcription $transcription,
     ) {}

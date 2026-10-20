@@ -9,6 +9,8 @@ use App\Models\TelegramOutboundMessage;
 use App\Models\Transcription;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiProviderCredentialResolver;
+use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * Writes a 1-2 sentence gist of a finished voice transcript into
@@ -53,16 +55,32 @@ class GistVoiceNoteAction
                 continue;
             }
 
-            $entry->refresh();
-            $entry->update([
-                'meta' => [
-                    ...$entry->meta,
-                    'gist' => $gist,
-                    'gist_at' => now()->toIso8601String(),
-                ],
-            ]);
+            $saved = DB::transaction(function () use ($entry, $gist): bool {
+                $locked = ScratchpadEntry::query()->whereKey($entry->id)->lockForUpdate()->first();
 
-            $this->replyOnTelegram($transcription, $entry, $gist);
+                // A concurrent run already wrote one; keep it so Telegram and the entry agree.
+                if ($locked === null || isset($locked->meta['gist'])) {
+                    return false;
+                }
+
+                $locked->update([
+                    'meta' => [
+                        ...$locked->meta,
+                        'gist' => $gist,
+                        'gist_at' => now()->toIso8601String(),
+                    ],
+                ]);
+
+                return true;
+            });
+
+            if ($saved) {
+                try {
+                    $this->replyOnTelegram($transcription, $entry->refresh(), $gist);
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            }
 
             return;
         }
@@ -91,6 +109,8 @@ class GistVoiceNoteAction
         $transcriptSent = TelegramOutboundMessage::query()
             ->where('telegram_bot_config_id', $config->id)
             ->where('logical_key', 'telegram:transcription:'.$transcription->id.':transcript')
+            ->where('webhook_generation', $entry->webhook_generation)
+            ->where('status', '!=', TelegramOutboundMessage::DISCARDED)
             ->exists();
 
         if (! $transcriptSent) {
