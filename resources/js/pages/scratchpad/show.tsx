@@ -33,6 +33,7 @@ type EntryTranscription = {
     text: string | null;
     language: string | null;
     error_message: string | null;
+    gist: string | null;
 };
 
 type EntryDetail = {
@@ -146,6 +147,11 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
                         {entry.transcription.status === 'done' && (
                             <p className="whitespace-pre-wrap">
                                 {entry.transcription.text}
+                            </p>
+                        )}
+                        {entry.transcription.gist && (
+                            <p className="text-sm text-muted-foreground">
+                                Gist: {entry.transcription.gist}
                             </p>
                         )}
                         {(entry.transcription.status === 'pending' ||

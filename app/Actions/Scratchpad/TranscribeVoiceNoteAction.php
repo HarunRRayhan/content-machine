@@ -5,6 +5,7 @@ namespace App\Actions\Scratchpad;
 use App\Actions\Telegram\ClaimTelegramPostWorkAction;
 use App\Actions\Telegram\QueueTelegramMessageAction;
 use App\Jobs\GenerateTelegramPostJob;
+use App\Jobs\GistVoiceNoteJob;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
@@ -158,6 +159,9 @@ class TranscribeVoiceNoteAction
                     $this->replyOnTelegram($lockedTranscription, $entry, (string) $result->text, $config);
                 }
                 $this->queueTelegramPostRequests($entry, $workRequestId, $workLeaseId);
+
+                // After commit, so a slow LLM never holds these locks.
+                GistVoiceNoteJob::dispatch($lockedTranscription)->afterCommit();
             });
 
             return;
