@@ -196,76 +196,10 @@ class HandleTelegramUpdateAction
             return;
         }
 
-        if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)) {
-            $this->keepTyping($config, $chatId);
-
-            if ($dispatchLeaseId !== null
-                && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
-            ) {
-                return;
-            }
-
-            if ($this->runLeased($config, $chatId, $update, $dispatchLeaseId,
-                fn () => $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text))
-            ) {
-                return;
-            }
-
-            $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
-
-            if ($intent !== null) {
-                if ($intent === 'clear_notes') {
-                    $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
-
-                    return;
-                }
-
-                if ($dispatchLeaseId !== null
-                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                    return;
-                }
-
-                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
-
-                return;
-            }
-
-            $this->keepTyping($config, $chatId);
-
-            if ($dispatchLeaseId !== null
-                && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
-            ) {
-                return;
-            }
-
-            $workspaceAction = $this->resolveWorkspaceAction()->handle($config->workspace, $text);
-
-            if ($workspaceAction !== null) {
-                $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
-                    fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text));
-
-                return;
-            }
-
-            $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
-
-            if ($chatReply !== null) {
-                if ($dispatchLeaseId !== null
-                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                    return;
-                }
-
-                $this->reply($config, $chatId, $chatReply);
-
-                return;
-            }
-
-            if ($dispatchLeaseId !== null
-                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                return;
-            }
-
-            $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
+        if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)
+            && $this->runChat($config, $link, $chatId, $text, $update, $dispatchLeaseId)
+        ) {
+            return;
         }
 
         if ($dispatchLeaseId !== null
@@ -274,6 +208,115 @@ class HandleTelegramUpdateAction
         }
 
         $this->captureTelegramMessageAction->handle($config, $update, true, true, $telegramUpdateKey);
+    }
+
+    /**
+     * Answers a transcribed Telegram voice note exactly as if its text had
+     * been typed. Replies are keyed per transcription, so a duplicate run
+     * reuses the same outbound rows instead of sending twice.
+     */
+    public function handleVoiceTranscript(TelegramBotConfig $config, int $chatId, string $text, int $transcriptionId): void
+    {
+        // Captures are private-chat only, where the chat id is the sender's user id.
+        $link = $this->findLink($config, $chatId);
+
+        if ($link === null) {
+            return;
+        }
+
+        $this->replyContextKey = 'voice-transcription:'.$transcriptionId;
+        $this->replySlot = 0;
+
+        $this->runChat($config, $link, $chatId, $text);
+    }
+
+    /**
+     * The AI-chat pipeline shared by typed text and transcribed voice notes:
+     * pending delete confirmation, command intent, workspace action, then a
+     * plain chat reply. Returns false only when the chat reply failed and
+     * the caller should fall back to capture.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function runChat(
+        TelegramBotConfig $config,
+        TelegramBotLink $link,
+        int $chatId,
+        string $text,
+        array $update = [],
+        ?string $dispatchLeaseId = null,
+    ): bool {
+        $this->keepTyping($config, $chatId);
+
+        if ($dispatchLeaseId !== null
+            && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
+        ) {
+            return true;
+        }
+
+        if ($this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+            fn () => $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text))
+        ) {
+            return true;
+        }
+
+        $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
+
+        if ($intent !== null) {
+            if ($intent === 'clear_notes') {
+                $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
+
+                return true;
+            }
+
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                return true;
+            }
+
+            $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
+
+            return true;
+        }
+
+        $this->keepTyping($config, $chatId);
+
+        if ($dispatchLeaseId !== null
+            && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
+        ) {
+            return true;
+        }
+
+        $workspaceAction = $this->resolveWorkspaceAction()->handle($config->workspace, $text);
+
+        if ($workspaceAction !== null) {
+            $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+                fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text));
+
+            return true;
+        }
+
+        $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
+
+        if ($chatReply !== null) {
+            if ($dispatchLeaseId !== null
+                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+                return true;
+            }
+
+            $this->reply($config, $chatId, $chatReply);
+
+            return true;
+        }
+
+        if ($dispatchLeaseId !== null
+            && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
+            return true;
+        }
+
+        $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
+
+        return false;
     }
 
     /**

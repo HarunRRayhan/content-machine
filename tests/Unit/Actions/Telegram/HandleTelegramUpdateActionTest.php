@@ -445,6 +445,29 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame(1, ScratchpadEntry::count());
     }
 
+    public function test_a_voice_delete_request_is_confirmed_by_a_typed_yes()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handleVoiceTranscript($config, 1, 'delete my last note', 7);
+        $this->assertStringContainsString('Reply "yes" to confirm', $this->lastReply());
+        $this->assertSame(1, ScratchpadEntry::count());
+
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes', 1));
+        $this->assertSame('Deleted the note.', $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_a_voice_transcript_from_an_unlinked_chat_gets_no_reply()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient(null))->handleVoiceTranscript($config, 999, 'show my notes', 7);
+
+        $this->assertSame([], $this->outboundMessages());
+    }
+
     public function test_a_scratch_pad_save_with_no_body_keeps_the_original_message()
     {
         $config = $this->linkedAiConfig();
