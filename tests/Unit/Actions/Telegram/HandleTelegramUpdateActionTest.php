@@ -450,7 +450,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = $this->linkedAiConfig();
         ScratchpadEntry::factory()->for($config->workspace)->create();
 
-        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handleVoiceTranscript($config, 1, 'delete my last note', 7);
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handleVoiceTranscript($config, 1, 'delete my last note', 7, $config->webhook_generation);
         $this->assertStringContainsString('Reply "yes" to confirm', $this->lastReply());
         $this->assertSame(1, ScratchpadEntry::count());
 
@@ -459,11 +459,45 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame(0, ScratchpadEntry::count());
     }
 
+    public function test_a_voice_delete_request_does_not_run_after_the_link_is_removed_mid_turn()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+        $client = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                if (str_contains($systemPrompt, 'Classify the user')) {
+                    return AiCompletionResult::success('none');
+                }
+
+                // The sender unlinks while the model is thinking.
+                TelegramBotLink::query()->delete();
+
+                return AiCompletionResult::success('{"action":"delete_scratchpad"}');
+            }
+        };
+
+        $this->action($client)->handleVoiceTranscript($config, 1, 'delete my last note', 7, $config->webhook_generation);
+
+        $this->assertSame([], $this->outboundMessages());
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
+    public function test_a_voice_transcript_from_a_rotated_webhook_generation_gets_no_reply()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient(null))->handleVoiceTranscript($config, 1, 'show my notes', 7, 'stale-generation');
+
+        $this->assertSame([], $this->outboundMessages());
+    }
+
     public function test_a_voice_transcript_from_an_unlinked_chat_gets_no_reply()
     {
         $config = $this->linkedAiConfig();
 
-        $this->action($this->actionClient(null))->handleVoiceTranscript($config, 999, 'show my notes', 7);
+        $this->action($this->actionClient(null))->handleVoiceTranscript($config, 999, 'show my notes', 7, $config->webhook_generation);
 
         $this->assertSame([], $this->outboundMessages());
     }

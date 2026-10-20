@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Actions\Telegram\HandleTelegramUpdateAction;
+use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
 use App\Models\Transcription;
 use Illuminate\Bus\Queueable;
@@ -10,7 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Runs a Telegram voice note's transcript through the same AI-chat pipeline
@@ -20,7 +21,7 @@ class ChatVoiceNoteJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    // Chat can save or delete notes: never retry, and claim the run so a duplicate delivery is a no-op.
+    // Chat can save or delete notes: never retry, and claim the run durably so a duplicate delivery is a no-op.
     public int $tries = 1;
 
     public bool $deleteWhenMissingModels = true;
@@ -52,10 +53,20 @@ class ChatVoiceNoteJob implements ShouldQueue
             return;
         }
 
-        if (! Cache::add('telegram:voice-chat:'.$transcription->id, true, now()->addDay())) {
-            return;
-        }
+        $claimed = DB::transaction(function () use ($entry, $transcription): bool {
+            $locked = ScratchpadEntry::query()->whereKey($entry->id)->lockForUpdate()->first();
 
-        $action->handleVoiceTranscript($config, $chatId, $text, $transcription->id);
+            if ($locked === null || ($locked->meta['voice_chat_transcription_id'] ?? null) === $transcription->id) {
+                return false;
+            }
+
+            $locked->update(['meta' => [...$locked->meta, 'voice_chat_transcription_id' => $transcription->id]]);
+
+            return true;
+        });
+
+        if ($claimed) {
+            $action->handleVoiceTranscript($config, $chatId, $text, $transcription->id, $entry->webhook_generation);
+        }
     }
 }
