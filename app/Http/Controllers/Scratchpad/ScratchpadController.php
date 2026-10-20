@@ -396,6 +396,7 @@ class ScratchpadController extends Controller
             'text' => $transcription->text,
             'language' => $transcription->language,
             'error_message' => $transcription->error_message,
+            'gist' => $entry->meta['gist'] ?? null,
         ];
     }
 

@@ -116,6 +116,7 @@ class ScratchpadEntryResource extends JsonResource
             'text' => $transcription->text,
             'language' => $transcription->language,
             'error_message' => $transcription->error_message,
+            'gist' => $this->meta['gist'] ?? null,
         ];
     }
 
