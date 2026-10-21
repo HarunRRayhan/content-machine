@@ -296,7 +296,12 @@ class HandleTelegramUpdateAction
         }
 
         if ($this->runLeased($config, $chatId, $update, $dispatchLeaseId,
-            fn () => $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text))
+            function () use ($config, $chatId, $text): ?string {
+                $reply = $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text);
+                $this->answeredWithoutCapture = $reply !== null;
+
+                return $reply;
+            })
         ) {
             return true;
         }
@@ -305,7 +310,7 @@ class HandleTelegramUpdateAction
 
         if ($intent !== null) {
             if ($intent === 'clear_notes') {
-                $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
+                $this->answeredWithoutCapture = $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
 
                 return true;
             }
@@ -327,8 +332,10 @@ class HandleTelegramUpdateAction
         if ($workspaceAction !== null) {
             $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
                 function () use ($config, $chatId, $workspaceAction, $text): string {
-                    $reply = $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text);
-                    $this->answeredWithoutCapture = ($workspaceAction['action'] ?? null) === 'list_ideas';
+                    $reply = $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text, $this->voiceTranscriptionId);
+                    // Only the create actions save the message; every other action is a command, not a note.
+                    $this->answeredWithoutCapture = in_array($workspaceAction['action'] ?? null,
+                        ['list_ideas', 'update_scratchpad', 'delete_scratchpad', 'update_idea', 'delete_idea'], true);
 
                     return $reply;
                 });
@@ -1184,8 +1191,7 @@ class HandleTelegramUpdateAction
     {
         // Only active (untriaged) notes count; triaged and dropped ones are filed or gone.
         $notes = fn () => ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->where('status', 'new')
-            ->when($this->voiceTranscriptionId !== null, fn ($query) => $query->whereDoesntHave(
-                'transcriptions', fn ($transcriptions) => $transcriptions->whereKey($this->voiceTranscriptionId)));
+            ->exceptVoiceTranscription($this->voiceTranscriptionId);
         $entries = $notes()->orderByDesc('captured_at')->limit(10)->get();
 
         if ($entries->isEmpty()) {
@@ -1209,7 +1215,7 @@ class HandleTelegramUpdateAction
      * Delete the same set /notes just listed and queue its reply in the same
      * transaction. Being linked is the only permission gate for this command.
      * If processing dies after commit, the processed marker prevents a replay
-     * from deleting a newer batch of notes.
+     * from deleting a newer batch of notes. Returns true when it replied.
      *
      * @param  array<string, mixed>|null  $update
      */
@@ -1218,13 +1224,13 @@ class HandleTelegramUpdateAction
         int $chatId,
         ?array $update = null,
         ?string $dispatchLeaseId = null,
-    ): void {
-        DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId): void {
+    ): bool {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId): bool {
             if (! $this->ownsChatTurn($config, $update ?? [], $dispatchLeaseId)) {
-                return;
+                return false;
             }
 
-            $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
+            $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace, $this->voiceTranscriptionId);
             $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
 
             $this->reply($config, $chatId, match (true) {
@@ -1232,6 +1238,8 @@ class HandleTelegramUpdateAction
                 $deleted === 1 => 'Deleted 1 note.',
                 default => "Deleted {$deleted} notes.",
             });
+
+            return true;
         });
     }
 

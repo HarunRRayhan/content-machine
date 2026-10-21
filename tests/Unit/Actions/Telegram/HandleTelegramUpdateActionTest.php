@@ -477,6 +477,19 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame(0, ScratchpadEntry::count());
     }
 
+    public function test_a_typed_delete_last_note_still_targets_the_newest_entry()
+    {
+        $config = $this->linkedAiConfig();
+        $older = ScratchpadEntry::factory()->for($config->workspace)->create(['captured_at' => now()->subMinute()]);
+        $newest = ScratchpadEntry::factory()->for($config->workspace)->create(['kind' => 'voice']);
+
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handle($config, $this->update(1, 'delete my last note'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+
+        $this->assertNull($newest->fresh());
+        $this->assertNotNull($older->fresh());
+    }
+
     public function test_a_command_between_the_ask_and_the_yes_cancels_the_pending_delete()
     {
         $config = $this->linkedAiConfig();

@@ -20,7 +20,7 @@ final class TelegramBotCommands
         ['command' => 'link', 'description' => 'Link your account with a code'],
         ['command' => 'videos', 'description' => 'Your most recent videos'],
         ['command' => 'posts', 'description' => 'Your most recent posts'],
-        ['command' => 'notes', 'description' => 'Your most recent Scratch Pad captures'],
+        ['command' => 'notes', 'description' => 'Count and list your active Scratch Pad notes'],
         ['command' => 'note', 'description' => 'Save a Scratch Pad note'],
         ['command' => 'post', 'description' => 'Create a draft from text, photo, or audio'],
         ['command' => 'approve', 'description' => 'Approve a draft for publishing'],

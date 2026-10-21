@@ -48,17 +48,19 @@ class ExecuteTelegramWorkspaceActionAction
     ) {}
 
     /**
+     * $voiceTranscriptionId is the voice note being answered, never the "latest note" a command targets.
+     *
      * @param  array<string, mixed>  $action
      */
-    public function handle(Workspace $workspace, int $chatId, array $action, ?string $original = null): string
+    public function handle(Workspace $workspace, int $chatId, array $action, ?string $original = null, ?int $voiceTranscriptionId = null): string
     {
         Cache::forget($this->pendingKey($workspace, $chatId));
 
         try {
             return match ($action['action'] ?? null) {
                 'create_scratchpad' => $this->createScratchpad($workspace, $action, $original),
-                'update_scratchpad' => $this->askToUpdateScratchpad($workspace, $chatId, $action),
-                'delete_scratchpad' => $this->askToDeleteScratchpad($workspace, $chatId),
+                'update_scratchpad' => $this->askToUpdateScratchpad($workspace, $chatId, $action, $voiceTranscriptionId),
+                'delete_scratchpad' => $this->askToDeleteScratchpad($workspace, $chatId, $voiceTranscriptionId),
                 'create_idea' => $this->saveIdea($workspace, $action),
                 'update_idea' => $this->askToEditIdea($workspace, $chatId, $action),
                 'delete_idea' => $this->askToDropIdea($workspace, $chatId, $action),
@@ -171,18 +173,18 @@ class ExecuteTelegramWorkspaceActionAction
     /**
      * @param  array<string, mixed>  $action
      */
-    private function askToUpdateScratchpad(Workspace $workspace, int $chatId, array $action): string
+    private function askToUpdateScratchpad(Workspace $workspace, int $chatId, array $action, ?int $voiceTranscriptionId): string
     {
-        $entry = $this->latestScratchpad($workspace);
+        $entry = $this->latestScratchpad($workspace, $voiceTranscriptionId);
         $body = $this->text($action, 'body', 20000, required: true);
         $this->storePending($workspace, $chatId, 'update_scratchpad', $entry->public_id, ['body' => $body]);
 
         return 'Replace your latest note with this? Reply "yes" to confirm.'."\n\n".Str::limit($body, 120);
     }
 
-    private function askToDeleteScratchpad(Workspace $workspace, int $chatId): string
+    private function askToDeleteScratchpad(Workspace $workspace, int $chatId, ?int $voiceTranscriptionId): string
     {
-        $entry = $this->latestScratchpad($workspace);
+        $entry = $this->latestScratchpad($workspace, $voiceTranscriptionId);
         $this->storePending($workspace, $chatId, 'delete_scratchpad', $entry->public_id);
 
         return 'Delete this note? Reply "yes" to confirm.'."\n\n".Str::limit($entry->title ?? $entry->body ?? '(no preview)', 120);
@@ -278,10 +280,11 @@ class ExecuteTelegramWorkspaceActionAction
             : $ideas->map(fn (Idea $idea) => "{$idea->human_id} · {$idea->title}")->implode("\n");
     }
 
-    private function latestScratchpad(Workspace $workspace): ScratchpadEntry
+    private function latestScratchpad(Workspace $workspace, ?int $voiceTranscriptionId): ScratchpadEntry
     {
         return ScratchpadEntry::query()
             ->where('workspace_id', $workspace->id)
+            ->exceptVoiceTranscription($voiceTranscriptionId)
             ->orderByDesc('captured_at')
             ->first() ?? throw new RuntimeException('No Scratch Pad notes yet.');
     }
