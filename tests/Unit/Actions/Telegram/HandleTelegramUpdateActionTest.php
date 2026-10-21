@@ -276,14 +276,18 @@ class HandleTelegramUpdateActionTest extends TestCase
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
         ScratchpadEntry::factory()->for($config->workspace)->count(12)->create(['status' => 'new']);
-        ScratchpadEntry::factory()->for($config->workspace)->triaged()->count(2)->create();
+        ScratchpadEntry::factory()->for($config->workspace)->triaged()->count(2)->create(['captured_at' => now()->addMinute()]);
+        ScratchpadEntry::factory()->for($config->workspace)->dropped()->count(3)->create(['captured_at' => now()->addMinute()]);
         ScratchpadEntry::factory()->count(5)->create();
 
         $this->action()->handle($config, $this->update(1, '/notes'));
 
         $lines = explode("\n", $this->lastReply());
-        $this->assertSame('You have 14 Scratch Pad notes (12 new, 2 triaged). Latest 10:', $lines[0]);
+        $this->assertSame('You have 12 active Scratch Pad notes. Latest 10:', $lines[0]);
         $this->assertCount(11, $lines);
+        foreach (array_slice($lines, 1) as $line) {
+            $this->assertStringEndsWith('(new)', $line);
+        }
     }
 
     public function test_notes_command_with_one_note_says_singular_total()
@@ -295,7 +299,7 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->action()->handle($config, $this->update(1, '/notes'));
 
-        $this->assertStringStartsWith("You have 1 Scratch Pad note (1 new).\n", $this->lastReply());
+        $this->assertStringStartsWith("You have 1 active Scratch Pad note.\n", $this->lastReply());
     }
 
     public function test_notes_command_with_none_yet_says_so()
@@ -306,7 +310,20 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->action()->handle($config, $this->update(1, '/notes'));
 
-        $this->assertSame('No Scratch Pad captures yet.', $this->lastReply());
+        $this->assertSame('No active Scratch Pad notes.', $this->lastReply());
+    }
+
+    public function test_notes_command_with_only_triaged_or_dropped_notes_says_none_active()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        ScratchpadEntry::factory()->for($config->workspace)->triaged()->create();
+        ScratchpadEntry::factory()->for($config->workspace)->dropped()->create();
+
+        $this->action()->handle($config, $this->update(1, '/notes'));
+
+        $this->assertSame('No active Scratch Pad notes.', $this->lastReply());
     }
 
     public function test_clearnotes_command_deletes_recent_untriaged_notes()
@@ -768,7 +785,7 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::query()->where('body', 'show me my scratchpad')->count());
         $this->assertStringContainsString('remember to renew the domain', $this->lastReply());
-        $this->assertStringStartsWith('You have 1 Scratch Pad note (1 new).', $this->lastReply());
+        $this->assertStringStartsWith('You have 1 active Scratch Pad note.', $this->lastReply());
     }
 
     public function test_when_every_provider_fails_the_reply_says_so_before_capturing_anyway()

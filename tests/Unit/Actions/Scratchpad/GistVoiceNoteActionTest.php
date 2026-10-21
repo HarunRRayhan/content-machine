@@ -169,7 +169,7 @@ class GistVoiceNoteActionTest extends TestCase
         $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
 
         $reply = TelegramOutboundMessage::query()->orderByDesc('id')->first()->chunks[0];
-        $this->assertStringStartsWith('You have 1 Scratch Pad note (1 new).', $reply);
+        $this->assertStringStartsWith('You have 1 active Scratch Pad note.', $reply);
         $this->assertNull($this->entry->fresh());
         $this->assertSame(1, ScratchpadEntry::query()->count());
     }
