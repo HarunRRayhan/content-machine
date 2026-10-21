@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -30,7 +31,7 @@ class ChatVoiceNoteJob implements ShouldQueue
         public readonly Transcription $transcription,
     ) {}
 
-    public function handle(HandleTelegramUpdateAction $action): void
+    public function handle(HandleTelegramUpdateAction $action, DeleteScratchpadEntryAction $deleteEntry): void
     {
         $transcription = $this->transcription->fresh(['scratchpadEntry']);
         $entry = $transcription?->scratchpadEntry;
@@ -65,8 +66,15 @@ class ChatVoiceNoteJob implements ShouldQueue
             return true;
         });
 
-        if ($claimed) {
-            $action->handleVoiceTranscript($config, $chatId, $text, $transcription->id, $entry->webhook_generation);
+        // A question or command the bot answered is not a capture: drop the entry and its audio, like typed text.
+        if ($claimed
+            && $action->handleVoiceTranscript($config, $chatId, $text, $transcription->id, $entry->webhook_generation)
+        ) {
+            $fresh = $entry->fresh();
+
+            if ($fresh !== null && $fresh->status === 'new') {
+                $deleteEntry->handle($fresh);
+            }
         }
     }
 }
