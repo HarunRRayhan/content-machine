@@ -3,7 +3,6 @@
 namespace Tests\Unit\Actions\Scratchpad;
 
 use App\Actions\Scratchpad\TranscribeVoiceNoteAction;
-use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Jobs\ChatVoiceNoteJob;
 use App\Jobs\GistVoiceNoteJob;
 use App\Models\AiProviderCredential;
@@ -65,6 +64,7 @@ class GistVoiceNoteActionTest extends TestCase
             'body' => 'my caption',
             'meta' => ['telegram_chat_id' => 555],
         ]);
+        $this->entry->attachments()->create(['media_asset_id' => $mediaAsset->id, 'role' => 'audio', 'position' => 0]);
         $this->transcription = Transcription::factory()->create([
             'scratchpad_entry_id' => $this->entry->id,
             'media_asset_id' => $mediaAsset->id,
@@ -140,7 +140,6 @@ class GistVoiceNoteActionTest extends TestCase
         $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
 
         $this->assertSame('how many notes are in my scratch pad', $completion->userContent);
-        $this->assertArrayNotHasKey('gist', $this->entry->refresh()->meta);
         $messages = TelegramOutboundMessage::query()->orderBy('id')->get();
         $this->assertCount(2, $messages);
         $this->assertSame('📝 Transcript: how many notes are in my scratch pad', $messages[0]->chunks[0]);
@@ -149,12 +148,79 @@ class GistVoiceNoteActionTest extends TestCase
         $this->assertSame(555, $messages[1]->chat_id);
         $this->assertSame($config->id, $messages[1]->telegram_bot_config_id);
 
-        // A duplicate delivery of the chat job, or a re-run of the transcription, does nothing.
+        // An answered question is not a capture: the entry and its audio are gone.
+        $this->assertSame(0, ScratchpadEntry::query()->count());
+        $this->assertSame(0, MediaAsset::query()->count());
+        Storage::disk('scratchpad')->assertMissing('audio/note.ogg');
+
+        // A duplicate delivery of the chat job does nothing.
         $calls = $completion->calls;
-        (new ChatVoiceNoteJob($this->transcription))->handle(app(HandleTelegramUpdateAction::class));
-        $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
+        app()->call([new ChatVoiceNoteJob($this->transcription), 'handle']);
         $this->assertSame($calls, $completion->calls);
         $this->assertSame(2, TelegramOutboundMessage::query()->count());
+    }
+
+    public function test_a_voice_notes_lookup_does_not_count_the_voice_note_itself(): void
+    {
+        $this->enableAiChat();
+        ScratchpadEntry::factory()->create(['workspace_id' => $this->workspace->id, 'status' => 'new', 'body' => 'older note']);
+        $this->bindCompletion(AiCompletionResult::success('notes'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
+
+        $reply = TelegramOutboundMessage::query()->orderByDesc('id')->first()->chunks[0];
+        $this->assertStringStartsWith('You have 1 Scratch Pad note (1 new).', $reply);
+        $this->assertNull($this->entry->fresh());
+        $this->assertSame(1, ScratchpadEntry::query()->count());
+    }
+
+    public function test_with_ai_chat_on_a_duplicate_chat_job_on_a_kept_capture_does_nothing(): void
+    {
+        $this->enableAiChat();
+        $completion = $this->bindCompletion(AiCompletionResult::success('{"action":"create_scratchpad","body":"buy milk"}'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'save a note buy milk', language: 'en', model: 'whisper-1'));
+        $calls = $completion->calls;
+        app()->call([new ChatVoiceNoteJob($this->transcription), 'handle']);
+        $this->transcribe(AiTranscriptionResult::success(text: 'save a note buy milk', language: 'en', model: 'whisper-1'));
+
+        $this->assertSame($calls, $completion->calls);
+    }
+
+    public function test_with_ai_chat_on_a_capture_request_keeps_the_voice_entry_and_audio(): void
+    {
+        $this->enableAiChat();
+        $this->bindCompletion(AiCompletionResult::success('{"action":"create_scratchpad","body":"buy milk"}'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'save a note buy milk', language: 'en', model: 'whisper-1'));
+
+        $this->assertNotNull($this->entry->fresh());
+        $this->assertSame(1, MediaAsset::query()->count());
+        Storage::disk('scratchpad')->assertExists('audio/note.ogg');
+    }
+
+    public function test_with_ai_chat_on_a_failed_chat_reply_keeps_the_voice_entry_and_audio(): void
+    {
+        $this->enableAiChat();
+        $this->bindCompletion(AiCompletionResult::failure('provider down'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
+
+        $this->assertNotNull($this->entry->fresh());
+        $this->assertSame(1, MediaAsset::query()->count());
+        Storage::disk('scratchpad')->assertExists('audio/note.ogg');
+    }
+
+    public function test_with_ai_chat_on_a_failed_transcription_keeps_the_voice_entry_and_audio(): void
+    {
+        $this->enableAiChat();
+        $completion = $this->bindCompletion(AiCompletionResult::success('unused'));
+
+        $this->transcribe(AiTranscriptionResult::failure('audio unreadable'));
+
+        $this->assertSame(0, $completion->calls);
+        $this->assertNotNull($this->entry->fresh());
+        Storage::disk('scratchpad')->assertExists('audio/note.ogg');
     }
 
     public function test_a_voice_note_consumed_by_post_is_not_answered_as_chat(): void

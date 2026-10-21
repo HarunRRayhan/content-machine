@@ -91,6 +91,12 @@ class HandleTelegramUpdateAction
 
     private const LOVE_REACTION = '❤';
 
+    // Set by runChat when a reply answered the turn without saving anything.
+    private bool $answeredWithoutCapture = false;
+
+    // The voice note being answered, left out of note lookups because an answered voice note is deleted.
+    private ?int $voiceTranscriptionId = null;
+
     public function __construct(
         private readonly CaptureTelegramMessageAction $captureTelegramMessageAction,
         private readonly CaptureTextNoteAction $captureTextNoteAction,
@@ -219,6 +225,10 @@ class HandleTelegramUpdateAction
      * reuses the same outbound rows instead of sending twice. With no
      * dispatch lease, every side effect re-checks the bot identity and the
      * sender's link under the workspace and config locks instead.
+     *
+     * Returns true when the transcript was answered as a question or command
+     * (lookup intent, idea list, or chat reply), so the caller can drop the
+     * voice capture just as a typed question is never captured.
      */
     public function handleVoiceTranscript(
         TelegramBotConfig $config,
@@ -226,13 +236,15 @@ class HandleTelegramUpdateAction
         string $text,
         int $transcriptionId,
         ?string $webhookGeneration,
-    ): void {
+    ): bool {
         // Captures are private-chat only, where the chat id is the sender's user id.
         $link = $this->findLink($config, $chatId);
 
         if ($link === null) {
-            return;
+            return false;
         }
+
+        $this->answeredWithoutCapture = false;
 
         $this->replyContextKey = 'voice-transcription:'.$transcriptionId;
         $this->replySlot = 0;
@@ -248,11 +260,16 @@ class HandleTelegramUpdateAction
                 && $this->findLink($locked, $chatId) !== null;
         });
 
+        $this->voiceTranscriptionId = $transcriptionId;
+
         try {
             $this->runChat($config, $link, $chatId, $text);
         } finally {
             $this->voiceTurnGuard = null;
+            $this->voiceTranscriptionId = null;
         }
+
+        return $this->answeredWithoutCapture;
     }
 
     /**
@@ -293,7 +310,7 @@ class HandleTelegramUpdateAction
                 return true;
             }
 
-            $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $this->intentReply($config, $link, $intent));
+            $this->answeredWithoutCapture = $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $this->intentReply($config, $link, $intent));
 
             return true;
         }
@@ -309,7 +326,12 @@ class HandleTelegramUpdateAction
 
         if ($workspaceAction !== null) {
             $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
-                fn () => $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text));
+                function () use ($config, $chatId, $workspaceAction, $text): string {
+                    $reply = $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text);
+                    $this->answeredWithoutCapture = ($workspaceAction['action'] ?? null) === 'list_ideas';
+
+                    return $reply;
+                });
 
             return true;
         }
@@ -317,7 +339,7 @@ class HandleTelegramUpdateAction
         $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
 
         if ($chatReply !== null) {
-            $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $chatReply);
+            $this->answeredWithoutCapture = $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $chatReply);
 
             return true;
         }
@@ -1160,14 +1182,17 @@ class HandleTelegramUpdateAction
 
     private function recentNotes(TelegramBotConfig $config): string
     {
-        $entries = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->orderByDesc('captured_at')->limit(10)->get();
+        $notes = fn () => ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)
+            ->when($this->voiceTranscriptionId !== null, fn ($query) => $query->whereDoesntHave(
+                'transcriptions', fn ($transcriptions) => $transcriptions->whereKey($this->voiceTranscriptionId)));
+        $entries = $notes()->orderByDesc('captured_at')->limit(10)->get();
 
         if ($entries->isEmpty()) {
             return 'No Scratch Pad captures yet.';
         }
 
         // The list is capped at 10, so the total comes from the database, never from $entries.
-        $byStatus = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)
+        $byStatus = $notes()
             ->selectRaw('status, count(*) as aggregate')->groupBy('status')->orderBy('status')
             ->pluck('aggregate', 'status');
         $total = (int) $byStatus->sum();
