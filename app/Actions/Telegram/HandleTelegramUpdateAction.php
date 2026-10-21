@@ -72,7 +72,7 @@ class HandleTelegramUpdateAction
         /link CODE: link your Content Machine account
         /videos: your workspace's most recent videos
         /posts: your workspace's most recent posts
-        /notes: your Scratch Pad note count and most recent captures
+        /notes: your active Scratch Pad note count and most recent ones
         /note <text>: save a Scratch Pad note
         /post <text>: create a draft, or send the next photo/voice/audio
         /approve P-123: approve a generated draft
@@ -1182,29 +1182,26 @@ class HandleTelegramUpdateAction
 
     private function recentNotes(TelegramBotConfig $config): string
     {
-        $notes = fn () => ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)
+        // Only active (untriaged) notes count; triaged and dropped ones are filed or gone.
+        $notes = fn () => ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->where('status', 'new')
             ->when($this->voiceTranscriptionId !== null, fn ($query) => $query->whereDoesntHave(
                 'transcriptions', fn ($transcriptions) => $transcriptions->whereKey($this->voiceTranscriptionId)));
         $entries = $notes()->orderByDesc('captured_at')->limit(10)->get();
 
         if ($entries->isEmpty()) {
-            return 'No Scratch Pad captures yet.';
+            return 'No active Scratch Pad notes.';
         }
 
         // The list is capped at 10, so the total comes from the database, never from $entries.
-        $byStatus = $notes()
-            ->selectRaw('status, count(*) as aggregate')->groupBy('status')->orderBy('status')
-            ->pluck('aggregate', 'status');
-        $total = (int) $byStatus->sum();
-        $breakdown = $byStatus->map(fn ($count, $status) => "{$count} {$status}")->implode(', ');
-        $header = 'You have '.$total.' Scratch Pad '.Str::plural('note', $total)." ({$breakdown}).";
+        $total = $notes()->count();
+        $header = 'You have '.$total.' active Scratch Pad '.Str::plural('note', $total).'.';
         $header .= $total > $entries->count() ? " Latest {$entries->count()}:" : '';
 
         return $header."\n".$entries->map(function (ScratchpadEntry $entry) {
             $preview = $entry->title ?? $entry->body;
             $preview = $preview === null ? '(no preview)' : Str::limit($preview, 60);
 
-            return "{$entry->kind}: {$preview} ({$entry->status})";
+            return "{$entry->kind}: {$preview}";
         })->implode("\n");
     }
 
