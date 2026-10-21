@@ -6,6 +6,7 @@ use App\Concerns\BelongsToWorkspace;
 use App\Concerns\RecordsHistory;
 use Carbon\CarbonImmutable;
 use Database\Factories\ScratchpadEntryFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -148,5 +149,18 @@ class ScratchpadEntry extends Model
     public function ideas(): HasMany
     {
         return $this->hasMany(Idea::class);
+    }
+
+    /**
+     * Leaves out the voice note whose transcript is being answered right now,
+     * so a spoken command never targets or counts its own entry. Null is a no-op.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeExceptVoiceTranscription(Builder $query, ?int $transcriptionId): Builder
+    {
+        return $query->when($transcriptionId !== null, fn (Builder $query) => $query->whereDoesntHave(
+            'transcriptions', fn (Builder $transcriptions) => $transcriptions->whereKey($transcriptionId)));
     }
 }

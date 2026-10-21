@@ -3,6 +3,7 @@
 namespace Tests\Unit\Actions\Scratchpad;
 
 use App\Actions\Scratchpad\TranscribeVoiceNoteAction;
+use App\Actions\Telegram\ExecuteTelegramWorkspaceActionAction;
 use App\Jobs\ChatVoiceNoteJob;
 use App\Jobs\GistVoiceNoteJob;
 use App\Models\AiProviderCredential;
@@ -172,6 +173,47 @@ class GistVoiceNoteActionTest extends TestCase
         $this->assertStringStartsWith('You have 1 active Scratch Pad note.', $reply);
         $this->assertNull($this->entry->fresh());
         $this->assertSame(1, ScratchpadEntry::query()->count());
+    }
+
+    public function test_a_voice_delete_last_note_targets_the_previous_note_and_drops_the_voice_entry(): void
+    {
+        $this->enableAiChat();
+        $older = ScratchpadEntry::factory()->create(['workspace_id' => $this->workspace->id, 'body' => 'older note', 'captured_at' => now()->subMinute()]);
+        $this->bindCompletion(AiCompletionResult::success('{"action":"delete_scratchpad"}'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'delete my last note', language: 'en', model: 'whisper-1'));
+
+        $this->assertStringContainsString('older note', TelegramOutboundMessage::query()->orderByDesc('id')->first()->chunks[0]);
+        $this->assertNull($this->entry->fresh());
+
+        $this->assertSame('Deleted the note.', app(ExecuteTelegramWorkspaceActionAction::class)->confirmPending($this->workspace, 555, 'yes'));
+        $this->assertNull($older->fresh());
+    }
+
+    public function test_a_voice_update_last_note_targets_the_previous_note_and_drops_the_voice_entry(): void
+    {
+        $this->enableAiChat();
+        $older = ScratchpadEntry::factory()->create(['workspace_id' => $this->workspace->id, 'body' => 'older note', 'captured_at' => now()->subMinute()]);
+        $this->bindCompletion(AiCompletionResult::success('{"action":"update_scratchpad","body":"new body"}'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'change my last note to new body', language: 'en', model: 'whisper-1'));
+
+        $this->assertNull($this->entry->fresh());
+        $this->assertSame('Updated the note.', app(ExecuteTelegramWorkspaceActionAction::class)->confirmPending($this->workspace, 555, 'yes'));
+        $this->assertSame('new body', $older->fresh()->body);
+    }
+
+    public function test_a_voice_clear_notes_leaves_the_voice_entry_out_of_the_batch_then_drops_it(): void
+    {
+        $this->enableAiChat();
+        ScratchpadEntry::factory()->count(2)->create(['workspace_id' => $this->workspace->id, 'status' => 'new', 'captured_at' => now()->subMinute()]);
+        $this->bindCompletion(AiCompletionResult::success('clear_notes'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'clear my notes', language: 'en', model: 'whisper-1'));
+
+        $this->assertSame('Deleted 2 notes.', TelegramOutboundMessage::query()->orderByDesc('id')->first()->chunks[0]);
+        $this->assertSame(0, ScratchpadEntry::query()->count());
+        Storage::disk('scratchpad')->assertMissing('audio/note.ogg');
     }
 
     public function test_with_ai_chat_on_a_duplicate_chat_job_on_a_kept_capture_does_nothing(): void
