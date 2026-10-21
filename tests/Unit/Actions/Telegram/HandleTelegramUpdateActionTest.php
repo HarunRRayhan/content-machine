@@ -267,7 +267,6 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertStringContainsString('text', $this->lastReply());
         $this->assertStringContainsString('remember to renew the domain', $this->lastReply());
-        $this->assertStringContainsString('new', $this->lastReply());
     }
 
     public function test_notes_command_leads_with_the_true_total_not_the_capped_list_length()
@@ -275,7 +274,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $config = TelegramBotConfig::factory()->connected()->create();
         $user = User::factory()->create();
         TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
-        ScratchpadEntry::factory()->for($config->workspace)->count(12)->create(['status' => 'new']);
+        ScratchpadEntry::factory()->for($config->workspace)->count(12)->create(['status' => 'new', 'title' => null, 'body' => 'active note']);
         ScratchpadEntry::factory()->for($config->workspace)->triaged()->count(2)->create(['captured_at' => now()->addMinute()]);
         ScratchpadEntry::factory()->for($config->workspace)->dropped()->count(3)->create(['captured_at' => now()->addMinute()]);
         ScratchpadEntry::factory()->count(5)->create();
@@ -286,7 +285,7 @@ class HandleTelegramUpdateActionTest extends TestCase
         $this->assertSame('You have 12 active Scratch Pad notes. Latest 10:', $lines[0]);
         $this->assertCount(11, $lines);
         foreach (array_slice($lines, 1) as $line) {
-            $this->assertStringEndsWith('(new)', $line);
+            $this->assertStringEndsWith(': active note', $line);
         }
     }
 

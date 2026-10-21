@@ -1201,7 +1201,7 @@ class HandleTelegramUpdateAction
             $preview = $entry->title ?? $entry->body;
             $preview = $preview === null ? '(no preview)' : Str::limit($preview, 60);
 
-            return "{$entry->kind}: {$preview} ({$entry->status})";
+            return "{$entry->kind}: {$preview}";
         })->implode("\n");
     }
 
