@@ -160,6 +160,20 @@ class GistVoiceNoteActionTest extends TestCase
         $this->assertSame(2, TelegramOutboundMessage::query()->count());
     }
 
+    public function test_a_voice_notes_lookup_does_not_count_the_voice_note_itself(): void
+    {
+        $this->enableAiChat();
+        ScratchpadEntry::factory()->create(['workspace_id' => $this->workspace->id, 'status' => 'new', 'body' => 'older note']);
+        $this->bindCompletion(AiCompletionResult::success('notes'));
+
+        $this->transcribe(AiTranscriptionResult::success(text: 'how many notes are in my scratch pad', language: 'en', model: 'whisper-1'));
+
+        $reply = TelegramOutboundMessage::query()->orderByDesc('id')->first()->chunks[0];
+        $this->assertStringStartsWith('You have 1 Scratch Pad note (1 new).', $reply);
+        $this->assertNull($this->entry->fresh());
+        $this->assertSame(1, ScratchpadEntry::query()->count());
+    }
+
     public function test_with_ai_chat_on_a_duplicate_chat_job_on_a_kept_capture_does_nothing(): void
     {
         $this->enableAiChat();

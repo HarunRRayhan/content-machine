@@ -94,6 +94,9 @@ class HandleTelegramUpdateAction
     // Set by runChat when a reply answered the turn without saving anything.
     private bool $answeredWithoutCapture = false;
 
+    // The voice note being answered, left out of note lookups because an answered voice note is deleted.
+    private ?int $voiceTranscriptionId = null;
+
     public function __construct(
         private readonly CaptureTelegramMessageAction $captureTelegramMessageAction,
         private readonly CaptureTextNoteAction $captureTextNoteAction,
@@ -257,10 +260,13 @@ class HandleTelegramUpdateAction
                 && $this->findLink($locked, $chatId) !== null;
         });
 
+        $this->voiceTranscriptionId = $transcriptionId;
+
         try {
             $this->runChat($config, $link, $chatId, $text);
         } finally {
             $this->voiceTurnGuard = null;
+            $this->voiceTranscriptionId = null;
         }
 
         return $this->answeredWithoutCapture;
@@ -1176,14 +1182,17 @@ class HandleTelegramUpdateAction
 
     private function recentNotes(TelegramBotConfig $config): string
     {
-        $entries = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->orderByDesc('captured_at')->limit(10)->get();
+        $notes = fn () => ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)
+            ->when($this->voiceTranscriptionId !== null, fn ($query) => $query->whereDoesntHave(
+                'transcriptions', fn ($transcriptions) => $transcriptions->whereKey($this->voiceTranscriptionId)));
+        $entries = $notes()->orderByDesc('captured_at')->limit(10)->get();
 
         if ($entries->isEmpty()) {
             return 'No Scratch Pad captures yet.';
         }
 
         // The list is capped at 10, so the total comes from the database, never from $entries.
-        $byStatus = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)
+        $byStatus = $notes()
             ->selectRaw('status, count(*) as aggregate')->groupBy('status')->orderBy('status')
             ->pluck('aggregate', 'status');
         $total = (int) $byStatus->sum();
