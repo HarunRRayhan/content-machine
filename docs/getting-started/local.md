@@ -12,21 +12,85 @@ The application declares PHP 8.3 support. The test toolchain currently needs PHP
 ## Start the app
 
 Create a local PostgreSQL database and user. `.env.example` uses
-`content_machine` on `127.0.0.1:5432` with user `root` and no password. Adjust
-those values for your local server.
+`content_machine` on `127.0.0.1:5432`. Set the database username and password
+to a PostgreSQL role that exists on your local server.
 
 ```bash
-composer install
-npm ci
+# Fresh installations only; keep an existing .env.
 cp .env.example .env
 # Edit .env with your local database host, port, name, username, and password.
-php artisan key:generate
-php artisan migrate
+composer run setup
 composer run dev
 ```
 
-`composer run dev` starts the Laravel server, queue listener, and Vite dev
-server. Open the URL printed by Laravel, usually `http://localhost:8000`.
+`composer run setup` installs locked dependencies, prepares a missing application
+key without replacing an existing one, migrates the database, creates
+`ADMIN_EMAIL` if configured, and builds the frontend.
+
+`composer run dev` starts the Laravel server, Vite, logs when supported, the
+default queue worker, scratchpad and PostSyncer workers, and scheduler. Open
+the URL printed by Laravel, usually `http://localhost:8000`.
+
+## First login and background workers
+
+After migration, create an account at `/register`, or use `ADMIN_EMAIL`,
+`ADMIN_NAME`, and `php artisan cm:ensure-admin` to create an owner account with
+a generated password. Both supported setup paths create a team and default
+workspace. The admin command skips existing accounts without repairing them or
+resetting their passwords.
+
+Follow the [README account setup](../../README.md#2-create-your-first-account)
+for the exact commands and the
+[development services](../../README.md#3-start-development-services) for the
+processes started together by `composer run dev`. Use the separate supervised
+worker commands from the [production guide](production.md) on a server.
+
+## Dashboard 404: No current workspace
+
+If login succeeds but `/dashboard` returns `404 No current workspace`, the
+account has no resolvable active team/workspace. The current `DatabaseSeeder`
+creates `test@example.com` without those records, so `php artisan db:seed` is
+not a substitute for registration or the admin setup command.
+
+For a fresh installation, use a new email with one of the supported setup paths
+above. To keep an existing local account, repair its team/workspace through the
+application's team-creation action. Run:
+
+```bash
+php artisan tinker
+```
+
+Paste the following block, replacing the email if needed. It preserves the
+password and reuses an existing membership and workspace when possible:
+
+```php
+Illuminate\Support\Facades\DB::transaction(function () {
+    $user = App\Models\User::where('email', 'test@example.com')
+        ->lockForUpdate()
+        ->firstOrFail();
+
+    $team = $user->teams()->whereKey($user->current_team_id)->first()
+        ?? $user->teams()->oldest('teams.id')->first();
+
+    if ($team === null) {
+        $team = app(App\Actions\Teams\CreateTeamAction::class)->handle(
+            $user,
+            App\Data\Teams\CreateTeamData::fromOwner($user),
+        );
+    }
+
+    if (! $team->workspaces()->exists()) {
+        $team->workspaces()->create(['name' => 'Default', 'slug' => 'default']);
+    }
+
+    $user->switchTeam($team);
+});
+```
+
+Exit Tinker and refresh `/dashboard`. Creating a missing team through
+`CreateTeamAction` also creates the owner membership and default workspace.
+Running `cm:ensure-admin` for the same existing email will not perform this
+repair. Change any default development password before making the app public.
 
 ## Run tests against a disposable PostgreSQL database
 

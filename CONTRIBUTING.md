@@ -12,17 +12,18 @@ Install the required PHP and Node packages, then configure a local PostgreSQL
 database in `.env`:
 
 ```bash
-composer install
-npm ci
+# Fresh installations only; keep an existing .env.
 cp .env.example .env
-php artisan key:generate
-php artisan migrate
+# Configure PostgreSQL credentials in .env before setup.
+composer run setup
 composer run dev
 ```
 
-`composer run dev` starts the Laravel server, the queue listener, and the Vite dev
-server together. The app supports PHP 8.3+, while the current Pest 5 test suite
-needs PHP 8.4. See [local development](docs/getting-started/local.md) for the
+`composer run setup` installs locked dependencies, preserves an existing app key,
+migrates, creates `ADMIN_EMAIL` if configured, and builds the frontend.
+`composer run dev` starts the Laravel server, Vite, logs when supported, all
+content queues, and the scheduler together. The app supports PHP 8.3+, while
+the current Pest 5 test suite needs PHP 8.4. See [local development](docs/getting-started/local.md) for the
 PostgreSQL setup used by CI. The app does not provide a local Docker Compose
 stack.
 
