@@ -8,9 +8,17 @@ use Throwable;
 
 class PostsyncerClient
 {
+    // Longest single PostSyncer request. Multi-platform creates can take minutes.
+    public const HTTP_TIMEOUT_SECONDS = 300;
+
+    private readonly PostsyncerWriteThrottle $throttle;
+
     public function __construct(
         private readonly PostsyncerConfig $config,
-    ) {}
+        ?PostsyncerWriteThrottle $throttle = null,
+    ) {
+        $this->throttle = $throttle ?? app(PostsyncerWriteThrottle::class);
+    }
 
     /**
      * PostSyncer workspaces from GET /workspaces, including the display name.
@@ -300,18 +308,26 @@ class PostsyncerClient
         $pending = Http::withToken($apiKey)
             // Multi-platform PostSyncer creates can take several minutes.
             // Keep the client below the queue worker's 900-second timeout.
-            ->timeout(300)
+            ->timeout(self::HTTP_TIMEOUT_SECONDS)
             ->acceptJson()
             ->withOptions(['allow_redirects' => false])
             ->withHeaders($headers);
 
+        $send = fn (): Response => match ($method) {
+            'get' => $pending->get($url),
+            'post' => $pending->post($url, $body),
+            'put' => $pending->put($url, $body),
+            default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
+        };
+
         try {
-            $response = match ($method) {
-                'get' => $pending->get($url),
-                'post' => $pending->post($url, $body),
-                'put' => $pending->put($url, $body),
-                default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
-            };
+            // Writes are spaced and serialized across processes. The throttle
+            // throws a notSent exception before any request if it cannot run.
+            $response = $method === 'get'
+                ? $send()
+                : $this->throttle->run($send);
+        } catch (PostsyncerException $exception) {
+            throw $exception;
         } catch (Throwable $exception) {
             // A connection timeout may happen after PostSyncer accepted a
             // create. Keep it in the unknown-outcome path so retries cannot
