@@ -169,4 +169,26 @@ class ListCalendarEventsActionTest extends TestCase
 
         $this->assertSame([], $this->action()->handle($workspace, 2026, 8));
     }
+
+    public function test_each_event_carries_its_color_category(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+        $groups = ['groups' => [['post_id' => '1', 'scheduled_at' => '2026-08-26T09:00:00+06:00']]];
+
+        Post::factory()->for($workspace)->create(['human_id' => 'P-1', 'category' => 'default', 'postsyncer' => $groups]);
+        Post::factory()->for($workspace)->create(['human_id' => 'P-2', 'category' => 'morning', 'postsyncer' => $groups]);
+        Post::factory()->for($workspace)->create(['human_id' => 'P-3', 'category' => 'evening_carousel', 'postsyncer' => $groups]);
+        Video::factory()->for($workspace)->create(['human_id' => 'BV-1', 'language' => 'bn', 'postsyncer' => $groups]);
+        Video::factory()->for($workspace)->create(['human_id' => 'EV-1', 'language' => 'en', 'postsyncer' => $groups]);
+
+        $categories = array_column($this->action()->handle($workspace, 2026, 8), 'category', 'human_id');
+
+        $this->assertSame([
+            'P-1' => 'post_default',
+            'P-2' => 'post_morning',
+            'P-3' => 'post_evening_carousel',
+            'BV-1' => 'video_bn',
+            'EV-1' => 'video_en',
+        ], $categories);
+    }
 }

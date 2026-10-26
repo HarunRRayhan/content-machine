@@ -43,6 +43,7 @@ class PostResource extends JsonResource
             'language' => $this->language,
             'slug' => $this->slug,
             'template' => $this->template,
+            'category' => $this->category,
             'body' => $this->when(
                 $include->wants('body'),
                 $this->body,

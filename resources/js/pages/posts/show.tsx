@@ -51,6 +51,7 @@ type PostDetail = {
         visual_identity: string;
     } | null;
     status: string;
+    category: string;
     blocked_reason: string | null;
     publish_state: string;
     publish_error: string | null;
@@ -161,6 +162,7 @@ export default function PostShow({ post }: PageProps) {
                         postId={post.id}
                         title={post.title}
                         status={post.status}
+                        category={post.category}
                         blockedReason={post.blocked_reason}
                         platforms={post.platforms}
                         language={post.language}

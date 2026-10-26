@@ -41,6 +41,7 @@ final readonly class UpdatePostData
         public bool $hasTemplate = false,
         public ?string $blockedReason = null,
         public bool $hasBlockedReason = false,
+        public ?string $category = null,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -57,6 +58,7 @@ final readonly class UpdatePostData
             hasBody: $request->has('body'),
             hasCaptions: $request->has('captions'),
             hasImageDriveUrls: $request->has('image_drive_urls'),
+            category: $request->filled('category') ? $request->string('category')->toString() : null,
         );
     }
 
@@ -146,6 +148,7 @@ final readonly class UpdatePostData
                 ? ($payload['blocked_reason'] !== null ? (string) $payload['blocked_reason'] : null)
                 : null,
             hasBlockedReason: array_key_exists('blocked_reason', $payload),
+            category: array_key_exists('category', $payload) ? (string) $payload['category'] : null,
         );
     }
 }

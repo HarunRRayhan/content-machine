@@ -88,6 +88,12 @@ class UpdatePostAction
                 $attributes['template'] = $data->template;
             }
 
+            // Category is calendar metadata: not content, so approval and
+            // publish locks are untouched.
+            if ($data->category !== null) {
+                $attributes['category'] = $data->category;
+            }
+
             if ($data->status !== null) {
                 $attributes['status'] = $data->status;
             }
