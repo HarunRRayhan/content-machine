@@ -259,8 +259,36 @@ class PostsyncerClientTest extends TestCase
             $this->assertStringContainsString('Already stored PostSyncer media ids: 915.', $exception->getMessage());
         }
 
-        Sleep::assertSleptTimes(3);
-        $this->assertCount(5, Http::recorded(fn ($request): bool => str_contains($request->url(), '/media/upload/file')));
+        // 30 + 60 s spends the shared budget; the third 60 s wait would exceed it.
+        Sleep::assertSequence([Sleep::for(30)->seconds(), Sleep::for(60)->seconds()]);
+        $this->assertCount(4, Http::recorded(fn ($request): bool => str_contains($request->url(), '/media/upload/file')));
+    }
+
+    public function test_upload_files_from_urls_shares_one_rate_limit_wait_budget_across_files(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
+                ->push(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '60'])
+                ->push(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '60'])
+                ->push(['media' => ['id' => 915]], 201)
+                ->whenEmpty(Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '1'])),
+        ]);
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, [
+                'https://drive.usercontent.google.com/download?id=video',
+                'https://drive.usercontent.google.com/download?id=cover',
+            ]);
+            $this->fail('Expected the exhausted budget to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertSame(429, $exception->getCode());
+            $this->assertStringContainsString('Already stored PostSyncer media ids: 915.', $exception->getMessage());
+        }
+
+        Sleep::assertSequence([Sleep::for(60)->seconds(), Sleep::for(60)->seconds()]);
+        $this->assertCount(4, Http::recorded(fn ($request): bool => str_contains($request->url(), '/media/upload/file')));
     }
 
     public function test_upload_files_from_urls_gives_up_on_a_first_file_rate_limit_safely(): void

@@ -22,6 +22,9 @@ class PostsyncerClient
 
     private const UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS = 60;
 
+    // Shared by every file in one publish group so retries stay well inside the job timeout.
+    private const UPLOAD_RATE_LIMIT_TOTAL_WAIT_SECONDS = 120;
+
     public function __construct(
         private readonly PostsyncerConfig $config,
         private readonly ?PublicUrlGuard $urlGuard = null,
@@ -201,6 +204,7 @@ class PostsyncerClient
     public function uploadFilesFromUrls(int|string $workspaceId, array $urls, ?string $idempotencyKey = null): array
     {
         $paths = [];
+        $waitBudget = self::UPLOAD_RATE_LIMIT_TOTAL_WAIT_SECONDS;
 
         try {
             foreach ($urls as $url) {
@@ -220,7 +224,7 @@ class PostsyncerClient
                     : ['Idempotency-Key' => $idempotencyKey.':'.$index];
 
                 try {
-                    $response = $this->uploadFileWithRateLimitRetry($workspaceId, $headers, $path);
+                    $response = $this->uploadFileWithRateLimitRetry($workspaceId, $headers, $path, $waitBudget);
                 } catch (PostsyncerException $exception) {
                     // A definitive rejection before any file was stored left
                     // nothing behind in PostSyncer, so a retry cannot duplicate.
@@ -272,13 +276,14 @@ class PostsyncerClient
 
     /**
      * PostSyncer's upload throttle answers 429 before storing anything, so the
-     * same file is retried after Retry-After (capped) or a fixed backoff. Worst
-     * case adds 180 s per file, well under the 900-second publish job timeout.
+     * same file is retried after Retry-After (capped) or a fixed backoff. All
+     * files in one call share a 120 s wait budget, so retries plus re-sent
+     * uploads stay inside the 900-second publish job timeout.
      * A 429 that outlasts the retries is still a definitive rejection.
      *
      * @param  array<string, string>  $headers
      */
-    private function uploadFileWithRateLimitRetry(int|string $workspaceId, array $headers, string $path): Response
+    private function uploadFileWithRateLimitRetry(int|string $workspaceId, array $headers, string $path, int &$waitBudget): Response
     {
         $backoff = self::UPLOAD_RATE_LIMIT_BACKOFF_SECONDS;
 
@@ -292,7 +297,9 @@ class PostsyncerClient
                     throw $exception;
                 }
 
-                if ($attempt >= count($backoff)) {
+                $wait = min($exception->retryAfter ?? $backoff[$attempt] ?? 0, self::UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS);
+
+                if ($attempt >= count($backoff) || $wait > $waitBudget) {
                     throw new PostsyncerException(
                         $exception->getMessage().' Gave up after '.count($backoff).' retries.',
                         429,
@@ -301,7 +308,8 @@ class PostsyncerClient
                     );
                 }
 
-                Sleep::for(min($exception->retryAfter ?? $backoff[$attempt], self::UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS))->seconds();
+                $waitBudget -= $wait;
+                Sleep::for($wait)->seconds();
             }
         }
     }
