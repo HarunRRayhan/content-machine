@@ -14,6 +14,7 @@ use GuzzleHttp\HandlerStack;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 class PostsyncerClientTest extends TestCase
@@ -192,6 +193,114 @@ class PostsyncerClientTest extends TestCase
             $this->assertFalse($exception->safeToRetry);
             $this->assertStringContainsString('Already stored PostSyncer media ids: 915.', $exception->getMessage());
         }
+    }
+
+    public function test_upload_files_from_urls_retries_a_rate_limited_file_and_keeps_order(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
+                ->push(['media' => ['id' => 915]], 201)
+                ->push(['message' => 'Too Many Attempts.'], 429)
+                ->push(['media' => ['id' => 916]], 201),
+        ]);
+
+        $ids = $this->clientWithKey()->uploadFilesFromUrls(15211, [
+            'https://drive.usercontent.google.com/download?id=video',
+            'https://drive.usercontent.google.com/download?id=cover',
+        ], 'op:0:group:media');
+
+        $this->assertSame([915, 916], $ids);
+        $uploads = Http::recorded(fn ($request): bool => str_contains($request->url(), '/media/upload/file'));
+        $this->assertCount(3, $uploads);
+        $this->assertSame(['op:0:group:media:1'], $uploads->last()[0]->header('Idempotency-Key'));
+        Sleep::assertSequence([Sleep::for(30)->seconds()]);
+    }
+
+    public function test_upload_files_from_urls_honors_a_capped_retry_after(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
+                ->push(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '7'])
+                ->push(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '3600'])
+                ->push(['media' => ['id' => 915]], 201),
+        ]);
+
+        $ids = $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
+
+        $this->assertSame([915], $ids);
+        Sleep::assertSequence([Sleep::for(7)->seconds(), Sleep::for(60)->seconds()]);
+    }
+
+    public function test_upload_files_from_urls_gives_up_on_rate_limit_and_names_stored_ids(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
+                ->push(['media' => ['id' => 915]], 201)
+                ->whenEmpty(Http::response(['message' => 'Too Many Attempts.'], 429)),
+        ]);
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, [
+                'https://drive.usercontent.google.com/download?id=video',
+                'https://drive.usercontent.google.com/download?id=cover',
+            ]);
+            $this->fail('Expected the rate limit to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertSame(429, $exception->getCode());
+            $this->assertFalse($exception->outcomeUnknown);
+            $this->assertFalse($exception->safeToRetry);
+            $this->assertStringContainsString('PostSyncer API error 429: Too Many Attempts.', $exception->getMessage());
+            $this->assertStringContainsString('Already stored PostSyncer media ids: 915.', $exception->getMessage());
+        }
+
+        Sleep::assertSleptTimes(3);
+        $this->assertCount(5, Http::recorded(fn ($request): bool => str_contains($request->url(), '/media/upload/file')));
+    }
+
+    public function test_upload_files_from_urls_gives_up_on_a_first_file_rate_limit_safely(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response(['message' => 'Too Many Attempts.'], 429),
+        ]);
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
+            $this->fail('Expected the rate limit to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertSame(429, $exception->getCode());
+            $this->assertTrue($exception->safeToRetry);
+        }
+    }
+
+    public function test_upload_files_from_urls_does_not_retry_a_connection_failure(): void
+    {
+        Sleep::fake();
+        $attempts = 0;
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => function () use (&$attempts) {
+                $attempts++;
+                throw new ConnectionException('timed out');
+            },
+        ]);
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
+            $this->fail('Expected the lost upload response to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->outcomeUnknown);
+        }
+
+        Sleep::assertNeverSlept();
+        $this->assertSame(1, $attempts);
     }
 
     public function test_upload_files_from_urls_download_failure_sends_nothing_to_postsyncer(): void

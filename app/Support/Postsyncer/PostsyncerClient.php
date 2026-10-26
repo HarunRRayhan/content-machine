@@ -7,6 +7,7 @@ use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\UriResolver;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Symfony\Component\Mime\MimeTypes;
 use Throwable;
 
@@ -16,6 +17,10 @@ class PostsyncerClient
     public const MAX_FILE_UPLOAD_BYTES = 500 * 1024 * 1024;
 
     private const MAX_DOWNLOAD_REDIRECTS = 5;
+
+    private const UPLOAD_RATE_LIMIT_BACKOFF_SECONDS = [30, 60, 60];
+
+    private const UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS = 60;
 
     public function __construct(
         private readonly PostsyncerConfig $config,
@@ -215,9 +220,7 @@ class PostsyncerClient
                     : ['Idempotency-Key' => $idempotencyKey.':'.$index];
 
                 try {
-                    $response = $this->request('post', '/media/upload/file', [
-                        'workspace_id' => $workspaceId,
-                    ], $headers, $path);
+                    $response = $this->uploadFileWithRateLimitRetry($workspaceId, $headers, $path);
                 } catch (PostsyncerException $exception) {
                     // A definitive rejection before any file was stored left
                     // nothing behind in PostSyncer, so a retry cannot duplicate.
@@ -263,6 +266,42 @@ class PostsyncerClient
         } finally {
             foreach ($paths as $path) {
                 @unlink($path);
+            }
+        }
+    }
+
+    /**
+     * PostSyncer's upload throttle answers 429 before storing anything, so the
+     * same file is retried after Retry-After (capped) or a fixed backoff. Worst
+     * case adds 180 s per file, well under the 900-second publish job timeout.
+     * A 429 that outlasts the retries is still a definitive rejection.
+     *
+     * @param  array<string, string>  $headers
+     */
+    private function uploadFileWithRateLimitRetry(int|string $workspaceId, array $headers, string $path): Response
+    {
+        $backoff = self::UPLOAD_RATE_LIMIT_BACKOFF_SECONDS;
+
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                return $this->request('post', '/media/upload/file', [
+                    'workspace_id' => $workspaceId,
+                ], $headers, $path);
+            } catch (PostsyncerException $exception) {
+                if ($exception->getCode() !== 429) {
+                    throw $exception;
+                }
+
+                if ($attempt >= count($backoff)) {
+                    throw new PostsyncerException(
+                        $exception->getMessage().' Gave up after '.count($backoff).' retries.',
+                        429,
+                        $exception,
+                        responseReceived: true,
+                    );
+                }
+
+                Sleep::for(min($exception->retryAfter ?? $backoff[$attempt], self::UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS))->seconds();
             }
         }
     }
