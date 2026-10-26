@@ -4,10 +4,14 @@ namespace App\Support\Postsyncer;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Symfony\Component\Mime\MimeTypes;
 use Throwable;
 
 class PostsyncerClient
 {
+    /** PostSyncer's documented limit for POST /media/upload/file. */
+    public const MAX_FILE_UPLOAD_BYTES = 500 * 1024 * 1024;
+
     public function __construct(
         private readonly PostsyncerConfig $config,
     ) {}
@@ -174,6 +178,121 @@ class PostsyncerClient
     }
 
     /**
+     * Upload media through PostSyncer's multipart file endpoint, one request
+     * per file, because its URL import stores no videos (2026-10-26). Every
+     * URL is downloaded first, so a download failure happens before anything
+     * reaches PostSyncer.
+     *
+     * @param  list<string>  $urls
+     * @param  string|null  $idempotencyKey  Stable per-operation/group key; each file gets its own suffix.
+     * @return list<int|string> Media ids in the same order as $urls.
+     */
+    public function uploadFilesFromUrls(int|string $workspaceId, array $urls, ?string $idempotencyKey = null): array
+    {
+        $paths = [];
+
+        try {
+            foreach ($urls as $url) {
+                $path = tempnam(sys_get_temp_dir(), 'cm-media-');
+                if ($path === false) {
+                    throw $this->safeUploadFailure('Could not create a temporary file for the media download.');
+                }
+                $paths[] = $path;
+                $this->downloadMedia($url, $path);
+            }
+
+            $ids = [];
+
+            foreach ($paths as $index => $path) {
+                $headers = $idempotencyKey === null || trim($idempotencyKey) === ''
+                    ? []
+                    : ['Idempotency-Key' => $idempotencyKey.':'.$index];
+
+                try {
+                    $response = $this->request('post', '/media/upload/file', [
+                        'workspace_id' => $workspaceId,
+                    ], $headers, $path);
+                } catch (PostsyncerException $exception) {
+                    // A definitive rejection before any file was stored left
+                    // nothing behind in PostSyncer, so a retry cannot duplicate.
+                    if ($ids === [] && $exception->responseReceived && ! $exception->outcomeUnknown) {
+                        throw new PostsyncerException(
+                            $exception->getMessage(),
+                            $exception->getCode(),
+                            $exception,
+                            responseReceived: true,
+                            safeToRetry: true,
+                        );
+                    }
+
+                    throw $exception;
+                }
+
+                $id = $this->decodeResponse($response)['media']['id'] ?? null;
+
+                if (! $this->hasMediaId($id)) {
+                    throw new PostsyncerException(
+                        'PostSyncer returned a media item without a valid id. '
+                        .'Refusing to publish with invalid media.'
+                    );
+                }
+
+                $ids[] = $id;
+            }
+
+            return $ids;
+        } finally {
+            foreach ($paths as $path) {
+                @unlink($path);
+            }
+        }
+    }
+
+    private function downloadMedia(string $url, string $path): void
+    {
+        try {
+            $response = Http::timeout(300)->sink($path)->get($url);
+        } catch (Throwable $exception) {
+            throw $this->safeUploadFailure('Could not download media before uploading it to PostSyncer: '
+                .$exception->getMessage(), $exception);
+        }
+
+        if (! $response->successful()) {
+            throw $this->safeUploadFailure('Could not download media before uploading it to PostSyncer: HTTP '
+                .$response->status().'.');
+        }
+
+        clearstatcache(true, $path);
+        $size = (int) filesize($path);
+
+        if ($size === 0) {
+            throw $this->safeUploadFailure('The downloaded media file is empty. Refusing to upload it to PostSyncer.');
+        }
+
+        if ($size > static::MAX_FILE_UPLOAD_BYTES) {
+            throw $this->safeUploadFailure(sprintf(
+                'The media file is %.1f MB, over PostSyncer\'s %d MB upload limit.',
+                $size / 1024 / 1024,
+                static::MAX_FILE_UPLOAD_BYTES / 1024 / 1024,
+            ));
+        }
+
+        // Drive serves an HTML page instead of the file when sharing is off.
+        if (str_starts_with((string) MimeTypes::getDefault()->guessMimeType($path), 'text/html')) {
+            throw $this->safeUploadFailure('The media URL returned an HTML page instead of a file. '
+                .'Check that the Drive file is shared publicly.');
+        }
+    }
+
+    /**
+     * Nothing was sent to PostSyncer, so retrying cannot duplicate media.
+     */
+    private function safeUploadFailure(string $message, ?Throwable $previous = null): PostsyncerException
+    {
+        return new PostsyncerException($message, 0, $previous, responseReceived: true, safeToRetry: true);
+    }
+
+    /**
      * @param  array<string, mixed>  $body
      * @param  string|null  $idempotencyKey  Stable per-operation/group key for providers that support replay deduplication.
      * @return array<string, mixed>
@@ -287,15 +406,22 @@ class PostsyncerClient
      * @param  array<string, mixed>  $body
      * @param  array<string, string>  $headers
      */
-    private function request(string $method, string $path, array $body = [], array $headers = []): Response
-    {
+    private function request(
+        string $method,
+        string $path,
+        array $body = [],
+        array $headers = [],
+        ?string $filePath = null,
+    ): Response {
         $apiKey = $this->config->apiKey();
 
         if (! is_string($apiKey) || $apiKey === '') {
             throw new PostsyncerException('PostSyncer API key is not configured.');
         }
 
-        $url = rtrim($this->config->apiBase(), '/').$path;
+        // File uploads must go to the dedicated upload host, never the API host.
+        $base = $filePath === null ? $this->config->apiBase() : $this->config->uploadBase();
+        $url = rtrim($base, '/').$path;
 
         $pending = Http::withToken($apiKey)
             // Multi-platform PostSyncer creates can take several minutes.
@@ -304,6 +430,21 @@ class PostsyncerClient
             ->acceptJson()
             ->withOptions(['allow_redirects' => false])
             ->withHeaders($headers);
+
+        if ($filePath !== null) {
+            // Guzzle closes this stream when the request is released.
+            $stream = fopen($filePath, 'r');
+            if ($stream === false) {
+                throw new PostsyncerException(
+                    'Could not open the downloaded media file for upload.',
+                    responseReceived: true,
+                    safeToRetry: true,
+                );
+            }
+            $mime = MimeTypes::getDefault()->guessMimeType($filePath) ?? 'application/octet-stream';
+            $extension = MimeTypes::getDefault()->getExtensions($mime)[0] ?? 'bin';
+            $pending = $pending->attach('file', $stream, 'media.'.$extension, ['Content-Type' => $mime]);
+        }
 
         try {
             $response = match ($method) {

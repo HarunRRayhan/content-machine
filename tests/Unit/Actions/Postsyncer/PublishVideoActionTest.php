@@ -82,16 +82,18 @@ class PublishVideoActionTest extends TestCase
     {
         parent::setUp();
 
+        // Video media is downloaded from Drive before the file upload.
+        Http::fake(['drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200)]);
+
         $this->action = new PublishVideoAction(new VideoPublishPlanner(new MediaUrlResolver));
     }
 
     public function test_publish_now_sets_succeeded_status_posted_and_groups(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915], ['id' => 916]],
-                'count_stored' => 2,
-            ], 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
+                ->push(['media' => ['id' => 915]], 201)
+                ->push(['media' => ['id' => 916]], 201),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
                 'status' => 'published',
@@ -159,9 +161,10 @@ class PublishVideoActionTest extends TestCase
             ]],
         ], $video->postsyncer);
 
-        Http::assertSentCount(4);
+        // Two Drive downloads, two file uploads, the create, and its verification.
+        Http::assertSentCount(7);
         $mediaRequest = Http::recorded(
-            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+            fn ($request): bool => $request->url() === 'https://upload.postsyncer.com/api/v1/media/upload/file',
         )->first();
         $postRequest = Http::recorded(
             fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts',
@@ -170,7 +173,7 @@ class PublishVideoActionTest extends TestCase
         $postKey = $postRequest[0]->header('Idempotency-Key')[0] ?? null;
         $this->assertIsString($mediaKey);
         $this->assertIsString($postKey);
-        $this->assertStringEndsWith(':media', $mediaKey);
+        $this->assertStringEndsWith(':media:0', $mediaKey);
         $this->assertStringEndsWith(':post', $postKey);
         $this->assertNotSame($mediaKey, $postKey);
     }
@@ -178,9 +181,10 @@ class PublishVideoActionTest extends TestCase
     public function test_bangla_x_leg_publishes_as_a_second_video_only_group(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::sequence()
-                ->push(['media' => [['id' => 915], ['id' => 916]], 'count_stored' => 2], 200)
-                ->push(['media' => [['id' => 917]], 'count_stored' => 1], 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
+                ->push(['media' => ['id' => 915]], 201)
+                ->push(['media' => ['id' => 916]], 201)
+                ->push(['media' => ['id' => 917]], 201),
             'postsyncer.com/api/v1/posts' => Http::sequence()
                 ->push(['id' => 42, 'status' => 'published'], 201)
                 ->push(['id' => 43, 'status' => 'published'], 201),
@@ -246,11 +250,10 @@ class PublishVideoActionTest extends TestCase
         $this->assertSame(['twitter'], $video->postsyncer['groups'][1]['platforms']);
 
         $uploads = Http::recorded(
-            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+            fn ($request): bool => $request->url() === 'https://upload.postsyncer.com/api/v1/media/upload/file',
         );
-        $this->assertCount(2, $uploads);
-        $this->assertCount(2, $uploads->first()[0]->data()['urls']);
-        $this->assertCount(1, $uploads->last()[0]->data()['urls']);
+        // Video and cover for the first group, video only for the X group.
+        $this->assertCount(3, $uploads);
 
         $xPost = Http::recorded(
             fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts'
@@ -287,10 +290,9 @@ class PublishVideoActionTest extends TestCase
     {
         $lookups = 0;
         Http::fake(function ($request) use (&$lookups) {
-            if ($request->url() === 'https://postsyncer.com/api/v1/media/upload/url') {
+            if ($request->url() === 'https://upload.postsyncer.com/api/v1/media/upload/file') {
                 return Http::response([
-                    'media' => [['id' => 915]],
-                    'count_stored' => 1,
+                    'media' => ['id' => 915],
                 ], 200);
             }
 
@@ -336,17 +338,16 @@ class PublishVideoActionTest extends TestCase
         $video->refresh();
         $this->assertSame('succeeded', $video->publish_state);
         $this->assertSame(2, $lookups);
-        Http::assertSentCount(4);
+        Http::assertSentCount(5);
     }
 
     public function test_canonical_connection_failure_is_retried_without_recreating(): void
     {
         $lookups = 0;
         Http::fake(function ($request) use (&$lookups) {
-            if ($request->url() === 'https://postsyncer.com/api/v1/media/upload/url') {
+            if ($request->url() === 'https://upload.postsyncer.com/api/v1/media/upload/file') {
                 return Http::response([
-                    'media' => [['id' => 915]],
-                    'count_stored' => 1,
+                    'media' => ['id' => 915],
                 ], 200);
             }
 
@@ -403,9 +404,8 @@ class PublishVideoActionTest extends TestCase
     public function test_canonical_payload_mismatch_becomes_uncertain_without_recreating(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response(['id' => 44, 'status' => 'published'], 201),
             'postsyncer.com/api/v1/posts/44' => Http::response([
@@ -449,9 +449,8 @@ class PublishVideoActionTest extends TestCase
     public function test_schedule_sets_status_scheduled(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,
@@ -505,9 +504,8 @@ class PublishVideoActionTest extends TestCase
     public function test_schedule_keeps_audit_of_groups_cleared_after_reconcile(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,
@@ -566,9 +564,8 @@ class PublishVideoActionTest extends TestCase
     public function test_naive_when_sends_workspace_timezone_on_schedule_for(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,
@@ -648,10 +645,9 @@ class PublishVideoActionTest extends TestCase
     public function test_empty_media_upload_response_does_not_create_a_text_only_video(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
                 'media' => [],
-                'count_stored' => 0,
-            ], 200),
+            ], 201),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
                 'status' => 'published',
@@ -675,7 +671,7 @@ class PublishVideoActionTest extends TestCase
 
         $video->refresh();
         $this->assertSame('failed', $video->publish_state);
-        $this->assertStringContainsString('incomplete media upload response', (string) $video->publish_error);
+        $this->assertStringContainsString('without a valid id', (string) $video->publish_error);
         $this->assertSame('recorded', $video->status);
         $this->assertNull($video->postsyncer);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
@@ -695,7 +691,7 @@ class PublishVideoActionTest extends TestCase
         $uploadCalls = 0;
 
         Http::fake(function ($request) use (&$uploadCalls) {
-            if (str_ends_with($request->url(), '/media/upload/url')) {
+            if (str_ends_with($request->url(), '/media/upload/file')) {
                 $uploadCalls++;
 
                 return $uploadCalls === 1
@@ -761,10 +757,9 @@ class PublishVideoActionTest extends TestCase
         $changed = false;
 
         Http::fake(function ($request) use ($video, &$changed) {
-            if (str_ends_with($request->url(), '/media/upload/url')) {
+            if (str_ends_with($request->url(), '/media/upload/file')) {
                 return Http::response([
-                    'media' => [['id' => 915]],
-                    'count_stored' => 1,
+                    'media' => ['id' => 915],
                 ], 200);
             }
 
@@ -811,9 +806,8 @@ class PublishVideoActionTest extends TestCase
     public function test_reconciliation_replaces_a_duplicate_completed_checkpoint(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'message' => 'gateway timeout',
@@ -890,10 +884,9 @@ class PublishVideoActionTest extends TestCase
         ]);
 
         Http::fake(function ($request) use ($video) {
-            if (str_ends_with($request->url(), '/media/upload/url')) {
+            if (str_ends_with($request->url(), '/media/upload/file')) {
                 return Http::response([
-                    'media' => [['id' => 915]],
-                    'count_stored' => 1,
+                    'media' => ['id' => 915],
                 ], 200);
             }
 
@@ -957,9 +950,8 @@ class PublishVideoActionTest extends TestCase
     public function test_empty_groups_without_post_ids_is_treated_as_first_publish(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 77,
@@ -1005,7 +997,7 @@ class PublishVideoActionTest extends TestCase
     public function test_failure_leaves_pipeline_status_and_sets_publish_error(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
                 'message' => 'Invalid workspace',
             ], 422),
         ]);
@@ -1046,10 +1038,9 @@ class PublishVideoActionTest extends TestCase
                 return Http::response(['message' => 'Unexpected request'], 500);
             }
 
-            if ($request->url() === 'https://postsyncer.com/api/v1/media/upload/url') {
+            if ($request->url() === 'https://upload.postsyncer.com/api/v1/media/upload/file') {
                 return Http::response([
-                    'media' => [['id' => 915]],
-                    'count_stored' => 1,
+                    'media' => ['id' => 915],
                 ], 200);
             }
 
@@ -1125,9 +1116,8 @@ class PublishVideoActionTest extends TestCase
     public function test_legacy_missing_account_checkpoint_reuses_registered_media_after_mapping_fix(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 999]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 999],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 42,
@@ -1199,7 +1189,7 @@ class PublishVideoActionTest extends TestCase
         $video->refresh();
         $this->assertSame('succeeded', $video->publish_state);
         $this->assertSame('42', $video->postsyncer['groups'][0]['post_id']);
-        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/media/upload/url'));
+        Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/media/upload/file'));
         Http::assertSent(fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/posts'
             && $request['content'][0]['media'] === [915]);
     }
@@ -1352,9 +1342,8 @@ class PublishVideoActionTest extends TestCase
     public function test_lost_create_response_records_an_uncertain_current_group(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'message' => 'gateway timeout',
@@ -1392,9 +1381,8 @@ class PublishVideoActionTest extends TestCase
     private function uncertainCreateVideo(Workspace $workspace): Video
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'message' => 'gateway timeout',
@@ -1438,10 +1426,10 @@ class PublishVideoActionTest extends TestCase
         // is expected: the retry reuses the media registered before the 500.
         Http::swap(new Factory);
         Http::fake(function ($request) use (&$uploadCalls, &$createCalls) {
-            if (str_ends_with($request->url(), '/media/upload/url')) {
+            if (str_ends_with($request->url(), '/media/upload/file')) {
                 $uploadCalls++;
 
-                return Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200);
+                return Http::response(['media' => ['id' => 915]], 200);
             }
 
             if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
@@ -1581,7 +1569,7 @@ class PublishVideoActionTest extends TestCase
     private function uncertainUploadVideo(Workspace $workspace): Video
     {
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
                 'message' => 'temporary outage',
             ], 503),
         ]);
@@ -1625,10 +1613,14 @@ class PublishVideoActionTest extends TestCase
 
         Http::swap(new Factory);
         Http::fake(function ($request) use (&$uploadCalls) {
-            if (str_ends_with($request->url(), '/media/upload/url')) {
+            if (str_starts_with($request->url(), 'https://drive.usercontent.google.com/')) {
+                return Http::response('fake-media-bytes', 200);
+            }
+
+            if (str_ends_with($request->url(), '/media/upload/file')) {
                 $uploadCalls++;
 
-                return Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200);
+                return Http::response(['media' => ['id' => 915]], 200);
             }
 
             if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
@@ -1746,9 +1738,8 @@ class PublishVideoActionTest extends TestCase
         ];
 
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
         ]);
@@ -1842,10 +1833,9 @@ class PublishVideoActionTest extends TestCase
                 $seenRunning = true;
             }
 
-            if (str_ends_with($request->url(), '/media/upload/url')) {
+            if (str_ends_with($request->url(), '/media/upload/file')) {
                 return Http::response([
-                    'media' => [['id' => 915]],
-                    'count_stored' => 1,
+                    'media' => ['id' => 915],
                 ], 200);
             }
 
