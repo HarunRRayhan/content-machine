@@ -271,14 +271,7 @@ class PostsyncerClient
     {
         $guard = $this->urlGuard ?? app(PublicUrlGuard::class);
         $overCap = false;
-        // Abort as soon as Content-Length or the streamed bytes pass the cap.
-        $progress = function (int $expected, int $downloaded) use (&$overCap): void {
-            if ($expected > static::MAX_FILE_UPLOAD_BYTES || $downloaded > static::MAX_FILE_UPLOAD_BYTES) {
-                $overCap = true;
-
-                throw new \RuntimeException('Media download is over the upload limit.');
-            }
-        };
+        $progress = $this->downloadCapProgress($overCap);
 
         for ($hop = 0; ; $hop++) {
             $curlOptions = $this->isDriveDownloadUrl($url) && $guard->isSafe($url)
@@ -343,6 +336,20 @@ class PostsyncerClient
             throw $this->safeUploadFailure('The media URL returned an HTML page instead of a file. '
                 .'Check that the Drive file is shared publicly.');
         }
+    }
+
+    /**
+     * Guzzle's progress option: a truthy return makes its cURL handler abort
+     * the transfer (Guzzle 8 rejects raw CURLOPT_PROGRESSFUNCTION), as soon
+     * as Content-Length or the received bytes pass the cap.
+     */
+    private function downloadCapProgress(bool &$overCap): \Closure
+    {
+        return function (int $expected, int $downloaded) use (&$overCap): bool {
+            $overCap = $expected > static::MAX_FILE_UPLOAD_BYTES || $downloaded > static::MAX_FILE_UPLOAD_BYTES;
+
+            return $overCap;
+        };
     }
 
     private function isDriveDownloadUrl(string $url): bool

@@ -7,6 +7,10 @@ use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\TransferException;
+use GuzzleHttp\Handler\CurlHandler;
+use GuzzleHttp\HandlerStack;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
@@ -342,6 +346,56 @@ class PostsyncerClientTest extends TestCase
 
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'postsyncer.com'));
         $this->assertSame($before, $this->mediaTempFiles());
+    }
+
+    public function test_download_cap_progress_callback_really_aborts_a_curl_transfer(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, ['api_key' => 'test-api-key']);
+        $client = new class(PostsyncerConfig::fromWorkspace($workspace->refresh())) extends PostsyncerClient
+        {
+            public const MAX_FILE_UPLOAD_BYTES = 1024;
+        };
+        $overCap = false;
+        $progress = (new \ReflectionMethod(PostsyncerClient::class, 'downloadCapProgress'))
+            ->invokeArgs($client, [&$overCap]);
+
+        // A real Guzzle cURL transfer from a local server proves the callback
+        // stops the download, which Http::fake cannot show.
+        $root = sys_get_temp_dir().'/cm-cap-'.bin2hex(random_bytes(4));
+        mkdir($root);
+        $size = 32 * 1024 * 1024;
+        file_put_contents($root.'/big.bin', str_repeat('x', $size));
+        $port = 20000 + random_int(0, 20000);
+        $server = proc_open([PHP_BINARY, '-S', '127.0.0.1:'.$port, '-t', $root], [
+            ['pipe', 'r'], ['file', '/dev/null', 'w'], ['file', '/dev/null', 'w'],
+        ], $pipes);
+        $sink = $root.'/sink.bin';
+
+        try {
+            for ($i = 0; $i < 50 && @fsockopen('127.0.0.1', $port) === false; $i++) {
+                usleep(100000);
+            }
+
+            $guzzle = new Client(['handler' => HandlerStack::create(new CurlHandler)]);
+
+            try {
+                $guzzle->get('http://127.0.0.1:'.$port.'/big.bin', ['sink' => $sink, 'progress' => $progress]);
+                $this->fail('Expected the transfer to be aborted.');
+            } catch (TransferException) {
+                // Aborted by the cap callback.
+            }
+
+            $this->assertTrue($overCap);
+            clearstatcache();
+            $this->assertLessThan($size, file_exists($sink) ? filesize($sink) : 0);
+        } finally {
+            proc_terminate($server);
+            proc_close($server);
+            @unlink($sink);
+            @unlink($root.'/big.bin');
+            @rmdir($root);
+        }
     }
 
     public function test_create_post_returns_post_payload(): void
