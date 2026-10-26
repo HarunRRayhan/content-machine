@@ -308,6 +308,32 @@ class PostsApiTest extends TestCase
             ->assertJsonValidationErrors('status');
     }
 
+    public function test_category_defaults_validates_and_does_not_reset_approval(): void
+    {
+        $this->acting()->postJson('/api/v1/posts', ['human_id' => 'P-90', 'number' => 90, 'title' => 'Plain'])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'default');
+
+        $this->acting()->postJson('/api/v1/posts', ['human_id' => 'P-91', 'number' => 91, 'title' => 'Morning', 'category' => 'morning'])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'morning');
+
+        $this->acting()->postJson('/api/v1/posts', ['title' => 'Bad', 'category' => 'night'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('category');
+
+        $this->acting()->patchJson('/api/v1/posts/P-91', ['category' => 'night'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('category');
+
+        $this->assertSame('approved', Post::query()->where('human_id', 'P-91')->value('approval_state'));
+
+        $this->acting()->patchJson('/api/v1/posts/P-91', ['category' => 'evening_carousel'])
+            ->assertOk()
+            ->assertJsonPath('data.category', 'evening_carousel')
+            ->assertJsonPath('data.approval_state', 'approved');
+    }
+
     public function test_store_and_patch_accept_template_letter(): void
     {
         $this->acting()->postJson('/api/v1/posts', [

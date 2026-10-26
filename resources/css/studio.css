@@ -2431,8 +2431,10 @@
     text-decoration: none;
     color: inherit;
     border: 1px solid var(--line);
+    border-left-width: 4px;
     background: var(--bg2);
     line-height: 1.2;
+    --cat: var(--ink-faint);
 }
 
 .studio-page .cal-chip:hover {
@@ -2474,14 +2476,69 @@
     white-space: nowrap;
 }
 
+/* Category owns the hue; state owns the border style and tint strength. */
+.studio-page .is-cat-post_default {
+    --cat: #2f6fdb;
+}
+
+.studio-page .is-cat-post_morning {
+    --cat: #d99a00;
+}
+
+.studio-page .is-cat-post_evening_carousel {
+    --cat: #8b45e0;
+}
+
+.studio-page .is-cat-video_bn {
+    --cat: #0f9d76;
+}
+
+.studio-page .is-cat-video_en {
+    --cat: #e0435c;
+}
+
 .studio-page .cal-chip.is-scheduled {
-    border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
-    background: color-mix(in srgb, var(--accent) 10%, var(--raised));
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--cat) 55%, var(--line));
+    border-left-style: solid;
+    border-left-color: var(--cat);
+    background: color-mix(in srgb, var(--cat) 9%, var(--raised));
 }
 
 .studio-page .cal-chip.is-published {
-    border-color: color-mix(in srgb, var(--good) 40%, var(--line));
-    background: color-mix(in srgb, var(--good) 12%, var(--raised));
+    border-color: color-mix(in srgb, var(--cat) 70%, var(--line));
+    border-left-color: var(--cat);
+    background: color-mix(in srgb, var(--cat) 22%, var(--raised));
+}
+
+.studio-page .cal-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 12px;
+    color: var(--ink-soft);
+}
+
+.studio-page .cal-legend li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.studio-page .cal-legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 1px solid var(--cat);
+    border-left-width: 4px;
+    background: color-mix(in srgb, var(--cat) 22%, var(--raised));
+}
+
+.studio-page .cal-legend-note {
+    color: var(--ink-faint);
 }
 
 .sp-fab-wrap {

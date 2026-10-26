@@ -399,6 +399,7 @@ class PostsController extends Controller
             'slug' => $post->slug,
             'template' => $post->template,
             'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
+            'category' => $post->category,
             'status' => $post->status,
             'blocked_reason' => $post->blocked_reason,
             'publish_state' => $post->publish_state,
