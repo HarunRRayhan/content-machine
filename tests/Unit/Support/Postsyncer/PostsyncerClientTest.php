@@ -3,6 +3,7 @@
 namespace Tests\Unit\Support\Postsyncer;
 
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
@@ -14,6 +15,13 @@ use Tests\TestCase;
 class PostsyncerClientTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
+    }
 
     private function clientWithKey(string $apiKey = 'test-api-key'): PostsyncerClient
     {
@@ -95,16 +103,16 @@ class PostsyncerClientTest extends TestCase
     {
         $before = $this->mediaTempFiles();
         Http::fake([
-            'example.com/video.mp4' => fn () => Http::response('video-bytes', 200),
-            'example.com/cover.png' => fn () => Http::response('cover-bytes', 200),
+            'drive.usercontent.google.com/download?id=video' => fn () => Http::response('video-bytes', 200),
+            'drive.usercontent.google.com/download?id=cover' => fn () => Http::response('cover-bytes', 200),
             'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
                 ->push(['media' => ['id' => 915]], 201)
                 ->push(['media' => ['id' => 916]], 201),
         ]);
 
         $ids = $this->clientWithKey()->uploadFilesFromUrls(15211, [
-            'https://example.com/video.mp4',
-            'https://example.com/cover.png',
+            'https://drive.usercontent.google.com/download?id=video',
+            'https://drive.usercontent.google.com/download?id=cover',
         ], 'op:0:group:media');
 
         $this->assertSame([915, 916], $ids);
@@ -127,12 +135,12 @@ class PostsyncerClientTest extends TestCase
     {
         $before = $this->mediaTempFiles();
         Http::fake([
-            'example.com/video.mp4' => fn () => Http::response('video-bytes', 200),
+            'drive.usercontent.google.com/download?id=video' => fn () => Http::response('video-bytes', 200),
             'upload.postsyncer.com/api/v1/media/upload/file' => fn () => throw new ConnectionException('timed out'),
         ]);
 
         try {
-            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://example.com/video.mp4']);
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
             $this->fail('Expected the lost upload response to throw.');
         } catch (PostsyncerException $exception) {
             $this->assertTrue($exception->outcomeUnknown);
@@ -146,12 +154,12 @@ class PostsyncerClientTest extends TestCase
     public function test_upload_files_from_urls_treats_a_first_file_rejection_as_safe_to_retry(): void
     {
         Http::fake([
-            'example.com/video.mp4' => fn () => Http::response('video-bytes', 200),
+            'drive.usercontent.google.com/download?id=video' => fn () => Http::response('video-bytes', 200),
             'upload.postsyncer.com/api/v1/media/upload/file' => Http::response(['message' => 'Unsupported file'], 422),
         ]);
 
         try {
-            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://example.com/video.mp4']);
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
             $this->fail('Expected the rejection to throw.');
         } catch (PostsyncerException $exception) {
             $this->assertSame(422, $exception->getCode());
@@ -164,7 +172,7 @@ class PostsyncerClientTest extends TestCase
     public function test_upload_files_from_urls_keeps_a_rejection_after_a_stored_file_unsafe(): void
     {
         Http::fake([
-            'example.com/*' => fn () => Http::response('bytes', 200),
+            'drive.usercontent.google.com/*' => fn () => Http::response('bytes', 200),
             'upload.postsyncer.com/api/v1/media/upload/file' => Http::sequence()
                 ->push(['media' => ['id' => 915]], 201)
                 ->push(['message' => 'Unsupported file'], 422),
@@ -172,12 +180,13 @@ class PostsyncerClientTest extends TestCase
 
         try {
             $this->clientWithKey()->uploadFilesFromUrls(15211, [
-                'https://example.com/video.mp4',
-                'https://example.com/cover.png',
+                'https://drive.usercontent.google.com/download?id=video',
+                'https://drive.usercontent.google.com/download?id=cover',
             ]);
             $this->fail('Expected the rejection to throw.');
         } catch (PostsyncerException $exception) {
             $this->assertFalse($exception->safeToRetry);
+            $this->assertStringContainsString('Already stored PostSyncer media ids: 915.', $exception->getMessage());
         }
     }
 
@@ -185,15 +194,15 @@ class PostsyncerClientTest extends TestCase
     {
         $before = $this->mediaTempFiles();
         Http::fake([
-            'example.com/video.mp4' => fn () => Http::response('video-bytes', 200),
-            'example.com/cover.png' => Http::response('missing', 404),
+            'drive.usercontent.google.com/download?id=video' => fn () => Http::response('video-bytes', 200),
+            'drive.usercontent.google.com/download?id=cover' => Http::response('missing', 404),
             'upload.postsyncer.com/*' => Http::response(['media' => ['id' => 915]], 201),
         ]);
 
         try {
             $this->clientWithKey()->uploadFilesFromUrls(15211, [
-                'https://example.com/video.mp4',
-                'https://example.com/cover.png',
+                'https://drive.usercontent.google.com/download?id=video',
+                'https://drive.usercontent.google.com/download?id=cover',
             ]);
             $this->fail('Expected the download failure to throw.');
         } catch (PostsyncerException $exception) {
@@ -210,20 +219,20 @@ class PostsyncerClientTest extends TestCase
     public function test_upload_files_from_urls_rejects_an_html_page_instead_of_media(): void
     {
         Http::fake([
-            'example.com/video.mp4' => fn () => Http::response('<!DOCTYPE html><html><body>Sign in</body></html>', 200),
+            'drive.usercontent.google.com/download?id=video' => fn () => Http::response('<!DOCTYPE html><html><body>Sign in</body></html>', 200),
         ]);
 
         $this->expectException(PostsyncerException::class);
         $this->expectExceptionMessage('HTML page');
 
-        $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://example.com/video.mp4']);
+        $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
     }
 
     public function test_upload_files_from_urls_rejects_files_over_the_size_cap_before_uploading(): void
     {
         $before = $this->mediaTempFiles();
         Http::fake([
-            'example.com/video.mp4' => fn () => Http::response(str_repeat('x', 11), 200),
+            'drive.usercontent.google.com/download?id=video' => fn () => Http::response(str_repeat('x', 11), 200),
         ]);
         $workspace = Workspace::factory()->create(['settings' => []]);
         PostsyncerConfig::write($workspace, ['api_key' => 'test-api-key']);
@@ -233,8 +242,99 @@ class PostsyncerClientTest extends TestCase
         };
 
         try {
-            $client->uploadFilesFromUrls(15211, ['https://example.com/video.mp4']);
+            $client->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
             $this->fail('Expected the size cap to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('upload limit', $exception->getMessage());
+            $this->assertTrue($exception->safeToRetry);
+        }
+
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'postsyncer.com'));
+        $this->assertSame($before, $this->mediaTempFiles());
+    }
+
+    public function test_upload_files_from_urls_refuses_a_non_drive_host(): void
+    {
+        Http::fake();
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['http://169.254.169.254/latest/meta-data']);
+            $this->fail('Expected the non-Drive URL to be refused.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('not a public Google Drive download', $exception->getMessage());
+            $this->assertTrue($exception->safeToRetry);
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_upload_files_from_urls_refuses_a_drive_host_resolving_to_a_private_address(): void
+    {
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '10.0.0.5']]));
+        Http::fake();
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('not a public Google Drive download');
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
+        } finally {
+            Http::assertNothingSent();
+        }
+    }
+
+    public function test_upload_files_from_urls_follows_redirects_between_drive_hosts(): void
+    {
+        Http::fake([
+            'drive.google.com/*' => Http::response('', 302, [
+                'Location' => 'https://drive.usercontent.google.com/download?id=video',
+            ]),
+            'drive.usercontent.google.com/*' => fn () => Http::response('video-bytes', 200),
+            'upload.postsyncer.com/*' => Http::response(['media' => ['id' => 915]], 201),
+        ]);
+
+        $this->assertSame([915], $this->clientWithKey()->uploadFilesFromUrls(
+            15211,
+            ['https://drive.google.com/uc?id=video'],
+        ));
+    }
+
+    public function test_upload_files_from_urls_refuses_a_redirect_off_drive(): void
+    {
+        Http::fake([
+            'evil.example.com/*' => Http::response('', 302, ['Location' => 'http://127.0.0.1/admin']),
+            'drive.usercontent.google.com/*' => Http::response('', 302, [
+                'Location' => 'https://evil.example.com/x',
+            ]),
+        ]);
+
+        try {
+            $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=other']);
+            $this->fail('Expected the off-Drive redirect to be refused.');
+        } catch (PostsyncerException $exception) {
+            $this->assertStringContainsString('not a public Google Drive download', $exception->getMessage());
+        }
+
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'evil.example.com')
+            || str_contains($request->url(), '127.0.0.1'));
+    }
+
+    public function test_upload_files_from_urls_rejects_an_oversized_content_length(): void
+    {
+        $before = $this->mediaTempFiles();
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('tiny', 200, ['Content-Length' => '11']),
+        ]);
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, ['api_key' => 'test-api-key']);
+        $client = new class(PostsyncerConfig::fromWorkspace($workspace->refresh())) extends PostsyncerClient
+        {
+            public const MAX_FILE_UPLOAD_BYTES = 10;
+        };
+
+        try {
+            $client->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
+            $this->fail('Expected the Content-Length cap to throw.');
         } catch (PostsyncerException $exception) {
             $this->assertStringContainsString('upload limit', $exception->getMessage());
             $this->assertTrue($exception->safeToRetry);

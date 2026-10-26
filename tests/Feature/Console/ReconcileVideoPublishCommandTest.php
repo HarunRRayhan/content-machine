@@ -5,6 +5,7 @@ namespace Tests\Feature\Console;
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -16,6 +17,7 @@ class ReconcileVideoPublishCommandTest extends TestCase
     {
         parent::setUp();
 
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
         // Video media is downloaded from Drive before the file upload.
         Http::fake(['drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200)]);
     }

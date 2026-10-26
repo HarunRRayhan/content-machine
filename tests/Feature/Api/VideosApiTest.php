@@ -10,6 +10,7 @@ use App\Models\Idea;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +30,7 @@ class VideosApiTest extends TestCase
     {
         parent::setUp();
 
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
         $this->workspace = Workspace::factory()->create();
         $this->token = (new CreateWorkspaceApiTokenAction)->handle(
             $this->workspace,

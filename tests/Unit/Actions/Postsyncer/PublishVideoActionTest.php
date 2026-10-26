@@ -6,6 +6,7 @@ use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\MediaUrlResolver;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
@@ -82,6 +83,7 @@ class PublishVideoActionTest extends TestCase
     {
         parent::setUp();
 
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
         // Video media is downloaded from Drive before the file upload.
         Http::fake(['drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200)]);
 
@@ -675,6 +677,34 @@ class PublishVideoActionTest extends TestCase
         $this->assertSame('recorded', $video->status);
         $this->assertNull($video->postsyncer);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://postsyncer.com/api/v1/posts');
+    }
+
+    public function test_drive_download_failure_fails_safely_without_reaching_postsyncer(): void
+    {
+        Http::swap(new Factory);
+        Http::fake(['drive.usercontent.google.com/*' => Http::response('missing', 404)]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        $this->action->handle($video, [
+            'platforms' => ['facebook'],
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_state);
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertStringContainsString('Could not download media', (string) $video->publish_error);
+        $this->assertTrue($video->canRetryPublish());
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'postsyncer.com'));
     }
 
     public function test_uncertain_media_upload_can_be_reconciled_without_uploading_again(): void

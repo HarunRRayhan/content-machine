@@ -2,6 +2,9 @@
 
 namespace App\Support\Postsyncer;
 
+use App\Support\LinkResolution\PublicUrlGuard;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Symfony\Component\Mime\MimeTypes;
@@ -12,8 +15,11 @@ class PostsyncerClient
     /** PostSyncer's documented limit for POST /media/upload/file. */
     public const MAX_FILE_UPLOAD_BYTES = 500 * 1024 * 1024;
 
+    private const MAX_DOWNLOAD_REDIRECTS = 5;
+
     public function __construct(
         private readonly PostsyncerConfig $config,
+        private readonly ?PublicUrlGuard $urlGuard = null,
     ) {}
 
     /**
@@ -225,6 +231,19 @@ class PostsyncerClient
                         );
                     }
 
+                    if ($ids !== []) {
+                        // Name the orphaned media so reconciliation can find it.
+                        throw new PostsyncerException(
+                            $exception->getMessage().' Already stored PostSyncer media ids: '.implode(', ', $ids).'.',
+                            $exception->getCode(),
+                            $exception,
+                            $exception->retryable,
+                            $exception->outcomeUnknown,
+                            $exception->responseReceived,
+                            $exception->safeToRetry,
+                        );
+                    }
+
                     throw $exception;
                 }
 
@@ -250,16 +269,62 @@ class PostsyncerClient
 
     private function downloadMedia(string $url, string $path): void
     {
-        try {
-            $response = Http::timeout(300)->sink($path)->get($url);
-        } catch (Throwable $exception) {
-            throw $this->safeUploadFailure('Could not download media before uploading it to PostSyncer: '
-                .$exception->getMessage(), $exception);
+        $guard = $this->urlGuard ?? app(PublicUrlGuard::class);
+        $overCap = false;
+        // Abort as soon as Content-Length or the streamed bytes pass the cap.
+        $progress = function (int $expected, int $downloaded) use (&$overCap): void {
+            if ($expected > static::MAX_FILE_UPLOAD_BYTES || $downloaded > static::MAX_FILE_UPLOAD_BYTES) {
+                $overCap = true;
+
+                throw new \RuntimeException('Media download is over the upload limit.');
+            }
+        };
+
+        for ($hop = 0; ; $hop++) {
+            $curlOptions = $this->isDriveDownloadUrl($url) && $guard->isSafe($url)
+                ? $guard->curlResolveOptions($url)
+                : null;
+
+            if ($curlOptions === null) {
+                throw $this->safeUploadFailure('Refusing to download media from a URL that is not a public Google Drive download.');
+            }
+
+            try {
+                $response = Http::timeout(300)
+                    ->sink($path)
+                    ->withOptions([
+                        'allow_redirects' => false,
+                        'progress' => $progress,
+                        ...$curlOptions,
+                    ])
+                    ->get($url);
+            } catch (Throwable $exception) {
+                throw $overCap
+                    ? $this->oversizeFailure()
+                    : $this->safeUploadFailure('Could not download media before uploading it to PostSyncer: '
+                        .$exception->getMessage(), $exception);
+            }
+
+            if (! $response->redirect()) {
+                break;
+            }
+
+            $location = $response->header('Location');
+            if ($location === '' || $hop >= self::MAX_DOWNLOAD_REDIRECTS) {
+                throw $this->safeUploadFailure('Could not download media before uploading it to PostSyncer: too many redirects.');
+            }
+
+            $url = (string) UriResolver::resolve(new Uri($url), new Uri($location));
         }
 
         if (! $response->successful()) {
             throw $this->safeUploadFailure('Could not download media before uploading it to PostSyncer: HTTP '
                 .$response->status().'.');
+        }
+
+        $length = $response->header('Content-Length');
+        if ($length !== '' && (int) $length > static::MAX_FILE_UPLOAD_BYTES) {
+            throw $this->oversizeFailure();
         }
 
         clearstatcache(true, $path);
@@ -270,11 +335,7 @@ class PostsyncerClient
         }
 
         if ($size > static::MAX_FILE_UPLOAD_BYTES) {
-            throw $this->safeUploadFailure(sprintf(
-                'The media file is %.1f MB, over PostSyncer\'s %d MB upload limit.',
-                $size / 1024 / 1024,
-                static::MAX_FILE_UPLOAD_BYTES / 1024 / 1024,
-            ));
+            throw $this->oversizeFailure();
         }
 
         // Drive serves an HTML page instead of the file when sharing is off.
@@ -282,6 +343,24 @@ class PostsyncerClient
             throw $this->safeUploadFailure('The media URL returned an HTML page instead of a file. '
                 .'Check that the Drive file is shared publicly.');
         }
+    }
+
+    private function isDriveDownloadUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        return strtolower((string) ($parts['scheme'] ?? '')) === 'https'
+            && (in_array($host, ['drive.usercontent.google.com', 'drive.google.com'], true)
+                || str_ends_with($host, '.googleusercontent.com'));
+    }
+
+    private function oversizeFailure(): PostsyncerException
+    {
+        return $this->safeUploadFailure(sprintf(
+            'The media file is over PostSyncer\'s %d MB upload limit.',
+            static::MAX_FILE_UPLOAD_BYTES / 1024 / 1024,
+        ));
     }
 
     /**
