@@ -612,6 +612,48 @@ class UpdatePostActionTest extends TestCase
         $this->assertLockedUpdateRefused($post, ['captions' => $captions, 'title' => 'Renamed']);
     }
 
+    public function test_a_scheduled_post_cannot_change_its_caption_map_shape(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = $post->captions;
+        $captions['linkedin'] = ['caption' => 'flat section beside language parts'];
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+
+        $flat = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+            'captions' => ['facebook' => ['caption' => 'fb'], 'twitter' => ['caption' => 'x']],
+        ]));
+        $this->assertLockedUpdateRefused($flat, ['captions' => $flat->captions + ['English' => ['linkedin' => ['caption' => 'nested']]]]);
+        $this->assertLockedUpdateRefused($flat, ['captions' => ['facebook' => ['caption' => 'fb', 'title' => 'new'], 'twitter' => ['caption' => 'x']]]);
+
+        $flat->captions = $flat->captions + ['linkedin' => ['caption' => 'li']];
+        (new UpdatePostAction)->handle($flat, UpdatePostData::fromApiPayload(['captions' => $flat->captions], $flat->fresh()));
+        $this->assertSame('li', $flat->refresh()->captions['linkedin']['caption']);
+    }
+
+    public function test_a_scheduled_post_cannot_add_non_platform_keys(): void
+    {
+        foreach (['caption', 'title', 'name', 'platforms', 'mastodon'] as $key) {
+            $post = Post::factory()->create($this->scheduledBilingualPost());
+            $captions = $post->captions;
+            $captions['English'][$key] = ['caption' => 'sneaky'];
+
+            $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+        }
+
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + ['Spanish' => ['title' => 'x', 'caption' => 'y']]]);
+    }
+
+    public function test_re_sending_identical_captions_in_another_key_order_keeps_approval(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = array_reverse($post->captions, true);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['captions' => $captions], $post));
+
+        $this->assertSame('approved', $post->refresh()->approval_state);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */

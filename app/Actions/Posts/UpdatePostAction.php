@@ -3,12 +3,18 @@
 namespace App\Actions\Posts;
 
 use App\Data\Posts\UpdatePostData;
+use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Models\Post;
+use App\Support\Postsyncer\PostPublishPlanner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class UpdatePostAction
 {
+    public function __construct(
+        private readonly ?PostPublishPlanner $planner = null,
+    ) {}
+
     public function handle(Post $post, UpdatePostData $data): Post
     {
         return DB::transaction(function () use ($post, $data): Post {
@@ -147,7 +153,7 @@ class UpdatePostAction
             return true;
         }
 
-        if ($data->hasCaptions && $post->captions !== $data->captions) {
+        if ($data->hasCaptions && $this->canonical($post->captions) !== $this->canonical($data->captions)) {
             return true;
         }
 
@@ -195,13 +201,56 @@ class UpdatePostAction
 
         $added = $this->addedCaptionPlatforms($post->captions ?? [], $data->captions ?? []);
 
-        return $added !== null && array_intersect($added, $this->groupPlatforms($post)) === [];
+        if ($added === null
+            || array_diff($added, UpdatePostsyncerSettingsRequest::PLATFORMS) !== []
+            || array_intersect($added, $this->groupPlatforms($post)) !== []
+        ) {
+            return false;
+        }
+
+        return $this->onlyAddsPlannedPairs($post, $data->captions ?? [], $added);
+    }
+
+    /**
+     * Second check through the publish planner's own caption reading: every
+     * (language, platform) entry it reads today must read the same after the
+     * edit, and any new entry must be one of the raw platforms just added.
+     *
+     * @param  array<mixed>  $captions
+     * @param  list<string>  $added
+     */
+    private function onlyAddsPlannedPairs(Post $post, array $captions, array $added): bool
+    {
+        $planner = $this->planner ?? app(PostPublishPlanner::class);
+        $before = $planner->captionsByLanguage($post);
+        $after = $planner->captionsByLanguage((clone $post)->forceFill(['captions' => $captions]));
+
+        foreach ($before as $language => $platforms) {
+            foreach ($platforms as $platform => $section) {
+                if ($this->canonical($section) !== $this->canonical($after[$language][$platform] ?? null)) {
+                    return false;
+                }
+            }
+        }
+
+        foreach ($after as $language => $platforms) {
+            foreach (array_keys(array_diff_key($platforms, $before[$language] ?? [])) as $platform) {
+                if (! in_array($platform, $added, true)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**
      * Platform names whose caption sections were added, or null when any
-     * stored section changed or disappeared. Handles both the flat
-     * {platform: section} map and the {part: {platform: section}} map.
+     * stored section changed or disappeared, or the map would change shape.
+     * A flat {platform: section} map may only gain sections; a nested
+     * {part: {platform: section}} map may only gain parts or platforms
+     * inside a part. The shape test mirrors PostPublishPlanner, so an added
+     * entry can never make the planner re-read the stored captions.
      *
      * @param  array<mixed>  $old
      * @param  array<mixed>  $new
@@ -209,6 +258,12 @@ class UpdatePostAction
      */
     private function addedCaptionPlatforms(array $old, array $new): ?array
     {
+        $flat = $this->isFlatCaptionMap($old);
+
+        if ($flat !== $this->isFlatCaptionMap($new)) {
+            return null;
+        }
+
         $added = [];
 
         foreach ($old as $key => $value) {
@@ -220,7 +275,7 @@ class UpdatePostAction
                 continue;
             }
 
-            if ($this->isPlatformSection($value) || ! is_array($value) || ! is_array($new[$key])) {
+            if ($flat || ! is_array($value) || ! is_array($new[$key])) {
                 return null;
             }
 
@@ -238,9 +293,9 @@ class UpdatePostAction
         }
 
         foreach (array_diff_key($new, $old) as $key => $value) {
-            if ($this->isPlatformSection($value)) {
+            if ($flat && $this->isPlatformSection($value)) {
                 $added[] = strtolower((string) $key);
-            } elseif (is_array($value)) {
+            } elseif (! $flat && is_array($value) && ! $this->isPlatformSection($value)) {
                 foreach (array_keys($value) as $platform) {
                     $added[] = strtolower((string) $platform);
                 }
@@ -252,7 +307,26 @@ class UpdatePostAction
         return $added;
     }
 
-    /** Mirrors PostPublishPlanner::isFlatCaptionMap's section test. */
+    /**
+     * Same test as PostPublishPlanner::isFlatCaptionMap.
+     *
+     * @param  array<mixed>  $captions
+     */
+    private function isFlatCaptionMap(array $captions): bool
+    {
+        foreach ($captions as $key => $value) {
+            if (is_int($key)) {
+                return false;
+            }
+
+            if ($this->isPlatformSection($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function isPlatformSection(mixed $value): bool
     {
         return is_string($value)
