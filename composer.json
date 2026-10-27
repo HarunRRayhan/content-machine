@@ -44,16 +44,43 @@
     },
     "scripts": {
         "setup": [
-            "composer install",
+            "@composer install --no-interaction",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
-            "@php artisan key:generate",
-            "@php artisan migrate --force",
-            "npm install",
+            "@php artisan config:clear",
+            "@php artisan cm:ensure-key",
+            "@php artisan migrate",
+            "@php artisan cm:ensure-admin",
+            "npm ci",
             "npm run build"
+        ],
+        "setup:production": [
+            "@composer install --no-dev --optimize-autoloader --no-interaction",
+            "@php artisan config:clear",
+            "@php artisan cm:ensure-key --require-existing",
+            "npm ci --include=dev",
+            "npm run build",
+            "@php artisan cm:deploy",
+            "@php artisan optimize"
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
             "@php artisan dev"
+        ],
+        "worker:default": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan queue:work --queue=default --tries=3 --timeout=900"
+        ],
+        "worker:scratchpad": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan queue:work --queue=scratchpad --tries=3 --timeout=900"
+        ],
+        "worker:publish": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan queue:work postsyncer --tries=3 --timeout=900"
+        ],
+        "scheduler": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan schedule:work"
         ],
         "lint": [
             "pint --parallel"
@@ -88,8 +115,7 @@
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
         ],
         "post-create-project-cmd": [
-            "@php artisan key:generate --ansi",
-            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
+            "@php artisan cm:ensure-key --ansi",
             "@php artisan migrate --graceful --ansi"
         ],
         "pre-package-uninstall": [
@@ -114,5 +140,14 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "scripts-descriptions": {
+        "setup": "Install local dependencies, preserve or generate APP_KEY, migrate, create ADMIN_EMAIL if configured, and build assets.",
+        "setup:production": "Install production PHP dependencies, require an existing APP_KEY, build assets, deploy, and cache the app.",
+        "dev": "Start the web server, Vite, logs, all content queues, and scheduler for local development.",
+        "worker:default": "Run the default queue worker under a production process supervisor.",
+        "worker:scratchpad": "Run Telegram media, transcription, and generation jobs where uploads are stored.",
+        "worker:publish": "Run PostSyncer publishing jobs where uploads are stored.",
+        "scheduler": "Run the Laravel scheduler under a process supervisor."
+    }
 }

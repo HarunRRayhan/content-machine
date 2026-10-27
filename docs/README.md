@@ -1,6 +1,10 @@
 # Documentation
 
+- [Setup and usage overview](../README.md#setup-and-usage)
+- [First account and login](../README.md#2-create-your-first-account)
+- [Dashboard 404: account recovery](getting-started/local.md#dashboard-404-no-current-workspace)
 - [Getting started: local development](getting-started/local.md)
+- [Production setup](getting-started/production.md)
 - [Architecture overview](architecture/overview.md)
 - [Posts and videos](architecture/posts-videos-api.md)
 - [Guides](guides/)
