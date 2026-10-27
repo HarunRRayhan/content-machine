@@ -1086,6 +1086,7 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
             ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'PUBLISHED')
             ->assertJsonPath('data.publish_progress.completed_groups.0.scheduled_at', null)
+            ->assertJsonMissingPath('data.publish_progress.completed_groups.0.operator_confirmed')
             ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
             ->assertJsonPath('data.publish_progress.current.media_ids.0', '9001');
     }
@@ -1097,6 +1098,7 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
             ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '1001')
             ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'FAILED')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.operator_confirmed', true)
             ->assertJsonPath('data.publish_progress.current.index', 1)
             ->assertJsonPath('data.publish_progress.current.phase', 'retryable');
     }

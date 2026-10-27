@@ -1226,6 +1226,11 @@ class PublishPostAction
             $rebased = $completed;
             $rebased['group_key'] = $newPlan['groups'][$index]['group_key'];
             $rebased['status'] = $remoteStatus;
+            if ($remoteStatus === 'FAILED') {
+                // Calling the rebase is the operator's confirmation, same markers as confirm_failed.
+                $rebased['remote_status'] = $remoteStatus;
+                $rebased['operator_confirmed'] = true;
+            }
             $rebased['scheduled_at'] = null;
             $rebased['platforms'] = $newGroup->platforms;
             $rebased['language'] = $newGroup->language;
