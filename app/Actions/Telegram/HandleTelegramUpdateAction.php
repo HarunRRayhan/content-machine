@@ -772,6 +772,10 @@ class HandleTelegramUpdateAction
             $this->reply($config, $chatId, $exception->getMessage());
 
             return;
+        } catch (ValidationException $exception) {
+            $this->reply($config, $chatId, collect($exception->errors())->flatten()->first() ?? $exception->getMessage());
+
+            return;
         }
     }
 
