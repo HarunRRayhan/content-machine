@@ -19,6 +19,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class PostsApiTest extends TestCase
@@ -1078,6 +1079,39 @@ class PostsApiTest extends TestCase
 
     public function test_rebase_retry_to_publish_now_preserves_unfinished_media_ids(): void
     {
+        $this->rebaseAfterCompletedGroupStatus('P-REBASE-NOW-API', 'PUBLISHED')
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed')
+            ->assertJsonPath('data.publish_progress.options.when', null)
+            ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'PUBLISHED')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.scheduled_at', null)
+            ->assertJsonMissingPath('data.publish_progress.completed_groups.0.operator_confirmed')
+            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
+            ->assertJsonPath('data.publish_progress.current.media_ids.0', '9001');
+    }
+
+    public function test_rebase_retry_to_publish_now_accepts_a_remotely_failed_completed_group(): void
+    {
+        $this->rebaseAfterCompletedGroupStatus('P-REBASE-NOW-FAILED', 'FAILED')
+            ->assertOk()
+            ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '1001')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'FAILED')
+            ->assertJsonPath('data.publish_progress.completed_groups.0.operator_confirmed', true)
+            ->assertJsonPath('data.publish_progress.current.index', 1)
+            ->assertJsonPath('data.publish_progress.current.phase', 'retryable');
+    }
+
+    public function test_rebase_retry_to_publish_now_rejects_a_still_scheduled_completed_group(): void
+    {
+        $this->rebaseAfterCompletedGroupStatus('P-REBASE-NOW-SCHED', 'SCHEDULED')
+            ->assertStatus(422)
+            ->assertJsonPath('errors.publish.0', 'Every completed group must be PUBLISHED or FAILED before a schedule can be rebased to publish-now.');
+    }
+
+    private function rebaseAfterCompletedGroupStatus(string $humanId, string $remoteStatus): TestResponse
+    {
         PostsyncerConfig::write($this->workspace, [
             'publish_enabled' => true,
             'api_key' => 'test-api-key',
@@ -1100,7 +1134,7 @@ class PostsApiTest extends TestCase
         ]);
 
         $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => 'P-REBASE-NOW-API',
+            'human_id' => $humanId,
             'number' => 66,
             'status' => 'ready',
             'approval_state' => 'approved',
@@ -1119,7 +1153,8 @@ class PostsApiTest extends TestCase
 
         $createdRemote = null;
         $createCount = 0;
-        Http::fake(function ($request) use (&$createdRemote, &$createCount) {
+        $getStatus = 'PUBLISHED';
+        Http::fake(function ($request) use (&$createdRemote, &$createCount, &$getStatus) {
             $url = $request->url();
 
             if (str_ends_with($url, '/media/upload/url')) {
@@ -1154,7 +1189,7 @@ class PostsApiTest extends TestCase
             }
 
             if (str_ends_with($url, '/posts/1001') && $request->method() === 'GET') {
-                return Http::response($createdRemote, 200);
+                return Http::response(array_merge($createdRemote, ['status' => $getStatus]), 200);
             }
 
             return Http::response(['message' => 'unexpected request'], 404);
@@ -1172,15 +1207,10 @@ class PostsApiTest extends TestCase
 
         $action->reconcileCreateAbsent($post);
 
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/rebase-retry-publish-now')
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.options.when', null)
-            ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'PUBLISHED')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.scheduled_at', null)
-            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
-            ->assertJsonPath('data.publish_progress.current.media_ids.0', '9001');
+        // The remote status changes only after the original schedule run, as on a real past slot.
+        $getStatus = $remoteStatus;
+
+        return $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/rebase-retry-publish-now');
     }
 
     public function test_abandon_retry_endpoint_drops_a_retryable_checkpoint_and_keeps_completed_groups(): void
