@@ -22,6 +22,7 @@ final readonly class PublishGroup
      * @param  list<string>  $mediaUrls
      * @param  array<string, string>  $captions
      * @param  list<string>|null  $threadTweets  Twitter/Threads: caption + thread segments
+     * @param  int  $mediaPerTweet  Images attached to each thread tweet (X allows 4)
      */
     public function __construct(
         public string $language,
@@ -33,6 +34,7 @@ final readonly class PublishGroup
         public bool $publishNow,
         public ?array $threadTweets = null,
         public ?string $firstComment = null,
+        public int $mediaPerTweet = 1,
     ) {}
 
     public static function supportsFirstComment(string $platform): bool

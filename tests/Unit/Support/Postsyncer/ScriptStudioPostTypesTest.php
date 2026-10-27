@@ -13,8 +13,10 @@ class ScriptStudioPostTypesTest extends TestCase
 
         $this->assertSame('on', $defaults['platforms']['facebook']['text']);
         $this->assertSame('on', $defaults['platforms']['youtube']['reel']);
+        $this->assertSame('ask', $defaults['platforms']['youtube']['photo']);
+        $this->assertSame('ask', $defaults['platforms']['youtube']['carousel']);
         $this->assertSame('off', $defaults['overrides']['english']['twitter']['photo']);
-        $this->assertSame('off', $defaults['overrides']['bangla']['twitter']['text']);
+        $this->assertSame('on', $defaults['overrides']['bangla']['twitter']['text']);
         $this->assertFalse(ScriptStudioPostTypes::isEmpty($defaults));
     }
 

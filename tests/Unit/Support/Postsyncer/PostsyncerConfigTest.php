@@ -108,6 +108,37 @@ class PostsyncerConfigTest extends TestCase
         $this->assertTrue($config->isPlatformEnabled('english', 'facebook'));
     }
 
+    public function test_stored_matrix_fills_only_unset_youtube_image_cells_from_defaults(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, [
+            'post_types' => [
+                'platforms' => [
+                    'youtube' => ['reel' => 'on', 'photo' => null, 'carousel' => 'off'],
+                    'facebook' => ['text' => 'on'],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+
+        $postTypes = PostsyncerConfig::fromWorkspace($workspace)->postTypes();
+
+        $this->assertSame('on', $postTypes['platforms']['youtube']['reel']);
+        $this->assertSame('ask', $postTypes['platforms']['youtube']['photo']);
+        $this->assertSame('off', $postTypes['platforms']['youtube']['carousel']);
+        $this->assertSame('on', $postTypes['platforms']['facebook']['text']);
+        $this->assertArrayNotHasKey('photo', $postTypes['platforms']['facebook']);
+    }
+
+    public function test_empty_stored_matrix_is_not_filled(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        PostsyncerConfig::write($workspace, ['post_types' => []]);
+        $workspace->refresh();
+
+        $this->assertSame([], PostsyncerConfig::fromWorkspace($workspace)->postTypes());
+    }
+
     public function test_platform_is_off_only_when_explicitly_disabled(): void
     {
         $workspace = Workspace::factory()->create(['settings' => []]);

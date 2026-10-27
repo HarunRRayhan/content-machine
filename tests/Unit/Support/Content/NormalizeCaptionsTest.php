@@ -68,4 +68,25 @@ class NormalizeCaptionsTest extends TestCase
         $this->assertSame('TikTok', $out[0]['platforms'][0]['name']);
         $this->assertSame('T', $out[0]['platforms'][0]['title']);
     }
+
+    #[Test]
+    public function it_keeps_an_explicit_motion_list_and_omits_it_when_absent(): void
+    {
+        $out = NormalizeCaptions::forDashboard([
+            'English' => [
+                'instagram' => [
+                    'caption' => 'IG',
+                    'images' => ['cover.png'],
+                    'motion' => ['slide-2.mp4', 'slide-1.mp4'],
+                ],
+                'facebook' => ['caption' => 'FB'],
+                'twitter' => ['caption' => 'X', 'motion' => []],
+            ],
+        ]);
+
+        $platforms = $out[0]['platforms'];
+        $this->assertSame(['slide-2.mp4', 'slide-1.mp4'], $platforms[0]['motion']);
+        $this->assertArrayNotHasKey('motion', $platforms[1]);
+        $this->assertSame([], $platforms[2]['motion']);
+    }
 }

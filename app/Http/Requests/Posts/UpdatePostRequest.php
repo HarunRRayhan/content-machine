@@ -24,6 +24,7 @@ class UpdatePostRequest extends FormRequest
             'body' => ['nullable', 'string', 'max:20000'],
             'captions' => ['sometimes', 'nullable', 'array'],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
+            'category' => ['sometimes', 'string', Rule::in(Post::CATEGORIES)],
             'image_drive_urls' => ['nullable', 'string', 'max:10000'],
         ];
     }

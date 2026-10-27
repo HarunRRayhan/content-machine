@@ -43,6 +43,7 @@ class PostResource extends JsonResource
             'language' => $this->language,
             'slug' => $this->slug,
             'template' => $this->template,
+            'category' => $this->category,
             'body' => $this->when(
                 $include->wants('body'),
                 $this->body,
@@ -64,6 +65,7 @@ class PostResource extends JsonResource
             'platforms' => $this->platforms,
             'image_drive_urls' => $this->image_drive_urls,
             'status' => $this->status,
+            'blocked_reason' => $this->blocked_reason,
             'publish_state' => $this->publish_state,
             'publish_error' => $this->publish_error === null
                 ? null
@@ -81,7 +83,7 @@ class PostResource extends JsonResource
     }
 
     /**
-     * @return list<array{id: int, role: string, filename: string|null, mime: string|null, media_url: string}>
+     * @return list<array{id: int, role: string, platform: string|null, language: string|null, filename: string|null, mime: string|null, media_url: string}>
      */
     private function presentAttachments(): array
     {
@@ -95,13 +97,15 @@ class PostResource extends JsonResource
     }
 
     /**
-     * @return array{id: int, role: string, filename: string|null, mime: string|null, media_url: string}
+     * @return array{id: int, role: string, platform: string|null, language: string|null, filename: string|null, mime: string|null, media_url: string}
      */
     private function presentAttachment(Attachment $attachment): array
     {
         return [
             'id' => $attachment->id,
             'role' => $attachment->role,
+            'platform' => $attachment->platform,
+            'language' => $attachment->language,
             'filename' => $attachment->mediaAsset?->original_filename,
             'mime' => $attachment->mediaAsset?->mime,
             'media_url' => route('api.v1.posts.media', [

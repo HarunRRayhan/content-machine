@@ -3,8 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Postsyncer\EnqueueVideoPublishAction;
+use App\Actions\Postsyncer\PublishVideoAction;
+use App\Actions\Postsyncer\ReconcileVideoGroupsDeletedAction;
+use App\Actions\Postsyncer\VideoRescheduleAction;
 use App\Actions\Videos\CreateVideoAction;
 use App\Actions\Videos\UpdateVideoAction;
+use App\Data\Postsyncer\ReschedulePostData;
 use App\Data\Videos\UpdateVideoData;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\V1\VideoResource;
@@ -14,10 +18,13 @@ use App\Rules\AccessibleDriveUrl;
 use App\Rules\RenderablePresentationManifest;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 /**
  * CRUD for videos over the workspace token API. human_id (V-12 / BV-53)
@@ -152,6 +159,94 @@ class VideosApiController extends Controller
         ], fn ($value) => $value !== null);
 
         $video = $action->handle($video, $this->currentWorkspace(), $options);
+
+        return new VideoResource($video);
+    }
+
+    public function reconcileCreateAbsent(Request $request, string $humanId, PublishVideoAction $action): VideoResource
+    {
+        $video = $this->resolveVideo($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileCreateAbsent($video);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new VideoResource($video->fresh());
+    }
+
+    public function reconcileMediaAbsent(Request $request, string $humanId, PublishVideoAction $action): VideoResource
+    {
+        $video = $this->resolveVideo($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileMediaAbsent($video);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new VideoResource($video->fresh());
+    }
+
+    public function reschedule(Request $request, string $humanId, VideoRescheduleAction $action): VideoResource
+    {
+        $video = $this->resolveVideo($humanId);
+
+        $payload = $request->validate([
+            'when' => ['required', 'string', 'max:64'],
+        ]);
+
+        try {
+            $video = $action->handle(
+                $video,
+                $this->currentWorkspace(),
+                ReschedulePostData::fromApiPayload($payload),
+            );
+        } catch (InvalidArgumentException|PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'when' => $exception->getMessage(),
+            ]);
+        }
+
+        return new VideoResource($video);
+    }
+
+    public function reconcileGroupsDeleted(
+        Request $request,
+        string $humanId,
+        ReconcileVideoGroupsDeletedAction $action,
+    ): VideoResource {
+        $video = $this->resolveVideo($humanId);
+
+        $request->validate([
+            'confirmed_deleted' => ['required', 'accepted'],
+            'owner_removed_published' => ['sometimes', 'boolean'],
+        ]);
+
+        try {
+            $video = $action->handle(
+                $video,
+                $this->currentWorkspace(),
+                $request->boolean('owner_removed_published'),
+            );
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_deleted' => $exception->getMessage(),
+            ]);
+        }
 
         return new VideoResource($video);
     }

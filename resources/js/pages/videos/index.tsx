@@ -49,6 +49,7 @@ type Filters = {
     status: string;
     language: string | null;
     q: string | null;
+    sort: 'oldest' | 'latest';
 };
 
 type PageProps = {
@@ -121,22 +122,14 @@ export default function VideosIndex({
     const rankStart = items.from ?? 1;
 
     function applyFilter(next: Partial<Filters>) {
+        const merged = { ...filters, ...next };
+
         router.get(
             index.url({
-                query: tabQuery(
-                    {
-                        status:
-                            next.status !== undefined
-                                ? next.status
-                                : filters.status,
-                        language:
-                            next.language !== undefined
-                                ? next.language
-                                : filters.language,
-                        q: next.q !== undefined ? next.q : filters.q,
-                    },
-                    next.status !== undefined ? next.status : filters.status,
-                ),
+                query: {
+                    ...tabQuery(merged, merged.status),
+                    ...(isIdeation ? {} : { sort: merged.sort }),
+                },
             }),
             {},
             { preserveState: true, preserveScroll: true },
@@ -208,18 +201,35 @@ export default function VideosIndex({
                         }}
                     />
                     {!isIdeation && (
-                        <select
-                            value={filters.language ?? ''}
-                            onChange={(event) =>
-                                applyFilter({
-                                    language: event.target.value || null,
-                                })
-                            }
-                        >
-                            <option value="">All languages</option>
-                            <option value="bn">Bangla</option>
-                            <option value="en">English</option>
-                        </select>
+                        <>
+                            <select
+                                value={filters.language ?? ''}
+                                onChange={(event) =>
+                                    applyFilter({
+                                        language: event.target.value || null,
+                                    })
+                                }
+                            >
+                                <option value="">All languages</option>
+                                <option value="bn">Bangla</option>
+                                <option value="en">English</option>
+                            </select>
+                            <select
+                                aria-label="Sort order"
+                                value={filters.sort}
+                                onChange={(event) =>
+                                    applyFilter({
+                                        sort:
+                                            event.target.value === 'oldest'
+                                                ? 'oldest'
+                                                : 'latest',
+                                    })
+                                }
+                            >
+                                <option value="oldest">Oldest first</option>
+                                <option value="latest">Latest first</option>
+                            </select>
+                        </>
                     )}
                 </div>
 

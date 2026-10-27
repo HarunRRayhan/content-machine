@@ -47,11 +47,21 @@ class VideosController extends Controller
     ];
 
     /**
+     * Work-queue tabs list oldest first by default; every other tab lists
+     * latest first. An explicit ?sort= overrides either default.
+     *
+     * @var list<string>
+     */
+    public const QUEUE_STATUSES = ['pending', 'ready', 'recorded', 'scheduled'];
+
+    /**
      * List the current workspace's videos (or video ideas on the Ideation
-     * tab). Videos are ordered by custom number (BV-67, BV-66, …), highest
-     * first, matching the API and git tracker. Ideas are highest score first,
-     * with null scores last. Filterable by status tab, language, and a
-     * free-text query over title / human id.
+     * tab). Videos are ordered by custom number, then id, in the direction
+     * from resolveSort(); created_at is not used because bulk imports carry
+     * timestamps unrelated to their numbers. Ideas are highest score first,
+     * with null scores last.
+     * Filterable by status tab, language, and a free-text query over title /
+     * human id.
      */
     public function index(Request $request): Response
     {
@@ -60,6 +70,8 @@ class VideosController extends Controller
         $status = $request->string('status')->toString() ?: 'pending';
         $language = $request->string('language')->toString() ?: null;
         $search = $request->string('q')->toString() ?: null;
+        $sort = $this->resolveSort($request, $status);
+        $direction = $sort === 'oldest' ? 'asc' : 'desc';
 
         if ($status === 'ideation') {
             $items = Idea::query()
@@ -92,8 +104,8 @@ class VideosController extends Controller
                             ->orWhere('slug', 'ilike', $like);
                     });
                 })
-                ->orderByDesc('number')
-                ->orderByDesc('id');
+                ->orderBy('number', $direction)
+                ->orderBy('id', $direction);
 
             PresenceFlags::selectVideoSummary($videosQuery, [
                 'id',
@@ -119,10 +131,26 @@ class VideosController extends Controller
                 'status' => $status,
                 'language' => $language,
                 'q' => $search,
+                'sort' => $sort,
             ],
             'counts' => $this->statusCounts($workspace),
             'tabs' => self::TAB_STATUSES,
         ]);
+    }
+
+    /**
+     * Only 'oldest' and 'latest' are honored; anything else falls back to the
+     * status default so a hand-edited URL can't break the ordering.
+     */
+    private function resolveSort(Request $request, string $status): string
+    {
+        $requested = $request->string('sort')->toString();
+
+        if (in_array($requested, ['oldest', 'latest'], true)) {
+            return $requested;
+        }
+
+        return in_array($status, self::QUEUE_STATUSES, true) ? 'oldest' : 'latest';
     }
 
     /**

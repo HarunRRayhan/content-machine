@@ -35,9 +35,11 @@ class ResolveTelegramIntentAction
         videos: asking to see, list, or check their recent videos.
         posts: asking to see, list, or check their recent posts.
         notes: asking to see, list, or check their recent Scratch Pad
-        captures or notes.
+        captures or notes, or asking how many notes they have (a count or
+        total), in any language.
         clear_notes: asking to delete, clear, or remove their recent
-        Scratch Pad notes/captures (not a specific post, video, or idea).
+        Scratch Pad notes/captures in bulk (not a specific post, video, or
+        idea, and not a single note such as "my last note" or "this note").
 
         If the message doesn't clearly ask for one of these, reply with
         exactly: none

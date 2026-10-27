@@ -215,7 +215,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'update_post',
-                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status, image_drive_urls. Drive URLs must be publicly fetchable.',
+                'description' => 'Update an existing post. human_id required; optional title, body, captions, platforms, status, category, blocked_reason, image_drive_urls. category (default, morning, evening_carousel) is calendar metadata and does not reset approval. blocked_reason is cleared when status leaves blocked. Drive URLs must be publicly fetchable.',
                 'ability' => 'posts:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string'],
@@ -224,6 +224,8 @@ final class McpToolCatalog
                     'captions' => ['type' => 'object', 'description' => 'Per-platform caption map.'],
                     'platforms' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'status' => ['type' => 'string', 'enum' => Post::STATUSES],
+                    'category' => ['type' => 'string', 'enum' => Post::CATEGORIES],
+                    'blocked_reason' => ['type' => 'string', 'description' => 'Why the post is blocked (shown in the list). Send with status=blocked.'],
                     'image_drive_urls' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Public Google Drive file links for post images.'],
                 ], ['human_id']),
             ],

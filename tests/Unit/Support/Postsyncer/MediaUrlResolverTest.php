@@ -110,6 +110,38 @@ class MediaUrlResolverTest extends TestCase
         $this->assertStringContainsString('/publish-media/posts/', $urls[1]);
     }
 
+    public function test_motion_slides_never_join_the_publish_image_set(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create([
+            'image_drive_urls' => ['https://drive.google.com/file/d/fallback/view'],
+        ]);
+
+        $motion = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'disk' => 'scratchpad',
+            'path' => 'posts/slide-1.mp4',
+            'original_filename' => 'slide-1.mp4',
+            'mime' => 'video/mp4',
+        ]);
+        Storage::disk('scratchpad')->put('posts/slide-1.mp4', 'mp4');
+        Attachment::factory()->for($post, 'attachable')->for($motion)->create([
+            'role' => 'motion',
+            'platform' => 'instagram',
+            'language' => 'en',
+            'position' => 0,
+        ]);
+
+        // Only motion attached: the publish set falls back to the Drive images, as if none were attached.
+        $this->assertSame(
+            ['https://drive.usercontent.google.com/download?id=fallback&export=download&confirm=t'],
+            $this->resolver->forPost($post->fresh()),
+        );
+        $this->assertSame([], $this->resolver->resolveNamedImages($post->fresh(), ['slide-1.mp4']));
+    }
+
     public function test_resolve_named_images_maps_attachment_filenames(): void
     {
         Storage::fake('scratchpad');

@@ -119,14 +119,10 @@ export const POST_STATUS_LABELS: Record<string, string> = {
     ready: 'Draft',
     scheduled: 'Scheduled',
     posted: 'Posted',
+    blocked: 'Blocked',
     archived: 'Archived',
-    dropped: 'Archived',
 };
 
 export function studioPostStatus(status: string): string {
-    if (status === 'ready' || status === 'dropped') {
-        return status === 'ready' ? 'draft' : 'archived';
-    }
-
-    return status;
+    return status === 'ready' ? 'draft' : status;
 }

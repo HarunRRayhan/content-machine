@@ -278,6 +278,124 @@ class PostPublishPlannerTest extends TestCase
         $this->planner->plan($post, $config, ['confirm_ask' => false]);
     }
 
+    private function youtubeConfigFor(Workspace $workspace): PostsyncerConfig
+    {
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'youtube' => ['reel' => 'on', 'photo' => 'ask', 'carousel' => 'ask'],
+                    'instagram' => ['photo' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+        $workspace->refresh();
+
+        return PostsyncerConfig::fromWorkspace($workspace);
+    }
+
+    public function test_youtube_image_carousel_needs_confirm_ask_and_then_gets_its_own_group(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->youtubeConfigFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['youtube'],
+            'captions' => ['main' => ['youtube' => ['caption' => 'YT caption']]],
+            'image_drive_urls' => [
+                'https://drive.google.com/file/d/one/view',
+                'https://drive.google.com/file/d/two/view',
+            ],
+        ]);
+
+        $this->assertTrue($this->planner->needsConfirmAsk($post, $config));
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['youtube'], $groups[0]->platforms);
+        $this->assertCount(2, $groups[0]->mediaUrls);
+    }
+
+    public function test_youtube_gets_its_own_group_even_when_it_shares_the_image_set(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->youtubeConfigFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['instagram', 'youtube'],
+            'captions' => ['main' => [
+                'instagram' => ['caption' => 'IG caption'],
+                'youtube' => ['caption' => 'YT caption'],
+            ]],
+            'image_drive_urls' => ['https://drive.google.com/file/d/one/view'],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $platforms = array_map(fn (PublishGroup $group): array => $group->platforms, $groups);
+        $this->assertCount(2, $groups);
+        $this->assertContains(['youtube'], $platforms);
+        $this->assertContains(['instagram'], $platforms);
+        // Groups run in order and a 4xx stops the loop, so YouTube must not come before the rest.
+        $this->assertSame(['youtube'], end($platforms));
+    }
+
+    public function test_youtube_image_post_is_planned_from_matrix_saved_before_youtube_photo_existed(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'youtube' => ['reel' => 'on'],
+                    'instagram' => ['photo' => 'on'],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['youtube'],
+            'captions' => ['main' => ['youtube' => ['caption' => 'YT caption']]],
+            'image_drive_urls' => ['https://drive.google.com/file/d/one/view'],
+        ]);
+
+        $this->assertTrue($this->planner->needsConfirmAsk($post, $config));
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['youtube'], $groups[0]->platforms);
+    }
+
+    public function test_youtube_image_carousel_without_confirm_ask_is_refused(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->youtubeConfigFor($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['youtube'],
+            'captions' => ['main' => ['youtube' => ['caption' => 'YT caption']]],
+            'image_drive_urls' => ['https://drive.google.com/file/d/one/view'],
+        ]);
+
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('youtube');
+
+        $this->planner->plan($post, $config, ['confirm_ask' => false]);
+    }
+
     public function test_throws_when_a_caption_language_has_no_postsyncer_workspace(): void
     {
         $workspace = Workspace::factory()->create();
@@ -440,6 +558,34 @@ class PostPublishPlannerTest extends TestCase
         $this->assertNotContains('twitter', $threadsGroup->platforms);
         $this->assertSame(['threads' => 'Threads caption'], $threadsGroup->captions);
         $this->assertNull($threadsGroup->threadTweets);
+    }
+
+    public function test_twitter_images_over_four_become_a_thread_of_four_image_tweets(): void
+    {
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => ['platforms' => ['twitter' => ['text' => 'on', 'photo' => 'on']]],
+        ]);
+        $workspace->refresh();
+        $config = PostsyncerConfig::fromWorkspace($workspace);
+
+        $images = array_map(fn (int $n) => "https://drive.google.com/file/d/img{$n}/view", range(1, 9));
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['twitter'],
+            'captions' => ['Bangla' => ['twitter' => ['caption' => 'Main tweet', 'images' => $images]]],
+        ]);
+
+        $groups = $this->planner->plan($post, $config, ['confirm_ask' => true]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['Main tweet', '2/3', '3/3'], $groups[0]->threadTweets);
+        $this->assertSame(4, $groups[0]->mediaPerTweet);
+        $this->assertCount(9, $groups[0]->mediaUrls);
     }
 
     public function test_threads_with_tweet_segments_gets_own_thread_group(): void

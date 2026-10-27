@@ -84,7 +84,7 @@ class PublishPostAction
             $progress = $post->publish_progress;
             $claimLeaseId = $post->publish_lease_id;
             $post->loadMissing('workspace');
-            $this->assertFirstPublish($post);
+            $this->assertFirstPublish($post, $options);
             $config = PostsyncerConfig::fromWorkspace($post->workspace);
             if (! $config->publishEnabled()) {
                 throw new PostsyncerException('PostSyncer publishing is disabled in Settings.');
@@ -121,6 +121,11 @@ class PublishPostAction
                         return;
                     }
                     $groupKey = $this->groupKey($config, $group);
+                    if ($this->isAbandonedGroup($progress, $groupKey)) {
+                        throw new PostsyncerException(
+                            'This PostSyncer group was abandoned and cannot be created again.'
+                        );
+                    }
                     $idempotencyKey = $this->idempotencyKey(
                         (string) $progress['operation_id'],
                         $index,
@@ -622,6 +627,7 @@ class PublishPostAction
                 when: $group->when,
                 publishNow: $group->publishNow,
                 threadTweets: $group->threadTweets,
+                mediaPerTweet: $group->mediaPerTweet,
                 firstComment: PublishGroup::supportsFirstComment($platform)
                     ? $group->firstComment
                     : null,
@@ -1003,6 +1009,73 @@ class PublishPostAction
             $lockedPost->forceFill([
                 'publish_state' => 'failed',
                 'publish_error' => 'PostSyncer create was verified absent. Retry the publish to create it with the existing media.',
+                'publish_progress' => $latestProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
+     * Drop a retryable checkpoint whose PostSyncer create an operator confirmed
+     * will not be sent. Completed groups stay; the audit trail keeps the
+     * abandoned group and its uploaded media ids, and the checkpoint no longer
+     * blocks PostSyncer settings.
+     */
+    public function abandonRetry(Post $post): void
+    {
+        $post->refresh();
+        $progress = $post->publish_progress;
+
+        if (! is_array($progress)) {
+            throw new PostsyncerException('This post has no PostSyncer progress to abandon.');
+        }
+
+        $this->assertProgressShape($progress);
+        $current = $progress['current'] ?? null;
+
+        if ($post->publish_state !== 'failed'
+            || ($progress['state'] ?? null) !== 'failed'
+            || ! is_array($current)
+            || ($current['phase'] ?? null) !== 'retryable') {
+            throw new PostsyncerException(
+                'Only a failed, retryable PostSyncer group can be abandoned.',
+            );
+        }
+
+        DB::transaction(function () use ($post, $progress, $current): void {
+            $lockedPost = Post::query()
+                ->whereKey($post->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $latestProgress = $lockedPost->publish_progress;
+
+            if (! is_array($latestProgress)
+                || ($latestProgress['operation_id'] ?? null) !== ($progress['operation_id'] ?? null)
+                || $lockedPost->publish_state !== 'failed'
+                || ($latestProgress['state'] ?? null) !== 'failed'
+                || ($latestProgress['current']['index'] ?? null) !== $current['index']
+                || ($latestProgress['current']['group_key'] ?? null) !== $current['group_key']
+                || ($latestProgress['current']['phase'] ?? null) !== 'retryable') {
+                throw new PostsyncerException(
+                    'The PostSyncer progress changed while abandoning the retry.',
+                );
+            }
+
+            $latestProgress['current'] = null;
+            $latestProgress['abandoned'][] = [
+                'operation_id' => $latestProgress['operation_id'],
+                'index' => $current['index'],
+                'group_key' => $current['group_key'],
+                'media_ids' => $this->normalizeMediaIds($current['media_ids'] ?? []),
+                'snapshot' => self::abandonedSnapshot($latestProgress),
+                'abandoned_at' => now()->toISOString(),
+            ];
+
+            $lockedPost->forceFill([
+                'publish_error' => 'Abandoned a retryable PostSyncer group. No create was sent for it; completed groups were kept.',
                 'publish_progress' => $latestProgress,
                 'publish_claimed_at' => null,
                 'publish_lease_id' => null,
@@ -1565,6 +1638,10 @@ class PublishPostAction
 
         $this->assertProgressShape($progress);
 
+        if ($post->status === 'blocked') {
+            throw new PostsyncerException('This post is blocked; unblock it before recovering a publish.');
+        }
+
         if (($progress['state'] ?? null) !== 'failed'
             || ($progress['current'] ?? null) !== null
             || $this->completedGroups($progress) === []) {
@@ -1687,6 +1764,8 @@ class PublishPostAction
                 );
             }
 
+            $publishedGroups = $this->withBaseGroups($lockedPost, $progress, $publishedGroups);
+
             $lockedPost->forceFill([
                 'postsyncer' => ['groups' => $publishedGroups],
                 'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
@@ -1715,8 +1794,9 @@ class PublishPostAction
             $contentItems = [];
             foreach ($threadTweets as $index => $tweet) {
                 $item = ['text' => $tweet];
-                if (array_key_exists($index, $mediaIds)) {
-                    $item['media'] = [$mediaIds[$index]];
+                $media = array_slice($mediaIds, $index * $group->mediaPerTweet, $group->mediaPerTweet);
+                if ($media !== []) {
+                    $item['media'] = $media;
                 }
                 $contentItems[] = $item;
             }
@@ -2396,6 +2476,17 @@ class PublishPostAction
                 return null;
             }
 
+            // Terminal for this post. Checked under the row lock, before any run state is written.
+            if (is_array($progress) && ($progress['abandoned'] ?? []) !== []) {
+                if ($locked->publish_state !== 'running') {
+                    $locked->forceFill([
+                        'publish_error' => 'This post has an abandoned PostSyncer retry and cannot be published again.',
+                    ])->save();
+                }
+
+                return null;
+            }
+
             $legacyAccountFailure = LegacyPublishProgress::isMissingAccountFailure(
                 $locked->publish_error,
                 is_array($progress) ? $progress : null,
@@ -2594,6 +2685,7 @@ class PublishPostAction
             $latestConfig = PostsyncerConfig::fromWorkspace($locked->workspace);
             $latestGroups = $this->planner->plan($locked, $latestConfig, $options);
             $latestPlan = $this->planMetadata($latestConfig, $latestGroups, $options);
+            $publishedGroups = $this->withBaseGroups($locked, $progress, $publishedGroups);
 
             if ($latestPlan['hash'] !== ($progress['plan_hash'] ?? null)
                 || $latestPlan['groups'] !== ($progress['planned_groups'] ?? null)
@@ -2943,8 +3035,59 @@ class PublishPostAction
         return true;
     }
 
-    private function assertFirstPublish(Post $post): void
+    /**
+     * For an append-only operation, prepend the untouched base groups to the
+     * newly created ones. Fails closed if the stored groups changed since the
+     * operation was validated, so a concurrent edit is never overwritten.
+     *
+     * @param  array<string, mixed>  $progress
+     * @param  list<array<string, mixed>>  $newGroups
+     * @return list<array<string, mixed>>
+     */
+    private function withBaseGroups(Post $locked, array $progress, array $newGroups): array
     {
+        if (($progress['options']['append_missing'] ?? false) !== true) {
+            return $newGroups;
+        }
+
+        $base = $progress['base_groups'] ?? null;
+        $current = $locked->postsyncer['groups'] ?? null;
+
+        if (! is_array($base) || $base === [] || ! is_array($current)
+            || $this->canonicalJson(['g' => array_values($current)])
+                !== $this->canonicalJson(['g' => array_values($base)])) {
+            throw new PostsyncerException(
+                'The existing PostSyncer groups changed while the append was running. '
+                .'The new groups were not finalized in Content Machine.'
+            );
+        }
+
+        return [...array_values($base), ...$newGroups];
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    private function assertFirstPublish(Post $post, array $options = []): void
+    {
+        if (($options['append_missing'] ?? false) === true) {
+            // Append-only: existing groups are expected, but the operation
+            // must carry the snapshot it was validated against and a schedule.
+            $progress = $post->publish_progress;
+            if (! is_array($progress)
+                || ! is_array($progress['base_groups'] ?? null)
+                || ! is_string($options['when'] ?? null)
+                || trim($options['when']) === ''
+                || ! is_array($options['platforms'] ?? null)
+                || $options['platforms'] === []) {
+                throw new PostsyncerException(
+                    'An append-only publish requires explicit platforms, a schedule, and a base group snapshot.'
+                );
+            }
+
+            return;
+        }
+
         if ($this->hasExistingPublicGroup($post)) {
             throw new PostsyncerException(
                 'This post already has PostSyncer posts. Republish is not supported yet.'
@@ -3708,6 +3851,11 @@ class PublishPostAction
             $normalized['platforms'] = $platforms;
         }
 
+        // Only present when true so existing operations keep their plan hash.
+        if (($options['append_missing'] ?? false) === true) {
+            $normalized['append_missing'] = true;
+        }
+
         $telegramRequestId = $this->telegramRequestId($options);
         if ($telegramRequestId !== null) {
             $normalized['telegram_request_id'] = $telegramRequestId;
@@ -3719,14 +3867,29 @@ class PublishPostAction
     }
 
     /**
-     * @param  array<string, mixed>  $value
+     * Hash of the progress an abandon covers. Any later completed group,
+     * supplemental group, or current checkpoint changes it.
+     *
+     * @param  array<string, mixed>  $progress
      */
-    private function canonicalJson(array $value): string
+    public static function abandonedSnapshot(array $progress): string
     {
-        return json_encode($this->canonicalValue($value), JSON_THROW_ON_ERROR);
+        return hash('sha256', self::canonicalJson([
+            'completed_groups' => $progress['completed_groups'] ?? [],
+            'supplemental_groups' => $progress['supplemental_groups'] ?? [],
+            'current' => $progress['current'] ?? null,
+        ]));
     }
 
-    private function canonicalValue(mixed $value): mixed
+    /**
+     * @param  array<string, mixed>  $value
+     */
+    private static function canonicalJson(array $value): string
+    {
+        return json_encode(self::canonicalValue($value), JSON_THROW_ON_ERROR);
+    }
+
+    private static function canonicalValue(mixed $value): mixed
     {
         if (! is_array($value)) {
             return $value;
@@ -3734,18 +3897,32 @@ class PublishPostAction
 
         if (array_is_list($value)) {
             return array_map(
-                fn (mixed $item): mixed => $this->canonicalValue($item),
+                fn (mixed $item): mixed => self::canonicalValue($item),
                 $value,
             );
         }
 
         $canonical = [];
         foreach ($value as $key => $item) {
-            $canonical[(string) $key] = $this->canonicalValue($item);
+            $canonical[(string) $key] = self::canonicalValue($item);
         }
         ksort($canonical);
 
         return $canonical;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function isAbandonedGroup(array $progress, string $groupKey): bool
+    {
+        foreach ($progress['abandoned'] ?? [] as $abandoned) {
+            if (is_array($abandoned) && ($abandoned['group_key'] ?? null) === $groupKey) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

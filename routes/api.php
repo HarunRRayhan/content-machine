@@ -10,7 +10,11 @@ use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
 use App\Http\Controllers\Api\V1\VideoSeriesApiController;
+use App\Http\Controllers\Api\VersionController;
 use Illuminate\Support\Facades\Route;
+
+// Public, unauthenticated deploy fingerprint (commit, branch, deployment id).
+Route::get('version', VersionController::class)->middleware('throttle:60,1')->name('api.version');
 
 /*
 |--------------------------------------------------------------------------
@@ -147,6 +151,22 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.publish');
 
+    Route::post('videos/{human_id}/reconcile-create-absent', [VideosApiController::class, 'reconcileCreateAbsent'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-create-absent');
+
+    Route::post('videos/{human_id}/reconcile-media-absent', [VideosApiController::class, 'reconcileMediaAbsent'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-media-absent');
+
+    Route::post('videos/{human_id}/reschedule', [VideosApiController::class, 'reschedule'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reschedule');
+
+    Route::post('videos/{human_id}/reconcile-groups-deleted', [VideosApiController::class, 'reconcileGroupsDeleted'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-groups-deleted');
+
     Route::get('posts', [PostsApiController::class, 'index'])
         ->middleware('auth.workspace-token:posts:read')
         ->name('posts.index');
@@ -170,6 +190,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('posts/{human_id}/documents', [PostsApiController::class, 'attachDocument'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.documents');
+
+    Route::post('posts/{human_id}/videos', [PostsApiController::class, 'attachVideo'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.videos');
 
     Route::post('posts/{human_id}/publish', [PostsApiController::class, 'publish'])
         ->middleware('auth.workspace-token:posts:write')
@@ -202,6 +226,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('posts/{human_id}/reconcile-create-absent', [PostsApiController::class, 'reconcileCreateAbsent'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile-create-absent');
+
+    Route::post('posts/{human_id}/abandon-retry', [PostsApiController::class, 'abandonRetry'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.abandon-retry');
 
     Route::post('posts/{human_id}/rebase-retry-publish-now', [PostsApiController::class, 'rebaseRetryToPublishNow'])
         ->middleware('auth.workspace-token:posts:write')

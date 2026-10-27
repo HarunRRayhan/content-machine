@@ -9,14 +9,17 @@ use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Telegram\CaptureTelegramMessageAction;
+use App\Actions\Telegram\ExecuteTelegramWorkspaceActionAction;
 use App\Actions\Telegram\GenerateTelegramChatReplyAction;
 use App\Actions\Telegram\HandleTelegramUpdateAction;
 use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Actions\Telegram\ResolveTelegramIntentAction;
+use App\Actions\Telegram\ResolveTelegramWorkspaceActionAction;
 use App\Jobs\GenerateTelegramPostJob;
 use App\Jobs\PublishPostJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Models\AiProviderCredential;
+use App\Models\Idea;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
 use App\Models\TelegramBotConfig;
@@ -72,6 +75,8 @@ class HandleTelegramUpdateActionTest extends TestCase
             new ResolveTelegramIntentAction($completionClient, new AiProviderCredentialResolver),
             new DeleteRecentScratchpadEntriesAction(new DeleteScratchpadEntryAction),
             $this->client,
+            resolveWorkspaceAction: new ResolveTelegramWorkspaceActionAction($completionClient, new AiProviderCredentialResolver),
+            executeWorkspaceAction: app(ExecuteTelegramWorkspaceActionAction::class),
         );
     }
 
@@ -262,7 +267,38 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertStringContainsString('text', $this->lastReply());
         $this->assertStringContainsString('remember to renew the domain', $this->lastReply());
-        $this->assertStringContainsString('new', $this->lastReply());
+    }
+
+    public function test_notes_command_leads_with_the_true_total_not_the_capped_list_length()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        ScratchpadEntry::factory()->for($config->workspace)->count(12)->create(['status' => 'new', 'title' => null, 'body' => 'active note']);
+        ScratchpadEntry::factory()->for($config->workspace)->triaged()->count(2)->create(['captured_at' => now()->addMinute()]);
+        ScratchpadEntry::factory()->for($config->workspace)->dropped()->count(3)->create(['captured_at' => now()->addMinute()]);
+        ScratchpadEntry::factory()->count(5)->create();
+
+        $this->action()->handle($config, $this->update(1, '/notes'));
+
+        $lines = explode("\n", $this->lastReply());
+        $this->assertSame('You have 12 active Scratch Pad notes. Latest 10:', $lines[0]);
+        $this->assertCount(11, $lines);
+        foreach (array_slice($lines, 1) as $line) {
+            $this->assertStringEndsWith(': active note', $line);
+        }
+    }
+
+    public function test_notes_command_with_one_note_says_singular_total()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        ScratchpadEntry::factory()->for($config->workspace)->create(['status' => 'new']);
+
+        $this->action()->handle($config, $this->update(1, '/notes'));
+
+        $this->assertStringStartsWith("You have 1 active Scratch Pad note.\n", $this->lastReply());
     }
 
     public function test_notes_command_with_none_yet_says_so()
@@ -273,7 +309,20 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->action()->handle($config, $this->update(1, '/notes'));
 
-        $this->assertSame('No Scratch Pad captures yet.', $this->lastReply());
+        $this->assertSame('No active Scratch Pad notes.', $this->lastReply());
+    }
+
+    public function test_notes_command_with_only_triaged_or_dropped_notes_says_none_active()
+    {
+        $config = TelegramBotConfig::factory()->connected()->create();
+        $user = User::factory()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => $user->id, 'telegram_user_id' => 1]);
+        ScratchpadEntry::factory()->for($config->workspace)->triaged()->create();
+        ScratchpadEntry::factory()->for($config->workspace)->dropped()->create();
+
+        $this->action()->handle($config, $this->update(1, '/notes'));
+
+        $this->assertSame('No active Scratch Pad notes.', $this->lastReply());
     }
 
     public function test_clearnotes_command_deletes_recent_untriaged_notes()
@@ -325,6 +374,242 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertSame('Deleted 1 note.', $this->lastReply());
         $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    private function actionClient(?string $json): AiCompletionClientContract
+    {
+        return new class($json) implements AiCompletionClientContract
+        {
+            public function __construct(private readonly ?string $json) {}
+
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                if (str_contains($systemPrompt, 'Classify the user')) {
+                    return AiCompletionResult::success('none');
+                }
+
+                if ($this->json !== null && str_contains($systemPrompt, 'reply with ONLY a JSON object')) {
+                    return AiCompletionResult::success($this->json);
+                }
+
+                return AiCompletionResult::success('none');
+            }
+        };
+    }
+
+    private function linkedAiConfig(): TelegramBotConfig
+    {
+        $config = TelegramBotConfig::factory()->connected()->aiChatEnabled()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'user_id' => User::factory()->create()->id, 'telegram_user_id' => 1]);
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $config->workspace_id]);
+
+        return $config;
+    }
+
+    public function test_asking_to_save_a_post_idea_creates_it_in_the_workspace()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_idea","kind":"post","title":"Store money as integer cents","rationale":"Floats round wrong"}');
+
+        $this->action($client)->handle($config, $this->update(1, 'save a post idea: store money as cents'));
+
+        $idea = Idea::withoutGlobalScopes()->sole();
+        $this->assertSame($config->workspace_id, $idea->workspace_id);
+        $this->assertSame('post', $idea->kind);
+        $this->assertSame('Store money as integer cents', $idea->title);
+        $this->assertSame("Saved {$idea->human_id}: Store money as integer cents", $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_both_creates_a_post_idea_and_a_video_idea()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_idea","kind":"both","title":"Store money as integer cents"}');
+
+        $this->action($client)->handle($config, $this->update(1, 'this should be both a post and a video idea, store money as cents'));
+
+        $ideas = Idea::withoutGlobalScopes()->orderBy('id')->get();
+        $this->assertSame(['post', 'video'], $ideas->pluck('kind')->all());
+        $this->assertSame(2, $ideas->where('workspace_id', $config->workspace_id)->count());
+        $this->assertSame('Saved '.$ideas->pluck('human_id')->implode(' and ').': Store money as integer cents', $this->lastReply());
+    }
+
+    public function test_an_idea_with_no_kind_is_kept_in_the_scratch_pad_not_lost()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_idea","title":"Store money as cents","body":"Floats round wrong."}');
+
+        $this->action($client)->handle($config, $this->update(1, 'idea: store money as cents, floats round wrong'));
+
+        $this->assertSame("Store money as cents\n\nFloats round wrong.", ScratchpadEntry::withoutGlobalScopes()->sole()->body);
+        $this->assertSame(0, Idea::withoutGlobalScopes()->count());
+        $this->assertStringContainsString('Saved to the Scratch Pad', $this->lastReply());
+    }
+
+    public function test_a_dictated_note_without_a_command_word_goes_to_the_scratch_pad()
+    {
+        $config = $this->linkedAiConfig();
+        $client = $this->actionClient('{"action":"create_scratchpad","body":"Dollars are stored as cents and Bitcoin as satoshis."}');
+
+        $this->action($client)->handle($config, $this->update(1, 'so i always keep dollars as cents and bitcoin as satoshis put that in the scratch pad'));
+
+        $this->assertSame('Dollars are stored as cents and Bitcoin as satoshis.', ScratchpadEntry::withoutGlobalScopes()->sole()->body);
+        $this->assertSame(0, Idea::withoutGlobalScopes()->count());
+    }
+
+    public function test_deleting_a_note_needs_a_yes_and_anything_else_cancels_it()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+        $client = $this->actionClient('{"action":"delete_scratchpad"}');
+
+        $this->action($client)->handle($config, $this->update(1, 'delete my last note'));
+        $this->assertStringContainsString('Reply "yes" to confirm', $this->lastReply());
+        $this->assertSame(1, ScratchpadEntry::count());
+
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'actually never mind'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame(1, ScratchpadEntry::count());
+
+        $this->action($client)->handle($config, $this->update(1, 'delete my last note'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame('Deleted the note.', $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_a_typed_delete_last_note_still_targets_the_newest_entry()
+    {
+        $config = $this->linkedAiConfig();
+        $older = ScratchpadEntry::factory()->for($config->workspace)->create(['captured_at' => now()->subMinute()]);
+        $newest = ScratchpadEntry::factory()->for($config->workspace)->create(['kind' => 'voice']);
+
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handle($config, $this->update(1, 'delete my last note'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+
+        $this->assertNull($newest->fresh());
+        $this->assertNotNull($older->fresh());
+    }
+
+    public function test_a_command_between_the_ask_and_the_yes_cancels_the_pending_delete()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handle($config, $this->update(1, 'delete my last note'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, '/help'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
+    public function test_a_voice_delete_request_is_confirmed_by_a_typed_yes()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+
+        $this->action($this->actionClient('{"action":"delete_scratchpad"}'))->handleVoiceTranscript($config, 1, 'delete my last note', 7, $config->webhook_generation);
+        $this->assertStringContainsString('Reply "yes" to confirm', $this->lastReply());
+        $this->assertSame(1, ScratchpadEntry::count());
+
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes', 1));
+        $this->assertSame('Deleted the note.', $this->lastReply());
+        $this->assertSame(0, ScratchpadEntry::count());
+    }
+
+    public function test_a_voice_delete_request_does_not_run_after_the_link_is_removed_mid_turn()
+    {
+        $config = $this->linkedAiConfig();
+        ScratchpadEntry::factory()->for($config->workspace)->create();
+        $client = new class implements AiCompletionClientContract
+        {
+            public function complete($credential, $systemPrompt, $userContent): AiCompletionResult
+            {
+                if (str_contains($systemPrompt, 'Classify the user')) {
+                    return AiCompletionResult::success('none');
+                }
+
+                // The sender unlinks while the model is thinking.
+                TelegramBotLink::query()->delete();
+
+                return AiCompletionResult::success('{"action":"delete_scratchpad"}');
+            }
+        };
+
+        $this->action($client)->handleVoiceTranscript($config, 1, 'delete my last note', 7, $config->webhook_generation);
+
+        $this->assertSame([], $this->outboundMessages());
+        $this->assertSame(1, ScratchpadEntry::count());
+    }
+
+    public function test_a_voice_transcript_from_a_rotated_webhook_generation_gets_no_reply()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient(null))->handleVoiceTranscript($config, 1, 'show my notes', 7, 'stale-generation');
+
+        $this->assertSame([], $this->outboundMessages());
+    }
+
+    public function test_a_voice_transcript_from_an_unlinked_chat_gets_no_reply()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient(null))->handleVoiceTranscript($config, 999, 'show my notes', 7, $config->webhook_generation);
+
+        $this->assertSame([], $this->outboundMessages());
+    }
+
+    public function test_a_scratch_pad_save_with_no_body_keeps_the_original_message()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient('{"action":"create_scratchpad"}'))->handle($config, $this->update(1, 'put this in the scratch pad: dollars are cents'));
+
+        $this->assertSame('put this in the scratch pad: dollars are cents', ScratchpadEntry::withoutGlobalScopes()->sole()->body);
+    }
+
+    public function test_deleting_an_idea_drops_it_after_confirmation_and_ignores_other_workspaces()
+    {
+        $config = $this->linkedAiConfig();
+        $mine = Idea::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'video', 'human_id' => 'VI-9']);
+        $theirs = Idea::factory()->create(['kind' => 'video', 'human_id' => 'VI-10']);
+
+        $this->action($this->actionClient('{"action":"delete_idea","id":"VI-10"}'))->handle($config, $this->update(1, 'delete VI-10'));
+        $this->assertSame("I couldn't find that idea.", $this->lastReply());
+
+        $this->action($this->actionClient('{"action":"delete_idea","id":"VI-9"}'))->handle($config, $this->update(1, 'delete VI-9'));
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+
+        $this->assertSame('dropped', $mine->fresh()->status);
+        $this->assertNotSame('dropped', $theirs->fresh()->status);
+    }
+
+    public function test_updates_only_apply_after_a_yes()
+    {
+        $config = $this->linkedAiConfig();
+        $entry = ScratchpadEntry::factory()->for($config->workspace)->create(['body' => 'old body']);
+        $idea = Idea::factory()->create(['workspace_id' => $config->workspace_id, 'kind' => 'post', 'human_id' => 'PI-7', 'title' => 'Old title']);
+
+        $this->action($this->actionClient('{"action":"update_scratchpad","body":"new body"}'))->handle($config, $this->update(1, 'change my last note'));
+        $this->assertSame('old body', $entry->fresh()->body);
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame('new body', $entry->fresh()->body);
+
+        $this->action($this->actionClient('{"action":"update_idea","id":"PI-7","title":"New title","score":700}'))->handle($config, $this->update(1, 'retitle PI-7'));
+        $this->assertSame('Old title', $idea->fresh()->title);
+        $this->action($this->actionClient(null))->handle($config, $this->update(1, 'yes'));
+        $this->assertSame('New title', $idea->fresh()->title);
+        $this->assertSame(700, $idea->fresh()->score);
+    }
+
+    public function test_an_unclear_model_answer_falls_through_to_normal_chat()
+    {
+        $config = $this->linkedAiConfig();
+
+        $this->action($this->actionClient('{"action":"delete_everything"}'))->handle($config, $this->update(1, 'hello'));
+
+        $this->assertSame(0, Idea::withoutGlobalScopes()->count());
+        $this->assertSame('none', $this->lastReply());
     }
 
     public function test_note_command_with_no_text_prompts_for_it()
@@ -512,6 +797,7 @@ class HandleTelegramUpdateActionTest extends TestCase
 
         $this->assertSame(0, ScratchpadEntry::query()->where('body', 'show me my scratchpad')->count());
         $this->assertStringContainsString('remember to renew the domain', $this->lastReply());
+        $this->assertStringStartsWith('You have 1 active Scratch Pad note.', $this->lastReply());
     }
 
     public function test_when_every_provider_fails_the_reply_says_so_before_capturing_anyway()

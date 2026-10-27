@@ -35,6 +35,25 @@ class ResolveTelegramIntentActionTest extends TestCase
         $this->assertSame('notes', $intent);
     }
 
+    public function test_the_prompt_routes_a_note_count_question_to_notes()
+    {
+        $workspace = Workspace::factory()->create();
+        AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
+
+        $client = new class implements AiCompletionClientContract
+        {
+            public function complete($entry, $systemPrompt, $userContent): AiCompletionResult
+            {
+                return AiCompletionResult::success(str_contains($systemPrompt, 'how many notes') ? 'notes' : 'none');
+            }
+        };
+
+        $intent = (new ResolveTelegramIntentAction($client, new AiProviderCredentialResolver))
+            ->handle($workspace, 'স্ক্র্যাচপ্যাডে কয়টা নোট আছে? টোটাল কাউন্ট বলতো');
+
+        $this->assertSame('notes', $intent);
+    }
+
     public function test_a_delete_request_resolves_to_clear_notes()
     {
         $workspace = Workspace::factory()->create();

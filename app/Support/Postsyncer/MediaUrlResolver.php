@@ -130,7 +130,8 @@ class MediaUrlResolver
         $urls = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
-            if ($attachment->role === 'document') {
+            // Motion slides are preview-only; PostSyncer takes the image set.
+            if (in_array($attachment->role, ['document', 'motion'], true)) {
                 continue;
             }
 
@@ -154,7 +155,7 @@ class MediaUrlResolver
         $map = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
-            if ($attachment->role === 'document') {
+            if (in_array($attachment->role, ['document', 'motion'], true)) {
                 continue;
             }
 

@@ -6,6 +6,7 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\UpdatePostRequest;
+use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
@@ -24,6 +25,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PostsController extends Controller
@@ -40,8 +42,8 @@ class PostsController extends Controller
         'ready',
         'scheduled',
         'posted',
+        'blocked',
         'archived',
-        'dropped',
     ];
 
     /**
@@ -55,6 +57,8 @@ class PostsController extends Controller
         $workspace = $this->currentWorkspace($request);
 
         $status = $request->string('status')->toString() ?: 'draft';
+        // Old bookmarks used the merged post status `dropped`.
+        $status = $status === 'dropped' ? 'archived' : $status;
         $language = $request->string('language')->toString() ?: null;
         $search = $request->string('q')->toString() ?: null;
 
@@ -79,8 +83,7 @@ class PostsController extends Controller
             $postsQuery = Post::query()
                 ->where('workspace_id', $workspace->id)
                 ->when($status === 'draft', fn ($builder) => $builder->whereIn('status', ['draft', 'ready']))
-                ->when($status === 'archived', fn ($builder) => $builder->whereIn('status', ['archived', 'dropped']))
-                ->when(in_array($status, ['scheduled', 'posted', 'ready'], true), fn ($builder) => $builder->where('status', $status))
+                ->when(in_array($status, ['scheduled', 'posted', 'ready', 'blocked', 'archived'], true), fn ($builder) => $builder->where('status', $status))
                 ->when($language, fn ($builder) => $builder->where('language', $language))
                 ->when($search, function ($builder) use ($search) {
                     $like = '%'.$search.'%';
@@ -101,6 +104,7 @@ class PostsController extends Controller
                 'title',
                 'template',
                 'status',
+                'blocked_reason',
                 'publish_state',
                 'approval_state',
                 'language',
@@ -151,7 +155,7 @@ class PostsController extends Controller
      * only way the dashboard <img> can load one: same-origin + session
      * cookie. A media asset outside the current workspace 404s.
      */
-    public function media(Request $request, Post $post, MediaAsset $mediaAsset): StreamedResponse
+    public function media(Request $request, Post $post, MediaAsset $mediaAsset): StreamedResponse|BinaryFileResponse
     {
         $workspace = $this->currentWorkspace($request);
 
@@ -161,6 +165,15 @@ class PostsController extends Controller
             $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(),
             404,
         );
+
+        // Video previews need HTTP Range support (Safari will not play a 200-only MP4).
+        // Storage::response() cannot serve ranges, so video goes through BinaryFileResponse.
+        if (str_starts_with((string) $mediaAsset->mime, 'video/')) {
+            return response()->file(Storage::disk($mediaAsset->disk)->path($mediaAsset->path), [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,
@@ -252,6 +265,7 @@ class PostsController extends Controller
             'template' => $post->template,
             'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
             'status' => $post->status,
+            'blocked_reason' => $post->blocked_reason,
             'publish_state' => $post->publish_state,
             'approval_state' => $post->approval_state ?? 'approved',
             'language' => $post->language,
@@ -298,7 +312,8 @@ class PostsController extends Controller
         $images = [];
         foreach ($post->attachments as $attachment) {
             $media = $attachment->mediaAsset;
-            if ($media === null) {
+            // Motion MP4s are previewed through motion_slides, never as still images.
+            if ($media === null || $attachment->role === 'motion') {
                 continue;
             }
 
@@ -318,6 +333,7 @@ class PostsController extends Controller
             NormalizeCaptions::forDashboard($post->captions),
             $images,
         );
+        $motionSlides = $this->presentMotionSlides($post, $captions);
 
         $captionImageNames = [];
         foreach ($captions as $group) {
@@ -383,6 +399,7 @@ class PostsController extends Controller
             'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),
             'images' => $images,
             'image_urls' => $imageUrls,
+            'motion_slides' => $motionSlides,
             'handles' => $handles,
             'caption_image_names' => array_keys($captionImageNames),
             'image_drive_urls' => $post->image_drive_urls ?? [],
@@ -390,7 +407,9 @@ class PostsController extends Controller
             'slug' => $post->slug,
             'template' => $post->template,
             'template_meta' => PostDesignTemplate::tryFrom($post->template)?->toArray(),
+            'category' => $post->category,
             'status' => $post->status,
+            'blocked_reason' => $post->blocked_reason,
             'publish_state' => $post->publish_state,
             'publish_error' => $post->publish_error,
             'publish_retryable' => $post->canRetryPublish(),
@@ -404,6 +423,66 @@ class PostsController extends Controller
             'created_at' => $post->created_at?->toIso8601String(),
             'updated_at' => $post->updated_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Motion slides keyed "lang:platform". The newest upload per filename wins
+     * (duplicates are append-only). A caption's `motion` list picks and orders its
+     * slides by filename from anywhere in that language, whatever platform they were
+     * uploaded for. Without a list, the section shows its own platform's uploads in upload order.
+     *
+     * @param  list<array{lang: string|null, platforms: list<array{name: string, images?: list<string>, motion?: list<string>}>}>  $captions
+     * @return array<string, list<array{filename: string, url: string, mime: string|null}>>
+     */
+    private function presentMotionSlides(Post $post, array $captions): array
+    {
+        $motion = $post->attachments
+            ->where('role', 'motion')
+            ->filter(fn (Attachment $attachment): bool => $attachment->mediaAsset !== null)
+            ->sortBy('id');
+
+        // Ascending id, so the newest copy of each filename overwrites older ones.
+        $byLang = [];
+        $bySlot = [];
+        foreach ($motion as $attachment) {
+            $filename = $attachment->mediaAsset->original_filename ?: basename($attachment->mediaAsset->path);
+            $byLang[$attachment->language][$filename] = $attachment;
+            $bySlot[$attachment->language.':'.$attachment->platform][$filename] = $attachment;
+        }
+
+        // Untagged caption groups belong to the post's own language, as the planner resolves them.
+        $fallbackLang = in_array(strtolower((string) $post->language), ['en', 'english'], true) ? 'en' : 'bn';
+        $slides = [];
+
+        foreach ($captions as $group) {
+            $lang = $group['lang'] ?? $fallbackLang;
+
+            foreach ($group['platforms'] as $platform) {
+                $slot = $lang.':'.strtolower(trim($platform['name']));
+                if (isset($slides[$slot])) {
+                    continue;
+                }
+
+                $ordered = array_key_exists('motion', $platform)
+                    ? array_values(array_filter(array_map(
+                        fn (string $name): mixed => $byLang[$lang][$name] ?? null,
+                        $platform['motion'],
+                    )))
+                    : collect($bySlot[$slot] ?? [])->sortBy(fn ($attachment): array => [$attachment->position, $attachment->id])->values()->all();
+
+                if ($ordered === []) {
+                    continue;
+                }
+
+                $slides[$slot] = array_values(array_map(fn ($attachment): array => [
+                    'filename' => $attachment->mediaAsset->original_filename ?: basename($attachment->mediaAsset->path),
+                    'url' => route('posts.media', [$post, $attachment->mediaAsset]),
+                    'mime' => $attachment->mediaAsset->mime,
+                ], $ordered));
+            }
+        }
+
+        return $slides;
     }
 
     /**

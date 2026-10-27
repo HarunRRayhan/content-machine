@@ -28,9 +28,11 @@ queue starts to hurt.
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
 `PublishPostJob` has a 900-second timeout and the dedicated `postsyncer` database
-queue connection has a 960-second visibility window. `PublishVideoJob` has a
-180-second timeout and uses the same connection, leaving enough time for its
-media upload, create, and canonical verification calls. Keep
+queue connection has a 960-second visibility window. `PublishVideoJob` also has a
+900-second timeout on the same connection: it downloads each video and cover
+from Drive and uploads them one by one to PostSyncer's file endpoint
+(`upload.postsyncer.com/api/v1/media/upload/file`, 500 MB cap), because the
+URL import stores no videos. Keep
 `POSTSYNCER_QUEUE_RETRY_AFTER` above the longest worker timeout. Both publish
 jobs are unique for the record and use a shared overlap lock whose expiry is
 longer than the video timeout. Each queued job also carries the run token it
@@ -307,7 +309,7 @@ screen must allow the Drive scope for the account you connect.
 
 List pages mirror Script Studio's pipeline tabs with live counts.
 
-**Posts:** Ideation · Draft · Ready · Scheduled · Posted · Archived · Dropped
+**Posts:** Ideation · Draft · Ready · Scheduled · Posted · Blocked · Archived
 (default **Draft**). Ideation lists open post ideas (`kind = post`).
 
 **Videos:** Ideation · Draft · Pending · Ready · Recorded · Scheduled ·

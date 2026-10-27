@@ -15,6 +15,7 @@ final readonly class CalendarEventData
         public string $state,
         public string $at,
         public string $date,
+        public string $category = '',
     ) {}
 
     /**
@@ -26,6 +27,7 @@ final readonly class CalendarEventData
      *     state: string,
      *     at: string,
      *     date: string,
+     *     category: string,
      *     href: string
      * }
      */
@@ -39,6 +41,7 @@ final readonly class CalendarEventData
             'state' => $this->state,
             'at' => $this->at,
             'date' => $this->date,
+            'category' => $this->category,
             'href' => $this->kind === 'video' ? '/videos/'.$this->humanId : '/posts/'.$this->humanId,
         ];
     }
