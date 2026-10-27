@@ -380,9 +380,13 @@ class PostPublishPlanner
     }
 
     /**
+     * Publishable captions keyed by language then platform, exactly as the
+     * planner reads them. Public so edits to a publish-locked post can be
+     * checked against the same reading.
+     *
      * @return array<string, array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>>
      */
-    private function captionsByLanguage(Post $post): array
+    public function captionsByLanguage(Post $post): array
     {
         $captions = $post->captions;
 
@@ -472,6 +476,12 @@ class PostPublishPlanner
         }
 
         return $this->resolveMediaUrls($post, $platformData, $defaultMediaUrls);
+    }
+
+    /** The language a nested captions part resolves to, as captionsByLanguage reads it. */
+    public function partLanguage(Post $post, string $part): string
+    {
+        return $this->languageFromPart($part) ?? $this->resolveLanguage($post);
     }
 
     private function languageFromPart(?string $part): ?string

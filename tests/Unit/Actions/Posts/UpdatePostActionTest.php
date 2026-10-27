@@ -517,4 +517,182 @@ class UpdatePostActionTest extends TestCase
 
         $this->assertSame('posted', $post->refresh()->status);
     }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function scheduledBilingualPost(): array
+    {
+        return [
+            'title' => 'Scheduled carousel',
+            'body' => 'Body.',
+            'status' => 'scheduled',
+            'approval_state' => 'approved',
+            'publish_state' => 'succeeded',
+            'platforms' => ['facebook', 'instagram', 'twitter'],
+            'captions' => [
+                'Bangla' => [
+                    'facebook' => ['title' => '', 'caption' => 'বাংলা', 'first_comment' => '', 'images' => ['bn-1.png'], 'thread' => []],
+                ],
+                'English' => [
+                    'facebook' => ['title' => '', 'caption' => 'English', 'first_comment' => '', 'images' => ['en-1.png'], 'thread' => []],
+                    'twitter' => ['title' => '', 'caption' => 'short', 'first_comment' => '', 'images' => [], 'thread' => []],
+                ],
+            ],
+            'postsyncer' => ['groups' => [
+                ['post_id' => '101', 'status' => 'SCHEDULED', 'language' => 'bangla', 'platforms' => ['facebook']],
+                ['post_id' => '102', 'status' => 'SCHEDULED', 'language' => 'english', 'platforms' => ['facebook', 'twitter']],
+            ]],
+            'publish_progress' => ['state' => 'succeeded', 'current' => null, 'completed_groups' => [
+                ['index' => 0, 'platforms' => ['instagram']],
+            ]],
+        ];
+    }
+
+    public function test_a_scheduled_post_can_gain_a_caption_section_for_an_unpublished_platform(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = $post->captions;
+        // Re-sent sections arrive in a different key order, as jsonb returns them.
+        $captions['English'] = array_reverse($captions['English'], true);
+        $captions['English']['facebook'] = array_reverse($captions['English']['facebook'], true);
+        $captions['English']['linkedin'] = ['title' => '', 'caption' => 'LinkedIn teaser', 'first_comment' => '', 'images' => ['p.pdf'], 'thread' => []];
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+            'captions' => $captions,
+            'platforms' => ['facebook', 'instagram', 'linkedin', 'twitter'],
+        ], $post));
+
+        $post->refresh();
+        $this->assertSame('LinkedIn teaser', $post->captions['English']['linkedin']['caption']);
+        $this->assertSame(['facebook', 'instagram', 'linkedin', 'twitter'], $post->platforms);
+        $this->assertSame('pending', $post->approval_state);
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('102', $post->postsyncer['groups'][1]['post_id']);
+    }
+
+    public function test_a_scheduled_post_cannot_change_an_existing_caption_section(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = $post->captions;
+        $captions['English']['twitter']['caption'] = 'edited';
+        $captions['English']['linkedin'] = ['caption' => 'LinkedIn teaser'];
+
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+    }
+
+    public function test_a_scheduled_post_cannot_add_a_section_for_a_platform_already_in_a_group(): void
+    {
+        foreach (['twitter' => 'Bangla', 'instagram' => 'English'] as $platform => $part) {
+            $post = Post::factory()->create($this->scheduledBilingualPost());
+            $captions = $post->captions;
+            $captions[$part][$platform] = ['caption' => 'new'];
+
+            $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+        }
+    }
+
+    public function test_a_scheduled_post_cannot_lose_a_platform_or_a_section(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $this->assertLockedUpdateRefused($post, ['platforms' => ['facebook', 'twitter', 'linkedin']]);
+
+        $captions = $post->captions;
+        unset($captions['English']['twitter']);
+        $captions['English']['linkedin'] = ['caption' => 'LinkedIn teaser'];
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+    }
+
+    public function test_a_scheduled_post_cannot_change_other_content_alongside_an_added_section(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = $post->captions;
+        $captions['English']['linkedin'] = ['caption' => 'LinkedIn teaser'];
+
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions, 'title' => 'Renamed']);
+    }
+
+    public function test_a_scheduled_post_cannot_change_its_caption_map_shape(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = $post->captions;
+        $captions['linkedin'] = ['caption' => 'flat section beside language parts'];
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+
+        $flat = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+            'captions' => ['facebook' => ['caption' => 'fb'], 'twitter' => ['caption' => 'x']],
+        ]));
+        $this->assertLockedUpdateRefused($flat, ['captions' => $flat->captions + ['English' => ['linkedin' => ['caption' => 'nested']]]]);
+        $this->assertLockedUpdateRefused($flat, ['captions' => ['facebook' => ['caption' => 'fb', 'title' => 'new'], 'twitter' => ['caption' => 'x']]]);
+
+        $flat->captions = $flat->captions + ['linkedin' => ['caption' => 'li']];
+        (new UpdatePostAction)->handle($flat, UpdatePostData::fromApiPayload(['captions' => $flat->captions], $flat->fresh()));
+        $this->assertSame('li', $flat->refresh()->captions['linkedin']['caption']);
+    }
+
+    public function test_a_scheduled_post_cannot_add_non_platform_keys(): void
+    {
+        foreach (['caption', 'title', 'name', 'platforms', 'mastodon'] as $key) {
+            $post = Post::factory()->create($this->scheduledBilingualPost());
+            $captions = $post->captions;
+            $captions['English'][$key] = ['caption' => 'sneaky'];
+
+            $this->assertLockedUpdateRefused($post, ['captions' => $captions]);
+        }
+
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + ['Spanish' => ['title' => 'x', 'caption' => 'y']]]);
+    }
+
+    public function test_a_scheduled_post_cannot_add_a_part_that_shares_an_existing_language(): void
+    {
+        // "Bangla 2" and "BN" sort beside the stored parts under jsonb key
+        // ordering and resolve to an existing language.
+        foreach (['Bangla 2', 'bn', 'A English', 'main'] as $part) {
+            $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), ['language' => 'en']));
+            $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + [
+                $part => ['linkedin' => ['caption' => 'LinkedIn teaser']],
+            ]]);
+        }
+
+        $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+            'captions' => ['Bangla' => $this->scheduledBilingualPost()['captions']['Bangla']],
+        ]));
+        $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + [
+            'English' => ['linkedin' => ['caption' => 'one']],
+            'English 2' => ['bluesky' => ['caption' => 'two']],
+        ]]);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['captions' => $post->captions + [
+            'English' => ['linkedin' => ['caption' => 'one']],
+        ]], $post));
+        $this->assertSame('one', $post->refresh()->captions['English']['linkedin']['caption']);
+    }
+
+    public function test_re_sending_identical_captions_in_another_key_order_keeps_approval(): void
+    {
+        $post = Post::factory()->create($this->scheduledBilingualPost());
+        $captions = array_reverse($post->captions, true);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['captions' => $captions], $post));
+
+        $this->assertSame('approved', $post->refresh()->approval_state);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function assertLockedUpdateRefused(Post $post, array $payload): void
+    {
+        $before = $post->only(['title', 'captions', 'platforms', 'approval_state']);
+
+        try {
+            (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload($payload, $post));
+            $this->fail('Expected the publish-locked update to be refused.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('after a PostSyncer publish attempt', $exception->getMessage());
+        }
+
+        $this->assertEquals($before, $post->refresh()->only(array_keys($before)));
+    }
 }
