@@ -13,6 +13,9 @@ use InvalidArgumentException;
  */
 class PostPublishPlanner
 {
+    /** X allows at most four images in one tweet. */
+    private const X_MAX_IMAGES = 4;
+
     public function __construct(
         private readonly MediaUrlResolver $mediaUrlResolver,
     ) {}
@@ -48,7 +51,62 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
+     * (language, platform) pairs already covered by a PostSyncer group on the
+     * post, keyed "language\0platform". A group without a language or platforms
+     * cannot be placed, so append-only planning fails closed on it.
+     *
+     * @return array<string, true>
+     */
+    public function existingPairs(Post $post): array
+    {
+        $pairs = [];
+
+        foreach ($post->postsyncer['groups'] ?? [] as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $language = $group['language'] ?? null;
+            $platforms = $group['platforms'] ?? null;
+
+            if (! is_string($language) || $language === '' || ! is_array($platforms) || $platforms === []) {
+                throw new PostsyncerException(
+                    'An existing PostSyncer group has no language or platforms; cannot safely add platforms.'
+                );
+            }
+
+            foreach ($platforms as $platform) {
+                $pairs[$language."\0".strtolower((string) $platform)] = true;
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * (language, platform) pairs that have a caption for the selected platforms.
+     *
+     * @param  array{platforms?: list<string>}  $options
+     * @return list<array{0: string, 1: string}>
+     */
+    public function candidatePairs(Post $post, array $options): array
+    {
+        $selected = $this->selectedPlatforms($post, $options);
+        $pairs = [];
+
+        foreach ($this->captionsByLanguage($post) as $language => $platformCaptions) {
+            foreach ($selected as $platform) {
+                if (array_key_exists($platform, $platformCaptions)) {
+                    $pairs[] = [$language, $platform];
+                }
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool}  $options
      * @return list<PublishGroup>
      */
     public function plan(Post $post, PostsyncerConfig $config, array $options): array
@@ -58,6 +116,11 @@ class PostPublishPlanner
         $selected = $this->selectedPlatforms($post, $options);
         $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
         $byLanguage = $this->captionsByLanguage($post);
+
+        // Append-only mode: never plan a pair that already has a PostSyncer group.
+        $existing = ($options['append_missing'] ?? false) === true
+            ? $this->existingPairs($post)
+            : [];
 
         $groups = [];
         foreach ($byLanguage as $language => $platformCaptions) {
@@ -73,6 +136,10 @@ class PostPublishPlanner
             $included = [];
             foreach ($selected as $platform) {
                 if (! array_key_exists($platform, $platformCaptions)) {
+                    continue;
+                }
+
+                if (isset($existing[$language."\0".$platform])) {
                     continue;
                 }
 
@@ -154,6 +221,28 @@ class PostPublishPlanner
             );
         }
 
+        // YouTube's image set goes last. Groups are created in order and a 4xx stops the loop,
+        // so a rejected YouTube create must not block the Facebook/Instagram/TikTok groups.
+        $youtubeGroup = null;
+        if (isset($remaining['youtube'])) {
+            $youtube = $remaining['youtube'];
+            unset($remaining['youtube']);
+
+            $youtubeGroup = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: ['youtube'],
+                mediaUrls: $this->resolveMediaUrls($post, $youtube, $defaultMediaUrls),
+                captions: ['youtube' => $youtube['caption']],
+                when: $when,
+                publishNow: $when === null,
+                firstComment: PublishGroup::supportsFirstComment('youtube')
+                    && $youtube['first_comment'] !== ''
+                    ? $youtube['first_comment']
+                    : null,
+            );
+        }
+
         // Twitter and Threads each get their own connected-thread PostSyncer call when
         // the caption block has Tweet N segments. Media is distributed one image per
         // tweet at publish time. Bluesky stays out: its API has no thread surface.
@@ -180,6 +269,35 @@ class PostPublishPlanner
                 publishNow: $when === null,
                 threadTweets: $threadTweets,
             );
+        }
+
+        // X caps a tweet at four images: a longer set becomes a thread of four-image
+        // tweets (caption first, then "2/N" markers). Same rule for every language.
+        if (isset($remaining['twitter'])) {
+            $mediaUrls = $this->resolveMediaUrls($post, $remaining['twitter'], $defaultMediaUrls);
+
+            if (count($mediaUrls) > self::X_MAX_IMAGES) {
+                $twitter = $remaining['twitter'];
+                unset($remaining['twitter']);
+
+                $tweetCount = (int) ceil(count($mediaUrls) / self::X_MAX_IMAGES);
+                $tweets = [$twitter['caption']];
+                for ($n = 2; $n <= $tweetCount; $n++) {
+                    $tweets[] = "{$n}/{$tweetCount}";
+                }
+
+                $groups[] = new PublishGroup(
+                    language: $language,
+                    workspaceId: $workspaceId,
+                    platforms: ['twitter'],
+                    mediaUrls: $mediaUrls,
+                    captions: ['twitter' => $twitter['caption']],
+                    when: $when,
+                    publishNow: $when === null,
+                    threadTweets: $tweets,
+                    mediaPerTweet: self::X_MAX_IMAGES,
+                );
+            }
         }
 
         $buckets = [];
@@ -215,6 +333,10 @@ class PostPublishPlanner
                 publishNow: $when === null,
                 firstComment: $bucket['firstComment'] ?? null,
             );
+        }
+
+        if ($youtubeGroup !== null) {
+            $groups[] = $youtubeGroup;
         }
 
         return $groups;

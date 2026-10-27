@@ -4,15 +4,17 @@ namespace App\Actions\Posts;
 
 use App\Actions\Scratchpad\Concerns\ResolvesMediaAsset;
 use App\Data\Posts\AttachPostDocumentData;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
  * Stores an uploaded post document (LinkedIn carousel PDF) on the private
- * `scratchpad` disk and attaches it with role `document`. Re-uploading the
- * same bytes onto the same post is a no-op.
+ * `scratchpad` disk and attaches it with role `document`. A new upload
+ * replaces older document generations on that post.
  */
 class AttachPostDocumentAction
 {
@@ -38,6 +40,9 @@ class AttachPostDocumentAction
             }
 
             $mediaAsset = $this->resolveMediaAsset($workspace, $uploadedBy, $data->file, 'document');
+
+            $this->removePreviousDocuments($lockedPost, $mediaAsset->id);
+
             $existing = $lockedPost->attachments()
                 ->where('media_asset_id', $mediaAsset->id)
                 ->first();
@@ -60,5 +65,42 @@ class AttachPostDocumentAction
 
             return $lockedPost->fresh(['attachments.mediaAsset']) ?? $lockedPost;
         });
+    }
+
+    private function removePreviousDocuments(Post $post, int $keepMediaAssetId): void
+    {
+        $previous = $post->attachments()
+            ->where('role', 'document')
+            ->where('media_asset_id', '!=', $keepMediaAssetId)
+            ->with('mediaAsset')
+            ->get();
+
+        foreach ($previous as $attachment) {
+            $mediaAsset = $attachment->mediaAsset;
+            $attachment->delete();
+
+            if ($mediaAsset === null) {
+                continue;
+            }
+
+            $lockedAsset = MediaAsset::query()
+                ->whereKey($mediaAsset->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($lockedAsset === null
+                || $lockedAsset->attachments()->exists()
+                || $lockedAsset->transcriptions()->exists()) {
+                continue;
+            }
+
+            $disk = $lockedAsset->disk;
+            $path = $lockedAsset->path;
+            $lockedAsset->delete();
+
+            DB::afterCommit(static function () use ($disk, $path): void {
+                Storage::disk($disk)->delete($path);
+            });
+        }
     }
 }

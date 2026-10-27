@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Contracts\PexelsProvider;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiProviderVerifierContract;
 use App\Support\AiProviders\AiTranscriptionClientContract;
@@ -13,6 +14,8 @@ use App\Support\CurrentApiToken;
 use App\Support\CurrentWorkspace;
 use App\Support\LinkResolution\LinkResolverContract;
 use App\Support\LinkResolution\ProcessLinkResolver;
+use App\Support\Pexels\HttpPexelsProvider;
+use App\Support\Pexels\PexelsConfig;
 use App\Support\Telegram\HttpTelegramClient;
 use App\Support\Telegram\TelegramClientContract;
 use Carbon\CarbonImmutable;
@@ -38,6 +41,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(AiCompletionClientContract::class, HttpAiCompletionClient::class);
         $this->app->bind(AiVisionCompletionClientContract::class, HttpAiCompletionClient::class);
         $this->app->bind(TelegramClientContract::class, HttpTelegramClient::class);
+        $this->app->bind(PexelsProvider::class, function ($app): PexelsProvider {
+            $workspace = $app->make(CurrentWorkspace::class)->get();
+            abort_if($workspace === null, 404, 'No current workspace.');
+
+            return new HttpPexelsProvider(PexelsConfig::fromWorkspace($workspace));
+        });
     }
 
     /**

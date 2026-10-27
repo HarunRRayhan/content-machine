@@ -62,6 +62,9 @@ class HandleTelegramUpdateAction
 
     private int $replySlot = 0;
 
+    /** Ownership check for a voice-transcript chat turn, which has no dispatch lease. */
+    private ?\Closure $voiceTurnGuard = null;
+
     private const HELP_TEXT = <<<'TEXT'
         Here's what I can do:
 
@@ -69,7 +72,7 @@ class HandleTelegramUpdateAction
         /link CODE: link your Content Machine account
         /videos: your workspace's most recent videos
         /posts: your workspace's most recent posts
-        /notes: your workspace's most recent Scratch Pad captures
+        /notes: your active Scratch Pad note count and most recent ones
         /note <text>: save a Scratch Pad note
         /post <text>: create a draft, or send the next photo/voice/audio
         /approve P-123: approve a generated draft
@@ -82,11 +85,17 @@ class HandleTelegramUpdateAction
 
     private const CAPTURE_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file, or just type, and I'll capture it to your Scratch Pad.";
 
-    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you. Use /note to capture text instead.";
+    private const CHAT_DEFAULT_TEXT = "Forward me a link, a photo, a voice note, or an audio file and I'll capture it. Otherwise, just talk, I'll chat back, and things like \"show my notes\" or \"what videos do I have\" run that command for you, and you can ask me to save, edit, or delete Scratch Pad notes and post/video ideas (for example \"save a post idea: ...\"). Deletes ask you to confirm first. Use /note to capture text instead.";
 
     private const CHAT_FAILED_TEXT = "Couldn't generate a chat reply right now, so I saved this as a note instead.";
 
     private const LOVE_REACTION = '❤';
+
+    // Set by runChat when a reply answered the turn without saving anything.
+    private bool $answeredWithoutCapture = false;
+
+    // The voice note being answered, left out of note lookups because an answered voice note is deleted.
+    private ?int $voiceTranscriptionId = null;
 
     public function __construct(
         private readonly CaptureTelegramMessageAction $captureTelegramMessageAction,
@@ -101,6 +110,8 @@ class HandleTelegramUpdateAction
         private readonly ?EnqueuePostPublishAction $enqueuePostPublishAction = null,
         private readonly ?CancelTelegramPostRequestAction $cancelTelegramPostRequestAction = null,
         private readonly ?QueueTelegramMessageAction $queueTelegramMessageAction = null,
+        private readonly ?ResolveTelegramWorkspaceActionAction $resolveWorkspaceAction = null,
+        private readonly ?ExecuteTelegramWorkspaceActionAction $executeWorkspaceAction = null,
     ) {}
 
     /**
@@ -151,6 +162,10 @@ class HandleTelegramUpdateAction
 
         $text = $this->messageText($message);
 
+        if ($text === null || str_starts_with($text, '/') || ! $this->isChatEligible($message, $text)) {
+            $this->executeWorkspaceAction()->forgetPending($config->workspace, $chatId);
+        }
+
         if ($text !== null && str_starts_with($text, '/')) {
             $this->handleCommand($config, $chatId, $fromUserId, $fromUsername, $text, $update, $telegramUpdateKey, $dispatchLeaseId);
 
@@ -190,61 +205,10 @@ class HandleTelegramUpdateAction
             return;
         }
 
-        if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)) {
-            $this->keepTyping($config, $chatId);
-
-            if ($dispatchLeaseId !== null
-                && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
-            ) {
-                return;
-            }
-
-            $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
-
-            if ($intent !== null) {
-                if ($intent === 'clear_notes') {
-                    $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
-
-                    return;
-                }
-
-                if ($dispatchLeaseId !== null
-                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                    return;
-                }
-
-                $this->reply($config, $chatId, $this->intentReply($config, $link, $intent));
-
-                return;
-            }
-
-            $this->keepTyping($config, $chatId);
-
-            if ($dispatchLeaseId !== null
-                && ! $this->renewDispatchLease($config, $update, $dispatchLeaseId)
-            ) {
-                return;
-            }
-
-            $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
-
-            if ($chatReply !== null) {
-                if ($dispatchLeaseId !== null
-                    && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                    return;
-                }
-
-                $this->reply($config, $chatId, $chatReply);
-
-                return;
-            }
-
-            if ($dispatchLeaseId !== null
-                && ! $this->ownsDispatchLease($config, $update, $dispatchLeaseId)) {
-                return;
-            }
-
-            $this->reply($config, $chatId, self::CHAT_FAILED_TEXT);
+        if ($config->ai_chat_enabled && $text !== null && $this->isChatEligible($message, $text)
+            && $this->runChat($config, $link, $chatId, $text, $update, $dispatchLeaseId)
+        ) {
+            return;
         }
 
         if ($dispatchLeaseId !== null
@@ -253,6 +217,178 @@ class HandleTelegramUpdateAction
         }
 
         $this->captureTelegramMessageAction->handle($config, $update, true, true, $telegramUpdateKey);
+    }
+
+    /**
+     * Answers a transcribed Telegram voice note exactly as if its text had
+     * been typed. Replies are keyed per transcription, so a duplicate run
+     * reuses the same outbound rows instead of sending twice. With no
+     * dispatch lease, every side effect re-checks the bot identity and the
+     * sender's link under the workspace and config locks instead.
+     *
+     * Returns true when the transcript was answered as a question or command
+     * (lookup intent, idea list, or chat reply), so the caller can drop the
+     * voice capture just as a typed question is never captured.
+     */
+    public function handleVoiceTranscript(
+        TelegramBotConfig $config,
+        int $chatId,
+        string $text,
+        int $transcriptionId,
+        ?string $webhookGeneration,
+    ): bool {
+        // Captures are private-chat only, where the chat id is the sender's user id.
+        $link = $this->findLink($config, $chatId);
+
+        if ($link === null) {
+            return false;
+        }
+
+        $this->answeredWithoutCapture = false;
+
+        $this->replyContextKey = 'voice-transcription:'.$transcriptionId;
+        $this->replySlot = 0;
+        $this->voiceTurnGuard = fn (): bool => DB::transaction(function () use ($config, $chatId, $webhookGeneration): bool {
+            Workspace::query()->whereKey($config->workspace_id)->lockForUpdate()->first();
+            $locked = TelegramBotConfig::query()->whereKey($config->id)->lockForUpdate()->first();
+
+            return $locked !== null
+                && $locked->isConnected()
+                && $locked->ai_chat_enabled
+                && $locked->webhook_generation === $config->webhook_generation
+                && ($webhookGeneration === null || $locked->webhook_generation === $webhookGeneration)
+                && $this->findLink($locked, $chatId) !== null;
+        });
+
+        $this->voiceTranscriptionId = $transcriptionId;
+
+        try {
+            $this->runChat($config, $link, $chatId, $text);
+        } finally {
+            $this->voiceTurnGuard = null;
+            $this->voiceTranscriptionId = null;
+        }
+
+        return $this->answeredWithoutCapture;
+    }
+
+    /**
+     * The AI-chat pipeline shared by typed text and transcribed voice notes:
+     * pending delete confirmation, command intent, workspace action, then a
+     * plain chat reply. Returns false only when the chat reply failed and
+     * the caller should fall back to capture.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function runChat(
+        TelegramBotConfig $config,
+        TelegramBotLink $link,
+        int $chatId,
+        string $text,
+        array $update = [],
+        ?string $dispatchLeaseId = null,
+    ): bool {
+        $this->keepTyping($config, $chatId);
+
+        if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId, renew: true)
+        ) {
+            return true;
+        }
+
+        if ($this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+            function () use ($config, $chatId, $text): ?string {
+                $reply = $this->executeWorkspaceAction()->confirmPending($config->workspace, $chatId, $text);
+                $this->answeredWithoutCapture = $reply !== null;
+
+                return $reply;
+            })
+        ) {
+            return true;
+        }
+
+        $intent = $this->resolveTelegramIntentAction->handle($config->workspace, $text);
+
+        if ($intent !== null) {
+            if ($intent === 'clear_notes') {
+                $this->answeredWithoutCapture = $this->handleClearNotes($config, $chatId, $update, $dispatchLeaseId);
+
+                return true;
+            }
+
+            $this->answeredWithoutCapture = $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $this->intentReply($config, $link, $intent));
+
+            return true;
+        }
+
+        $this->keepTyping($config, $chatId);
+
+        if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId, renew: true)
+        ) {
+            return true;
+        }
+
+        $workspaceAction = $this->resolveWorkspaceAction()->handle($config->workspace, $text);
+
+        if ($workspaceAction !== null) {
+            $this->runLeased($config, $chatId, $update, $dispatchLeaseId,
+                function () use ($config, $chatId, $workspaceAction, $text): string {
+                    $reply = $this->executeWorkspaceAction()->handle($config->workspace, $chatId, $workspaceAction, $text, $this->voiceTranscriptionId);
+                    // Only the create actions save the message; every other action is a command, not a note.
+                    $this->answeredWithoutCapture = in_array($workspaceAction['action'] ?? null,
+                        ['list_ideas', 'update_scratchpad', 'delete_scratchpad', 'update_idea', 'delete_idea'], true);
+
+                    return $reply;
+                });
+
+            return true;
+        }
+
+        $chatReply = $this->generateTelegramChatReplyAction->handle($config->workspace, $link->user, $text);
+
+        if ($chatReply !== null) {
+            $this->answeredWithoutCapture = $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, $chatReply);
+
+            return true;
+        }
+
+        return ! $this->replyIfOwned($config, $chatId, $update, $dispatchLeaseId, self::CHAT_FAILED_TEXT);
+    }
+
+    /**
+     * Check ownership and queue the reply in one transaction, so the locks
+     * the check takes are held while the outbound row is written.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function replyIfOwned(TelegramBotConfig $config, int $chatId, array $update, ?string $dispatchLeaseId, string $text): bool
+    {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId, $text): bool {
+            if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId)) {
+                return false;
+            }
+
+            $this->reply($config, $chatId, $text);
+
+            return true;
+        });
+    }
+
+    /**
+     * A typed chat turn owns its update through the dispatch lease; a voice
+     * turn re-checks its guard. Called inside the caller's transaction, so
+     * the locks are held through the following write or reply.
+     *
+     * @param  array<string, mixed>  $update
+     */
+    private function ownsChatTurn(TelegramBotConfig $config, array $update, ?string $dispatchLeaseId, bool $renew = false): bool
+    {
+        if ($dispatchLeaseId !== null) {
+            return $renew
+                ? $this->renewDispatchLease($config, $update, $dispatchLeaseId)
+                : $this->ownsDispatchLease($config, $update, $dispatchLeaseId);
+        }
+
+        return $this->voiceTurnGuard === null || ($this->voiceTurnGuard)();
     }
 
     /**
@@ -954,6 +1090,52 @@ class HandleTelegramUpdateAction
         return is_string($message) && $message !== '' ? $message : 'The request could not be completed.';
     }
 
+    /**
+     * Runs a Scratch Pad / idea action and sends its reply inside one
+     * transaction that first re-checks the dispatch lease, same as
+     * handleClearNotes(), so a stale worker can't create/update/delete and a
+     * replay after a crash can't repeat it. $run returns the reply, or null
+     * for "nothing to do" (returns false so the caller carries on). Returns
+     * true when the update is handled, including when the lease was lost.
+     *
+     * @param  array<string, mixed>  $update
+     * @param  \Closure(): ?string  $run
+     */
+    private function runLeased(
+        TelegramBotConfig $config,
+        int $chatId,
+        array $update,
+        ?string $dispatchLeaseId,
+        \Closure $run,
+    ): bool {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId, $run): bool {
+            if (! $this->ownsChatTurn($config, $update, $dispatchLeaseId)) {
+                return true;
+            }
+
+            $reply = $run();
+
+            if ($reply === null) {
+                return false;
+            }
+
+            $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
+            $this->reply($config, $chatId, $reply);
+
+            return true;
+        });
+    }
+
+    private function resolveWorkspaceAction(): ResolveTelegramWorkspaceActionAction
+    {
+        return $this->resolveWorkspaceAction ?? app(ResolveTelegramWorkspaceActionAction::class);
+    }
+
+    private function executeWorkspaceAction(): ExecuteTelegramWorkspaceActionAction
+    {
+        return $this->executeWorkspaceAction ?? app(ExecuteTelegramWorkspaceActionAction::class);
+    }
+
     private function startPostAction(): StartTelegramPostAction
     {
         return $this->startTelegramPostAction ?? new StartTelegramPostAction($this->captureTelegramMessageAction);
@@ -1007,17 +1189,25 @@ class HandleTelegramUpdateAction
 
     private function recentNotes(TelegramBotConfig $config): string
     {
-        $entries = ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->orderByDesc('captured_at')->limit(10)->get();
+        // Only active (untriaged) notes count; triaged and dropped ones are filed or gone.
+        $notes = fn () => ScratchpadEntry::query()->where('workspace_id', $config->workspace_id)->where('status', 'new')
+            ->exceptVoiceTranscription($this->voiceTranscriptionId);
+        $entries = $notes()->orderByDesc('captured_at')->limit(10)->get();
 
         if ($entries->isEmpty()) {
-            return 'No Scratch Pad captures yet.';
+            return 'No active Scratch Pad notes.';
         }
 
-        return $entries->map(function (ScratchpadEntry $entry) {
+        // The list is capped at 10, so the total comes from the database, never from $entries.
+        $total = $notes()->count();
+        $header = 'You have '.$total.' active Scratch Pad '.Str::plural('note', $total).'.';
+        $header .= $total > $entries->count() ? " Latest {$entries->count()}:" : '';
+
+        return $header."\n".$entries->map(function (ScratchpadEntry $entry) {
             $preview = $entry->title ?? $entry->body;
             $preview = $preview === null ? '(no preview)' : Str::limit($preview, 60);
 
-            return "{$entry->kind}: {$preview} ({$entry->status})";
+            return "{$entry->kind}: {$preview}";
         })->implode("\n");
     }
 
@@ -1025,7 +1215,7 @@ class HandleTelegramUpdateAction
      * Delete the same set /notes just listed and queue its reply in the same
      * transaction. Being linked is the only permission gate for this command.
      * If processing dies after commit, the processed marker prevents a replay
-     * from deleting a newer batch of notes.
+     * from deleting a newer batch of notes. Returns true when it replied.
      *
      * @param  array<string, mixed>|null  $update
      */
@@ -1034,14 +1224,13 @@ class HandleTelegramUpdateAction
         int $chatId,
         ?array $update = null,
         ?string $dispatchLeaseId = null,
-    ): void {
-        DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId): void {
-            if ($dispatchLeaseId !== null
-                && ! $this->ownsDispatchLease($config, $update ?? [], $dispatchLeaseId)) {
-                return;
+    ): bool {
+        return DB::transaction(function () use ($config, $chatId, $update, $dispatchLeaseId): bool {
+            if (! $this->ownsChatTurn($config, $update ?? [], $dispatchLeaseId)) {
+                return false;
             }
 
-            $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace);
+            $deleted = $this->deleteRecentScratchpadEntriesAction->handle($config->workspace, $this->voiceTranscriptionId);
             $this->markUpdateProcessed($config, $update, $dispatchLeaseId);
 
             $this->reply($config, $chatId, match (true) {
@@ -1049,6 +1238,8 @@ class HandleTelegramUpdateAction
                 $deleted === 1 => 'Deleted 1 note.',
                 default => "Deleted {$deleted} notes.",
             });
+
+            return true;
         });
     }
 

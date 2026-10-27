@@ -28,6 +28,9 @@ return [
 
     'env' => env('APP_ENV', 'production'),
 
+    // Send a logged-in visitor from the landing page straight to the dashboard.
+    'redirect_home_to_dashboard' => (bool) env('REDIRECT_HOME_TO_DASHBOARD', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Debug Mode
@@ -163,5 +166,15 @@ return [
         env('CM_TELEGRAM_OLD_WEB_FLEET_DRAINED', false),
         FILTER_VALIDATE_BOOLEAN,
     ),
+
+    // Deploy fingerprint for GET /api/version. Railway injects these at runtime.
+    'deploy' => [
+        'commit' => env('RAILWAY_GIT_COMMIT_SHA'),
+        'message' => env('RAILWAY_GIT_COMMIT_MESSAGE'),
+        'branch' => env('RAILWAY_GIT_BRANCH'),
+        'deployment_id' => env('RAILWAY_DEPLOYMENT_ID'),
+        'environment' => env('RAILWAY_ENVIRONMENT_NAME'),
+        'service' => env('RAILWAY_SERVICE_NAME'),
+    ],
 
 ];

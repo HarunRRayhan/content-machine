@@ -9,7 +9,7 @@ import {
     platformLabel,
 } from '@/lib/platform-meta';
 import { PostCaptionMock } from '@/lib/post-caption-mock';
-import type { HandleDirectory } from '@/lib/post-caption-mock';
+import type { HandleDirectory, MotionSlide } from '@/lib/post-caption-mock';
 
 type CaptionGroupWithLang = CaptionGroup & {
     lang?: string | null;
@@ -19,6 +19,8 @@ type Props = {
     groups: CaptionGroupWithLang[];
     platforms: string[];
     imageUrls: Record<string, string>;
+    // Keyed "lang:platform", e.g. "en:instagram".
+    motionSlides?: Record<string, MotionSlide[]>;
     handles?: HandleDirectory;
     defaultLang?: LangCode | null;
 };
@@ -46,6 +48,7 @@ export default function PostCaptionsPanel({
     groups,
     platforms,
     imageUrls,
+    motionSlides = {},
     handles,
     defaultLang = null,
 }: Props) {
@@ -180,10 +183,16 @@ export default function PostCaptionsPanel({
 
                         {platform && (
                             <PostCaptionMock
+                                key={platform.name}
                                 platform={platform}
                                 lang={viewLang}
                                 handles={handles}
                                 imageUrls={imageUrls}
+                                motionSlides={
+                                    motionSlides[
+                                        `${viewLang}:${platform.name.trim().toLowerCase()}`
+                                    ] ?? []
+                                }
                             />
                         )}
                     </section>

@@ -4,6 +4,8 @@ namespace Tests\Unit\Actions\Postsyncer;
 
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
+use App\Models\Attachment;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
@@ -15,6 +17,7 @@ use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PublishPostActionTest extends TestCase
@@ -821,9 +824,7 @@ class PublishPostActionTest extends TestCase
     public function test_uncertain_create_can_be_verified_and_resumed(): void
     {
         Http::fake([
-            'postsyncer.com/api/v1/posts' => Http::response([
-                'message' => 'gateway timeout',
-            ], 500),
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
         ]);
 
         $workspace = Workspace::factory()->create();
@@ -1047,6 +1048,159 @@ class PublishPostActionTest extends TestCase
             && $request->url() === 'https://postsyncer.com/api/v1/posts');
     }
 
+    public function test_partial_failure_recovery_creates_failed_platform_replacement_via_content_machine(): void
+    {
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::sequence()
+                ->push(['message' => 'gateway timeout'], 500)
+                ->push([
+                    'id' => 100,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [[
+                        'platform' => 'tiktok',
+                        'status' => 'PUBLISHED',
+                        'settings' => ['description' => 'Caption'],
+                    ]],
+                    'status' => 'PUBLISHED',
+                ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['account_id' => 100],
+                        'tiktok' => ['account_id' => 3508],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['photo' => 'on'],
+                    'tiktok' => ['photo' => 'on'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'tiktok'],
+            'captions' => [
+                'facebook' => 'Caption',
+                'tiktok' => 'Caption',
+            ],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+
+        try {
+            $this->action->handle($post, ['confirm_ask' => true]);
+        } catch (PostsyncerException) {
+            // The uncertain create is the state this recovery test exercises.
+        }
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+
+        Http::fake(function ($request) {
+            $url = $request->url();
+
+            if ($request->method() === 'POST') {
+                return Http::response([
+                    'id' => 100,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [[
+                        'platform' => 'tiktok',
+                        'status' => 'PUBLISHED',
+                        'settings' => ['description' => 'Caption'],
+                    ]],
+                    'status' => 'PUBLISHED',
+                ], 200);
+            }
+
+            if ($url === 'https://postsyncer.com/api/v1/posts/99') {
+                return Http::response([
+                    'id' => 99,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [
+                        ['platform' => 'facebook', 'status' => 'PUBLISHED', 'settings' => [
+                            'post_type' => 'POST', 'caption' => 'Caption',
+                        ]],
+                        ['platform' => 'tiktok', 'status' => 'FAILED', 'settings' => [
+                            'description' => 'Caption',
+                        ]],
+                    ],
+                    'status' => 'PARTIALLY_FAILED',
+                ], 200);
+            }
+
+            if ($url === 'https://postsyncer.com/api/v1/analytics/posts/99') {
+                return Http::response([
+                    'accounts' => [
+                        ['account_id' => 100, 'platform' => 'facebook'],
+                        ['account_id' => 3508, 'platform' => 'tiktok'],
+                    ],
+                ], 200);
+            }
+
+            if ($url === 'https://postsyncer.com/api/v1/posts/100') {
+                return Http::response([
+                    'id' => 100,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [[
+                        'platform' => 'tiktok',
+                        'status' => 'PUBLISHED',
+                        'settings' => ['description' => 'Caption'],
+                    ]],
+                    'status' => 'PUBLISHED',
+                ], 200);
+            }
+
+            if ($url === 'https://postsyncer.com/api/v1/analytics/posts/100') {
+                return Http::response([
+                    'accounts' => [['account_id' => 3508, 'platform' => 'tiktok']],
+                ], 200);
+            }
+
+            return Http::response(['message' => 'unexpected request'], 500);
+        });
+
+        $this->action->recoverPartialFailure($post, 99);
+
+        $post->refresh();
+        $progress = $post->publish_progress;
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $progress['state']);
+        $this->assertNull($progress['current']);
+        $this->assertSame('completed', $progress['partial_recovery']['state']);
+        $this->assertSame('100', $progress['supplemental_groups'][0]['post_id']);
+        $this->assertSame(['facebook'], $progress['completed_groups'][0]['platforms']);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'must not create again',
+            ], 500),
+        ]);
+        $this->action->handle($post, ['confirm_ask' => true]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertCount(2, $post->postsyncer['groups']);
+        Http::assertNothingSent();
+    }
+
     public function test_reconciliation_rejects_a_failed_remote_post(): void
     {
         $workspace = Workspace::factory()->create();
@@ -1171,6 +1325,213 @@ class PublishPostActionTest extends TestCase
 
         $this->expectException(PostsyncerException::class);
         $this->action->handle($post, ['confirm_ask' => false]);
+    }
+
+    private function attachScratchpadFile(
+        Post $post,
+        Workspace $workspace,
+        string $filename,
+        string $kind,
+        string $role,
+        int $position,
+        ?string $platform = null,
+        ?string $language = null,
+    ): MediaAsset {
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'kind' => $kind,
+            'disk' => 'scratchpad',
+            'path' => $workspace->id.'/'.$filename,
+            'original_filename' => $filename,
+            'mime' => $kind === 'video' ? 'video/mp4' : 'image/png',
+        ]);
+        Storage::disk('scratchpad')->put($media->path, $filename);
+        Attachment::factory()->for($post, 'attachable')->for($media)->create([
+            'role' => $role,
+            'platform' => $platform,
+            'language' => $language,
+            'position' => $position,
+        ]);
+
+        return $media;
+    }
+
+    public function test_publish_ignores_motion_slides_and_uploads_only_the_image_set(): void
+    {
+        Storage::fake('scratchpad');
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 42, 'status' => 'published'], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'IG caption', 'media' => [['id' => 915]]]],
+                'platforms' => [
+                    ['platform' => 'instagram', 'account_id' => 101, 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'IG caption',
+                    ]],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'platforms' => ['instagram'],
+            'captions' => ['main' => ['instagram' => ['caption' => 'IG caption']]],
+        ]);
+        $cover = $this->attachScratchpadFile($post, $workspace, 'cover.png', 'image', 'image', 0);
+        $slide = $this->attachScratchpadFile(
+            $post,
+            $workspace,
+            'slide-1.mp4',
+            'video',
+            'motion',
+            1,
+            'instagram',
+            'bn',
+        );
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+        $upload = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+        )->first();
+        $urls = $upload[0]->data()['urls'];
+
+        $this->assertCount(1, $urls);
+        $this->assertStringContainsString("/publish-media/posts/{$post->id}/{$cover->id}?", $urls[0]);
+        $this->assertStringNotContainsString("/{$slide->id}?", $urls[0]);
+    }
+
+    public function test_publish_with_a_facebook_motion_list_still_uploads_only_its_images(): void
+    {
+        Storage::fake('scratchpad');
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915]],
+                'count_stored' => 1,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response(['id' => 42, 'status' => 'published'], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response([
+                'id' => 42,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'FB caption', 'media' => [['id' => 915]]]],
+                'platforms' => [
+                    ['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'FB caption',
+                    ]],
+                ],
+                'status' => 'PUBLISHED',
+            ], 200),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['main' => ['facebook' => [
+                'caption' => 'FB caption',
+                'images' => ['cover.png'],
+                'motion' => ['slide-1.mp4'],
+            ]]],
+        ]);
+        $cover = $this->attachScratchpadFile($post, $workspace, 'cover.png', 'image', 'image', 0);
+        $slide = $this->attachScratchpadFile(
+            $post,
+            $workspace,
+            'slide-1.mp4',
+            'video',
+            'motion',
+            1,
+            'instagram',
+            'bn',
+        );
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+        $upload = Http::recorded(
+            fn ($request): bool => $request->url() === 'https://postsyncer.com/api/v1/media/upload/url',
+        )->first();
+        $urls = $upload[0]->data()['urls'];
+
+        $this->assertCount(1, $urls);
+        $this->assertStringContainsString("/publish-media/posts/{$post->id}/{$cover->id}?", $urls[0]);
+        $this->assertStringNotContainsString("/{$slide->id}?", $urls[0]);
+    }
+
+    public function test_youtube_image_group_rejected_by_postsyncer_is_a_failed_group_not_a_blind_retry(): void
+    {
+        Storage::fake('scratchpad');
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+                'media' => [['id' => 915], ['id' => 916]],
+                'count_stored' => 2,
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'YouTube rejected the image set',
+            ], 422),
+        ]);
+
+        $workspace = Workspace::factory()->create();
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'youtube' => ['account_id' => 103, 'handle' => '@harun'],
+                    ],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => [
+                    'youtube' => ['reel' => 'on', 'photo' => 'ask', 'carousel' => 'ask'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'draft',
+            'publish_state' => 'queued',
+            'language' => 'bn',
+            'platforms' => ['youtube'],
+            'captions' => [
+                'main' => [
+                    'youtube' => ['caption' => 'YT caption', 'images' => ['a.png', 'b.png']],
+                ],
+            ],
+        ]);
+        $this->attachScratchpadFile($post, $workspace, 'a.png', 'image', 'image', 0);
+        $this->attachScratchpadFile($post, $workspace, 'b.png', 'image', 'image', 1);
+
+        // Confirmed ask gate. The 422 must be recorded, not thrown back to the queue.
+        $this->action->handle($post, ['confirm_ask' => true]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('PostSyncer API error 422', (string) $post->publish_error);
+        $progress = $post->publish_progress;
+        $this->assertSame('failed', $progress['state']);
+        $this->assertSame([], $progress['completed_groups'] ?? []);
+        $this->assertSame(0, $progress['current']['index']);
+        $this->assertSame('retryable', $progress['current']['phase']);
+        Http::assertSentCount(2);
     }
 
     public function test_failure_leaves_pipeline_status_and_sets_publish_error(): void
@@ -2156,6 +2517,180 @@ class PublishPostActionTest extends TestCase
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
         $this->assertSame(1, $uploadCalls);
+    }
+
+    public function test_verified_absent_media_upload_can_be_reset_and_retried(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+        $uploadCalls = 0;
+
+        Http::fake(function ($request) use (&$uploadCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                $uploadCalls++;
+
+                return $uploadCalls === 1
+                    ? Http::response(['message' => 'temporary outage'], 503)
+                    : Http::response([
+                        'media' => [['id' => 915]],
+                        'count_stored' => 1,
+                    ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                return Http::response([
+                    'id' => 42,
+                    'status' => 'scheduled',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST',
+                        'caption' => 'Caption',
+                    ]]],
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        try {
+            $this->action->handle($post, [
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->outcomeUnknown);
+        }
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('uploading', $post->publish_progress['current']['phase']);
+        $this->assertSame([], $post->publish_progress['current']['media_ids']);
+
+        $this->action->reconcileMediaAbsent($post);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertNull($post->publish_progress['current']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $post->publish_progress['media_upload_recovery']['mode'],
+        );
+
+        $this->action->handle($post, [
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('scheduled', $post->status);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(2, $uploadCalls);
+    }
+
+    public function test_verified_absent_create_can_be_reconciled_without_reuploading_media(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+        $uploadCalls = 0;
+        $createCalls = 0;
+
+        Http::fake(function ($request) use (&$uploadCalls, &$createCalls) {
+            if (str_ends_with($request->url(), '/media/upload/url')) {
+                $uploadCalls++;
+
+                return Http::response([
+                    'media' => [['id' => 915]],
+                    'count_stored' => 1,
+                ], 200);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts') {
+                $createCalls++;
+
+                return $createCalls === 1
+                    ? Http::response(['message' => 'temporary outage'], 500)
+                    : Http::response([
+                        'id' => 42,
+                        'status' => 'scheduled',
+                        'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                    ], 201);
+            }
+
+            if ($request->url() === 'https://postsyncer.com/api/v1/posts/42') {
+                return Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST',
+                        'caption' => 'Caption',
+                    ]]],
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2099-09-03T09:00:00+06:00',
+                ], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected request'], 500);
+        });
+
+        $options = [
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ];
+
+        $this->action->handle($post, $options);
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('creating', $post->publish_progress['current']['phase']);
+        $this->assertSame([915], $post->publish_progress['current']['media_ids']);
+
+        $this->action->reconcileCreateAbsent($post);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
+        $this->assertSame(['915'], $post->publish_progress['current']['media_ids']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $post->publish_progress['create_recovery']['mode'],
+        );
+
+        $this->action->handle($post, $options);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('scheduled', $post->status);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(1, $uploadCalls);
+        $this->assertSame(2, $createCalls);
     }
 
     public function test_sets_running_before_api_calls(): void

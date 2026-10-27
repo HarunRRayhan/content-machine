@@ -4,6 +4,7 @@ namespace Tests\Unit\Actions\Scratchpad;
 
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Models\Attachment;
+use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\ScratchpadEntry;
 use App\Models\StatusTransition;
@@ -11,7 +12,6 @@ use App\Models\Transcription;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
-use RuntimeException;
 use Tests\TestCase;
 
 class DeleteScratchpadEntryActionTest extends TestCase
@@ -41,14 +41,18 @@ class DeleteScratchpadEntryActionTest extends TestCase
         $this->assertSame(0, ScratchpadEntry::count());
     }
 
-    public function test_a_triaged_entry_is_refused()
+    public function test_a_triaged_entry_is_deleted_and_its_idea_is_preserved_without_the_source_link()
     {
         $entry = ScratchpadEntry::factory()->triaged()->create();
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage("already been triaged into an idea and can't be deleted");
+        $idea = Idea::factory()->for($entry->workspace)->create([
+            'scratchpad_entry_id' => $entry->id,
+        ]);
 
         $this->action()->handle($entry);
+
+        $this->assertModelMissing($entry);
+        $this->assertSame(1, Idea::count());
+        $this->assertNull($idea->fresh()->scratchpad_entry_id);
     }
 
     public function test_its_status_transitions_are_deleted_too()

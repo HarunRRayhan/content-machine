@@ -29,4 +29,11 @@ class VideoFactory extends Factory
             'status' => 'draft',
         ];
     }
+
+    public function declaresSeries(): static
+    {
+        return $this->state(fn (): array => [
+            'script_markdown' => "**Language:** Bangla\n**Format:** beginner series, part 1 of 2\n",
+        ]);
+    }
 }

@@ -64,6 +64,12 @@ type VideoDetail = {
     idea_id: number | null;
     created_at: string | null;
     updated_at: string | null;
+    series: {
+        slug: string;
+        title: string;
+        part: number;
+        videos: Array<{ human_id: string; title: string; part: number }>;
+    } | null;
 };
 
 type PageProps = {
@@ -85,7 +91,9 @@ export default function VideoShow({ video }: PageProps) {
     const validTabs = useMemo<readonly TabKey[]>(() => {
         const tabs: TabKey[] = ['overview'];
 
-        tabs.push('script');
+        if (!hasDeck) {
+            tabs.push('script');
+        }
 
         if (hasCaptions) {
             tabs.push('captions');
@@ -102,7 +110,16 @@ export default function VideoShow({ video }: PageProps) {
         return tabs;
     }, [hasCaptions, hasFacts, hasDeck]);
 
-    const [tab, setTab] = useStudioTab(validTabs, 'overview');
+    const tabAliases = useMemo(
+        () =>
+            hasDeck
+                ? ({ script: 'presentation' } as Partial<
+                      Record<string, TabKey>
+                  >)
+                : {},
+        [hasDeck],
+    );
+    const [tab, setTab] = useStudioTab(validTabs, 'overview', tabAliases);
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
 
     return (
@@ -118,6 +135,18 @@ export default function VideoShow({ video }: PageProps) {
                         <span className="no">Video #{video.number}</span>
                         <h2>{video.title}</h2>
                     </div>
+                    {video.series && (
+                        <Link
+                            href={`/series/${video.series.slug}`}
+                            className="series-badge"
+                            title={video.series.title}
+                        >
+                            <span className="series-badge-label">Series</span>
+                            <span className="series-badge-name">
+                                {video.series.title}
+                            </span>
+                        </Link>
+                    )}
                 </div>
 
                 {video.idea_id && (
@@ -147,14 +176,16 @@ export default function VideoShow({ video }: PageProps) {
                     >
                         📋 Overview
                     </button>
-                    <button
-                        type="button"
-                        role="tab"
-                        aria-selected={activeTab === 'script'}
-                        onClick={() => setTab('script')}
-                    >
-                        📄 Script
-                    </button>
+                    {!hasDeck && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'script'}
+                            onClick={() => setTab('script')}
+                        >
+                            📄 Script
+                        </button>
+                    )}
                     {hasCaptions && (
                         <button
                             type="button"
@@ -210,6 +241,7 @@ export default function VideoShow({ video }: PageProps) {
                         publishRetryable={video.publish_retryable}
                         needsConfirmAsk={video.needs_confirm_ask}
                         postsyncer={video.postsyncer}
+                        series={video.series}
                     />
                 )}
 

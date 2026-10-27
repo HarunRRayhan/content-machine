@@ -33,6 +33,7 @@ type EntryTranscription = {
     text: string | null;
     language: string | null;
     error_message: string | null;
+    gist: string | null;
 };
 
 type EntryDetail = {
@@ -118,28 +119,25 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
                         <Badge variant="outline">via {entry.source}</Badge>
                     </div>
 
-                    {entry.status !== 'triaged' && (
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                                if (
-                                    confirm(
-                                        "Delete this entry? This can't be undone.",
-                                    )
-                                ) {
-                                    router.delete(
-                                        ScratchpadController.destroy.url(
-                                            entry.id,
-                                        ),
-                                    );
-                                }
-                            }}
-                        >
-                            Delete
-                        </Button>
-                    )}
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => {
+                            const message =
+                                entry.status === 'triaged'
+                                    ? 'Delete this capture? Its idea will stay, but its source link will be removed. This cannot be undone.'
+                                    : "Delete this entry? This can't be undone.";
+
+                            if (confirm(message)) {
+                                router.delete(
+                                    ScratchpadController.destroy.url(entry.id),
+                                );
+                            }
+                        }}
+                    >
+                        Delete
+                    </Button>
                 </div>
 
                 <ScratchpadEntryMedia attachments={entry.attachments} />
@@ -149,6 +147,11 @@ export default function ScratchpadShow({ entry, suggestion }: PageProps) {
                         {entry.transcription.status === 'done' && (
                             <p className="whitespace-pre-wrap">
                                 {entry.transcription.text}
+                            </p>
+                        )}
+                        {entry.transcription.gist && (
+                            <p className="text-sm text-muted-foreground">
+                                Gist: {entry.transcription.gist}
                             </p>
                         )}
                         {(entry.transcription.status === 'pending' ||

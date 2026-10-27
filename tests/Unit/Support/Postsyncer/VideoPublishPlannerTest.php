@@ -38,7 +38,7 @@ class VideoPublishPlannerTest extends TestCase
                     'tiktok' => ['reel' => 'ask'],
                 ],
                 'bangla' => [
-                    'twitter' => ['text' => 'off', 'photo' => 'off', 'thread' => 'off'],
+                    'twitter' => ['text' => 'off', 'photo' => 'off', 'thread' => 'off', 'reel' => 'on'],
                 ],
             ],
         ];
@@ -351,7 +351,7 @@ class VideoPublishPlannerTest extends TestCase
         $config = $this->configFor($workspace);
 
         $video = Video::factory()->for($workspace)->create([
-            'language' => 'bn',
+            'language' => 'en',
             'video_drive_url' => 'https://drive.google.com/file/d/video/view',
             'captions' => [
                 'facebook' => 'FB',
@@ -359,12 +359,92 @@ class VideoPublishPlannerTest extends TestCase
             ],
         ]);
 
-        $group = $this->planner->plan($video, $config, [
+        $groups = $this->planner->plan($video, $config, [
             'platforms' => ['facebook', 'twitter'],
             'confirm_ask' => false,
-        ])[0];
+        ]);
 
-        $this->assertSame(['facebook'], $group->platforms);
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook'], $groups[0]->platforms);
+    }
+
+    public function test_bangla_x_leg_is_its_own_video_only_group(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/cover/view',
+            'captions' => [
+                'facebook' => ['caption' => 'FB'],
+                'twitter' => ['caption' => 'X caption'],
+            ],
+        ]);
+
+        $groups = $this->planner->plan($video, $config, [
+            'platforms' => ['facebook', 'twitter'],
+            'confirm_ask' => false,
+        ]);
+
+        $this->assertCount(2, $groups);
+        $this->assertSame(['facebook'], $groups[0]->platforms);
+        $this->assertSame([
+            'https://drive.usercontent.google.com/download?id=video&export=download&confirm=t',
+            'https://drive.usercontent.google.com/download?id=cover&export=download&confirm=t',
+        ], $groups[0]->mediaUrls);
+        $this->assertSame(['twitter'], $groups[1]->platforms);
+        $this->assertSame(['twitter' => 'X caption'], $groups[1]->captions);
+        $this->assertSame([
+            'https://drive.usercontent.google.com/download?id=video&export=download&confirm=t',
+        ], $groups[1]->mediaUrls);
+        $this->assertSame('15211', $groups[1]->workspaceId);
+    }
+
+    public function test_bangla_twitter_without_caption_is_not_planned(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'cover_drive_url' => 'https://drive.google.com/file/d/cover/view',
+            'captions' => ['facebook' => ['caption' => 'FB']],
+        ]);
+
+        $groups = $this->planner->plan($video, $config, [
+            'platforms' => ['facebook', 'twitter'],
+            'confirm_ask' => false,
+        ]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook'], $groups[0]->platforms);
+        $this->assertCount(2, $groups[0]->mediaUrls);
+    }
+
+    public function test_english_x_leg_is_not_planned_even_with_a_caption(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $video = Video::factory()->for($workspace)->create([
+            'language' => 'en',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => [
+                'facebook' => 'FB',
+                'twitter' => 'X caption',
+            ],
+        ]);
+
+        $groups = $this->planner->plan($video, $config, [
+            'platforms' => ['facebook', 'twitter'],
+            'confirm_ask' => false,
+        ]);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(['facebook'], $groups[0]->platforms);
     }
 
     public function test_omits_cover_from_media_urls_when_missing(): void

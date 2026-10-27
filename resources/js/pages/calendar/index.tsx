@@ -2,8 +2,16 @@ import { Head, Link, router } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 import { index } from '@/routes/calendar';
 
+type EventCategory =
+    | 'post_default'
+    | 'post_morning'
+    | 'post_evening_carousel'
+    | 'video_bn'
+    | 'video_en';
+
 type CalendarEvent = {
     kind: 'post' | 'video';
+    category: EventCategory;
     id: number;
     human_id: string;
     title: string;
@@ -23,6 +31,14 @@ type PageProps = {
 
 type KindFilter = 'all' | 'post' | 'video';
 type StateFilter = 'all' | 'scheduled' | 'published';
+
+const CATEGORY_LEGEND: Array<[EventCategory, string]> = [
+    ['post_default', 'Post'],
+    ['post_morning', 'Morning post'],
+    ['post_evening_carousel', 'Evening carousel'],
+    ['video_bn', 'Bangla video'],
+    ['video_en', 'English video'],
+];
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -260,6 +276,18 @@ export default function CalendarIndex({
                     </div>
                 </div>
 
+                <ul className="cal-legend" aria-label="Calendar colors">
+                    {CATEGORY_LEGEND.map(([category, label]) => (
+                        <li key={category} className={`is-cat-${category}`}>
+                            <span className="cal-legend-swatch" aria-hidden />
+                            {label}
+                        </li>
+                    ))}
+                    <li className="cal-legend-note">
+                        Dashed: scheduled · Solid ✓: published
+                    </li>
+                </ul>
+
                 <div className="cal-grid" role="grid">
                     {WEEKDAYS.map((day) => (
                         <div key={day} className="cal-dow">
@@ -288,10 +316,13 @@ export default function CalendarIndex({
                                         <Link
                                             key={`${event.kind}-${event.id}-${event.at}-${event.state}`}
                                             href={event.href}
-                                            className={`cal-chip is-${event.state} is-${event.kind}`}
+                                            className={`cal-chip is-${event.state} is-${event.kind} is-cat-${event.category}`}
                                             title={`${event.human_id} · ${event.title}`}
                                         >
                                             <span className="cal-chip-time">
+                                                {event.state === 'published'
+                                                    ? '✓ '
+                                                    : ''}
                                                 {timeLabel(event.at, timezone)}
                                             </span>
                                             <span className="cal-chip-kind">

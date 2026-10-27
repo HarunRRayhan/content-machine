@@ -1,86 +1,38 @@
-# Posts + Videos API (full content in CM)
+# Posts and videos
 
-**Status:** implementing  
-**Decision:** 1C + 2B — full video/post records including decks live in Content Machine; personal-content Tailscale app keeps only HyperFrames edit + presentation player, everything else reads CM over the API.
+Content Machine stores posts and videos in PostgreSQL and exposes them through
+the dashboard, workspace-token API, and MCP tools. Local content tools use the
+API to read and update records. `human_id` is the stable public identifier.
+Imported legacy IDs such as `BP-24`, `BV-60`, and `EV-11` remain valid.
 
-## Source of truth
+## Records and media
 
-Content Machine Postgres is the only source of truth for:
+Posts store their body, language, status, platform list, structured captions,
+Drive image URLs, publish metadata, and attachments. Videos store their script,
+language, status, structured captions, Drive media URLs, presentation manifest,
+and attachments. Both use workspace-owned `MediaAsset` records linked through
+`Attachment`.
 
-- Ideas (already)
-- Scratch pad (already)
-- **Videos** — script, captions, language, pipeline status, deck package
-- **Posts** — body/captions, platforms, images, pipeline status
+API list responses are slim by default. Clients can request larger post or video
+fields with `include`; show endpoints return the full record. API Resources
+define these payloads. See the [API guide](../guides/api.md) for fields, filters,
+and endpoint behavior.
 
-personal-content markdown (`scripts/`, `posts/`, `VIDEOS.md`, `POSTS.md`, decks) becomes a frozen archive after import, same pattern as `scratchpad/`.
+## Publishing
 
-## Schema additions
+Dashboard and API publish requests enter the same enqueue Actions and jobs.
+PostSyncer settings belong to a workspace. Publish jobs build groups by
+language, platform, and media set. They checkpoint progress and call PostSyncer
+only through Content Machine. Public publish results are written only after all
+groups finish. Reconcile uncertain media uploads or post creates before retrying.
 
-### `videos`
+The [PostSyncer guide](../guides/postsyncer.md) documents scheduled status
+synchronization and operational recovery. Do not create or modify PostSyncer
+records outside Content Machine's supported publish and recovery paths.
 
-| Column | Type | Notes |
-|---|---|---|
-| `language` | string nullable | `bn` / `en` |
-| `slug` | string nullable | URL/file slug |
-| `script_markdown` | longText nullable | spoken script body |
-| `captions` | jsonb | per-platform caption blocks |
-| `deck_manifest` | jsonb | slide list / player cues |
-| `status` | string | was enum(`draft`) only — now pipeline string |
+## Remaining API gaps
 
-**Video statuses:** `draft`, `pending`, `ready`, `recorded`, `scheduled`, `posted`, `archived`, `dropped`
-
-`human_id` stays the API address. New promotions still get `V-N`. Imported personal-content rows keep `BV-N` / `EV-N` so agents and old links don't renumber.
-
-### `posts`
-
-Same shape minus script/deck:
-
-| Column | Type |
-|---|---|
-| `language` | string nullable |
-| `slug` | string nullable |
-| `captions` | jsonb |
-| `platforms` | jsonb |
-| `status` | string pipeline |
-
-**Post statuses:** `draft`, `ready`, `scheduled`, `posted`, `archived`, `dropped`
-
-Imported ids keep `BP-N` / `EP-N` / `P-N`. New promotions stay `P-N`.
-
-### Attachments
-
-`attachments.role` gains `deck` (zip/html package for the recording player). Post images keep `image` / `cover`.
-
-## API
-
-Token abilities (additive): `videos:read`, `videos:write`, `posts:read`, `posts:write`.
-
-| Method | Path | Ability |
-|---|---|---|
-| GET | `/api/v1/videos` | videos:read |
-| GET | `/api/v1/videos/{human_id}` | videos:read |
-| POST | `/api/v1/videos` | videos:write |
-| PATCH | `/api/v1/videos/{human_id}` | videos:write |
-| POST | `/api/v1/videos/{human_id}/deck` | videos:write |
-| GET | `/api/v1/videos/{human_id}/deck` | videos:read |
-| GET | `/api/v1/videos/{human_id}/media/{mediaAsset}` | videos:read |
-| GET/POST/PATCH | `/api/v1/posts` … | posts:* |
-| POST | `/api/v1/posts/{human_id}/images` | posts:write |
-| POST | `/api/v1/posts/{human_id}/publish` | posts:write; queues the resumable PostSyncer publish job |
-| GET | `/api/v1/posts/{human_id}/media/{mediaAsset}` | posts:read |
-
-List endpoints are cursor-paginated like ideas. Create accepts an optional `human_id` for idempotent import.
-
-## Local Tailscale after cutover
-
-- **Keep:** HyperFrames edit/render/cover, presentation player (loads deck from CM)
-- **Read-only mirror:** Videos/Posts tabs (optional) via API
-- **Remove writes:** local script/post markdown edits, local status flips, local reserve-id as source of truth
-
-## Migration order
-
-1. Schema + API + tests (this slice)
-2. One-shot importer from personal-content → CM
-3. personal-content client + Script Studio read-only
-4. Player switched to CM deck URLs
-5. Freeze local markdown as archive
+The API guide's [Not here yet](../guides/api.md#not-here-yet) section is the
+current gap list. At this revision it identifies deck-package upload endpoints,
+idea promotion over the API, and rate limiting beyond the default throttle. Do
+not use the August implementation plans as a current backlog.

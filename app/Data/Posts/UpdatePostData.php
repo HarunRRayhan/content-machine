@@ -39,6 +39,9 @@ final readonly class UpdatePostData
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
         public bool $hasTemplate = false,
+        public ?string $blockedReason = null,
+        public bool $hasBlockedReason = false,
+        public ?string $category = null,
     ) {}
 
     public static function fromRequest(UpdatePostRequest $request): self
@@ -55,6 +58,7 @@ final readonly class UpdatePostData
             hasBody: $request->has('body'),
             hasCaptions: $request->has('captions'),
             hasImageDriveUrls: $request->has('image_drive_urls'),
+            category: $request->filled('category') ? $request->string('category')->toString() : null,
         );
     }
 
@@ -97,7 +101,7 @@ final readonly class UpdatePostData
         }
 
         $letter = strtoupper(trim($raw));
-        if (! in_array($letter, PostDesignTemplate::LETTERS, true)) {
+        if (! in_array($letter, PostDesignTemplate::letters(), true)) {
             return null;
         }
 
@@ -140,6 +144,11 @@ final readonly class UpdatePostData
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
             hasTemplate: array_key_exists('template', $payload),
+            blockedReason: array_key_exists('blocked_reason', $payload)
+                ? ($payload['blocked_reason'] !== null ? (string) $payload['blocked_reason'] : null)
+                : null,
+            hasBlockedReason: array_key_exists('blocked_reason', $payload),
+            category: array_key_exists('category', $payload) ? (string) $payload['category'] : null,
         );
     }
 }

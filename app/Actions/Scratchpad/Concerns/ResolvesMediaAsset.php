@@ -38,8 +38,17 @@ trait ResolvesMediaAsset
         'audio/x-m4a',
     ];
 
-    private function resolveMediaAsset(Workspace $workspace, ?User $uploadedBy, UploadedFile $file, string $kind): MediaAsset
-    {
+    /**
+     * `$originalFilename` overrides the client's upload name. Identical bytes
+     * reuse the existing asset, so it keeps the name it was first stored under.
+     */
+    private function resolveMediaAsset(
+        Workspace $workspace,
+        ?User $uploadedBy,
+        UploadedFile $file,
+        string $kind,
+        ?string $originalFilename = null,
+    ): MediaAsset {
         $checksum = hash_file('sha256', $file->getRealPath());
 
         $existing = MediaAsset::query()
@@ -70,7 +79,7 @@ trait ResolvesMediaAsset
             // duration_ms is left null: probing audio/video duration needs an
             // ffmpeg/getID3-style dependency this task doesn't add. A later
             // phase can backfill it without a schema change.
-            'original_filename' => $file->getClientOriginalName(),
+            'original_filename' => $originalFilename ?? $file->getClientOriginalName(),
             'uploaded_by_user_id' => $uploadedBy?->id,
         ]);
     }

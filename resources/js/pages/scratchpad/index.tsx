@@ -378,32 +378,31 @@ export default function ScratchpadIndex({ entries }: PageProps) {
                             <ScratchpadEntryMedia
                                 attachments={entry.attachments}
                             />
-                            {entry.status !== 'triaged' && (
-                                <div className="flex justify-end">
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="ghost"
-                                        className="text-muted-foreground hover:text-destructive"
-                                        onClick={() => {
-                                            if (
-                                                confirm(
-                                                    "Delete this entry? This can't be undone.",
-                                                )
-                                            ) {
-                                                router.delete(
-                                                    ScratchpadController.destroy.url(
-                                                        entry.id,
-                                                    ),
-                                                    { preserveScroll: true },
-                                                );
-                                            }
-                                        }}
-                                    >
-                                        <Trash2 /> Delete
-                                    </Button>
-                                </div>
-                            )}
+                            <div className="flex justify-end">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="text-muted-foreground hover:text-destructive"
+                                    onClick={() => {
+                                        const message =
+                                            entry.status === 'triaged'
+                                                ? 'Delete this capture? Its idea will stay, but its source link will be removed. This cannot be undone.'
+                                                : "Delete this entry? This can't be undone.";
+
+                                        if (confirm(message)) {
+                                            router.delete(
+                                                ScratchpadController.destroy.url(
+                                                    entry.id,
+                                                ),
+                                                { preserveScroll: true },
+                                            );
+                                        }
+                                    }}
+                                >
+                                    <Trash2 /> Delete
+                                </Button>
+                            </div>
                         </div>
                     ))}
                 </div>

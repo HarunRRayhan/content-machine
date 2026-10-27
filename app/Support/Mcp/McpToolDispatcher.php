@@ -450,7 +450,7 @@ final class McpToolDispatcher
     private function updatePost(array $arguments): array
     {
         $post = $this->findPost($this->stringArg($arguments, 'human_id'));
-        $payload = $this->optionalPayload($arguments, ['title', 'body', 'status']);
+        $payload = $this->optionalPayload($arguments, ['title', 'body', 'status', 'category', 'blocked_reason']);
 
         if (array_key_exists('captions', $arguments)) {
             $captions = $arguments['captions'];
@@ -487,10 +487,14 @@ final class McpToolDispatcher
         }
 
         if ($payload === []) {
-            throw new RuntimeException('Send at least one of title, body, captions, platforms, status, image_drive_urls.');
+            throw new RuntimeException('Send at least one of title, body, captions, platforms, status, category, blocked_reason, image_drive_urls.');
         }
 
         $this->assertAllowedStatus($payload, Post::STATUSES, 'post');
+
+        if (array_key_exists('category', $payload) && ! in_array($payload['category'], Post::CATEGORIES, true)) {
+            throw new RuntimeException('Invalid post category.');
+        }
 
         $this->updatePostAction->handle($post, UpdatePostData::fromApiPayload($payload, $post));
 

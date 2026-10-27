@@ -20,15 +20,16 @@ class DeleteRecentScratchpadEntriesAction
         private readonly DeleteScratchpadEntryAction $deleteScratchpadEntryAction,
     ) {}
 
-    public function handle(Workspace $workspace): int
+    public function handle(Workspace $workspace, ?int $exceptVoiceTranscriptionId = null): int
     {
-        return DB::transaction(function () use ($workspace): int {
+        return DB::transaction(function () use ($workspace, $exceptVoiceTranscriptionId): int {
             // Select and delete the whole batch in one transaction. A worker
             // crash rolls the batch back, so a replay cannot delete the next
             // batch after partially deleting this one.
             $entries = ScratchpadEntry::query()
                 ->where('workspace_id', $workspace->id)
                 ->where('status', 'new')
+                ->exceptVoiceTranscription($exceptVoiceTranscriptionId)
                 ->orderByDesc('captured_at')
                 ->limit(self::LIMIT)
                 ->lockForUpdate()

@@ -1,9 +1,9 @@
 # JSON API (v1)
 
-External clients (personal-content / Script Studio, an MCP server) talk to
-content-machine through a small token-authenticated JSON API under `/api/v1`.
-The first slice covers the Scratch Pad and Ideas: capture anywhere, pull
-entries, work on them, push updates back, triage them into ideas.
+External clients, including personal-content tools, use Content Machine's
+workspace-token JSON API under `/api/v1`. The API covers Scratch Pad entries,
+ideas, posts, videos, media, Drive access, notifications, publishing, and operational recovery.
+The same workspace token can call the Streamable HTTP MCP endpoint at `/mcp`.
 
 ## Authentication
 
@@ -19,8 +19,8 @@ entries, work on them, push updates back, triage them into ideas.
 Authorization: Bearer <your-token>
 ```
 
-A token is bound to exactly one workspace — there is no workspace header,
-by design. Revoking it in the dashboard takes effect immediately (the next
+Each token is bound to one workspace. Requests don't include a workspace header.
+Revoking a token in the dashboard takes effect immediately (the next
 request reads as `401`). Abilities:
 
 | Ability | Grants |
@@ -35,6 +35,8 @@ request reads as `401`). Abilities:
 | `posts:write` | create/update posts, upload post images, queue a PostSyncer publish |
 | `drive:read` | browse the connected workspace Google Drive |
 | `drive:write` | add an Anyone-with-the-link reader permission to a selected Drive file |
+| `notifications:read` | read status for notifications created by this token owner |
+| `notifications:write` | queue Telegram notifications to this token owner's linked private chat |
 
 Missing ability → `403`. Bad or revoked token → `401`.
 
@@ -61,26 +63,53 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | PATCH | `/api/v1/ideas/{human_id}` | write | `title` required, plus `score`/`trend`/`rationale`/`body` |
 | GET | `/api/v1/videos` | videos:read | filters: `status`, `language`. Default list is slim (no `script_markdown` / `captions` / `deck_manifest`); pass `include=full` or `include=script_markdown,captions,deck_manifest` to opt in. Always includes `has_script` / `has_captions` / `has_deck`. |
 | GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` (full record, including deck) |
+| GET | `/api/v1/series` | videos:read | workspace's video series, including part counts |
+| GET | `/api/v1/series/{slug}` | videos:read | one series with videos in explicit part order |
+| PUT | `/api/v1/series/{slug}` | videos:write | create or replace a series using `title` and an ordered `videos` array of human IDs. Parts are numbered from 1. Rejects cross-workspace IDs, duplicates, and videos assigned to another series. |
 | POST | `/api/v1/videos` | videos:write | create; pass `human_id`+`number` for idempotent import |
 | PATCH | `/api/v1/videos/{human_id}` | videos:write | script, captions, status, deck_manifest, Drive URLs, … (publish metadata is read-only). Drive URLs must be public Google Drive file links. |
 | POST | `/api/v1/media-urls/check` | any token | probe a Drive URL: `{ url }` → `{ accessible, message, file_id, share_url, fetch_url }` |
+| POST | `/api/v1/notifications/telegram` | `notifications:write` | body: `{ "key": "stable-caller-key", "text": "message" }`; queues through the durable Telegram outbox |
+| GET | `/api/v1/notifications/telegram/{key}` | `notifications:read` | status for this token owner's key in this workspace |
 | GET | `/api/v1/google-drive/files` | `drive:read` | list the connected Drive folder; optional `folder_id` and `q` |
 | POST | `/api/v1/google-drive/files/{file_id}/make-public` | `drive:write` | add a public reader permission and return the share URL |
 | POST | `/api/v1/videos/{human_id}/publish` | videos:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). The video needs a Video Drive URL. Always send `when` to schedule. Retries preserve the original options; an uncertain create requires `postsyncer:reconcile-video` before retrying. |
 | GET | `/api/v1/posts` | posts:read | filters: `status`, `language`. Default list is slim (no `body` / `captions`); pass `include=full` or `include=body,captions` to opt in. Always includes `has_body` / `has_captions`. |
 | GET | `/api/v1/posts/{human_id}` | posts:read | full record |
 | POST | `/api/v1/posts` | posts:write | create / idempotent import |
-| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, image_drive_urls, … (publish metadata is read-only) |
+| PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, blocked_reason, image_drive_urls, … (publish metadata is read-only). Post `status` is one of `draft`, `ready`, `scheduled`, `posted`, `blocked`, `archived`. `blocked` = stuck on an external limit (e.g. the scheduler cannot publish it); set `blocked_reason` (nullable, max 2000) to show the blocker. `blocked_reason` is cleared when status leaves `blocked`. A blocked post is never scheduled or published: publish refuses it, and it is never picked up by the scheduled-post sync. Blocking a publish-locked post (one with PostSyncer groups) is allowed only when every group is terminal (`PUBLISHED` or `FAILED`) and no publish is queued, running, or uncertain (`publish_state`, `publish_progress.state`); any `SCHEDULED`, `IN_QUEUE`, `PENDING`, `IN_PROGRESS`, or status-less group refuses it with a 422. Blocking only flips `status` and `blocked_reason`: the groups, media, captions, and `postsyncer` data are left as they are. Leaving `blocked` for a publish-locked post (same settled check) may only go to `posted` or `archived`; `draft` and `scheduled` are refused because the groups already exist and are not pending, so `posted` is the restore target. An unlocked post (no groups) can leave `blocked` for any status, and draft is the usual choice. `blocked_reason` is cleared when status leaves `blocked`. Legacy `dropped` was merged into `archived` (2026-10-14). |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
 | POST | `/api/v1/posts/{human_id}/documents` | posts:write | multipart `document` (PDF); LinkedIn carousel document, idempotent on same bytes |
+| POST | `/api/v1/posts/{human_id}/videos` | posts:write | multipart `file` (`video/mp4`, max 25 MB), `platform` (`instagram`), `language` (`bn`/`en`), optional `filename` (defaults to the upload name) and `order` (slide position). Motion-carousel slide for Captions preview only; publish ignores it. Idempotent on the same bytes in the same platform+language slot; a re-upload under the same filename shows the newest copy |
 | POST | `/api/v1/posts/{human_id}/publish` | posts:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). Always send `when` to schedule; omitting it is live `publish_now`. Returns the post with `publish_state` = `queued`. Attachment-backed post jobs run on the Railway `cm-web` PostSyncer worker. Retries preserve the original options; an uncertain external create requires reconciliation. |
+| POST | `/api/v1/posts/{human_id}/approve` | posts:write | approve a draft for publishing; attributes the approval to the user who created the API token |
+| POST | `/api/v1/posts/{human_id}/reconcile-partial-failure` | posts:write | verify a `PARTIALLY_FAILED` create, create replacement groups for failed platforms through Content Machine using checkpointed media ids, and reconcile the replacements; an unknown replacement outcome is checkpointed and must not be replayed |
 | POST | `/api/v1/posts/{human_id}/reconcile-media` | posts:write | checkpoint PostSyncer media ids after an uncertain URL upload (`{ "media_ids": [915, ...] }`); verify ids in the matching workspace first |
+| POST | `/api/v1/posts/{human_id}/reconcile-media-absent` | posts:write | reset an uncertain URL upload after verifying no media was stored (`{ "confirmed_absent": true }`); requires an unchanged plan and an empty media-id checkpoint |
+| POST | `/api/v1/posts/{human_id}/reconcile-create-absent` | posts:write | reset an uncertain PostSyncer create after verifying no matching post was created (`{ "confirmed_absent": true }`); keeps checkpointed media ids and requires an unchanged plan |
+| POST | `/api/v1/posts/{human_id}/rebase-retry-publish-now` | posts:write | rebase a failed partial schedule whose time has passed to publish-now; verifies every completed group is still the original `PUBLISHED` post and preserves unfinished media ids |
 | POST | `/api/v1/posts/{human_id}/repair-account-mapping` | posts:write | repair one stale account in a failed partial publish; body: `{ "language", "platform", "from_account_id", "to_account_id" }`; verifies the target account in PostSyncer and rebases only the unfinished group |
 | GET | `/api/v1/posts/{human_id}/media/{id}` | posts:read | streams a private post image or document |
 
-Captures made through the API are recorded with `source: api`, and every
-status transition / field change they cause is attributed to the token by
-name in the history tables — the same audit trail the dashboard leaves.
+Captures made through the API are recorded with `source: api`. The history tables
+attribute status transitions and field changes to the token name, as they do for
+dashboard changes.
+
+### Telegram notifications
+
+The caller supplies a stable `key` (1–120 ASCII letters, digits, `.`, `_`, `:`, or `-`)
+and `text` (1–10,000 characters). A new request returns `202`; an identical retry
+returns `200` and the original record. Reusing the same key with different text or
+after the owner's linked Telegram chat changes returns `409`. The key is scoped to
+the token owner and current workspace. A response contains only `key`, `status`,
+`created_at`, and `sent_at`; it never returns the chat id or the dispatcher's internal
+error. Status is one of `pending`, `sending`, `sent`, `failed`, `uncertain`, or
+`discarded`. Poll the GET endpoint to observe delivery.
+
+The current token owner must still belong to the workspace and have a linked private
+chat for the connected workspace bot when creating a notification. The API never
+accepts a recipient. Existing tokens do not gain notification abilities implicitly;
+mint a token with `notifications:write` and `notifications:read` selected.
 
 ## Example
 

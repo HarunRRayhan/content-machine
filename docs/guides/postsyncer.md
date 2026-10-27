@@ -1,8 +1,8 @@
 # PostSyncer
 
 Content Machine configures PostSyncer per workspace and schedules or publishes
-**posts** from the dashboard. Video publishing is temporarily disabled until
-safe retries and reconciliation are available. PostSyncer still delivers to Facebook,
+**posts and videos** from the dashboard. Video publishing uses the same safe
+retry and reconciliation fences as post publishing. PostSyncer still delivers to Facebook,
 Instagram, TikTok, YouTube, and the other connected accounts; CM only
 orchestrates.
 
@@ -28,9 +28,11 @@ queue starts to hurt.
 | `postsyncer:sync-scheduled` | every five minutes | Pulls PostSyncer status back onto scheduled records. |
 
 `PublishPostJob` has a 900-second timeout and the dedicated `postsyncer` database
-queue connection has a 960-second visibility window. `PublishVideoJob` has a
-180-second timeout and uses the same connection, leaving enough time for its
-media upload, create, and canonical verification calls. Keep
+queue connection has a 960-second visibility window. `PublishVideoJob` also has a
+900-second timeout on the same connection: it downloads each video and cover
+from Drive and uploads them one by one to PostSyncer's file endpoint
+(`upload.postsyncer.com/api/v1/media/upload/file`, 500 MB cap), because the
+URL import stores no videos. Keep
 `POSTSYNCER_QUEUE_RETRY_AFTER` above the longest worker timeout. Both publish
 jobs are unique for the record and use a shared overlap lock whose expiry is
 longer than the video timeout. Each queued job also carries the run token it
@@ -79,6 +81,21 @@ php artisan postsyncer:reconcile-video-media WORKSPACE_ID BV-68 MEDIA_ID[,MEDIA_
 The command requires exactly one valid id per uploaded URL and changes the
 checkpoint to a retryable create. It never uploads the URLs again.
 
+If inspection confirms that PostSyncer stored no media for the upload, clear
+the checkpoint through the API instead of supplying ids:
+
+```bash
+curl -X POST https://cm.harun.dev/api/v1/posts/P-68/reconcile-media-absent \
+  -H "Authorization: Bearer $CONTENT_MACHINE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"confirmed_absent":true}'
+```
+
+This only accepts an uncertain upload with an empty media-id list and an
+unchanged publish plan. It clears the checkpoint so the next retry uploads the
+URLs through Content Machine. If any media id exists, use the normal media
+reconciliation command instead.
+
 ### Reconcile an uncertain create
 
 PostSyncer does not accept an idempotency key on create. If a worker loses the
@@ -100,6 +117,22 @@ accepted the content; Content Machine preserves the group's raw `FAILED` status,
 stores the operator confirmation marker, and counts it as effectively delivered
 without losing the failure signal on later status syncs.
 
+If a read-only search confirms that no matching PostSyncer post exists, recover
+an uncertain post create through Content Machine instead of replaying it blindly:
+
+```bash
+curl -X POST https://cm.harun.dev/api/v1/posts/P-68/reconcile-create-absent \
+  -H "Authorization: Bearer $CONTENT_MACHINE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"confirmed_absent":true}'
+```
+
+This only accepts an uncertain create with a saved payload and an unchanged
+publish plan. It changes the current group to retryable while preserving its
+checkpointed media ids, so the next retry creates the post without uploading
+the same media again. Verify the matching workspace and payload are absent
+before calling it.
+
 ### Recover a drifted plan
 
 If local content changes after every external group has been checkpointed, a
@@ -117,10 +150,8 @@ snapshot. It rechecks each remote post before marking the operation successful;
 it never creates a new PostSyncer post. Use `--confirm-failed` only when a saved
 group is already an operator-confirmed remote `FAILED` record.
 
-`PublishPostJob` has a 900-second timeout and the dedicated `postsyncer`
-database queue has a 960-second visibility window. Its row lease and overlap
-lock make duplicate dispatches harmless, while leaving the scheduled recovery
-sweep free to re-enqueue a job if queue insertion fails.
+`PublishPostJob`'s row lease and overlap lock make duplicate dispatches harmless.
+The scheduled recovery sweep can re-enqueue a job if queue insertion fails.
 
 ## Settings → PostSyncer
 
@@ -205,10 +236,10 @@ now**.
 
 The dialog lets you pick:
 
-- **When** — datetime in the workspace timezone (default Asia/Dhaka), or Now
-- **Platforms** — intersection of the record's platforms, configured accounts,
+- **When:** datetime in the workspace timezone (default Asia/Dhaka), or Now
+- **Platforms:** intersection of the record's platforms, configured accounts,
   and post-type rules
-- **Ask platforms** — English Twitter/Threads/Bluesky photo posts need an
+- **Ask platforms:** English Twitter/Threads/Bluesky photo posts need an
   explicit confirm checkbox (same gate as Script Studio)
 
 Bilingual posts auto-split into separate PostSyncer calls per language,
@@ -231,11 +262,11 @@ into publish-now or expand a partial retry to other platforms.
 
 On the video show page, before scheduling:
 
-- **Video Drive URL** (`video_drive_url`) — required. A live Google Drive file
+- **Video Drive URL** (`video_drive_url`): required. A live Google Drive file
   share link. CM checks that Anyone with the link can fetch it, then sends
   PostSyncer the download form (`drive.usercontent.google.com/download?id=…`).
   A folder link or a private file is rejected.
-- **Cover Drive URL** (`cover_drive_url`) — optional. Same public-file rule.
+- **Cover Drive URL** (`cover_drive_url`): optional. Same public-file rule.
   Used as `content[0].cover_image` for YouTube / Instagram / Facebook.
 
 Paste in the video overview, or push from local via
@@ -274,26 +305,11 @@ GOOGLE_DRIVE_REDIRECT_URI=https://cm.example/settings/google-drive/callback
 Register the exact redirect URI in Google Cloud Console. The OAuth consent
 screen must allow the Drive scope for the account you connect.
 
-### Reconcile an uncertain create
-
-If a worker loses the response after `POST /posts`, first find the created post
-in the matching PostSyncer workspace. Verify its content, media, platforms,
-and schedule against the failed operation, then run this on the Content Machine
-deployment:
-
-```bash
-php artisan postsyncer:reconcile-post WORKSPACE_ID P-68 POSTSYNCER_POST_ID
-```
-
-The command calls `GET /posts/{id}` and only records the id when the workspace
-and group payload match. Retry the post afterwards; the reconciled group is
-checkpointed and won't be created again.
-
 ## Status tabs
 
 List pages mirror Script Studio's pipeline tabs with live counts.
 
-**Posts:** Ideation · Draft · Ready · Scheduled · Posted · Archived · Dropped
+**Posts:** Ideation · Draft · Ready · Scheduled · Posted · Blocked · Archived
 (default **Draft**). Ideation lists open post ideas (`kind = post`).
 
 **Videos:** Ideation · Draft · Pending · Ready · Recorded · Scheduled ·

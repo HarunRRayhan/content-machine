@@ -14,7 +14,6 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('media/gifs', [MediaLibraryController::class, 'gifs'])->name('media.gifs');
         Route::get('media/templates', [PostDesignTemplatesController::class, 'index'])->name('media.templates');
         Route::get('media/templates/{letter}', [PostDesignTemplatesController::class, 'show'])
-            ->where('letter', '[A-Fa-f]')
             ->name('media.templates.show');
 
         Route::post('media', [MediaLibraryController::class, 'store'])->name('media.store');

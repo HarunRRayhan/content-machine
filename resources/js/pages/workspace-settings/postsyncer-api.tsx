@@ -115,6 +115,7 @@ export default function PostsyncerApiSettings({
                                     Enable publishing from Content Machine
                                 </label>
                                 <InputError message={errors.publish_enabled} />
+                                <InputError message={errors.postsyncer} />
 
                                 <div className="flex flex-wrap items-center gap-4">
                                     <Button disabled={processing} type="submit">

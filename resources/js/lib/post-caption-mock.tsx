@@ -1,7 +1,8 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { CaptionPlatform } from '@/components/content/captions-panel';
 import ImageLightbox from '@/components/studio/image-lightbox';
+import MotionLightbox from '@/components/studio/motion-lightbox';
 import type { LangCode } from '@/lib/lang-meta';
 import type { PlatformKey } from '@/lib/platform-meta';
 import { PLATFORM_META, normalizePlatformKey } from '@/lib/platform-meta';
@@ -45,7 +46,7 @@ const PLATFORM_MOCKUP: Record<
     youtube: {
         label: 'YouTube',
         reactions: '👍 Like   💬 Comment   ↪ Share',
-        tip: 'Image posts are not supported on YouTube: video-only platform.',
+        tip: 'Image and carousel posts on YouTube are ask-gated: each publish needs explicit confirmation. PostSyncer support is unverified.',
     },
     twitter: {
         label: 'Twitter / X',
@@ -276,17 +277,132 @@ function MockLinkedInMedia({
     return <p className="empty mock-imgs-empty">No image on LinkedIn.</p>;
 }
 
+export type MotionSlide = {
+    filename: string;
+    url: string;
+    mime: string | null;
+};
+
+// Muted, looping MP4 thumbnails in the same grid as the still images. The whole
+// thumbnail is the button that opens the pop-up; the video ignores pointer events.
+// Each one plays only while it is at least 60% on screen. While the pop-up is
+// open (suspended) they stay paused.
+function MockMotionSlide({
+    slide,
+    suspended,
+    onOpen,
+    buttonRef,
+}: {
+    slide: MotionSlide;
+    suspended: boolean;
+    onOpen: () => void;
+    buttonRef: (el: HTMLButtonElement | null) => void;
+}) {
+    const ref = useRef<HTMLVideoElement>(null);
+
+    useEffect(() => {
+        const video = ref.current;
+
+        if (!video || typeof IntersectionObserver === 'undefined') {
+            return;
+        }
+
+        if (suspended) {
+            video.pause();
+
+            return;
+        }
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    video.play().catch(() => undefined);
+                } else {
+                    video.pause();
+                }
+            },
+            { threshold: 0.6 },
+        );
+        observer.observe(video);
+
+        return () => observer.disconnect();
+    }, [suspended]);
+
+    return (
+        <button
+            ref={buttonRef}
+            type="button"
+            className="mock-img-open mock-motion-open"
+            aria-label={`Open ${slide.filename}`}
+            onClick={onOpen}
+        >
+            <video
+                ref={ref}
+                src={slide.url}
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                aria-hidden="true"
+            />
+        </button>
+    );
+}
+
+function MockMotion({ slides }: { slides: MotionSlide[] }) {
+    const [openIndex, setOpenIndex] = useState<number | null>(null);
+    const thumbButtons = useRef<(HTMLButtonElement | null)[]>([]);
+    const lastOpened = useRef(0);
+
+    return (
+        <>
+            <div
+                className="mock-imgs mock-imgs-multi"
+                role="group"
+                aria-label="Motion carousel"
+            >
+                {slides.map((slide, index) => (
+                    <MockMotionSlide
+                        key={`${slide.filename}-${index}`}
+                        slide={slide}
+                        suspended={openIndex !== null}
+                        onOpen={() => {
+                            lastOpened.current = index;
+                            setOpenIndex(index);
+                        }}
+                        buttonRef={(el) => {
+                            thumbButtons.current[index] = el;
+                        }}
+                    />
+                ))}
+            </div>
+            <MotionLightbox
+                slides={slides}
+                startIndex={openIndex}
+                onClose={() => setOpenIndex(null)}
+                onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    thumbButtons.current[lastOpened.current]?.focus();
+                }}
+            />
+        </>
+    );
+}
+
 export function PostCaptionMock({
     platform,
     lang,
     handles,
     imageUrls,
+    motionSlides = [],
 }: {
     platform: CaptionPlatform;
     lang: LangCode;
     handles?: HandleDirectory;
     imageUrls: Record<string, string>;
+    motionSlides?: MotionSlide[];
 }) {
+    const [showStill, setShowStill] = useState(false);
     const key = normalizePlatformKey(platform.name);
     const meta = key ? PLATFORM_META[key] : null;
     const color = meta?.color ?? '#c23a22';
@@ -296,6 +412,8 @@ export function PostCaptionMock({
     );
     const cfg = key ? PLATFORM_MOCKUP[key] : null;
     const noHashtags = cfg?.noHashtags === true;
+    // Instagram's scheduled media is the motion set, so it never shows stills. Other platforms keep stills one toggle away.
+    const motionOnly = key === 'instagram';
     const bangla = lang === 'bn';
     const caption = platform.caption.trim();
     const firstComment = platform.first_comment.trim();
@@ -314,6 +432,14 @@ export function PostCaptionMock({
     const capMax = key ? CAPLIM[key] : undefined;
     const over = capMax !== undefined && caption.length > capMax;
     const label = cfg?.label ?? platform.name;
+    const backToMotion =
+        motionSlides.length > 0 ? (
+            <div className="mock-motion-toggle">
+                <button type="button" onClick={() => setShowStill(false)}>
+                    Show motion carousel
+                </button>
+            </div>
+        ) : null;
 
     return (
         <div className="mock-wrap">
@@ -348,17 +474,42 @@ export function PostCaptionMock({
                         </p>
                     </div>
                 )}
-                {key === 'linkedin' ? (
-                    <MockLinkedInMedia
-                        images={headImages}
-                        imageUrls={imageUrls}
-                    />
-                ) : headImages.length > 0 ? (
-                    <MockImages images={headImages} imageUrls={imageUrls} />
+                {motionSlides.length > 0 && (motionOnly || !showStill) ? (
+                    <>
+                        {motionOnly ? null : (
+                            <div className="mock-motion-toggle">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowStill(true)}
+                                >
+                                    Show still images
+                                </button>
+                            </div>
+                        )}
+                        <MockMotion slides={motionSlides} />
+                    </>
+                ) : key === 'linkedin' ? (
+                    <>
+                        {backToMotion}
+                        <MockLinkedInMedia
+                            images={headImages}
+                            imageUrls={imageUrls}
+                        />
+                    </>
                 ) : (
-                    <p className="empty mock-imgs-empty">
-                        No image on {label}.
-                    </p>
+                    <>
+                        {backToMotion}
+                        {headImages.length > 0 ? (
+                            <MockImages
+                                images={headImages}
+                                imageUrls={imageUrls}
+                            />
+                        ) : (
+                            <p className="empty mock-imgs-empty">
+                                No image on {label}.
+                            </p>
+                        )}
+                    </>
                 )}
                 {reactions ? <div className="mock-bar">{reactions}</div> : null}
                 {threadTweets.length > 0 ? (

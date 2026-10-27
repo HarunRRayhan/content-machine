@@ -4,10 +4,17 @@ use App\Http\Controllers\Api\V1\GoogleDriveApiController;
 use App\Http\Controllers\Api\V1\IdeasApiController;
 use App\Http\Controllers\Api\V1\MediaApiController;
 use App\Http\Controllers\Api\V1\MediaUrlsApiController;
+use App\Http\Controllers\Api\V1\NotificationsApiController;
+use App\Http\Controllers\Api\V1\PexelsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
 use App\Http\Controllers\Api\V1\VideosApiController;
+use App\Http\Controllers\Api\V1\VideoSeriesApiController;
+use App\Http\Controllers\Api\VersionController;
 use Illuminate\Support\Facades\Route;
+
+// Public, unauthenticated deploy fingerprint (commit, branch, deployment id).
+Route::get('version', VersionController::class)->middleware('throttle:60,1')->name('api.version');
 
 /*
 |--------------------------------------------------------------------------
@@ -94,6 +101,15 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:media:read')
         ->name('media-urls.check');
 
+    Route::post('notifications/telegram', [NotificationsApiController::class, 'store'])
+        ->middleware('auth.workspace-token:notifications:write')
+        ->name('notifications.telegram.store');
+
+    Route::get('notifications/telegram/{key}', [NotificationsApiController::class, 'show'])
+        ->where('key', '[A-Za-z0-9._:-]{1,120}')
+        ->middleware('auth.workspace-token:notifications:read')
+        ->name('notifications.telegram.show');
+
     Route::get('google-drive/files', [GoogleDriveApiController::class, 'files'])
         ->middleware('auth.workspace-token:drive:read')
         ->name('google-drive.files');
@@ -106,6 +122,18 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('videos', [VideosApiController::class, 'index'])
         ->middleware('auth.workspace-token:videos:read')
         ->name('videos.index');
+
+    Route::get('series', [VideoSeriesApiController::class, 'index'])
+        ->middleware('auth.workspace-token:videos:read')
+        ->name('series.index');
+
+    Route::put('series/{slug}', [VideoSeriesApiController::class, 'save'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('series.save');
+
+    Route::get('series/{slug}', [VideoSeriesApiController::class, 'show'])
+        ->middleware('auth.workspace-token:videos:read')
+        ->name('series.show');
 
     Route::post('videos', [VideosApiController::class, 'store'])
         ->middleware('auth.workspace-token:videos:write')
@@ -122,6 +150,22 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('videos/{human_id}/publish', [VideosApiController::class, 'publish'])
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.publish');
+
+    Route::post('videos/{human_id}/reconcile-create-absent', [VideosApiController::class, 'reconcileCreateAbsent'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-create-absent');
+
+    Route::post('videos/{human_id}/reconcile-media-absent', [VideosApiController::class, 'reconcileMediaAbsent'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-media-absent');
+
+    Route::post('videos/{human_id}/reschedule', [VideosApiController::class, 'reschedule'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reschedule');
+
+    Route::post('videos/{human_id}/reconcile-groups-deleted', [VideosApiController::class, 'reconcileGroupsDeleted'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile-groups-deleted');
 
     Route::get('posts', [PostsApiController::class, 'index'])
         ->middleware('auth.workspace-token:posts:read')
@@ -147,17 +191,49 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.documents');
 
+    Route::post('posts/{human_id}/videos', [PostsApiController::class, 'attachVideo'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.videos');
+
     Route::post('posts/{human_id}/publish', [PostsApiController::class, 'publish'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.publish');
+
+    Route::post('posts/{human_id}/approve', [PostsApiController::class, 'approve'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.approve');
+
+    Route::post('posts/{human_id}/reschedule', [PostsApiController::class, 'reschedule'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reschedule');
 
     Route::post('posts/{human_id}/reconcile', [PostsApiController::class, 'reconcile'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile');
 
+    Route::post('posts/{human_id}/reconcile-partial-failure', [PostsApiController::class, 'recoverPartialFailure'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile-partial-failure');
+
     Route::post('posts/{human_id}/reconcile-media', [PostsApiController::class, 'reconcileMedia'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reconcile-media');
+
+    Route::post('posts/{human_id}/reconcile-media-absent', [PostsApiController::class, 'reconcileMediaAbsent'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile-media-absent');
+
+    Route::post('posts/{human_id}/reconcile-create-absent', [PostsApiController::class, 'reconcileCreateAbsent'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.reconcile-create-absent');
+
+    Route::post('posts/{human_id}/abandon-retry', [PostsApiController::class, 'abandonRetry'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.abandon-retry');
+
+    Route::post('posts/{human_id}/rebase-retry-publish-now', [PostsApiController::class, 'rebaseRetryToPublishNow'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.rebase-retry-publish-now');
 
     Route::post('posts/{human_id}/repair-account-mapping', [PostsApiController::class, 'repairAccountMapping'])
         ->middleware('auth.workspace-token:posts:write')
@@ -170,6 +246,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::get('media', [MediaApiController::class, 'index'])
         ->middleware('auth.workspace-token:media:read')
         ->name('media.index');
+
+    Route::get('pexels/search', [PexelsApiController::class, 'search'])
+        ->middleware('auth.workspace-token:media:read')
+        ->name('pexels.search');
+
+    Route::post('pexels/import', [PexelsApiController::class, 'import'])
+        ->middleware('auth.workspace-token:media:write')
+        ->name('pexels.import');
 
     Route::get('media/{mediaAsset:public_id}/file', [MediaApiController::class, 'file'])
         ->middleware('auth.workspace-token:media:read')

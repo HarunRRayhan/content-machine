@@ -25,10 +25,18 @@ const POST_PIPELINE = [
 
 const DEFAULT_TIMEZONE = 'Asia/Dhaka';
 
+const POST_CATEGORIES = [
+    { key: 'default', label: 'Post' },
+    { key: 'morning', label: 'Morning post' },
+    { key: 'evening_carousel', label: 'Evening carousel' },
+] as const;
+
 type Props = {
     postId: number;
     title: string;
     status: string;
+    category: string;
+    blockedReason: string | null;
     platforms: string[];
     language?: string | null;
     templateMeta: {
@@ -217,6 +225,8 @@ export default function PostOverview({
     postId,
     title,
     status,
+    category,
+    blockedReason,
     platforms,
     language,
     templateMeta,
@@ -279,7 +289,7 @@ export default function PostOverview({
     const awaitingApproval = approvalState === 'pending';
     const scheduledAt = earliestWhen(groups, effectiveTimezone);
 
-    function advanceStatus(nextStatus: 'archived' | 'posted') {
+    function advanceStatus(nextStatus: 'archived' | 'draft' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {
             return;
         }
@@ -288,6 +298,18 @@ export default function PostOverview({
         router.patch(
             `/posts/${postId}`,
             { title, status: nextStatus },
+            {
+                preserveScroll: true,
+                onFinish: () => setBusy(false),
+            },
+        );
+    }
+
+    function changeCategory(nextCategory: string) {
+        setBusy(true);
+        router.patch(
+            `/posts/${postId}`,
+            { title, category: nextCategory },
             {
                 preserveScroll: true,
                 onFinish: () => setBusy(false),
@@ -443,6 +465,23 @@ export default function PostOverview({
                                     🗄️ Archive
                                 </button>
                             </>
+                        ) : studioStatus === 'blocked' ? (
+                            <>
+                                <span className="badge">⛔ Blocked</span>
+                                {blockedReason && (
+                                    <p className="schedule-it-hint">
+                                        {blockedReason}
+                                    </p>
+                                )}
+                                <button
+                                    type="button"
+                                    className="undo"
+                                    disabled={busy}
+                                    onClick={() => advanceStatus('draft')}
+                                >
+                                    ↩︎ Unblock
+                                </button>
+                            </>
                         ) : showPublishControls ? (
                             <PublishDialog
                                 disabled={!canPublish}
@@ -482,6 +521,26 @@ export default function PostOverview({
                                 : undefined
                         }
                     />
+                </div>
+            </section>
+            <section className="pane">
+                <div className="pane-head">
+                    <span className="k">Category</span>
+                </div>
+                <div className="m-4">
+                    <select
+                        aria-label="Post category"
+                        value={category}
+                        disabled={busy}
+                        onChange={(event) => changeCategory(event.target.value)}
+                        className="rounded-md border border-[var(--line)] bg-[var(--bg2)] px-3 py-2 text-sm"
+                    >
+                        {POST_CATEGORIES.map((option) => (
+                            <option key={option.key} value={option.key}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
                 </div>
             </section>
             {templateMeta && (

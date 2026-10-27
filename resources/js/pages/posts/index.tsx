@@ -36,6 +36,7 @@ type PostRow = {
         visual_identity: string;
     } | null;
     status: string;
+    blocked_reason: string | null;
     publish_state: string;
     language: string | null;
     platforms: string[];
@@ -80,7 +81,7 @@ const TAB_LABELS: Record<string, string> = {
     scheduled: 'Scheduled',
     posted: 'Posted',
     archived: 'Archived',
-    dropped: 'Dropped',
+    blocked: 'Blocked',
 };
 
 function paginationLabel(label: string): string {
@@ -344,6 +345,11 @@ export default function PostsIndex({
                                                         studioStatus
                                                     ] ?? row.status}
                                                 </span>
+                                                {row.blocked_reason && (
+                                                    <div className="mt-1 text-xs text-[var(--ink-faint)]">
+                                                        {row.blocked_reason}
+                                                    </div>
+                                                )}
                                                 {['queued', 'running'].includes(
                                                     row.publish_state,
                                                 ) && (

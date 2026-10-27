@@ -19,7 +19,20 @@ class RestoreApiTokenScopesMigrationTest extends TestCase
     public function test_it_removes_only_implicit_abilities_from_legacy_tokens(): void
     {
         $legacy = WorkspaceApiToken::factory()->create([
-            'abilities' => WorkspaceApiToken::ABILITIES,
+            'abilities' => [
+                'scratchpad:read',
+                'scratchpad:write',
+                'ideas:read',
+                'ideas:write',
+                'videos:read',
+                'videos:write',
+                'posts:read',
+                'posts:write',
+                'media:read',
+                'media:write',
+                'drive:read',
+                'drive:write',
+            ],
             'created_at' => '2026-08-20 00:00:00+00',
             'updated_at' => '2026-08-20 00:00:00+00',
         ]);

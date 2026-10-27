@@ -29,7 +29,7 @@ class PostDesignTemplatesControllerTest extends TestCase
         return [$user, $workspace];
     }
 
-    public function test_templates_index_lists_a_through_f(): void
+    public function test_templates_index_lists_only_active_catalog_entries(): void
     {
         $this->actingAsWorkspaceMember();
 
@@ -37,11 +37,16 @@ class PostDesignTemplatesControllerTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
                 ->component('media/templates/index')
-                ->has('templates', 6)
+                ->has('templates', 7)
                 ->where('templates.0.letter', 'A')
-                ->where('templates.5.letter', 'F')
+                ->where('templates.5.letter', 'G')
+                ->where('templates.6.letter', 'H')
                 ->where('templates.0.preview_url', asset('images/templates/template-a-light-data-driven.png'))
-                ->where('templates.5.preview_url', asset('images/templates/template-f-product-showcase.png'))
+                ->where('templates.5.slug', 'template-g-handwritten-explainer')
+                ->where('templates.5.directory', 'template-g-handwritten-explainer')
+                ->where('templates.5.name', 'Handwritten Blue Explainer')
+                ->where('templates.6.slug', 'template-h-dark-systems-explainer')
+                ->where('templates.6.preview_url', asset('images/templates/template-h-dark-systems-explainer.png'))
             );
     }
 
@@ -84,15 +89,57 @@ class PostDesignTemplatesControllerTest extends TestCase
         $this->get(route('media.templates.show', ['letter' => 'Z']))->assertNotFound();
     }
 
+    public function test_archived_template_metadata_remains_available_for_historical_posts(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        Post::factory()->create([
+            'workspace_id' => $workspace->id,
+            'human_id' => 'P-84',
+            'number' => 84,
+            'title' => 'Output gate',
+            'template' => 'J',
+            'status' => 'draft',
+        ]);
+
+        $this->get(route('media.templates.show', ['letter' => 'J']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('template.letter', 'J')
+                ->where('template.name', 'Trajectory Output Gate')
+                ->where('template.status', 'archived')
+                ->where('template.directory', 'archived/template-j-trajectory-output-gate')
+                ->where('template.successor', 'H')
+                ->has('posts', 1)
+                ->where('posts.0.human_id', 'P-84')
+            );
+    }
+
     public function test_post_design_template_catalog_covers_every_letter(): void
     {
-        $this->assertCount(6, PostDesignTemplate::all());
+        $this->assertSame(['A', 'B', 'C', 'D', 'F', 'G', 'H'], PostDesignTemplate::activeLetters());
+        $this->assertCount(7, PostDesignTemplate::all());
 
-        foreach (PostDesignTemplate::all() as $template) {
+        foreach (PostDesignTemplate::letters() as $letter) {
+            $template = PostDesignTemplate::from($letter);
+
             $this->assertFileExists(public_path("images/templates/{$template->slug}.png"));
+            $this->assertSame(
+                asset("images/templates/{$template->slug}.png"),
+                $template->toArray()['preview_url'],
+                "Template {$letter} should resolve its preview asset.",
+            );
         }
 
         $this->assertSame('D', PostDesignTemplate::from('d')->letter);
+        $this->assertSame('archived/template-i-linux-security-explainer', PostDesignTemplate::from('I')->directory);
+        $this->assertSame('archived', PostDesignTemplate::from('I')->status);
+        $this->assertSame('H', PostDesignTemplate::from('I')->successor);
+        $this->assertSame('archived/template-j-trajectory-output-gate', PostDesignTemplate::from('J')->directory);
+        $this->assertSame('archived', PostDesignTemplate::from('J')->status);
+        $this->assertSame('H', PostDesignTemplate::from('J')->successor);
+        $this->assertSame('archived/template-e-cheatsheet-doodle', PostDesignTemplate::from('E')->directory);
+        $this->assertSame('G', PostDesignTemplate::from('E')->successor);
         $this->assertNull(PostDesignTemplate::tryFrom(null));
     }
 }

@@ -5,6 +5,7 @@ namespace Tests\Feature\Console;
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -12,6 +13,15 @@ use Tests\TestCase;
 
 class ReconcileVideoPublishCommandTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
+        // Video media is downloaded from Drive before the file upload.
+        Http::fake(['drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200)]);
+    }
+
     use RefreshDatabase;
 
     public function test_it_verifies_and_checkpoints_an_uncertain_video(): void
@@ -50,9 +60,8 @@ class ReconcileVideoPublishCommandTest extends TestCase
         ];
 
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'message' => 'gateway timeout',
@@ -165,9 +174,8 @@ class ReconcileVideoPublishCommandTest extends TestCase
         ]);
 
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'id' => 99,

@@ -63,6 +63,34 @@ class EnqueuePostPublishActionTest extends TestCase
         });
     }
 
+    public function test_a_blocked_post_is_refused_before_anything_is_queued(): void
+    {
+        Queue::fake();
+
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'blocked',
+            'blocked_reason' => 'Scheduler cannot publish it.',
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        try {
+            (new EnqueuePostPublishAction)->handle($post, $workspace, [
+                'when' => '2026-09-02T09:20:00+06:00',
+                'platforms' => ['facebook'],
+            ]);
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('publish', $e->errors());
+            $this->assertStringContainsString('This post is blocked', $e->errors()['publish'][0]);
+            throw $e;
+        } finally {
+            Queue::assertNothingPushed();
+            $this->assertNull($post->refresh()->publish_progress);
+        }
+    }
+
     public function test_queue_insert_failure_rolls_back_and_releases_the_unique_lock(): void
     {
         $workspace = Workspace::factory()->create();

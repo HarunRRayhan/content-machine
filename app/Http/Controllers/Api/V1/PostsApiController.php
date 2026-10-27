@@ -2,20 +2,26 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
+use App\Actions\Posts\AttachPostMotionAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Actions\Postsyncer\ReschedulePostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
+use App\Data\Posts\AttachPostMotionData;
 use App\Data\Posts\UpdatePostData;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
+use App\Data\Postsyncer\ReschedulePostData;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\RepairPostAccountMappingRequest;
 use App\Http\Requests\Posts\StorePostDocumentRequest;
 use App\Http\Requests\Posts\StorePostImageRequest;
+use App\Http\Requests\Posts\StorePostMotionRequest;
 use App\Http\Resources\V1\PostResource;
 use App\Models\MediaAsset;
 use App\Models\Post;
@@ -24,6 +30,7 @@ use App\Models\Workspace;
 use App\Rules\AccessibleDriveUrl;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
+use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +39,8 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -65,6 +74,7 @@ class PostsApiController extends Controller
                 'language',
                 'slug',
                 'template',
+                'category',
                 'platforms',
                 'image_drive_urls',
                 'postsyncer',
@@ -102,7 +112,8 @@ class PostsApiController extends Controller
             'number' => ['nullable', 'integer', 'min:1'],
             'language' => ['nullable', 'string', 'max:8'],
             'slug' => ['nullable', 'string', 'max:255'],
-            'template' => ['nullable', 'string', 'size:1', Rule::in(['A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f'])],
+            'template' => ['nullable', 'string', 'size:1', Rule::in(PostDesignTemplate::apiLetters())],
+            'category' => ['nullable', 'string', Rule::in(Post::CATEGORIES)],
             'body' => ['nullable', 'string'],
             'captions' => ['nullable', 'array'],
             'platforms' => ['nullable', 'array'],
@@ -131,13 +142,15 @@ class PostsApiController extends Controller
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'language' => ['sometimes', 'nullable', 'string', 'max:8'],
             'slug' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'template' => ['sometimes', 'nullable', 'string', 'size:1', Rule::in(['A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f'])],
+            'template' => ['sometimes', 'nullable', 'string', 'size:1', Rule::in(PostDesignTemplate::apiLetters())],
+            'category' => ['sometimes', 'string', Rule::in(Post::CATEGORIES)],
             'body' => ['sometimes', 'nullable', 'string'],
             'captions' => ['sometimes', 'nullable', 'array'],
             'platforms' => ['sometimes', 'nullable', 'array'],
             'image_drive_urls' => ['sometimes', 'nullable', 'array'],
             'image_drive_urls.*' => ['string', 'url', 'max:2048', new AccessibleDriveUrl],
             'status' => ['sometimes', 'string', Rule::in(Post::STATUSES)],
+            'blocked_reason' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'postsyncer' => ['prohibited'],
             'publish_state' => ['prohibited'],
             'publish_error' => ['prohibited'],
@@ -160,6 +173,36 @@ class PostsApiController extends Controller
         $user = $user instanceof User ? $user : null;
 
         $post = $action->handle($post, $user, AttachPostImageData::fromApi($file));
+        $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
+        $created = $fresh->attachments()->count() > $alreadyAttached;
+
+        return (new PostResource($fresh))
+            ->response()
+            ->setStatusCode($created ? 201 : 200);
+    }
+
+    public function attachVideo(StorePostMotionRequest $request, string $humanId, AttachPostMotionAction $action): JsonResponse
+    {
+        $post = $this->resolvePost($humanId);
+        $alreadyAttached = $post->attachments()->count();
+
+        /** @var UploadedFile $file */
+        $file = $request->file('file');
+
+        $user = $request->user();
+        $user = $user instanceof User ? $user : null;
+
+        $filename = basename(trim((string) ($request->input('filename') ?: $file->getClientOriginalName())));
+        $filename = $filename !== '' && $filename !== '.' ? $filename : $file->getClientOriginalName();
+        $order = $request->input('order');
+
+        $post = $action->handle($post, $user, new AttachPostMotionData(
+            file: $file,
+            filename: $filename,
+            platform: (string) $request->input('platform'),
+            language: (string) $request->input('language'),
+            order: $order === null ? null : (int) $order,
+        ));
         $fresh = $post->fresh(['attachments.mediaAsset']) ?? $post;
         $created = $fresh->attachments()->count() > $alreadyAttached;
 
@@ -207,7 +250,52 @@ class PostsApiController extends Controller
                 : null,
         ], fn ($value) => $value !== null);
 
+        // Explicit platforms on an already-scheduled post mean "add these".
+        // The action enforces append-only rules and ignores this flag when
+        // the post has no PostSyncer groups yet.
+        if (is_array($options['platforms'] ?? null) && $options['platforms'] !== []) {
+            $options['append_missing'] = true;
+        }
+
         $post = $action->handle($post, $this->currentWorkspace(), $options);
+
+        return new PostResource($post->load(['attachments.mediaAsset']));
+    }
+
+    public function approve(Request $request, string $humanId, ApprovePostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+        $user = $request->user();
+
+        abort_unless($user instanceof User, 401, 'An API token with a user owner is required.');
+
+        $action->handle($post, $user);
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reschedule(
+        Request $request,
+        string $humanId,
+        ReschedulePostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'when' => ['required', 'string', 'max:64'],
+        ]);
+
+        try {
+            $post = $action->handle(
+                $post,
+                $this->currentWorkspace(),
+                ReschedulePostData::fromApiPayload($payload),
+            );
+        } catch (InvalidArgumentException|PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'when' => $exception->getMessage(),
+            ]);
+        }
 
         return new PostResource($post->load(['attachments.mediaAsset']));
     }
@@ -243,6 +331,28 @@ class PostsApiController extends Controller
         return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
+    public function recoverPartialFailure(
+        Request $request,
+        string $humanId,
+        PublishPostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'postsyncer_id' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $action->recoverPartialFailure($post, $payload['postsyncer_id']);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'postsyncer_id' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     public function reconcileMedia(Request $request, string $humanId, PublishPostAction $action): PostResource
     {
         $post = $this->resolvePost($humanId);
@@ -257,6 +367,78 @@ class PostsApiController extends Controller
         } catch (PostsyncerException $exception) {
             throw ValidationException::withMessages([
                 'media_ids' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reconcileMediaAbsent(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileMediaAbsent($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reconcileCreateAbsent(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileCreateAbsent($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function abandonRetry(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->abandonRetry($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'publish' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function rebaseRetryToPublishNow(string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        try {
+            $action->rebaseRetryToPublishNow($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'publish' => $exception->getMessage(),
             ]);
         }
 
@@ -289,13 +471,21 @@ class PostsApiController extends Controller
      * Stream a post image. Token-guarded; a media asset from another
      * workspace 404s rather than streaming.
      */
-    public function media(string $humanId, MediaAsset $mediaAsset): StreamedResponse
+    public function media(string $humanId, MediaAsset $mediaAsset): StreamedResponse|BinaryFileResponse
     {
         $workspace = $this->currentWorkspace();
 
         $post = $this->resolvePost($humanId);
         abort_if($mediaAsset->workspace_id !== $workspace->id, 404);
         abort_if(! $post->attachments()->where('media_asset_id', $mediaAsset->id)->exists(), 404);
+
+        // Video needs Range support for Safari playback; see PostsController::media.
+        if (str_starts_with((string) $mediaAsset->mime, 'video/')) {
+            return response()->file(Storage::disk($mediaAsset->disk)->path($mediaAsset->path), [
+                'Content-Type' => $mediaAsset->mime,
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
 
         return Storage::disk($mediaAsset->disk)->response(
             $mediaAsset->path,

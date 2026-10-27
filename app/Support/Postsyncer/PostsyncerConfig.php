@@ -86,8 +86,27 @@ class PostsyncerConfig
     public function postTypes(): array
     {
         $postTypes = $this->data['post_types'] ?? [];
+        $postTypes = is_array($postTypes) ? $postTypes : [];
 
-        return is_array($postTypes) ? $postTypes : [];
+        // Matrices saved before YouTube image posts existed have no youtube photo/carousel
+        // cell, and the planner skips a null cell silently. Fill only unset (missing or null)
+        // cells from the bundled matrix; any explicit stored state wins.
+        // shortcut: only youtube photo/carousel are filled; generalize if more cells get added later.
+        if (! ScriptStudioPostTypes::isEmpty($postTypes)) {
+            $platforms = is_array($postTypes['platforms'] ?? null) ? $postTypes['platforms'] : [];
+            $youtube = is_array($platforms['youtube'] ?? null) ? $platforms['youtube'] : [];
+
+            foreach (['photo', 'carousel'] as $postType) {
+                if (($youtube[$postType] ?? null) === null) {
+                    $youtube[$postType] = ScriptStudioPostTypes::defaults()['platforms']['youtube'][$postType] ?? null;
+                }
+            }
+
+            $platforms['youtube'] = $youtube;
+            $postTypes['platforms'] = $platforms;
+        }
+
+        return $postTypes;
     }
 
     public function publishEnabled(): bool
@@ -97,7 +116,11 @@ class PostsyncerConfig
 
     public function videoPublishEnabled(): bool
     {
-        return (bool) ($this->data['video_publish_enabled'] ?? false);
+        // Video publishing now has the same checkpoint, retry, and
+        // reconciliation fence as post publishing. Keep an explicit false as
+        // an emergency stop, but do not make every existing workspace opt in
+        // to a feature that is already ready for the owner's publish command.
+        return (bool) ($this->data['video_publish_enabled'] ?? true);
     }
 
     public function defaultLanguage(): string

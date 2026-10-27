@@ -64,7 +64,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bengali');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bengali', model: 'gpt-4o-transcribe');
             }
         };
 
@@ -73,7 +73,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         $transcription->refresh();
         $this->assertSame('done', $transcription->status);
         $this->assertSame('openai', $transcription->provider);
-        $this->assertSame('whisper-1', $transcription->model);
+        $this->assertSame('gpt-4o-transcribe', $transcription->model);
         $this->assertSame('bengali', $transcription->language);
         $this->assertSame('transcribed text', $transcription->text);
 
@@ -126,7 +126,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
             {
                 $this->request->update(['state' => TelegramPostRequest::CANCELLED]);
 
-                return AiTranscriptionResult::success(text: 'transcribed after cancellation', language: 'bn');
+                return AiTranscriptionResult::success(text: 'transcribed after cancellation', language: 'bn', model: 'whisper-1');
             }
         };
 
@@ -167,7 +167,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bengali');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bengali', model: 'whisper-1');
             }
         };
 
@@ -205,7 +205,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn', model: 'whisper-1');
             }
         };
         (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
@@ -257,7 +257,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn', model: 'whisper-1');
             }
         };
 
@@ -296,7 +296,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn', model: 'whisper-1');
             }
         };
         (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
@@ -332,7 +332,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn', model: 'whisper-1');
             }
         };
         (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
@@ -366,7 +366,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
         {
             public function transcribe($credential, $audioContents, $filename, $mimeType): AiTranscriptionResult
             {
-                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn');
+                return AiTranscriptionResult::success(text: 'transcribed text', language: 'bn', model: 'whisper-1');
             }
         };
         (new TranscribeVoiceNoteAction($client, new AiProviderCredentialResolver))->handle($transcription);
@@ -506,7 +506,7 @@ class TranscribeVoiceNoteActionTest extends TestCase
 
                 return $credential->api_key === 'sk-first'
                     ? AiTranscriptionResult::failure('first provider is down')
-                    : AiTranscriptionResult::success(text: 'from the second provider', language: null);
+                    : AiTranscriptionResult::success(text: 'from the second provider', language: null, model: 'whisper-1');
             }
         };
 

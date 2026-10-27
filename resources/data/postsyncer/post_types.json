@@ -17,7 +17,9 @@
             "reel": "on"
         },
         "youtube": {
-            "reel": "on"
+            "reel": "on",
+            "photo": "ask",
+            "carousel": "ask"
         },
         "twitter": {
             "text": "on",
@@ -54,9 +56,10 @@
         },
         "bangla": {
             "twitter": {
-                "text": "off",
-                "photo": "off",
-                "thread": "off"
+                "text": "on",
+                "photo": "on",
+                "thread": "off",
+                "reel": "on"
             },
             "linkedin": {
                 "text": null,

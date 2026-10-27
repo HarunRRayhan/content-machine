@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property string|null $language
  * @property string|null $slug
  * @property string|null $template
+ * @property string $category
  * @property string|null $body
  * @property array<string, mixed>|null $captions
  * @property array<string, mixed>|null $platforms
@@ -41,6 +42,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property CarbonImmutable|null $approved_at
  * @property int|null $approved_by_user_id
  * @property string $status
+ * @property string|null $blocked_reason
  * @property int|null $created_by_user_id
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
@@ -55,8 +57,8 @@ class Post extends Model
         'ready',
         'scheduled',
         'posted',
+        'blocked',
         'archived',
-        'dropped',
     ];
 
     public const PUBLISH_STATES = [
@@ -65,6 +67,13 @@ class Post extends Model
         'running',
         'succeeded',
         'failed',
+    ];
+
+    /** Calendar color group; metadata only, never resets approval. */
+    public const CATEGORIES = [
+        'default',
+        'morning',
+        'evening_carousel',
     ];
 
     public const APPROVAL_STATES = [
@@ -84,6 +93,7 @@ class Post extends Model
         'language',
         'slug',
         'template',
+        'category',
         'body',
         'captions',
         'platforms',
@@ -98,6 +108,7 @@ class Post extends Model
         'approved_at',
         'approved_by_user_id',
         'status',
+        'blocked_reason',
         'created_by_user_id',
     ];
 

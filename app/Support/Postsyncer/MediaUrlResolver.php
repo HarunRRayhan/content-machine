@@ -75,23 +75,31 @@ class MediaUrlResolver
     }
 
     /**
-     * First attached post document (LinkedIn carousel PDF), if any.
+     * Newest attached post document (LinkedIn carousel PDF), if any.
+     *
+     * Document uploads replace the working carousel generation. Keep the
+     * newest attachment as the source of truth even when older attachments
+     * remain in a post's history.
      */
     public function linkedinDocumentUrl(Post $post): ?string
     {
         $post->loadMissing(['attachments.mediaAsset']);
 
-        foreach ($post->attachments->sortBy('position') as $attachment) {
-            if ($attachment->role !== 'document') {
-                continue;
-            }
+        $documents = $post->attachments
+            ->filter(fn ($attachment): bool => $attachment->role === 'document')
+            ->sort(fn ($left, $right): int => [
+                $right->position,
+                $right->id,
+            ] <=> [
+                $left->position,
+                $left->id,
+            ]);
 
+        foreach ($documents as $attachment) {
             $media = $attachment->mediaAsset;
-            if ($media === null || ! $this->attachmentIsReadable($media)) {
-                continue;
+            if ($media !== null && $this->attachmentIsReadable($media)) {
+                return $this->signedPostMediaUrl($post, $media);
             }
-
-            return $this->signedPostMediaUrl($post, $media);
         }
 
         return null;
@@ -122,7 +130,8 @@ class MediaUrlResolver
         $urls = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
-            if ($attachment->role === 'document') {
+            // Motion slides are preview-only; PostSyncer takes the image set.
+            if (in_array($attachment->role, ['document', 'motion'], true)) {
                 continue;
             }
 
@@ -146,7 +155,7 @@ class MediaUrlResolver
         $map = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
-            if ($attachment->role === 'document') {
+            if (in_array($attachment->role, ['document', 'motion'], true)) {
                 continue;
             }
 
