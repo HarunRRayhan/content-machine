@@ -1089,7 +1089,9 @@ class PublishPostAction
      * Rebase a failed partial schedule whose requested time has passed onto a
      * publish-now retry. This is deliberately narrower than changing publish
      * options: every completed group must still be remotely verifiable as the
-     * original published group, and only the unfinished groups get created.
+     * original group, remotely PUBLISHED or FAILED (a FAILED group stays
+     * completed with its status preserved), and only the unfinished groups
+     * get created.
      */
     public function rebaseRetryToPublishNow(Post $post): void
     {
@@ -1209,19 +1211,21 @@ class PublishPostAction
                 $oldGroup,
                 $mediaIds,
                 $postId,
-                false,
+                true,
                 $expectedPayload,
             );
 
-            if (strtoupper((string) ($remote['status'] ?? '')) !== 'PUBLISHED') {
+            // A remotely FAILED group is terminal: keep it as completed, never retry it here.
+            $remoteStatus = strtoupper((string) ($remote['status'] ?? ''));
+            if (! in_array($remoteStatus, ['PUBLISHED', 'FAILED'], true)) {
                 throw new PostsyncerException(
-                    'Every completed group must be PUBLISHED before a schedule can be rebased to publish-now.',
+                    'Every completed group must be PUBLISHED or FAILED before a schedule can be rebased to publish-now.',
                 );
             }
 
             $rebased = $completed;
             $rebased['group_key'] = $newPlan['groups'][$index]['group_key'];
-            $rebased['status'] = 'PUBLISHED';
+            $rebased['status'] = $remoteStatus;
             $rebased['scheduled_at'] = null;
             $rebased['platforms'] = $newGroup->platforms;
             $rebased['language'] = $newGroup->language;
