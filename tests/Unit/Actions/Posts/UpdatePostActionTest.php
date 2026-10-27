@@ -644,6 +644,31 @@ class UpdatePostActionTest extends TestCase
         $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + ['Spanish' => ['title' => 'x', 'caption' => 'y']]]);
     }
 
+    public function test_a_scheduled_post_cannot_add_a_part_that_shares_an_existing_language(): void
+    {
+        // "Bangla 2" and "BN" sort beside the stored parts under jsonb key
+        // ordering and resolve to an existing language.
+        foreach (['Bangla 2', 'bn', 'A English', 'main'] as $part) {
+            $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), ['language' => 'en']));
+            $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + [
+                $part => ['linkedin' => ['caption' => 'LinkedIn teaser']],
+            ]]);
+        }
+
+        $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+            'captions' => ['Bangla' => $this->scheduledBilingualPost()['captions']['Bangla']],
+        ]));
+        $this->assertLockedUpdateRefused($post, ['captions' => $post->captions + [
+            'English' => ['linkedin' => ['caption' => 'one']],
+            'English 2' => ['bluesky' => ['caption' => 'two']],
+        ]]);
+
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['captions' => $post->captions + [
+            'English' => ['linkedin' => ['caption' => 'one']],
+        ]], $post));
+        $this->assertSame('one', $post->refresh()->captions['English']['linkedin']['caption']);
+    }
+
     public function test_re_sending_identical_captions_in_another_key_order_keeps_approval(): void
     {
         $post = Post::factory()->create($this->scheduledBilingualPost());

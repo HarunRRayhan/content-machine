@@ -478,6 +478,12 @@ class PostPublishPlanner
         return $this->resolveMediaUrls($post, $platformData, $defaultMediaUrls);
     }
 
+    /** The language a nested captions part resolves to, as captionsByLanguage reads it. */
+    public function partLanguage(Post $post, string $part): string
+    {
+        return $this->languageFromPart($part) ?? $this->resolveLanguage($post);
+    }
+
     private function languageFromPart(?string $part): ?string
     {
         if ($part === null || trim($part) === '') {

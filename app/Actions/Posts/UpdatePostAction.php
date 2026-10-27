@@ -222,6 +222,26 @@ class UpdatePostAction
     private function onlyAddsPlannedPairs(Post $post, array $captions, array $added): bool
     {
         $planner = $this->planner ?? app(PostPublishPlanner::class);
+        $stored = $post->captions ?? [];
+
+        // jsonb reorders object keys, so a new part sharing a language with
+        // another part could later merge over it in a different order than
+        // validated here. A new part must bring a language of its own.
+        if (! $this->isFlatCaptionMap($stored)) {
+            $languages = [];
+            foreach (array_keys($stored) as $part) {
+                $languages[$planner->partLanguage($post, (string) $part)] = true;
+            }
+
+            foreach (array_keys(array_diff_key($captions, $stored)) as $part) {
+                $language = $planner->partLanguage($post, (string) $part);
+                if (isset($languages[$language])) {
+                    return false;
+                }
+                $languages[$language] = true;
+            }
+        }
+
         $before = $planner->captionsByLanguage($post);
         $after = $planner->captionsByLanguage((clone $post)->forceFill(['captions' => $captions]));
 
