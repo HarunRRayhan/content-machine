@@ -16,6 +16,7 @@ class PostsyncerException extends Exception
         public readonly bool $outcomeUnknown = false,
         public readonly bool $responseReceived = false,
         public readonly bool $safeToRetry = false,
+        public readonly ?int $retryAfter = null,
     ) {
         parent::__construct($message, $code, $previous);
     }
@@ -30,6 +31,7 @@ class PostsyncerException extends Exception
 
         $status = $response->status();
         $outcomeUnknown = in_array($status, [408, 425, 429], true) || $status >= 500;
+        $retryAfter = $response->header('Retry-After');
 
         return new self(
             "PostSyncer API error {$status}: {$message}",
@@ -38,6 +40,7 @@ class PostsyncerException extends Exception
             $outcomeUnknown,
             $outcomeUnknown,
             true,
+            retryAfter: ctype_digit($retryAfter) ? (int) $retryAfter : null,
         );
     }
 }

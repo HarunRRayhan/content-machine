@@ -10,6 +10,7 @@ use App\Models\Idea;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -29,6 +30,7 @@ class VideosApiTest extends TestCase
     {
         parent::setUp();
 
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
         $this->workspace = Workspace::factory()->create();
         $this->token = (new CreateWorkspaceApiTokenAction)->handle(
             $this->workspace,
@@ -562,9 +564,9 @@ class VideosApiTest extends TestCase
         ]);
 
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
+            'drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
             ], 200),
             'postsyncer.com/api/v1/posts' => Http::response([
                 'message' => 'temporary outage',
@@ -626,7 +628,8 @@ class VideosApiTest extends TestCase
         ]);
 
         Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
+            'drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
                 'message' => 'temporary outage',
             ], 503),
         ]);

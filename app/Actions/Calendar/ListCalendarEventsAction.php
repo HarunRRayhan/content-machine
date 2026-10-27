@@ -38,6 +38,7 @@ final class ListCalendarEventsAction
                 $post->title,
                 $post->postsyncer,
                 $timezone,
+                'post_'.$post->category,
             ) as $event) {
                 $events[] = $event;
             }
@@ -51,6 +52,7 @@ final class ListCalendarEventsAction
                 $video->title,
                 $video->postsyncer,
                 $timezone,
+                $video->language === 'en' ? 'video_en' : 'video_bn',
             ) as $event) {
                 $events[] = $event;
             }
