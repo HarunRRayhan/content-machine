@@ -23,6 +23,7 @@ final class CollectCalendarOccurrences
         string $title,
         ?array $postsyncer,
         string $timezone,
+        string $category = '',
     ): array {
         $groups = $postsyncer['groups'] ?? null;
 
@@ -37,7 +38,7 @@ final class CollectCalendarOccurrences
                 continue;
             }
 
-            $event = $this->fromGroup($kind, $id, $humanId, $title, $group, $timezone);
+            $event = $this->fromGroup($kind, $id, $humanId, $title, $group, $timezone, $category);
 
             if ($event === null) {
                 continue;
@@ -72,6 +73,7 @@ final class CollectCalendarOccurrences
         string $title,
         array $group,
         string $timezone,
+        string $category,
     ): ?CalendarEventData {
         $publishedAt = $this->stringOrNull($group['published_at'] ?? null);
         $scheduledAt = $this->stringOrNull($group['scheduled_at'] ?? null);
@@ -100,6 +102,7 @@ final class CollectCalendarOccurrences
             state: $state,
             at: $at->toIso8601String(),
             date: $at->toDateString(),
+            category: $category,
         );
     }
 

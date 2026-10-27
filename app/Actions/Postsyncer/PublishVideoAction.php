@@ -117,7 +117,7 @@ class PublishVideoAction
                         }
 
                         if ($group->mediaUrls !== []) {
-                            $mediaIds = $client->uploadFromUrls(
+                            $mediaIds = $client->uploadFilesFromUrls(
                                 $group->workspaceId,
                                 $group->mediaUrls,
                                 $idempotencyKey.':media',

@@ -18,11 +18,13 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public const TIMEOUT_SECONDS = 180;
+    // Video media is downloaded and re-uploaded as files (up to ~300 MB per
+    // video), so match the post job and the worker's 900-second timeout.
+    public const TIMEOUT_SECONDS = 900;
 
     public const UNIQUE_FOR_SECONDS = 3600;
 
-    public const OVERLAP_EXPIRES_AFTER_SECONDS = 240;
+    public const OVERLAP_EXPIRES_AFTER_SECONDS = 1020;
 
     public int $timeout = self::TIMEOUT_SECONDS;
 
