@@ -6,6 +6,7 @@ use App\Http\Controllers\Settings\GeneralSettingsController;
 use App\Http\Controllers\Settings\GoogleDriveController;
 use App\Http\Controllers\Settings\PexelsSettingsController;
 use App\Http\Controllers\Settings\PostsyncerSettingsController;
+use App\Http\Controllers\Settings\SocialreinsSettingsController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Controllers\Telegram\TelegramBotLinkController;
 use App\Http\Middleware\SetCurrentWorkspace;
@@ -38,6 +39,9 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::permanentRedirect('postsyncer/connecting', '/settings/postsyncer');
         Route::permanentRedirect('postsyncer/bangla', '/settings/postsyncer/workspaces');
         Route::permanentRedirect('postsyncer/english', '/settings/postsyncer/workspaces');
+
+        Route::get('socialreins', [SocialreinsSettingsController::class, 'edit'])->name('socialreins.edit');
+        Route::put('socialreins', [SocialreinsSettingsController::class, 'update'])->name('socialreins.update');
 
         Route::get('ai-providers', [AiProviderCredentialsController::class, 'index'])->name('ai-providers.index');
         Route::post('ai-providers', [AiProviderCredentialsController::class, 'store'])->name('ai-providers.store');

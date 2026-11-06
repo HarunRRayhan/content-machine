@@ -39,6 +39,10 @@ Schedule::command('cm:requeue-legacy-media-jobs')
     ->everyMinute()
     ->withoutOverlapping(2);
 
+Schedule::command('socialreins:reconcile')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10);
+
 Schedule::command('postsyncer:dispatch-pending-publishes')
     ->everyMinute()
     ->withoutOverlapping(2);

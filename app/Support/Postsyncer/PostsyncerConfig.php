@@ -37,6 +37,17 @@ class PostsyncerConfig
         return new self(is_array($postsyncer) ? $postsyncer : []);
     }
 
+    /**
+     * Build a config from raw settings, for callers (the SocialReins driver) that reuse the
+     * planners with their own language and post-type settings.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self($data);
+    }
+
     public function apiKey(): ?string
     {
         $encrypted = $this->data['api_key'] ?? null;
