@@ -22,18 +22,21 @@ use InvalidArgumentException;
  * request per language (one set and token each), and send it with a stable
  * Idempotency-Key.
  *
- * A request that got no answer stays `pending` and is resent byte for byte under the same
- * key, so a retry days later returns the first result instead of posting twice. A request
- * brain refused (4xx) created nothing and was stored with its key, so the next attempt is a
- * new sequence with a new key. After a partial failure a retry plans again but sends only
- * the failed platforms: never one that has a published target, a remote id or thread parts,
- * because brain posts to every account of a platform and would repost what is already live.
+ * - A request that got no answer stays `pending`. The next run asks `GET /idempotency/{key}`
+ *   what the key made; only when brain has nothing stored is the frozen body resent, byte
+ *   for byte under the same key.
+ * - A request brain refused (4xx) created nothing and was stored with its key, so the next
+ *   attempt is a new sequence with a new key.
+ * - A group with failed targets is never recreated: `POST /post-groups/{id}/retry` re-queues
+ *   only its failed targets that are not ambiguous (each attempt has its own key). Targets
+ *   brain reports as `outcome_unknown` are left for the user to check on the platform.
  */
 class PublishToSocialreinsAction
 {
     public function __construct(
         private readonly SettleSocialreinsSubjectAction $settle,
         private readonly ReconcileSocialreinsGroupsAction $reconcile,
+        private readonly ResolveSocialreinsGroupAction $resolve,
     ) {}
 
     /** @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options */
@@ -46,8 +49,26 @@ class PublishToSocialreinsAction
         }
 
         try {
-            foreach ($this->rowsToSend($subject, $options) as $row) {
-                $this->send($row);
+            $rows = SocialreinsResults::rowsOf($subject);
+            $pending = array_values(array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::PENDING));
+
+            if ($pending !== []) {
+                foreach ($pending as $row) {
+                    if ($this->resolve->handle($row) === ResolveSocialreinsGroupAction::MISSING) {
+                        $this->send($row);
+                    }
+                }
+            } else {
+                $fresh = $this->createRows($subject, $rows, $options);
+                $retried = $this->retryFailedGroups($rows);
+
+                if ($fresh === [] && $retried === 0) {
+                    throw new SocialreinsException($this->nothingToSend($rows));
+                }
+
+                foreach ($fresh as $row) {
+                    $this->send($row);
+                }
             }
         } catch (SocialreinsException|PostsyncerException|InvalidArgumentException $exception) {
             $this->markFailed($subject, $exception->getMessage());
@@ -92,25 +113,16 @@ class PublishToSocialreinsAction
     }
 
     /**
-     * @param  array<string, mixed>  $options
-     * @return list<SocialreinsGroup>
-     */
-    private function rowsToSend(Post|Video $subject, array $options): array
-    {
-        $rows = SocialreinsResults::rowsOf($subject);
-        $pending = array_values(array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::PENDING));
-
-        return $pending !== [] ? $pending : $this->createRows($subject, $rows, $options);
-    }
-
-    /**
+     * Plan, and freeze a request for every planned language that has no live group yet. A
+     * language that already has posts at SocialReins is never planned again: its failed
+     * targets are retried in place.
+     *
      * @param  list<SocialreinsGroup>  $rows
      * @param  array<string, mixed>  $options
      * @return list<SocialreinsGroup>
      */
     private function createRows(Post|Video $subject, array $rows, array $options): array
     {
-        $rows = $this->refreshedRows($subject, $rows);
         $workspace = $subject->workspace;
         $config = SocialreinsConfig::fromWorkspace($workspace);
         $video = $subject instanceof Video;
@@ -119,27 +131,25 @@ class PublishToSocialreinsAction
         /** @var list<PublishGroup> $groups */
         $groups = $planner->plan($subject, $config->planningConfig($workspace), $options);
 
+        $live = $this->liveLanguages($rows);
         $byLanguage = [];
         foreach ($groups as $group) {
-            $byLanguage[$group->language][] = $group;
+            if (! in_array($group->language, $live, true)) {
+                $byLanguage[$group->language][] = $group;
+            }
         }
 
-        $only = $this->platformsStillToSend($rows);
         $builder = new PostGroupPayloadBuilder($config);
         $payloads = [];
         foreach ($byLanguage as $language => $languageGroups) {
-            $payload = $builder->build($language, $languageGroups, $video, $only[$language] ?? null);
+            $payload = $builder->build($language, $languageGroups, $video);
             if ($payload !== null) {
                 $payloads[$language] = PostGroupPayloadBuilder::encode($payload);
             }
         }
 
         if ($payloads === []) {
-            $partial = SocialreinsResults::withState(SocialreinsResults::byPlatform($rows), SocialreinsResults::PARTIAL);
-
-            throw new SocialreinsException($partial->isNotEmpty()
-                ? SettleSocialreinsSubjectAction::partialMessage($partial)
-                : 'Nothing to send: no platform is enabled for this post, or it is already published or still publishing.');
+            return [];
         }
 
         $kind = $video ? 'video' : 'post';
@@ -172,63 +182,142 @@ class PublishToSocialreinsAction
     }
 
     /**
-     * Before deciding what to resend, ask brain for the full picture of every group with a
-     * failure: a webhook does not say whether an account or a thread part already went out.
-     * When brain cannot be asked, nothing is resent.
+     * Languages with a created group that still has posts (not all taken down).
      *
      * @param  list<SocialreinsGroup>  $rows
-     * @return list<SocialreinsGroup>
+     * @return list<string>
      */
-    private function refreshedRows(Post|Video $subject, array $rows): array
+    private function liveLanguages(array $rows): array
     {
-        $checked = false;
-        foreach ($rows as $row) {
-            $states = array_column(SocialreinsResults::byPlatform([$row]), 'state');
-            if ($row->state === SocialreinsGroup::CREATED
-                && array_intersect($states, [SocialreinsResults::FAILED, SocialreinsResults::PARTIAL]) !== []) {
-                if (! $this->reconcile->reconcileGroup($row)) {
-                    throw new SocialreinsException(
-                        "Could not ask SocialReins about the failed posts of {$row->language}, so CM cannot tell "
-                        .'whether part of them is already live. Nothing was resent; try again shortly.'
-                    );
-                }
-                $checked = true;
+        $live = [];
+        foreach (SocialreinsResults::byPlatform($rows) as $key => $platform) {
+            if ($platform['state'] !== SocialreinsResults::DELETED) {
+                $live[] = explode(':', $key, 2)[0];
             }
         }
 
-        return $checked ? SocialreinsResults::rowsOf($subject) : $rows;
+        return array_values(array_unique($live));
     }
 
     /**
-     * A language that already has posts at SocialReins resends only its failed platforms;
-     * a language with none (or only taken-down ones) goes out in full.
+     * Retry every created group that has a failed target. Brain decides what is safe: it
+     * re-queues only failed targets that are not ambiguous and lists the rest as skipped.
      *
      * @param  list<SocialreinsGroup>  $rows
-     * @return array<string, list<string>>
+     * @return int groups a retry was sent for
      */
-    private function platformsStillToSend(array $rows): array
+    private function retryFailedGroups(array $rows): int
     {
-        $byLanguage = [];
-        foreach (SocialreinsResults::byPlatform($rows) as $key => $platform) {
-            [$language, $name] = explode(':', $key, 2);
-            $byLanguage[$language][$name] = $platform['state'];
-        }
+        $sent = 0;
 
-        $only = [];
-        foreach ($byLanguage as $language => $states) {
-            if (array_unique(array_values($states)) === [SocialreinsResults::DELETED]) {
+        foreach ($rows as $row) {
+            if ($row->state !== SocialreinsGroup::CREATED
+                || ! $this->hasRetryable(SocialreinsResults::byPlatform([$row], requireComplete: false))) {
                 continue;
             }
-            $only[$language] = array_keys(array_filter($states, fn (string $state): bool => $state === SocialreinsResults::FAILED));
+
+            // A webhook names one target; the retry should act on the whole group as it is now.
+            if (! $this->reconcile->reconcileGroup($row)) {
+                throw new SocialreinsException(
+                    "Could not ask SocialReins about the failed posts of {$row->language}. Nothing was retried; try again shortly."
+                );
+            }
+
+            if (! $this->hasRetryable(SocialreinsResults::byPlatform([$row->refresh()], requireComplete: false))) {
+                continue;
+            }
+
+            $this->retryGroup($row);
+            $sent++;
         }
 
-        return $only;
+        return $sent;
+    }
+
+    /** @param  array<string, array<string, mixed>>  $platforms */
+    private function hasRetryable(array $platforms): bool
+    {
+        return array_intersect(array_column($platforms, 'state'), [SocialreinsResults::FAILED, SocialreinsResults::PARTIAL]) !== [];
+    }
+
+    private function retryGroup(SocialreinsGroup $row): void
+    {
+        $client = new SocialreinsClient(SocialreinsConfig::fromWorkspace($row->workspace), $row->language);
+        // One key per attempt: the retry has no body, so a reused key would replay an old answer.
+        $key = "cm:ws{$row->workspace_id}:retry:{$row->group_id}:{$row->retry_attempt}";
+
+        try {
+            $body = $client->retryGroup((string) $row->group_id, $key);
+        } catch (SocialreinsException $exception) {
+            // Brain stored this answer under the key, so the next attempt needs a new one.
+            if ($exception->isDefinitive()) {
+                $row->mutate(function (SocialreinsGroup $locked): void {
+                    $locked->retry_attempt++;
+                });
+            }
+
+            match ($exception->errorCode) {
+                'outcome_unknown' => $this->flagUnknown($row, (array) ($exception->body['targets'] ?? [])),
+                // Still going out, or nothing failed any more: the settle that follows says which.
+                'publish_in_progress', 'nothing_to_retry' => null,
+                default => throw $exception,
+            };
+
+            return;
+        }
+
+        $at = time();
+        $unknown = array_values(array_filter(array_map(
+            fn (mixed $skipped): ?string => is_array($skipped) && is_string($skipped['target_id'] ?? null) ? $skipped['target_id'] : null,
+            $body['skipped_targets'],
+        )));
+
+        $row->mutate(function (SocialreinsGroup $locked) use ($body, $at, $unknown): void {
+            $results = $locked->results ?? [];
+            foreach ($body['posts'] as $post) {
+                if (is_array($post) && is_string($post['id'] ?? null)) {
+                    $results[$post['id']] = SocialreinsResults::afterRetry(
+                        $results[$post['id']] ?? ['targets' => []],
+                        SocialreinsResults::fromBrainPost($post, $at),
+                        $at,
+                        $unknown,
+                    );
+                }
+            }
+            $locked->results = $results;
+            $locked->expected_targets = $body['expected_targets'];
+            $locked->retry_attempt++;
+        });
+    }
+
+    /** @param  array<mixed>  $targets  brain's `targets` of a 409 outcome_unknown */
+    private function flagUnknown(SocialreinsGroup $row, array $targets): void
+    {
+        $row->mutateResults(function (array $results) use ($targets): array {
+            foreach ($targets as $target) {
+                if (is_array($target) && isset($results[$target['post_id'] ?? '']['targets'][$target['target_id'] ?? ''])) {
+                    $results[$target['post_id']]['targets'][$target['target_id']]['unknown'] = true;
+                }
+            }
+
+            return $results;
+        });
+    }
+
+    /** @param  list<SocialreinsGroup>  $rows */
+    private function nothingToSend(array $rows): string
+    {
+        $platforms = SocialreinsResults::byPlatform($rows);
+        $unknown = SocialreinsResults::withState($platforms, SocialreinsResults::UNKNOWN);
+
+        return $unknown->isNotEmpty()
+            ? SettleSocialreinsSubjectAction::unknownMessage($unknown)
+            : 'Nothing to send: no platform is enabled for this post, or it is already published or still publishing.';
     }
 
     private function send(SocialreinsGroup $row): void
     {
         $client = new SocialreinsClient(SocialreinsConfig::fromWorkspace($row->workspace), $row->language);
-        $at = time();
 
         try {
             $body = $client->createGroup($row->idempotency_key, $row->request);
@@ -236,26 +325,19 @@ class PublishToSocialreinsAction
             $row->forceFill([
                 // A stored 4xx created nothing and would replay forever: close the row so
                 // the next attempt gets a new key. Anything else may or may not have
-                // happened, so the row stays pending and is resent unchanged.
+                // happened, so the row stays pending and is looked up, then resent unchanged.
                 'state' => $exception->isDefinitive() ? SocialreinsGroup::REJECTED : SocialreinsGroup::PENDING,
                 'error' => $exception->getMessage(),
             ])->save();
 
+            // The key was used by a different body: ask what it made instead of guessing.
+            if ($exception->errorCode === 'idempotency_key_reused') {
+                $this->resolve->handle($row);
+            }
+
             return;
         }
 
-        $results = [];
-        foreach ($body['posts'] as $post) {
-            if (is_array($post) && is_string($post['id'] ?? null)) {
-                $results[$post['id']] = SocialreinsResults::fromBrainPost($post, $at);
-            }
-        }
-
-        $row->forceFill([
-            'state' => SocialreinsGroup::CREATED,
-            'group_id' => $body['group_id'],
-            'results' => $results,
-            'error' => null,
-        ])->save();
+        $this->resolve->markCreated($row, $body);
     }
 }

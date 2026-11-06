@@ -24,7 +24,7 @@ class SocialreinsClient
     /**
      * POST /post-groups with the exact JSON body that was frozen for this key.
      *
-     * @return array{group_id: string, posts: array<mixed>}
+     * @return array{group_id: string, posts: array<mixed>, expected_targets: int}
      */
     public function createGroup(string $key, string $json): array
     {
@@ -33,25 +33,70 @@ class SocialreinsClient
             ->withBody($json, 'application/json')
             ->post($this->url('/post-groups')));
 
-        $body = $this->decode($response);
-        if (! is_string($body['group_id'] ?? null) || ! is_array($body['posts'] ?? null)) {
-            throw new SocialreinsException('SocialReins answered without a group id.', $response->status());
-        }
-
-        return $body;
+        return $this->groupBody($response);
     }
 
     /**
-     * GET /posts?group_id= : the group's posts with their targets.
+     * GET /post-groups/{id}: the group's posts with their targets and `expected_targets`.
      *
-     * @return list<array<string, mixed>>
+     * @return array{group_id: string, posts: array<mixed>, expected_targets: int}
      */
-    public function postsOfGroup(string $groupId): array
+    public function group(string $groupId): array
     {
         $response = $this->send(fn (PendingRequest $http) => $http
-            ->get($this->url('/posts'), ['group_id' => $groupId]));
+            ->get($this->url('/post-groups/'.rawurlencode($groupId))));
 
-        return array_values(array_filter($this->decode($response), 'is_array'));
+        return $this->groupBody($response);
+    }
+
+    /**
+     * POST /post-groups/{id}/retry: re-queues the group's failed targets that are not
+     * ambiguous. An empty body, so every attempt needs its own key.
+     *
+     * @return array{group_id: string, posts: array<mixed>, expected_targets: int, skipped_targets: array<mixed>}
+     */
+    public function retryGroup(string $groupId, string $key): array
+    {
+        $response = $this->send(fn (PendingRequest $http) => $http
+            ->withHeaders(['Idempotency-Key' => $key])
+            ->post($this->url('/post-groups/'.rawurlencode($groupId).'/retry')));
+
+        return [...$this->groupBody($response), 'skipped_targets' => (array) $response->json('skipped_targets', [])];
+    }
+
+    /**
+     * GET /idempotency/{key}: what a key made, for a request whose answer was lost.
+     *
+     * @return array<string, mixed>|null null when brain has nothing stored under it (the first
+     *                                   request answered 5xx or 429, or never arrived)
+     */
+    public function lookupKey(string $key): ?array
+    {
+        try {
+            return $this->decode($this->send(fn (PendingRequest $http) => $http
+                ->get($this->url('/idempotency/'.rawurlencode($key)))));
+        } catch (SocialreinsException $exception) {
+            if ($exception->status === 404) {
+                return null;
+            }
+
+            throw $exception;
+        }
+    }
+
+    /** @return array{group_id: string, posts: array<mixed>, expected_targets: int} */
+    private function groupBody(Response $response): array
+    {
+        $body = $this->decode($response);
+        if (! is_string($body['group_id'] ?? null) || ! is_array($body['posts'] ?? null)) {
+            throw new SocialreinsException('SocialReins answered without a group.', $response->status());
+        }
+
+        return [
+            'group_id' => $body['group_id'],
+            'posts' => $body['posts'],
+            'expected_targets' => (int) ($body['expected_targets'] ?? 0),
+        ];
     }
 
     /**
@@ -97,6 +142,15 @@ class SocialreinsClient
         $detail = $response->json('message');
         $platform = $response->json('platform');
 
+        if ($code === 'tiktok_settings_required') {
+            throw new SocialreinsException(
+                'SocialReins refused the TikTok post: no TikTok visibility was sent. Choose one in Settings > SocialReins '
+                .'(TikTok has no default and is never made public for you).',
+                $response->status(),
+                $code,
+            );
+        }
+
         throw new SocialreinsException(
             'SocialReins answered '.$response->status()
                 .(is_string($code) ? " {$code}" : '')
@@ -104,6 +158,7 @@ class SocialreinsClient
                 .(is_string($detail) ? ": {$detail}" : '').'.',
             $response->status(),
             is_string($code) ? $code : null,
+            (array) $response->json(),
         );
     }
 

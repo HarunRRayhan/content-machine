@@ -21,6 +21,8 @@ use Illuminate\Support\Facades\DB;
  * @property string $state
  * @property string $request
  * @property string|null $group_id
+ * @property int|null $expected_targets
+ * @property int $retry_attempt
  * @property array<string, array<string, mixed>>|null $results
  * @property string|null $error
  * @property CarbonImmutable|null $updated_at
@@ -35,7 +37,7 @@ class SocialreinsGroup extends Model
 
     protected $fillable = [
         'workspace_id', 'subject_type', 'subject_id', 'language', 'sequence',
-        'idempotency_key', 'state', 'request', 'group_id', 'results', 'error',
+        'idempotency_key', 'state', 'request', 'group_id', 'expected_targets', 'retry_attempt', 'results', 'error',
     ];
 
     protected function casts(): array
@@ -58,13 +60,26 @@ class SocialreinsGroup extends Model
      */
     public function mutateResults(\Closure $change): void
     {
-        DB::transaction(function () use ($change): void {
-            $locked = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+        $this->mutate(function (self $locked) use ($change): void {
             $next = $change($locked->results ?? []);
 
             if ($next !== null) {
-                $locked->forceFill(['results' => $next])->save();
+                $locked->results = $next;
             }
+        });
+    }
+
+    /**
+     * Change any columns of this row under a row lock; the callback gets the locked, fresh row.
+     *
+     * @param  \Closure(self): void  $change
+     */
+    public function mutate(\Closure $change): void
+    {
+        DB::transaction(function () use ($change): void {
+            $locked = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+            $change($locked);
+            $locked->save();
         });
 
         $this->refresh();

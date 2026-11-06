@@ -37,6 +37,7 @@ class SettleSocialreinsSubjectAction
             $platforms = SocialreinsResults::byPlatform($rows);
             $failed = SocialreinsResults::withState($platforms, SocialreinsResults::FAILED);
             $partial = SocialreinsResults::withState($platforms, SocialreinsResults::PARTIAL);
+            $unknown = SocialreinsResults::withState($platforms, SocialreinsResults::UNKNOWN);
             $waiting = SocialreinsResults::withState($platforms, SocialreinsResults::WAITING);
             $ok = SocialreinsResults::withState($platforms, SocialreinsResults::OK);
             $open = $this->unfinishedRows($rows);
@@ -55,7 +56,7 @@ class SettleSocialreinsSubjectAction
                 return;
             }
 
-            if (($failed->isNotEmpty() || $partial->isNotEmpty()) && $waiting->isEmpty()) {
+            if (($failed->isNotEmpty() || $partial->isNotEmpty() || $unknown->isNotEmpty()) && $waiting->isEmpty()) {
                 $message = [];
                 if ($failed->isNotEmpty()) {
                     $message[] = 'SocialReins failed on '.$failed->map(
@@ -65,7 +66,10 @@ class SettleSocialreinsSubjectAction
                 if ($partial->isNotEmpty()) {
                     $message[] = self::partialMessage($partial);
                 }
-                $this->save($locked, $ok->isNotEmpty() || $partial->isNotEmpty() ? 'scheduled' : null, 'failed', implode(' ', $message));
+                if ($unknown->isNotEmpty()) {
+                    $message[] = self::unknownMessage($unknown);
+                }
+                $this->save($locked, $ok->isNotEmpty() || $partial->isNotEmpty() || $unknown->isNotEmpty() ? 'scheduled' : null, 'failed', implode(' ', $message));
 
                 return;
             }
@@ -86,8 +90,19 @@ class SettleSocialreinsSubjectAction
         return 'Partly published in SocialReins: '.$partial->map(
             fn (array $p, string $key): string => explode(':', $key, 2)[1]." (group {$p['group_id']}"
                 .($p['detail'] !== '' ? ", {$p['detail']}" : '').')',
-        )->implode(', ').'. Some accounts or thread parts are already live, so CM will not resend them. '
-            .'Retry from SocialReins.';
+        )->implode(', ').'. Some accounts or thread parts are already live. Retry continues only the failed '
+            .'accounts and the rest of the thread; nothing already published is sent again.';
+    }
+
+    /**
+     * @param  Collection<string, array<string, mixed>>  $unknown
+     */
+    public static function unknownMessage(Collection $unknown): string
+    {
+        return 'Check the platform: SocialReins cannot tell whether '.$unknown->map(
+            fn (array $p, string $key): string => explode(':', $key, 2)[1]." (group {$p['group_id']}".($p['detail'] !== '' ? ", {$p['detail']}" : '').')',
+        )->implode(', ').' already posted (outcome unknown), so it was not retried. Look at the account; '
+            .'if it is not there, retry from SocialReins.';
     }
 
     private function save(Post|Video $subject, ?string $status, string $state, ?string $error): void

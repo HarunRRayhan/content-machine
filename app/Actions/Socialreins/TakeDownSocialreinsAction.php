@@ -16,8 +16,8 @@ use App\Support\Socialreins\SocialreinsResults;
  * (brain stores the 4xx) moves to the next key so the retry actually tries again.
  *
  * It never reports success while something may still be live or publishing:
- * - a request that got no answer may have created a group CM does not know: refused until a
- *   publish retry replays it and returns the first result;
+ * - a request that got no answer is looked up by its Idempotency-Key first; if brain cannot say
+ *   (still processing, unreachable) the take down is refused;
  * - a post that is publishing (queued) cannot be deleted yet;
  * - a post that failed after part of it went out (another account, thread parts) cannot be
  *   deleted by brain at all: it is reported, not skipped;
@@ -25,21 +25,35 @@ use App\Support\Socialreins\SocialreinsResults;
  */
 class TakeDownSocialreinsAction
 {
+    public function __construct(
+        private readonly ResolveSocialreinsGroupAction $resolve,
+    ) {}
+
     /** @return list<string> what could not be taken down; empty when everything is down */
     public function handle(Post|Video $subject): array
     {
-        $rows = SocialreinsResults::rowsOf($subject);
         $problems = [];
 
-        foreach ($rows as $row) {
+        // A request that got no answer may have created a group CM does not know: ask brain
+        // what its key made before anything else.
+        foreach (SocialreinsResults::rowsOf($subject) as $row) {
             if ($row->state === SocialreinsGroup::PENDING) {
-                $problems[] = "{$row->language}: SocialReins never answered the request that publishes this, so CM does not know "
-                    .'whether it created posts. Status unknown: retry the publish first (it replays the same request and '
-                    .'returns the first result), then take it down.';
+                $outcome = $this->resolve->handle($row);
+
+                if ($outcome === ResolveSocialreinsGroupAction::MISSING) {
+                    // Brain stored nothing under the key: the request never ran, nothing exists.
+                    $row->forceFill(['state' => SocialreinsGroup::REJECTED, 'error' => 'SocialReins never received the request.'])->save();
+                } elseif ($outcome === ResolveSocialreinsGroupAction::PENDING) {
+                    $problems[] = "{$row->language}: status unknown. ".($row->fresh()->error ?? 'SocialReins could not be asked.')
+                        .' Try again shortly; CM does not report a take down while a group may exist.';
+                }
             }
         }
 
-        foreach (SocialreinsResults::byPlatform($rows) as $key => $platform) {
+        $rows = SocialreinsResults::rowsOf($subject);
+
+        // Classified as brain reports each post, whether or not the whole group has reported yet.
+        foreach (SocialreinsResults::byPlatform($rows, requireComplete: false) as $key => $platform) {
             $name = explode(':', $key, 2)[1];
             $row = $this->rowOf($rows, $platform['post_id']);
             $result = $row->results[$platform['post_id']];

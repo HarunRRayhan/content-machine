@@ -40,22 +40,26 @@ first comment, cover and TikTok settings. CM `twitter` is brain `x`.
 Every write carries an `Idempotency-Key`: `cm:ws<workspace>:<post|video>:<id>:<language>:<sequence>`.
 The JSON body is frozen in `socialreins_groups.request` before the first call.
 
-- No answer (timeout, 5xx, 429): the row stays `pending`; a retry, even days later, resends
-  the same bytes under the same key and gets the first result back.
+- No answer (timeout, 5xx, 429): the row stays `pending`. The next run asks `GET /idempotency/{key}`
+  what the key made: a stored 201 becomes the group (nothing is sent again), a stored 4xx closes
+  the row, "still processing" waits. Only when brain has nothing under the key (404) is the frozen
+  body resent, byte for byte under the same key, even days later.
 - Refused (4xx): brain stored the refusal and nothing was created. The row is `rejected` and
-  the next attempt is sequence + 1, a new key.
-- 422 `idempotency_key_reused` keeps the row pending and is shown as the error; the key is never changed
-  automatically, because a new key would post again what the first may have created.
-- Partial failure: a retry first asks brain (`GET /posts?group_id=`) what is live, then plans again and
-  sends only platforms with nothing published, no remote id and no thread parts, as sequence + 1.
-  Brain posts to every account of a platform, so a platform with one account up (or a thread that
-  stopped halfway) is reported as "Partly published" with its group id and is never resent; finish it
-  from SocialReins. If brain cannot be asked, nothing is resent.
+  the next attempt is sequence + 1, a new key. `422 tiktok_settings_required` is reported as a
+  workspace settings problem (choose a TikTok visibility).
+- 422 `idempotency_key_reused` is resolved with the same lookup; the key is never changed
+  automatically.
+- Failed targets: a retry never creates a new group. It calls `POST /post-groups/{id}/retry` on the
+  same group (key `cm:ws<ws>:retry:<group id>:<attempt>`, a new attempt number after every answer).
+  Brain re-queues only failed targets that are not ambiguous and continues half-sent threads after
+  the parts already out. Targets it lists as `outcome_unknown` (409, or `skipped_targets`) are
+  shown as "Check the platform" and are not retried again: look at the account first.
 
 Take down (`POST /api/v1/posts|videos/{human_id}/take-down`) calls `DELETE /posts/{id}` per
 SocialReins post with its own key, and moves to the next key after a refusal so a retry
 really tries again. It never reports success while something may be live: a request that got
-no answer ("status unknown", retry the publish first), a post still publishing and a partly
+no answer that `GET /idempotency/{key}` cannot resolve ("status unknown"; once it resolves the
+group is taken down like any other), a post still publishing and a partly
 published failed post (brain cannot delete a failed post) are reported; a post that failed with
 nothing live is skipped. Brain cannot delete on TikTok; that platform is reported as a problem.
 
@@ -65,9 +69,9 @@ nothing live is skipped. Brain cannot delete on TikTok; that platform is reporte
 `SocialReins-Signature: t=..,v1=..`, five minute window) update the per-post results; the
 post or video becomes `posted` when every platform published, stays `scheduled` while any is
 in flight and is `failed` (naming the platforms) once nothing is in flight and one failed.
-An event names one target only, so after each one CM asks `GET /posts?group_id=` for the whole
-group (all accounts, the post's own status); a post counts as settled only when that snapshot
-says so, and reconcile keeps checking groups until it does. Results are merged under a row lock
+An event names one target only, so after each one CM reads `GET /post-groups/{id}` (all accounts,
+the post's own status, `expected_targets`); a group counts as settled only when that many targets
+have reported, and reconcile keeps checking groups until it does. Results are merged under a row lock
 and never move a target backwards, so an older snapshot cannot overwrite a newer webhook.
 An event for a group CM does not know answers 404 so brain retries it.
 

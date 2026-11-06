@@ -24,8 +24,11 @@ final class SocialreinsResults
 
     public const FAILED = 'failed';
 
-    /** Part of the platform is live or has partial thread parts: never to be resent. */
+    /** Part of the platform is live (another account, thread parts); a retry continues the rest. */
     public const PARTIAL = 'partial';
+
+    /** Every failed target may already have posted: brain will not retry it, the user checks. */
+    public const UNKNOWN = 'unknown';
 
     public const WAITING = 'waiting';
 
@@ -76,7 +79,7 @@ final class SocialreinsResults
 
     /**
      * @param  array<string, mixed>  $target  a brain target or a webhook `data` block
-     * @return array{status: string, remote_id: string|null, remote_url: string|null, parts: int, error: string|null, at: int}
+     * @return array{status: string, remote_id: string|null, remote_url: string|null, parts: int, error: string|null, at: int, unknown: bool}
      */
     public static function target(array $target, int $at): array
     {
@@ -87,7 +90,35 @@ final class SocialreinsResults
             'parts' => is_array($target['parts'] ?? null) ? count($target['parts']) : 0,
             'error' => is_string($target['error'] ?? null) ? $target['error'] : null,
             'at' => $at,
+            'unknown' => false,
         ];
+    }
+
+    /**
+     * Replace a post's stored result with the answer to a retry (taken after brain re-queued
+     * the failed targets, so it is authoritative): everything older than `$at` is ignored from
+     * now on. Targets named in `$unknown` were left alone because they may already have
+     * posted.
+     *
+     * @param  array<string, mixed>  $existing
+     * @param  array<string, mixed>  $incoming
+     * @param  list<string>  $unknown  target ids brain skipped as outcome_unknown
+     * @return array<string, mixed>
+     */
+    public static function afterRetry(array $existing, array $incoming, int $at, array $unknown): array
+    {
+        $incoming['reset_at'] = $at;
+        foreach ($incoming['targets'] as $id => $target) {
+            $incoming['targets'][$id]['reset_at'] = $at;
+            $incoming['targets'][$id]['unknown'] = in_array($id, $unknown, true);
+            $incoming['targets'][$id]['remote_id'] ??= $existing['targets'][$id]['remote_id'] ?? null;
+            $incoming['targets'][$id]['parts'] = max($target['parts'], (int) ($existing['targets'][$id]['parts'] ?? 0));
+        }
+        if (isset($existing['delete_attempt'])) {
+            $incoming['delete_attempt'] = $existing['delete_attempt'];
+        }
+
+        return $incoming;
     }
 
     /**
@@ -101,6 +132,11 @@ final class SocialreinsResults
     {
         if ($existing === null) {
             return $incoming;
+        }
+
+        // Anything fetched before the last retry describes the attempt that was retried.
+        if ((int) ($existing['reset_at'] ?? 0) > (int) $incoming['at']) {
+            return $existing;
         }
 
         $merged = $existing;
@@ -152,10 +188,17 @@ final class SocialreinsResults
             return $incoming;
         }
 
+        // A webhook of the attempt that was retried (or a snapshot from before the retry).
+        if ((int) ($existing['reset_at'] ?? 0) > (int) $incoming['at']) {
+            return $existing;
+        }
+
         if (! self::newer($incoming['status'], (int) $incoming['at'], $existing['status'], (int) $existing['at'])) {
             return $existing;
         }
 
+        $incoming['reset_at'] = $existing['reset_at'] ?? null;
+        $incoming['unknown'] = $incoming['status'] === 'failed' && ($existing['unknown'] ?? false);
         // A webhook says nothing of remote ids or parts: keep what a snapshot learned.
         $incoming['remote_id'] ??= $existing['remote_id'] ?? null;
         $incoming['remote_url'] ??= $existing['remote_url'] ?? null;
@@ -177,9 +220,10 @@ final class SocialreinsResults
      * platform supersedes its earlier failure.
      *
      * @param  list<SocialreinsGroup>  $rows
+     * @param  bool  $requireComplete  false to classify posts even before the group has fully reported
      * @return array<string, array{state: string, detail: string, post_id: string, language: string, group_id: string|null}> keyed "language:platform"
      */
-    public static function byPlatform(array $rows): array
+    public static function byPlatform(array $rows, bool $requireComplete = true): array
     {
         $platforms = [];
 
@@ -188,9 +232,16 @@ final class SocialreinsResults
                 continue;
             }
 
+            $complete = ! $requireComplete || self::groupComplete($row);
+
             foreach ($row->results ?? [] as $postId => $result) {
+                $classified = self::classify($result);
+                // Until every expected target has reported, nothing in the group is settled.
+                if (! $complete) {
+                    $classified['state'] = $classified['state'] === self::DELETED ? self::DELETED : self::WAITING;
+                }
                 $platforms[$row->language.':'.$result['platform']] = [
-                    ...self::classify($result),
+                    ...$classified,
                     'post_id' => (string) $postId,
                     'language' => $row->language,
                     'group_id' => $row->group_id,
@@ -199,6 +250,34 @@ final class SocialreinsResults
         }
 
         return $platforms;
+    }
+
+    /**
+     * Brain's `expected_targets` (one per account of each post's platform in its set) against
+     * the targets that reached a final state. A group read says how many to expect; without
+     * one (the create answer, or a webhook alone) nothing can be called settled.
+     */
+    public static function groupComplete(SocialreinsGroup $row): bool
+    {
+        if ($row->expected_targets === null) {
+            return false;
+        }
+
+        $final = 0;
+        $postsFinal = true;
+        $failedWithoutTargets = false;
+        foreach ($row->results ?? [] as $result) {
+            foreach ($result['targets'] ?? [] as $target) {
+                $final += in_array($target['status'], ['published', 'failed', 'deleted'], true) ? 1 : 0;
+            }
+            $postsFinal = $postsFinal && in_array($result['status'], ['published', 'failed', 'deleted'], true);
+            $failedWithoutTargets = $failedWithoutTargets
+                || (($result['targets'] ?? []) === [] && in_array($result['status'], ['failed', 'deleted'], true));
+        }
+
+        // A post that failed before it had any target (no account, a bad request) has no
+        // targets to count against the accounts brain expected for it.
+        return $final >= $row->expected_targets || ($failedWithoutTargets && $postsFinal);
     }
 
     /**
@@ -228,6 +307,11 @@ final class SocialreinsResults
         $failed = array_filter($targets, fn (array $t): bool => $t['status'] === 'failed');
         // A failed target that already has a remote id or thread parts is partly live.
         $touched = array_filter($failed, fn (array $t): bool => ($t['remote_id'] ?? null) !== null || (int) ($t['parts'] ?? 0) > 0);
+
+        // Every failed target may already have posted: brain will not retry them.
+        if ($failed !== [] && array_filter($failed, fn (array $t): bool => ! ($t['unknown'] ?? false)) === []) {
+            return ['state' => self::UNKNOWN, 'detail' => $detail];
+        }
 
         return match (true) {
             $failed === [] && $status !== 'failed' => ['state' => self::OK, 'detail' => $detail],

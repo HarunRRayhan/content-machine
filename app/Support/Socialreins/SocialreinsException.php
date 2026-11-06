@@ -10,6 +10,8 @@ class SocialreinsException extends RuntimeException
         string $message,
         public readonly ?int $status = null,
         public readonly ?string $errorCode = null,
+        /** @var array<mixed> brain's JSON answer, when it gave one (a 409 outcome_unknown lists its targets) */
+        public readonly array $body = [],
     ) {
         parent::__construct($message, $status ?? 0);
     }

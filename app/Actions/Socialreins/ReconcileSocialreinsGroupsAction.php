@@ -10,7 +10,8 @@ use App\Support\Socialreins\SocialreinsResults;
 
 /**
  * The fallback for a missed webhook, and the source of truth for a group's settled state:
- * `GET /posts?group_id=` lists every post with all its targets, which no webhook does. A
+ * `GET /post-groups/{id}` lists every post with all its targets and `expected_targets`, which
+ * no webhook does. A
  * group that still has a post in flight is checked again every run.
  */
 class ReconcileSocialreinsGroupsAction
@@ -33,6 +34,8 @@ class ReconcileSocialreinsGroupsAction
                 array_column(SocialreinsResults::byPlatform([$group]), 'state'),
                 true,
             ));
+        // `byPlatform` calls a group that has not fully reported WAITING, so a group whose
+        // events all arrived but whose group read never did is still checked.
 
         foreach ($groups as $group) {
             if ($this->reconcileGroup($group)) {
@@ -60,22 +63,23 @@ class ReconcileSocialreinsGroupsAction
         $at = time();
 
         try {
-            $posts = $client->postsOfGroup((string) $group->group_id);
+            $body = $client->group((string) $group->group_id);
         } catch (SocialreinsException) {
             return false; // the next run tries again
         }
 
-        $group->mutateResults(function (array $results) use ($posts, $at): array {
-            foreach ($posts as $post) {
-                if (is_string($post['id'] ?? null) && isset($results[$post['id']])) {
+        $group->mutate(function (SocialreinsGroup $locked) use ($body, $at): void {
+            $results = $locked->results ?? [];
+            foreach ($body['posts'] as $post) {
+                if (is_array($post) && is_string($post['id'] ?? null) && isset($results[$post['id']])) {
                     $results[$post['id']] = SocialreinsResults::mergePost(
                         $results[$post['id']],
                         SocialreinsResults::fromBrainPost($post, $at),
                     );
                 }
             }
-
-            return $results;
+            $locked->results = $results;
+            $locked->expected_targets = $body['expected_targets'];
         });
 
         return true;

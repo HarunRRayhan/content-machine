@@ -25,6 +25,11 @@ return new class extends Migration
             // The exact JSON body, kept as text so a retry sends the same bytes.
             $table->text('request');
             $table->uuid('group_id')->nullable()->unique();
+            // How many targets the group will have once everything has gone out (brain's
+            // `expected_targets`); the group has settled only when that many have reported.
+            $table->unsignedInteger('expected_targets')->nullable();
+            // Number of the next group retry; each attempt has its own Idempotency-Key.
+            $table->unsignedSmallInteger('retry_attempt')->default(1);
             // SocialReins post id => {platform, status, targets: {target id => {...}}}
             $table->json('results')->nullable();
             $table->text('error')->nullable();

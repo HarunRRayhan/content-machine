@@ -34,10 +34,14 @@ class SocialreinsWebhookControllerTest extends TestCase
             'languages' => ['english' => ['set_id' => '11111111-1111-4111-8111-111111111111', 'token' => 'sr_set_live_english']],
         ]);
         // Brain's own list for the group, which the handler asks for after every event.
-        Http::fake(['brain.test/v1/posts*' => fn () => Http::response([[
-            'id' => 'bbbbbbbb-0000-4000-8000-000000000001', 'platform' => 'facebook', 'status' => $this->snapshot,
-            'targets' => [['id' => 't1', 'status' => $this->snapshot, 'remote_url' => 'https://fb.test/1', 'error' => null, 'parts' => []]],
-        ]])]);
+        $this->fakeHttp(['brain.test/v1/post-groups/*' => fn () => Http::response([
+            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001',
+            'expected_targets' => 1,
+            'posts' => [[
+                'id' => 'bbbbbbbb-0000-4000-8000-000000000001', 'platform' => 'facebook', 'status' => $this->snapshot,
+                'targets' => [['id' => 't1', 'status' => $this->snapshot, 'remote_url' => 'https://fb.test/1', 'error' => null, 'parts' => []]],
+            ]],
+        ])]);
         $this->post = Post::factory()->for($this->workspace)->create(['status' => 'scheduled', 'publish_state' => 'succeeded']);
         SocialreinsGroup::query()->create([
             'workspace_id' => $this->workspace->id, 'subject_type' => 'post', 'subject_id' => $this->post->id,
