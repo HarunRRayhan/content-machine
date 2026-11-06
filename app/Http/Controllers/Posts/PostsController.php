@@ -20,6 +20,7 @@ use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PostsyncerHandleDirectory;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -417,7 +418,10 @@ class PostsController extends Controller
             'approval_state' => $post->approval_state ?? 'approved',
             'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
-            'postsyncer_ready' => $postsyncerConfig?->isReadyForPublish() ?? false,
+            // Legacy name: "a publish driver is ready" (PostSyncer, or SocialReins when chosen).
+            'postsyncer_ready' => $workspace !== null && SocialreinsConfig::usesSocialreins($workspace)
+                ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
+                : ($postsyncerConfig?->isReadyForPublish() ?? false),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),

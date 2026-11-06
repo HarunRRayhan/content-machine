@@ -2,10 +2,12 @@
 
 namespace App\Actions\Postsyncer;
 
+use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Jobs\PublishVideoJob;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +25,10 @@ class EnqueueVideoPublishAction
     public function handle(Video $video, Workspace $workspace, array $options = []): Video
     {
         abort_if($video->workspace_id !== $workspace->id, 404);
+
+        if (SocialreinsConfig::usesSocialreins($workspace)) {
+            return app(EnqueueSocialreinsPublishAction::class)->handle($video, $workspace, $options);
+        }
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
 
