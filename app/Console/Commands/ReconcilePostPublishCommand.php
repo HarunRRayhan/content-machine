@@ -24,7 +24,7 @@ class ReconcilePostPublishCommand extends Command
         $postsyncerId = (string) $this->argument('postsyncer_id');
         $post = Post::query()
             ->where('workspace_id', $workspaceId)
-            ->where('human_id', $humanId)
+            ->whereLabel($humanId)
             ->first();
 
         if ($post === null) {

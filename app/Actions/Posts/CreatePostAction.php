@@ -43,11 +43,15 @@ class CreatePostAction
                     ]);
                 }
 
+                if (str_starts_with($humanId, 'P-')) {
+                    $this->reserveContentIdAction->advancePostSequence($number);
+                }
                 $this->reserveContentIdAction->advancePast($workspace, 'post', $number);
             } else {
-                $contentId = $this->reserveContentIdAction->handle($workspace, 'post');
-                $humanId = $contentId->human_id;
-                $number = $contentId->number;
+                // New posts: number = id, human_id = "P-{id}" (display label).
+                $newId = $this->reserveContentIdAction->nextPostId($workspace);
+                $number = $newId;
+                $humanId = "P-{$newId}";
             }
 
             $status = (string) ($attributes['status'] ?? 'draft');
@@ -55,7 +59,7 @@ class CreatePostAction
                 throw ValidationException::withMessages(['status' => "Invalid post status [{$status}]."]);
             }
 
-            $post = Post::create([
+            $post = new Post([
                 'workspace_id' => $workspace->id,
                 'idea_id' => $attributes['idea_id'] ?? null,
                 'number' => $number,
@@ -80,12 +84,11 @@ class CreatePostAction
                 'created_by_user_id' => $createdBy !== null ? $createdBy->id : Auth::id(),
             ]);
 
-            if (isset($contentId)) {
-                $contentId->forceFill([
-                    'entity_type' => $post->getMorphClass(),
-                    'entity_id' => $post->id,
-                ])->save();
+            if (isset($newId)) {
+                $post->id = $newId;
             }
+
+            $post->save();
 
             return $post;
         });
@@ -97,6 +100,10 @@ class CreatePostAction
             throw ValidationException::withMessages([
                 'human_id' => 'human_id must be P-N, BP-N, or EP-N with a positive number.',
             ]);
+        }
+
+        if ((int) $matches[1] > ReserveContentIdAction::MAX_IMPORT_NUMBER) {
+            throw ValidationException::withMessages(['human_id' => 'human_id number is too large.']);
         }
 
         return (int) $matches[1];

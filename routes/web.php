@@ -21,7 +21,7 @@ Route::post('invitations/{token}', [TeamInvitationController::class, 'accept'])
 Route::post('telegram/webhook/{slug}', [TelegramWebhookController::class, 'handle'])->name('telegram.webhook');
 
 // PostSyncer fetches these during link-upload; signature replaces bearer auth.
-Route::get('publish-media/posts/{post}/{mediaAsset}', [PublishMediaController::class, 'post'])
+Route::get('publish-media/posts/{post:id}/{mediaAsset}', [PublishMediaController::class, 'post'])
     ->middleware('signed')
     ->name('publish-media.post');
 

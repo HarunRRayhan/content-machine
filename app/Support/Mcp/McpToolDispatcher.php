@@ -628,7 +628,7 @@ final class McpToolDispatcher
 
     private function findPost(string $humanId): Post
     {
-        $post = Post::query()->where('human_id', $humanId)->first();
+        $post = Post::query()->whereLabel($humanId)->first();
 
         if ($post === null) {
             throw new RuntimeException('Post not found.');

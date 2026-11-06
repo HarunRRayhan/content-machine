@@ -24,7 +24,7 @@ class ReconcilePostMediaPublishCommand extends Command
         $humanId = (string) $this->argument('post');
         $post = Post::query()
             ->where('workspace_id', $workspaceId)
-            ->where('human_id', $humanId)
+            ->whereLabel($humanId)
             ->first();
 
         if ($post === null) {
