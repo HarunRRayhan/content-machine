@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Ids\ReserveContentIdAction;
 use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Posts\AttachPostDocumentAction;
 use App\Actions\Posts\AttachPostImageAction;
@@ -109,7 +110,7 @@ class PostsApiController extends Controller
         $payload = $request->validate([
             'title' => ['required', 'string', 'max:255'],
             'human_id' => ['nullable', 'string', 'max:32'],
-            'number' => ['nullable', 'integer', 'min:1'],
+            'number' => ['nullable', 'integer', 'min:1', 'max:'.ReserveContentIdAction::MAX_IMPORT_NUMBER],
             'language' => ['nullable', 'string', 'max:8'],
             'slug' => ['nullable', 'string', 'max:255'],
             'template' => ['nullable', 'string', 'size:1', Rule::in(PostDesignTemplate::apiLetters())],

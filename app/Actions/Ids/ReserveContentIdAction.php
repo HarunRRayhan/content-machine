@@ -6,6 +6,7 @@ use App\Models\ContentId;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 /**
@@ -44,6 +45,14 @@ class ReserveContentIdAction
         });
     }
 
+    /** Highest number an import may carry; keeps every id far below int overflow. */
+    public const MAX_IMPORT_NUMBER = 999999;
+
+    /** How far above the posts.id sequence an imported P- number may sit before it is refused. */
+    public const MAX_IMPORT_GAP = 1000;
+
+    private const POST_ID_LOCK = 7253001;
+
     /**
      * New posts: the number IS the posts.id (one id; "P-" is only a display
      * label). Takes the next value of the posts.id sequence for the caller to
@@ -52,9 +61,11 @@ class ReserveContentIdAction
      */
     public function nextPostId(Workspace $workspace): int
     {
+        $this->lockPostIds();
+
+        // An imported P-{id} (or a reserved one) may already own this label: skip it.
         do {
             $id = (int) DB::selectOne("select nextval(pg_get_serial_sequence('posts', 'id')) as id")->id;
-            // An imported P-{id} (or a reserved one) may already own this label.
         } while (DB::table('posts')->where('workspace_id', $workspace->id)->where('human_id', "P-{$id}")->exists());
 
         $this->advancePast($workspace, 'post', $id);
@@ -63,20 +74,12 @@ class ReserveContentIdAction
     }
 
     /**
-     * Keep a generated id above an explicitly imported number.
+     * Keep a generated id above an explicitly imported number (legacy counter only).
      */
     public function advancePast(Workspace $workspace, string $kind, int $number): void
     {
         if ($number < 1) {
             throw new InvalidArgumentException('A content id number must be positive.');
-        }
-
-        if ($kind === 'post') {
-            // New posts take number = posts.id, so imports must keep that sequence ahead of them.
-            DB::statement(
-                "select setval(pg_get_serial_sequence('posts', 'id'), greatest(?, (select last_value from posts_id_seq)))",
-                [$number],
-            );
         }
 
         DB::table('id_sequences')->insertOrIgnore([
@@ -97,6 +100,37 @@ class ReserveContentIdAction
                 ->where('kind', $kind)
                 ->update(['next_value' => $number + 1]);
         }
+    }
+
+    /**
+     * An imported P-{number} label must stay ahead of the global posts.id sequence so a
+     * generated id never reuses it. Never jumps the shared sequence far: a number at or
+     * below the sequence needs nothing, one slightly above moves it, one far above is refused.
+     */
+    public function advancePostSequence(int $number): void
+    {
+        $this->lockPostIds();
+
+        $sequence = DB::selectOne("select pg_get_serial_sequence('posts', 'id') as name")->name;
+        $last = (int) DB::selectOne("select last_value from {$sequence}")->last_value;
+
+        if ($number <= $last) {
+            return;
+        }
+
+        if ($number > $last + self::MAX_IMPORT_GAP) {
+            throw ValidationException::withMessages([
+                'number' => 'number is too far above the current post ids to import.',
+            ]);
+        }
+
+        DB::selectOne('select setval(?, ?)', [$sequence, $number]);
+    }
+
+    /** Serializes nextval/setval on posts.id so an import can never move the sequence backwards. */
+    private function lockPostIds(): void
+    {
+        DB::select('select pg_advisory_xact_lock(?)', [self::POST_ID_LOCK]);
     }
 
     /**

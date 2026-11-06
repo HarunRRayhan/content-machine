@@ -43,6 +43,9 @@ class CreatePostAction
                     ]);
                 }
 
+                if (str_starts_with($humanId, 'P-')) {
+                    $this->reserveContentIdAction->advancePostSequence($number);
+                }
                 $this->reserveContentIdAction->advancePast($workspace, 'post', $number);
             } else {
                 // New posts: number = id, human_id = "P-{id}" (display label).
@@ -97,6 +100,10 @@ class CreatePostAction
             throw ValidationException::withMessages([
                 'human_id' => 'human_id must be P-N, BP-N, or EP-N with a positive number.',
             ]);
+        }
+
+        if ((int) $matches[1] > ReserveContentIdAction::MAX_IMPORT_NUMBER) {
+            throw ValidationException::withMessages(['human_id' => 'human_id number is too large.']);
         }
 
         return (int) $matches[1];
