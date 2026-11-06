@@ -52,7 +52,10 @@ class ReserveContentIdAction
      */
     public function nextPostId(Workspace $workspace): int
     {
-        $id = (int) DB::selectOne("select nextval(pg_get_serial_sequence('posts', 'id')) as id")->id;
+        do {
+            $id = (int) DB::selectOne("select nextval(pg_get_serial_sequence('posts', 'id')) as id")->id;
+            // An imported P-{id} (or a reserved one) may already own this label.
+        } while (DB::table('posts')->where('workspace_id', $workspace->id)->where('human_id', "P-{$id}")->exists());
 
         $this->advancePast($workspace, 'post', $id);
 
@@ -66,6 +69,14 @@ class ReserveContentIdAction
     {
         if ($number < 1) {
             throw new InvalidArgumentException('A content id number must be positive.');
+        }
+
+        if ($kind === 'post') {
+            // New posts take number = posts.id, so imports must keep that sequence ahead of them.
+            DB::statement(
+                "select setval(pg_get_serial_sequence('posts', 'id'), greatest(?, (select last_value from posts_id_seq)))",
+                [$number],
+            );
         }
 
         DB::table('id_sequences')->insertOrIgnore([

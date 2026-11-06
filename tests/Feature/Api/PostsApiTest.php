@@ -101,6 +101,21 @@ class PostsApiTest extends TestCase
         $this->assertNotSame(290, $generated->json('data.number'));
     }
 
+    public function test_a_new_post_never_reuses_an_already_taken_p_label(): void
+    {
+        $next = $this->acting()->postJson('/api/v1/posts', ['title' => 'Probe'])->json('data.id') + 1;
+        $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => "P-{$next}",
+            'number' => $next,
+            'title' => 'Imported on the next id',
+        ])->assertCreated();
+
+        $generated = $this->acting()->postJson('/api/v1/posts', ['title' => 'Generated'])->assertCreated();
+
+        $this->assertGreaterThan($next, $generated->json('data.number'));
+        $this->assertSame($generated->json('data.id'), $generated->json('data.number'));
+    }
+
     public function test_a_post_resolves_by_p_label_and_bare_number_alike(): void
     {
         $new = $this->acting()->postJson('/api/v1/posts', ['title' => 'New one'])->assertCreated();
