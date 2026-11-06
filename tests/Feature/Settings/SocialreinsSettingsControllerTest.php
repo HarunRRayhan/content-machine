@@ -4,16 +4,25 @@ namespace Tests\Feature\Settings;
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\LinkResolution\PublicUrlGuard;
 use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
 class SocialreinsSettingsControllerTest extends TestCase
 {
-    use RefreshDatabase;
+    use FakesPublicDns, RefreshDatabase;
 
     private const SET = '11111111-1111-4111-8111-111111111111';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->resolveHostsTo();
+    }
 
     private function memberOf(Workspace $workspace, string $role): void
     {
@@ -99,5 +108,70 @@ class SocialreinsSettingsControllerTest extends TestCase
         SocialreinsConfig::write($workspace, ['languages' => ['english' => ['set_id' => self::SET]]]);
 
         $this->assertFalse(SocialreinsConfig::fromWorkspace($workspace->fresh())->isReadyForPublish());
+    }
+
+    /** @return array<string, array{string}> */
+    public static function unsafeBaseUrls(): array
+    {
+        return [
+            'http scheme' => ['http://brain.socialreins.com/v1'],
+            'userinfo' => ['https://user:pass@brain.socialreins.com/v1'],
+            'query' => ['https://brain.socialreins.com/v1?x=1'],
+            'fragment' => ['https://brain.socialreins.com/v1#x'],
+            'private ip' => ['https://10.0.0.5/v1'],
+            'loopback ip' => ['https://127.0.0.1/v1'],
+            'localhost' => ['https://localhost/v1'],
+            'metadata ip' => ['https://169.254.169.254/v1'],
+            'not a url' => ['brain'],
+        ];
+    }
+
+    #[DataProvider('unsafeBaseUrls')]
+    public function test_an_unsafe_base_url_is_refused(string $url): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        // Real-looking names still resolve to something public here; literal IPs and
+        // localhost are caught by the guard itself.
+        $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(
+            fn (string $host): array => $host === 'localhost' ? [['ip' => '127.0.0.1']] : [['ip' => '93.184.216.34']],
+        ));
+
+        $this->put('/settings/socialreins', $this->payload(['base_url' => $url]))->assertSessionHasErrors('base_url');
+        $this->assertNull($workspace->fresh()->settings['socialreins'] ?? null);
+    }
+
+    public function test_a_host_that_resolves_to_a_private_address_is_refused(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        $this->resolveHostsTo('10.1.2.3');
+
+        $this->put('/settings/socialreins', $this->payload())->assertSessionHasErrors('base_url');
+    }
+
+    public function test_changing_the_base_url_clears_tokens_and_webhook_secret_but_a_trailing_slash_does_not(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        $this->put('/settings/socialreins', $this->payload())->assertRedirect();
+
+        $this->put('/settings/socialreins', $this->payload([
+            'base_url' => 'https://brain.socialreins.com/v1/', 'webhook_secret' => '',
+            'languages' => ['english' => ['set_id' => self::SET, 'token' => '']],
+        ]))->assertRedirect();
+        $config = SocialreinsConfig::fromWorkspace($workspace->fresh());
+        $this->assertSame('sr_set_live_secret', $config->token('english'));
+        $this->assertSame('https://brain.socialreins.com/v1', $config->baseUrl());
+
+        $this->put('/settings/socialreins', $this->payload([
+            'base_url' => 'https://brain.self-host.example/v1', 'webhook_secret' => '',
+            'languages' => ['english' => ['set_id' => self::SET, 'token' => '']],
+        ]))->assertRedirect();
+        $config = SocialreinsConfig::fromWorkspace($workspace->fresh());
+        $this->assertNull($config->token('english'));
+        $this->assertNull($config->webhookSecret());
+        $this->assertSame(self::SET, $config->setId('english'));
+        $this->assertFalse($config->isReadyForPublish());
     }
 }

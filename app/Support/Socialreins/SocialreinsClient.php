@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\Http;
  */
 class SocialreinsClient
 {
+    /** Set by send() before each call builds its URL. */
+    private string $resolved = '';
+
     public function __construct(
         private readonly SocialreinsConfig $config,
         private readonly string $language,
@@ -74,7 +77,14 @@ class SocialreinsClient
         }
 
         try {
-            $response = $call(Http::withToken($token)->acceptJson()->timeout(30));
+            // The token only ever goes to a public HTTPS host, on the addresses just
+            // checked, and never follows a redirect (which would carry it elsewhere).
+            $base = (new SocialreinsBaseUrl)->resolve($this->config->baseUrl());
+            $this->resolved = $base['url'];
+            $response = $call(Http::withToken($token)->acceptJson()->timeout(30)
+                ->withoutRedirecting()->withOptions($base['options']));
+        } catch (\InvalidArgumentException $exception) {
+            throw new SocialreinsException($exception->getMessage());
         } catch (ConnectionException $exception) {
             throw new SocialreinsException('SocialReins could not be reached: '.$exception->getMessage());
         }
@@ -111,6 +121,6 @@ class SocialreinsClient
 
     private function url(string $path): string
     {
-        return $this->config->baseUrl().$path;
+        return $this->resolved.$path;
     }
 }

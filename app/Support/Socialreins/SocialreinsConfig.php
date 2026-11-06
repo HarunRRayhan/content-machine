@@ -134,6 +134,20 @@ class SocialreinsConfig
             $settings['publish_driver'] = $input['publish_driver'] === self::DRIVER ? self::DRIVER : 'postsyncer';
         }
 
+        // Tokens and the webhook secret belong to the host they were issued for: pointing the
+        // workspace somewhere else must not send them there, so they are entered again.
+        if (is_string($input['base_url'] ?? null)
+            && rtrim(trim($input['base_url']), '/') !== (new self($current))->baseUrl()) {
+            unset($current['webhook_secret']);
+            foreach (array_keys((array) ($current['languages'] ?? [])) as $language) {
+                unset($current['languages'][$language]['token']);
+            }
+        }
+
+        if (is_string($input['base_url'] ?? null)) {
+            $input['base_url'] = rtrim(trim($input['base_url']), '/');
+        }
+
         foreach (['base_url', 'tiktok_privacy_level', 'default_language'] as $key) {
             if (array_key_exists($key, $input)) {
                 $current[$key] = $input[$key];

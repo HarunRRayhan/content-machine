@@ -21,17 +21,24 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
+use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
 class SocialreinsPublishTest extends TestCase
 {
-    use RefreshDatabase;
+    use FakesPublicDns, RefreshDatabase;
 
     private const URL = 'https://brain.test/v1/post-groups';
 
     private const EN_SET = '11111111-1111-4111-8111-111111111111';
 
     private const BN_SET = '22222222-2222-4222-8222-222222222222';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->resolveHostsTo();
+    }
 
     private function workspace(bool $socialreins = true, ?string $tiktok = 'SELF_ONLY'): Workspace
     {
@@ -318,6 +325,42 @@ class SocialreinsPublishTest extends TestCase
         $post->refresh();
         $this->assertSame('idle', $post->publish_state);
         $this->assertSame('ready', $post->status);
+    }
+
+    public function test_a_redirect_is_not_followed_so_the_token_never_leaves(): void
+    {
+        Http::fake([
+            self::URL => Http::response('', 302, ['Location' => 'https://evil.example/steal']),
+            'evil.example/*' => Http::response([], 200),
+        ]);
+        $post = $this->makePost($this->workspace(), ['facebook' => ['caption' => 'Hello']], ['platforms' => ['facebook']]);
+
+        $result = $this->publish($post);
+
+        $this->assertSame('failed', $result->publish_state);
+        $this->assertStringContainsString('answered 302', $result->publish_error);
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'evil.example'));
+    }
+
+    public function test_every_call_rechecks_dns_and_sends_nothing_to_a_private_address(): void
+    {
+        Http::fake([self::URL => Http::response($this->groupResponse(['facebook']), 201), 'brain.test/*' => Http::response([], 200)]);
+        $post = $this->makePost($this->workspace(), ['facebook' => ['caption' => 'Hello']], ['platforms' => ['facebook']]);
+        $this->publish($post);
+        $sent = count($this->sent());
+
+        // The name now resolves inside the network (rebinding): create, reconcile and take down all refuse.
+        $this->resolveHostsTo('192.168.1.10');
+        $this->travel(10)->minutes();
+        $this->assertSame(0, app(ReconcileSocialreinsGroupsAction::class)->handle());
+        $problems = app(TakeDownSocialreinsAction::class)->handle($post->fresh());
+        $this->assertStringContainsString('public network addresses', $problems[0]);
+
+        $retry = $this->makePost($post->workspace, ['facebook' => ['caption' => 'Again']], ['platforms' => ['facebook']]);
+        $this->assertSame('failed', $this->publish($retry)->publish_state);
+
+        Http::assertSentCount($sent);
     }
 
     public function test_the_driver_is_chosen_per_workspace_and_postsyncer_stays_the_default(): void

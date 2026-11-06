@@ -92,6 +92,10 @@ export default function SocialreinsSettings({
                                         defaultValue={baseUrl}
                                     />
                                     <InputError message={errors.base_url} />
+                                    <p className="text-sm text-muted-foreground">
+                                        Public HTTPS only. Changing it clears
+                                        the saved tokens and webhook secret.
+                                    </p>
                                 </div>
                                 <div className="grid gap-2">
                                     <Label htmlFor="default_language">

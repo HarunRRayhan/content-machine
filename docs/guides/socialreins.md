@@ -8,7 +8,7 @@ or running.
 | Field | Purpose |
 |---|---|
 | **Publish driver** | `postsyncer` (default) or `socialreins`. Stored as `settings.publish_driver`. |
-| **API base URL** | Default `https://brain.socialreins.com/v1`. |
+| **API base URL** | Default `https://brain.socialreins.com/v1`. Public HTTPS only (no userinfo, query or fragment, no private or loopback address). Every call re-checks DNS and pins the checked addresses, and redirects are never followed, so the tokens go only to that host. Changing it clears the saved tokens and webhook secret. |
 | **Set id + token, per language** | One SocialReins set per language (English, Bangla) and its set-limited API token (`sr_set_live_...`). Encrypted, write-only. |
 | **TikTok visibility** | One of `SELF_ONLY`, `FOLLOWER_OF_CREATOR`, `MUTUAL_FOLLOW_FRIENDS`, `PUBLIC_TO_EVERYONE`. Required for TikTok: with none chosen a TikTok publish is refused, never defaulted to public. |
 | **Webhook secret** | The `whsec_...` secret of the SocialReins team webhook. |

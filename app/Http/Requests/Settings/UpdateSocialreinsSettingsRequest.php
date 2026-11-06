@@ -5,10 +5,12 @@ namespace App\Http\Requests\Settings;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Socialreins\SocialreinsBaseUrl;
 use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 
 class UpdateSocialreinsSettingsRequest extends FormRequest
 {
@@ -31,7 +33,13 @@ class UpdateSocialreinsSettingsRequest extends FormRequest
     {
         $rules = [
             'publish_driver' => ['required', Rule::in(['postsyncer', SocialreinsConfig::DRIVER])],
-            'base_url' => ['required', 'url:https,http', 'max:255'],
+            'base_url' => ['required', 'string', 'max:255', function (string $attribute, mixed $value, \Closure $fail): void {
+                try {
+                    (new SocialreinsBaseUrl)->resolve((string) $value);
+                } catch (InvalidArgumentException $exception) {
+                    $fail($exception->getMessage());
+                }
+            }],
             'webhook_secret' => ['nullable', 'string', 'max:255'],
             'tiktok_privacy_level' => ['nullable', Rule::in(SocialreinsConfig::PRIVACY_LEVELS)],
             'default_language' => ['required', Rule::in(PostsyncerConfig::LANGUAGES)],
