@@ -7,6 +7,7 @@ use App\Concerns\RecordsHistory;
 use App\Concerns\ResolvesByHumanId;
 use Carbon\CarbonImmutable;
 use Database\Factories\PostFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -126,6 +127,47 @@ class Post extends Model
             'publish_claimed_at' => 'datetime',
             'approved_at' => 'datetime',
         ];
+    }
+
+    /**
+     * "P-290", "p-290" and bare "290" all address the same post: a bare
+     * number is the P- label's number. Other legacy prefixes (BP-7) are only
+     * upper-cased. The P- prefix is a display label, never required.
+     */
+    public static function normalizeLabel(string $value): string
+    {
+        $value = trim($value);
+
+        return ctype_digit($value) ? "P-{$value}" : strtoupper($value);
+    }
+
+    /**
+     * @param  Builder<Post>  $query
+     * @return Builder<Post>
+     */
+    public function scopeWhereLabel(Builder $query, string $value): Builder
+    {
+        return $query->where('human_id', static::normalizeLabel($value));
+    }
+
+    /**
+     * A bare number never binds to the primary key: old posts have id !=
+     * number, new posts have id == number, so label lookup is unambiguous.
+     * An explicit field (e.g. {post:id} on the signed media route) still wins.
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        if ($field === null) {
+            return $this->newQuery()->whereLabel((string) $value)->first();
+        }
+
+        return parent::resolveRouteBinding($value, $field);
+    }
+
+    /** Bare-number URLs for P- posts (/posts/290); legacy prefixes keep theirs. */
+    public function getRouteKey(): string
+    {
+        return $this->human_id === "P-{$this->number}" ? (string) $this->number : (string) $this->human_id;
     }
 
     public function isPublishInProgress(): bool

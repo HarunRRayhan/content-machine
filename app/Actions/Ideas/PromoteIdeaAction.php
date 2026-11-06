@@ -38,21 +38,39 @@ class PromoteIdeaAction
             };
 
             $workspace = $idea->workspace;
-            $contentId = $this->reserveContentIdAction->handle($workspace, $idea->kind);
+            $contentId = null;
+            $postId = null;
+
+            if ($idea->kind === 'post') {
+                // Posts: number = id, human_id = "P-{id}" (display label).
+                $postId = $this->reserveContentIdAction->nextPostId($workspace);
+                $number = $postId;
+                $humanId = "P-{$postId}";
+            } else {
+                $contentId = $this->reserveContentIdAction->handle($workspace, $idea->kind);
+                $number = $contentId->number;
+                $humanId = $contentId->human_id;
+            }
 
             /** @var Post|Video $entity */
-            $entity = $modelClass::create([
+            $entity = new $modelClass([
                 'workspace_id' => $workspace->id,
                 'idea_id' => $idea->id,
-                'number' => $contentId->number,
-                'human_id' => $contentId->human_id,
+                'number' => $number,
+                'human_id' => $humanId,
                 'title' => $idea->title,
                 'body' => $idea->body,
                 'status' => 'draft',
                 'created_by_user_id' => Auth::id(),
             ]);
 
-            $contentId->forceFill([
+            if ($postId !== null) {
+                $entity->id = $postId;
+            }
+
+            $entity->save();
+
+            $contentId?->forceFill([
                 'entity_type' => $entity->getMorphClass(),
                 'entity_id' => $entity->id,
             ])->save();

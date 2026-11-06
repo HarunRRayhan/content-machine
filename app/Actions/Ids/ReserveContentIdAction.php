@@ -45,6 +45,21 @@ class ReserveContentIdAction
     }
 
     /**
+     * New posts: the number IS the posts.id (one id; "P-" is only a display
+     * label). Takes the next value of the posts.id sequence for the caller to
+     * insert with, and keeps the legacy counter above it. Call inside the
+     * creating transaction.
+     */
+    public function nextPostId(Workspace $workspace): int
+    {
+        $id = (int) DB::selectOne("select nextval(pg_get_serial_sequence('posts', 'id')) as id")->id;
+
+        $this->advancePast($workspace, 'post', $id);
+
+        return $id;
+    }
+
+    /**
      * Keep a generated id above an explicitly imported number.
      */
     public function advancePast(Workspace $workspace, string $kind, int $number): void

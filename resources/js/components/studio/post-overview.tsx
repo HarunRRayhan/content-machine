@@ -32,7 +32,7 @@ const POST_CATEGORIES = [
 ] as const;
 
 type Props = {
-    postId: number;
+    postId: string;
     title: string;
     status: string;
     category: string;

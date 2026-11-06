@@ -159,7 +159,7 @@ export default function PostShow({ post }: PageProps) {
 
                 {tab === 'overview' && (
                     <PostOverview
-                        postId={post.id}
+                        postId={post.human_id}
                         title={post.title}
                         status={post.status}
                         category={post.category}
@@ -168,12 +168,12 @@ export default function PostShow({ post }: PageProps) {
                         language={post.language}
                         templateMeta={post.template_meta}
                         workspaces={post.workspaces}
-                        publishUrl={`/posts/${post.id}/publish`}
+                        publishUrl={`/posts/${post.human_id}/publish`}
                         postsyncerReady={post.postsyncer_ready}
                         publishState={post.publish_state}
                         publishRetryable={post.publish_retryable}
                         publishProgress={post.publish_progress}
-                        reconcileUrl={`/posts/${post.id}/reconcile`}
+                        reconcileUrl={`/posts/${post.human_id}/reconcile`}
                         approvalState={post.approval_state}
                         timezone={post.timezone}
                         needsConfirmAsk={post.needs_confirm_ask}
@@ -199,7 +199,7 @@ export default function PostShow({ post }: PageProps) {
                             </p>
                         )}
                         <PostDraftEditor
-                            postId={post.id}
+                            postId={post.human_id}
                             title={post.title}
                             body={post.body}
                             groups={post.captions}

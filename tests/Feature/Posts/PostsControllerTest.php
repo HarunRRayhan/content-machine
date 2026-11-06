@@ -294,6 +294,23 @@ class PostsControllerTest extends TestCase
             );
     }
 
+    public function test_show_resolves_p_label_and_bare_number_and_never_the_database_id(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $post = Post::factory()->for($workspace)->create(['number' => 290, 'human_id' => 'P-290']);
+        $this->assertNotSame(290, $post->id);
+
+        $this->assertSame('/posts/290', parse_url(route('posts.show', $post), PHP_URL_PATH));
+
+        foreach (['/posts/290', '/posts/P-290', '/posts/p-290'] as $url) {
+            $this->get($url)->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.id', $post->id));
+        }
+
+        $this->get("/posts/{$post->id}")->assertNotFound();
+    }
+
     public function test_show_renders_a_post_in_the_current_workspace()
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
@@ -600,20 +617,6 @@ class PostsControllerTest extends TestCase
         ]);
 
         $this->get('/dashboard/posts/P-50')->assertRedirect('/posts/P-50');
-    }
-
-    public function test_short_url_still_resolves_a_numeric_database_id(): void
-    {
-        [, $workspace] = $this->actingAsWorkspaceMember();
-
-        $post = Post::factory()->for($workspace)->create(['title' => 'Numeric id post']);
-
-        $this->get('/posts/'.$post->id)
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->component('posts/show')
-                ->where('post.id', $post->id)
-            );
     }
 
     public function test_short_url_404s_for_a_prefixed_id_in_another_workspace(): void

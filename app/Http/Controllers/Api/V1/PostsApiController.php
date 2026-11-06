@@ -501,7 +501,7 @@ class PostsApiController extends Controller
     {
         $workspace = $this->currentWorkspace();
 
-        $post = Post::query()->where('human_id', $humanId)->firstOrFail();
+        $post = Post::query()->whereLabel($humanId)->firstOrFail();
 
         abort_if($post->workspace_id !== $workspace->id, 404);
 

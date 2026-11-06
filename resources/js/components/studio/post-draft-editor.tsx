@@ -24,7 +24,7 @@ type EditableCaptionGroup = CaptionGroup & {
 type EditableField = 'title' | 'caption' | 'first_comment';
 
 type Props = {
-    postId: number;
+    postId: string;
     title: string;
     body: string | null;
     groups: EditableCaptionGroup[];

@@ -37,7 +37,8 @@ class PromoteIdeaActionTest extends TestCase
         $this->assertSame('The full pitch.', $entity->body);
         $this->assertSame('draft', $entity->status);
         $this->assertSame($user->id, $entity->created_by_user_id);
-        $this->assertStringStartsWith('P-', $entity->human_id);
+        $this->assertSame($entity->id, $entity->number);
+        $this->assertSame("P-{$entity->id}", $entity->human_id);
 
         $this->assertSame('promoted', $idea->refresh()->status);
     }
@@ -54,7 +55,7 @@ class PromoteIdeaActionTest extends TestCase
 
     public function test_it_claims_the_content_id_reservation()
     {
-        $idea = Idea::factory()->create(['kind' => 'post', 'status' => 'open']);
+        $idea = Idea::factory()->create(['kind' => 'video', 'status' => 'open']);
 
         $entity = (new PromoteIdeaAction(new ReserveContentIdAction))->handle($idea);
 

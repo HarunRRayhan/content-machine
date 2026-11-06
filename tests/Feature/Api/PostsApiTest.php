@@ -70,19 +70,72 @@ class PostsApiTest extends TestCase
             ->assertJsonPath('data.status', 'archived');
     }
 
-    public function test_an_explicit_import_advances_the_generated_post_sequence(): void
+    public function test_a_new_post_gets_number_equal_to_its_id_and_a_p_label(): void
     {
-        $this->acting()->postJson('/api/v1/posts', [
-            'human_id' => 'BP-1',
-            'number' => 1,
-            'title' => 'Imported post',
-        ])->assertCreated();
+        $response = $this->acting()->postJson('/api/v1/posts', ['title' => 'Generated post'])
+            ->assertCreated();
 
-        $this->acting()->postJson('/api/v1/posts', [
-            'title' => 'Generated post',
-        ])
-            ->assertCreated()
-            ->assertJsonPath('data.human_id', 'P-2');
+        $id = $response->json('data.id');
+        $response->assertJsonPath('data.number', $id)
+            ->assertJsonPath('data.human_id', "P-{$id}");
+
+        $second = $this->acting()->postJson('/api/v1/posts', ['title' => 'Another'])->assertCreated();
+        $this->assertSame($second->json('data.id'), $second->json('data.number'));
+        $this->assertGreaterThan($id, $second->json('data.id'));
+    }
+
+    public function test_an_explicit_import_keeps_its_human_id_and_number_while_id_differs(): void
+    {
+        $response = $this->acting()->postJson('/api/v1/posts', [
+            'human_id' => 'P-290',
+            'number' => 290,
+            'title' => 'Imported post',
+        ])->assertCreated()
+            ->assertJsonPath('data.human_id', 'P-290')
+            ->assertJsonPath('data.number', 290);
+
+        $this->assertNotSame(290, $response->json('data.id'));
+
+        // A generated post later never collides with the imported number.
+        $generated = $this->acting()->postJson('/api/v1/posts', ['title' => 'Generated'])->assertCreated();
+        $this->assertNotSame(290, $generated->json('data.number'));
+    }
+
+    public function test_a_post_resolves_by_p_label_and_bare_number_alike(): void
+    {
+        $new = $this->acting()->postJson('/api/v1/posts', ['title' => 'New one'])->assertCreated();
+        $n = $new->json('data.number');
+
+        foreach (["P-{$n}", "p-{$n}", (string) $n] as $key) {
+            $this->acting()->getJson("/api/v1/posts/{$key}")
+                ->assertOk()
+                ->assertJsonPath('data.id', $new->json('data.id'));
+        }
+
+        $this->acting()->patchJson("/api/v1/posts/{$n}", ['title' => 'Renamed'])
+            ->assertOk()
+            ->assertJsonPath('data.title', 'Renamed');
+    }
+
+    public function test_an_old_post_with_id_different_from_number_resolves_by_number_only(): void
+    {
+        $old = Post::factory()->create([
+            'workspace_id' => $this->workspace->id,
+            'number' => 290,
+            'human_id' => 'P-290',
+        ]);
+        $this->assertNotSame(290, $old->id);
+
+        $this->acting()->getJson('/api/v1/posts/290')->assertOk()->assertJsonPath('data.id', $old->id);
+        $this->acting()->getJson('/api/v1/posts/P-290')->assertOk()->assertJsonPath('data.id', $old->id);
+        // The database id is never an address.
+        $this->acting()->getJson("/api/v1/posts/{$old->id}")->assertNotFound();
+    }
+
+    public function test_an_unknown_post_number_is_not_found(): void
+    {
+        $this->acting()->getJson('/api/v1/posts/999999')->assertNotFound();
+        $this->acting()->getJson('/api/v1/posts/P-999999')->assertNotFound();
     }
 
     public function test_store_rejects_an_idea_from_another_workspace(): void
