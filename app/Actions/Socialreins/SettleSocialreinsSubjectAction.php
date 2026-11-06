@@ -7,6 +7,7 @@ use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
 use App\Support\Socialreins\SocialreinsResults;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -35,6 +36,7 @@ class SettleSocialreinsSubjectAction
 
             $platforms = SocialreinsResults::byPlatform($rows);
             $failed = SocialreinsResults::withState($platforms, SocialreinsResults::FAILED);
+            $partial = SocialreinsResults::withState($platforms, SocialreinsResults::PARTIAL);
             $waiting = SocialreinsResults::withState($platforms, SocialreinsResults::WAITING);
             $ok = SocialreinsResults::withState($platforms, SocialreinsResults::OK);
             $open = $this->unfinishedRows($rows);
@@ -53,11 +55,17 @@ class SettleSocialreinsSubjectAction
                 return;
             }
 
-            if ($failed->isNotEmpty() && $waiting->isEmpty()) {
-                $message = 'SocialReins failed on '.$failed->map(
-                    fn (array $p, string $key): string => explode(':', $key, 2)[1].($p['detail'] !== '' ? " ({$p['detail']})" : ''),
-                )->implode(', ').'. Retry sends only those.';
-                $this->save($locked, $ok->isNotEmpty() ? 'scheduled' : null, 'failed', $message);
+            if (($failed->isNotEmpty() || $partial->isNotEmpty()) && $waiting->isEmpty()) {
+                $message = [];
+                if ($failed->isNotEmpty()) {
+                    $message[] = 'SocialReins failed on '.$failed->map(
+                        fn (array $p, string $key): string => explode(':', $key, 2)[1].($p['detail'] !== '' ? " ({$p['detail']})" : ''),
+                    )->implode(', ').'. Retry sends only those.';
+                }
+                if ($partial->isNotEmpty()) {
+                    $message[] = self::partialMessage($partial);
+                }
+                $this->save($locked, $ok->isNotEmpty() || $partial->isNotEmpty() ? 'scheduled' : null, 'failed', implode(' ', $message));
 
                 return;
             }
@@ -68,6 +76,18 @@ class SettleSocialreinsSubjectAction
 
             $this->save($locked, $waiting->isEmpty() ? 'posted' : 'scheduled', 'succeeded', null);
         });
+    }
+
+    /**
+     * @param  Collection<string, array<string, mixed>>  $partial
+     */
+    public static function partialMessage(Collection $partial): string
+    {
+        return 'Partly published in SocialReins: '.$partial->map(
+            fn (array $p, string $key): string => explode(':', $key, 2)[1]." (group {$p['group_id']}"
+                .($p['detail'] !== '' ? ", {$p['detail']}" : '').')',
+        )->implode(', ').'. Some accounts or thread parts are already live, so CM will not resend them. '
+            .'Retry from SocialReins.';
     }
 
     private function save(Post|Video $subject, ?string $status, string $state, ?string $error): void

@@ -16,8 +16,8 @@ class SocialreinsException extends RuntimeException
 
     /**
      * Brain answered and refused: a stored 4xx, so nothing was created and the same
-     * Idempotency-Key would only replay the refusal. 408, 409 `idempotency_in_progress`
-     * and 429 are not final; neither is a 5xx or a lost connection.
+     * Idempotency-Key would only replay the refusal. 408, 429, 409 `idempotency_in_progress`
+     * and 422 `idempotency_key_reused` are not final; neither is a 5xx or a lost connection.
      */
     public function isDefinitive(): bool
     {
@@ -25,7 +25,9 @@ class SocialreinsException extends RuntimeException
             return false;
         }
 
+        // idempotency_key_reused means the key was used for a different body: a new key would
+        // post again what the first one may already have created, so it never closes a row.
         return ! in_array($this->status, [408, 429], true)
-            && $this->errorCode !== 'idempotency_in_progress';
+            && ! in_array($this->errorCode, ['idempotency_in_progress', 'idempotency_key_reused'], true);
     }
 }

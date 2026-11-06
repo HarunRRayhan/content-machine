@@ -8,28 +8,42 @@ use App\Models\Workspace;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\WebhookSignature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
 class SocialreinsWebhookControllerTest extends TestCase
 {
-    use RefreshDatabase;
+    use FakesPublicDns, RefreshDatabase;
 
     private Workspace $workspace;
 
     private Post $post;
 
+    private string $snapshot = 'published';
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        $this->resolveHostsTo();
         $this->workspace = Workspace::factory()->create();
-        SocialreinsConfig::write($this->workspace, ['webhook_secret' => 'whsec_test']);
+        SocialreinsConfig::write($this->workspace, [
+            'webhook_secret' => 'whsec_test',
+            'base_url' => 'https://brain.test/v1',
+            'languages' => ['english' => ['set_id' => '11111111-1111-4111-8111-111111111111', 'token' => 'sr_set_live_english']],
+        ]);
+        // Brain's own list for the group, which the handler asks for after every event.
+        Http::fake(['brain.test/v1/posts*' => fn () => Http::response([[
+            'id' => 'bbbbbbbb-0000-4000-8000-000000000001', 'platform' => 'facebook', 'status' => $this->snapshot,
+            'targets' => [['id' => 't1', 'status' => $this->snapshot, 'remote_url' => 'https://fb.test/1', 'error' => null, 'parts' => []]],
+        ]])]);
         $this->post = Post::factory()->for($this->workspace)->create(['status' => 'scheduled', 'publish_state' => 'succeeded']);
         SocialreinsGroup::query()->create([
             'workspace_id' => $this->workspace->id, 'subject_type' => 'post', 'subject_id' => $this->post->id,
             'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created', 'request' => '{}',
             'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001',
-            'results' => ['bbbbbbbb-0000-4000-8000-000000000001' => ['platform' => 'facebook', 'status' => 'scheduled', 'error' => null, 'targets' => []]],
+            'results' => ['bbbbbbbb-0000-4000-8000-000000000001' => ['platform' => 'facebook', 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []]],
         ]);
     }
 
@@ -67,6 +81,7 @@ class SocialreinsWebhookControllerTest extends TestCase
 
     public function test_a_failed_event_marks_the_publish_failed_and_the_same_event_twice_changes_nothing(): void
     {
+        $this->snapshot = 'failed';
         $body = $this->body('failed');
         $signature = WebhookSignature::sign('whsec_test', time(), $body);
 

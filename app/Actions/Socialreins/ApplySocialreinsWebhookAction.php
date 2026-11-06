@@ -7,12 +7,17 @@ use App\Support\Socialreins\SocialreinsResults;
 
 /**
  * Applies one verified `post.target.published|failed|deleted` event to the group it
- * belongs to, then settles the Post or Video. Applying the same event twice changes nothing.
+ * belongs to, then asks brain for the whole group before settling the Post or Video. An
+ * event names one target only; the group's real account count and the post's own status
+ * come from `GET /posts?group_id=`, so the first of two accounts publishing never marks the
+ * post posted. If brain cannot be asked, the post stays unsettled and the reconcile run
+ * finishes it. Applying the same event twice changes nothing.
  */
 class ApplySocialreinsWebhookAction
 {
     public function __construct(
         private readonly SettleSocialreinsSubjectAction $settle,
+        private readonly ReconcileSocialreinsGroupsAction $reconcile,
     ) {}
 
     /**
@@ -35,13 +40,24 @@ class ApplySocialreinsWebhookAction
                 ->first()
             : null;
 
-        $results = $row !== null ? SocialreinsResults::withTargetEvent($row->results ?? [], $data) : null;
-
-        if ($row === null || $results === null) {
+        if ($row === null) {
             return false;
         }
 
-        $row->forceFill(['results' => $results])->save();
+        $at = is_string($event['created_at'] ?? null) ? (strtotime($event['created_at']) ?: time()) : time();
+        $known = false;
+        $row->mutateResults(function (array $results) use ($data, $at, &$known): ?array {
+            $merged = SocialreinsResults::withTargetEvent($results, $data, $at);
+            $known = $merged !== null;
+
+            return $merged;
+        });
+
+        if (! $known) {
+            return false;
+        }
+
+        $this->reconcile->reconcileGroup($row);
 
         $subject = $row->subject();
         if ($subject !== null) {

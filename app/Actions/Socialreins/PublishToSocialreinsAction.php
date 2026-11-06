@@ -26,12 +26,14 @@ use InvalidArgumentException;
  * key, so a retry days later returns the first result instead of posting twice. A request
  * brain refused (4xx) created nothing and was stored with its key, so the next attempt is a
  * new sequence with a new key. After a partial failure a retry plans again but sends only
- * the failed platforms.
+ * the failed platforms: never one that has a published target, a remote id or thread parts,
+ * because brain posts to every account of a platform and would repost what is already live.
  */
 class PublishToSocialreinsAction
 {
     public function __construct(
         private readonly SettleSocialreinsSubjectAction $settle,
+        private readonly ReconcileSocialreinsGroupsAction $reconcile,
     ) {}
 
     /** @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options */
@@ -108,6 +110,7 @@ class PublishToSocialreinsAction
      */
     private function createRows(Post|Video $subject, array $rows, array $options): array
     {
+        $rows = $this->refreshedRows($subject, $rows);
         $workspace = $subject->workspace;
         $config = SocialreinsConfig::fromWorkspace($workspace);
         $video = $subject instanceof Video;
@@ -132,9 +135,11 @@ class PublishToSocialreinsAction
         }
 
         if ($payloads === []) {
-            throw new SocialreinsException(
-                'Nothing to send: no platform is enabled for this post, or it is already published or still publishing.'
-            );
+            $partial = SocialreinsResults::withState(SocialreinsResults::byPlatform($rows), SocialreinsResults::PARTIAL);
+
+            throw new SocialreinsException($partial->isNotEmpty()
+                ? SettleSocialreinsSubjectAction::partialMessage($partial)
+                : 'Nothing to send: no platform is enabled for this post, or it is already published or still publishing.');
         }
 
         $kind = $video ? 'video' : 'post';
@@ -167,6 +172,34 @@ class PublishToSocialreinsAction
     }
 
     /**
+     * Before deciding what to resend, ask brain for the full picture of every group with a
+     * failure: a webhook does not say whether an account or a thread part already went out.
+     * When brain cannot be asked, nothing is resent.
+     *
+     * @param  list<SocialreinsGroup>  $rows
+     * @return list<SocialreinsGroup>
+     */
+    private function refreshedRows(Post|Video $subject, array $rows): array
+    {
+        $checked = false;
+        foreach ($rows as $row) {
+            $states = array_column(SocialreinsResults::byPlatform([$row]), 'state');
+            if ($row->state === SocialreinsGroup::CREATED
+                && array_intersect($states, [SocialreinsResults::FAILED, SocialreinsResults::PARTIAL]) !== []) {
+                if (! $this->reconcile->reconcileGroup($row)) {
+                    throw new SocialreinsException(
+                        "Could not ask SocialReins about the failed posts of {$row->language}, so CM cannot tell "
+                        .'whether part of them is already live. Nothing was resent; try again shortly.'
+                    );
+                }
+                $checked = true;
+            }
+        }
+
+        return $checked ? SocialreinsResults::rowsOf($subject) : $rows;
+    }
+
+    /**
      * A language that already has posts at SocialReins resends only its failed platforms;
      * a language with none (or only taken-down ones) goes out in full.
      *
@@ -195,6 +228,7 @@ class PublishToSocialreinsAction
     private function send(SocialreinsGroup $row): void
     {
         $client = new SocialreinsClient(SocialreinsConfig::fromWorkspace($row->workspace), $row->language);
+        $at = time();
 
         try {
             $body = $client->createGroup($row->idempotency_key, $row->request);
@@ -213,7 +247,7 @@ class PublishToSocialreinsAction
         $results = [];
         foreach ($body['posts'] as $post) {
             if (is_array($post) && is_string($post['id'] ?? null)) {
-                $results[$post['id']] = SocialreinsResults::fromBrainPost($post);
+                $results[$post['id']] = SocialreinsResults::fromBrainPost($post, $at);
             }
         }
 

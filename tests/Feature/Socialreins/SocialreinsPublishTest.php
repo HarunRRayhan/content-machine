@@ -16,6 +16,7 @@ use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Socialreins\SocialreinsResults;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -196,42 +197,6 @@ class SocialreinsPublishTest extends TestCase
         $this->assertSame('succeeded', $post->fresh()->publish_state);
     }
 
-    public function test_partial_failure_is_reported_and_a_retry_sends_only_the_failed_platform(): void
-    {
-        Http::fake([self::URL => Http::sequence()
-            ->push($this->groupResponse(['facebook', 'x']), 201)
-            ->push($this->groupResponse(['x'], 'aaaaaaaa-0000-4000-8000-000000000002'), 201)]);
-        $workspace = $this->workspace();
-        $post = $this->makePost($workspace, [
-            'facebook' => ['caption' => 'FB'],
-            'twitter' => ['caption' => 'X'],
-        ], ['platforms' => ['facebook', 'twitter']]);
-
-        $this->publish($post);
-
-        $webhook = app(ApplySocialreinsWebhookAction::class);
-        $webhook->handle($workspace->id, $this->event('published', 'bbbbbbbb-0000-4000-8000-000000000000', 'facebook'));
-        $this->assertSame('scheduled', $post->fresh()->status);
-
-        $webhook->handle($workspace->id, $this->event('failed', 'bbbbbbbb-0000-4000-8000-000000000001', 'x', error: 'rate limited'));
-
-        $post->refresh();
-        $this->assertSame('failed', $post->publish_state);
-        $this->assertStringContainsString('twitter (rate limited)', $post->publish_error);
-        $this->assertStringNotContainsString('facebook', $post->publish_error);
-
-        $this->publish($post);
-
-        $retry = $this->sent()[1];
-        $this->assertSame(['x'], $retry['platforms']);
-        $this->assertStringEndsWith(':english:2', $retry->header('Idempotency-Key')[0]);
-
-        $webhook->handle($workspace->id, $this->event('published', 'bbbbbbbb-0000-4000-8000-000000000000', 'x', group: 'aaaaaaaa-0000-4000-8000-000000000002', target: 't2'));
-        $post->refresh();
-        $this->assertSame('succeeded', $post->publish_state);
-        $this->assertSame('posted', $post->status);
-    }
-
     public function test_tiktok_without_a_chosen_privacy_is_refused_and_nothing_is_sent(): void
     {
         Http::fake();
@@ -393,6 +358,252 @@ class SocialreinsPublishTest extends TestCase
 
         $this->expectException(ValidationException::class);
         app(EnqueueSocialreinsPublishAction::class)->handle($post->fresh(), $post->workspace, []);
+    }
+
+    private const FB_POST = 'bbbbbbbb-0000-4000-8000-000000000000';
+
+    private const X_POST = 'bbbbbbbb-0000-4000-8000-000000000001';
+
+    private const GROUP = 'aaaaaaaa-0000-4000-8000-000000000001';
+
+    /** What brain answers to GET /posts?group_id=, by group; tests change it between steps. */
+    private array $brain = [];
+
+    private bool $brainDown = false;
+
+    /** @var list<mixed> queued answers to DELETE /posts/{id}; 204 when empty */
+    private array $deleteReplies = [];
+
+    private function brainPost(string $id, string $platform, string $status, array $targets = [], ?string $error = null): array
+    {
+        return ['id' => $id, 'platform' => $platform, 'status' => $status, 'error' => $error, 'targets' => $targets];
+    }
+
+    private function brainTarget(string $id, string $status, array $extra = []): array
+    {
+        return ['id' => $id, 'status' => $status, 'remote_id' => null, 'remote_url' => null, 'error' => null, 'parts' => [], ...$extra];
+    }
+
+    /** Create the group and make GET /posts?group_id= answer from $this->brain. */
+    private function publishedGroup(array $platforms = ['facebook', 'twitter']): array
+    {
+        $workspace = $this->workspace();
+        $post = $this->makePost($workspace, [
+            'facebook' => ['caption' => 'FB'],
+            'twitter' => ['caption' => 'X'],
+        ], ['platforms' => $platforms]);
+        $posts = array_values(array_filter([
+            in_array('facebook', $platforms, true) ? $this->brainPost(self::FB_POST, 'facebook', 'scheduled') : null,
+            in_array('twitter', $platforms, true) ? $this->brainPost(self::X_POST, 'x', 'scheduled') : null,
+        ]));
+        $this->brain = [self::GROUP => $posts];
+        $this->deleteReplies = [];
+        Http::fake([
+            self::URL => Http::sequence()
+                ->push(['group_id' => self::GROUP, 'posts' => $posts], 201)
+                ->push($this->groupResponse(['x'], 'aaaaaaaa-0000-4000-8000-000000000002'), 201),
+            'brain.test/v1/posts/*' => fn () => array_shift($this->deleteReplies) ?? Http::response(null, 204),
+            // Laravel's fake runs every stub for every request (and keeps the first match), so
+            // this one also sees DELETEs, which have no group_id.
+            'brain.test/v1/posts*' => fn (Request $r) => $this->brainDown
+                ? Http::response(['error' => 'internal'], 500)
+                : Http::response($this->brain[$r['group_id'] ?? ''] ?? []),
+        ]);
+        $this->publish($post);
+
+        return [$workspace, $post];
+    }
+
+    public function test_one_failed_account_of_two_on_a_platform_is_never_resent(): void
+    {
+        [$workspace, $post] = $this->publishedGroup(['facebook']);
+        // Two Facebook accounts in the set: one published, one failed. Brain posts to both.
+        $this->brain[self::GROUP] = [
+            $this->brainPost(self::FB_POST, 'facebook', 'published', [
+                $this->brainTarget('t1', 'published', ['remote_id' => 'r1', 'remote_url' => 'https://fb.test/1']),
+                $this->brainTarget('t2', 'failed', ['error' => 'token expired']),
+            ]),
+        ];
+
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('failed', self::FB_POST, 'facebook', 'token expired', target: 't2'));
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('Partly published in SocialReins: facebook (group '.self::GROUP, $post->publish_error);
+        $this->assertStringContainsString('Retry from SocialReins', $post->publish_error);
+
+        $retry = $this->publish($post);
+
+        $this->assertSame('failed', $retry->publish_state);
+        $this->assertStringContainsString('will not resend', $retry->publish_error);
+        $this->assertCount(1, $this->sent(), 'no second post group was created');
+    }
+
+    public function test_a_thread_that_failed_halfway_is_never_resent(): void
+    {
+        [$workspace, $post] = $this->publishedGroup(['twitter']);
+        $this->brain[self::GROUP] = [
+            $this->brainPost(self::X_POST, 'x', 'failed', [
+                $this->brainTarget('t1', 'failed', ['error' => 'part 3 failed', 'parts' => [['remote_id' => 'p1'], ['remote_id' => 'p2']]]),
+            ], 'part 3 failed'),
+        ];
+
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('failed', self::X_POST, 'x', 'part 3 failed'));
+
+        $this->assertStringContainsString('Partly published', $post->fresh()->publish_error);
+        $this->publish($post);
+        $this->assertCount(1, $this->sent());
+    }
+
+    public function test_a_platform_that_failed_with_nothing_live_is_resent_alone_after_asking_brain(): void
+    {
+        [$workspace, $post] = $this->publishedGroup();
+        $this->brain[self::GROUP] = [
+            $this->brainPost(self::FB_POST, 'facebook', 'published', [$this->brainTarget('t1', 'published', ['remote_id' => 'r1'])]),
+            $this->brainPost(self::X_POST, 'x', 'failed', [$this->brainTarget('t2', 'failed', ['error' => 'rate limited'])]),
+        ];
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('failed', self::X_POST, 'x', 'rate limited', target: 't2'));
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertStringContainsString('twitter (rate limited)', $post->publish_error);
+        $this->assertStringNotContainsString('facebook', $post->publish_error);
+
+        $this->publish($post);
+
+        $retry = $this->sent()[1];
+        $this->assertSame(['x'], $retry['platforms']);
+        $this->assertStringEndsWith(':english:2', $retry->header('Idempotency-Key')[0]);
+
+        $second = 'aaaaaaaa-0000-4000-8000-000000000002';
+        $this->brain[$second] = [$this->brainPost(self::FB_POST, 'x', 'published', [$this->brainTarget('t3', 'published', ['remote_id' => 'r3'])])];
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('published', self::FB_POST, 'x', group: $second, target: 't3'));
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('posted', $post->status);
+    }
+
+    public function test_a_resend_is_refused_when_brain_cannot_be_asked_what_is_already_live(): void
+    {
+        [$workspace, $post] = $this->publishedGroup();
+        $this->brain[self::GROUP] = [
+            $this->brainPost(self::FB_POST, 'facebook', 'published', [$this->brainTarget('t1', 'published')]),
+            $this->brainPost(self::X_POST, 'x', 'failed', [$this->brainTarget('t2', 'failed')]),
+        ];
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('failed', self::X_POST, 'x', target: 't2'));
+        $this->brainDown = true;
+
+        $result = $this->publish($post);
+
+        $this->assertStringContainsString('Nothing was resent', $result->publish_error);
+        $this->assertCount(1, $this->sent());
+    }
+
+    public function test_the_first_of_two_accounts_publishing_does_not_mark_the_post_posted_and_reconcile_finishes_it(): void
+    {
+        [$workspace, $post] = $this->publishedGroup(['facebook']);
+        // The webhook is about t1 only; brain's own list shows t2 still publishing.
+        $this->brain[self::GROUP] = [$this->brainPost(self::FB_POST, 'facebook', 'queued', [
+            $this->brainTarget('t1', 'published', ['remote_id' => 'r1']),
+            $this->brainTarget('t2', 'publishing'),
+        ])];
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('published', self::FB_POST, 'facebook', target: 't1'));
+        $this->assertSame('scheduled', $post->fresh()->status);
+
+        // Even if the snapshot could not be fetched, a lone event never settles the post.
+        $this->brainDown = true;
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('published', self::FB_POST, 'facebook', target: 't2'));
+        $this->assertSame('scheduled', $post->fresh()->status);
+
+        $this->brainDown = false;
+        $this->brain[self::GROUP] = [$this->brainPost(self::FB_POST, 'facebook', 'published', [
+            $this->brainTarget('t1', 'published', ['remote_id' => 'r1']),
+            $this->brainTarget('t2', 'published', ['remote_id' => 'r2']),
+        ])];
+        $this->travel(10)->minutes();
+        $this->assertSame(1, app(ReconcileSocialreinsGroupsAction::class)->handle());
+        $this->assertSame('posted', $post->fresh()->status);
+    }
+
+    public function test_an_older_snapshot_never_overwrites_a_newer_webhook_result(): void
+    {
+        $this->publishedGroup(['facebook']);
+        $group = SocialreinsGroup::query()->first();
+        $older = SocialreinsResults::fromBrainPost(
+            $this->brainPost(self::FB_POST, 'facebook', 'queued', [$this->brainTarget('t1', 'publishing')]),
+            at: 1_000,
+        );
+
+        $group->mutateResults(fn (array $r) => SocialreinsResults::withTargetEvent($r, $this->event('published', self::FB_POST, 'facebook')['data'], 2_000));
+        // A reconcile that fetched before the webhook but saved after it:
+        $group->mutateResults(function (array $r) use ($older) {
+            $r[self::FB_POST] = SocialreinsResults::mergePost($r[self::FB_POST], $older);
+
+            return $r;
+        });
+
+        $this->assertSame('published', $group->fresh()->results[self::FB_POST]['targets']['t1']['status']);
+    }
+
+    public function test_take_down_with_a_request_that_never_got_an_answer_is_refused_and_not_reset(): void
+    {
+        Http::fake([self::URL => Http::response(['error' => 'internal'], 500), 'brain.test/v1/posts/*' => Http::response(null, 204)]);
+        $post = $this->makePost($this->workspace(), ['facebook' => ['caption' => 'Hello']], ['platforms' => ['facebook']]);
+        $this->publish($post);
+
+        $problems = app(TakeDownSocialreinsAction::class)->handle($post->fresh());
+
+        $this->assertStringContainsString('Status unknown', $problems[0]);
+        $this->assertSame([], $this->sent('DELETE'));
+        $this->assertSame('failed', $post->fresh()->publish_state);
+    }
+
+    public function test_take_down_skips_failed_posts_waits_for_queued_ones_and_retries_a_409(): void
+    {
+        [$workspace, $post] = $this->publishedGroup();
+        $this->brain[self::GROUP] = [
+            $this->brainPost(self::FB_POST, 'facebook', 'failed', [$this->brainTarget('t1', 'failed')]),
+            $this->brainPost(self::X_POST, 'x', 'queued', [$this->brainTarget('t2', 'publishing')]),
+        ];
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('failed', self::FB_POST, 'facebook', target: 't1'));
+
+        $problems = app(TakeDownSocialreinsAction::class)->handle($post->fresh());
+
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('still publishing', $problems[0]);
+        $this->assertSame([], $this->sent('DELETE'), 'neither the failed nor the queued post was deleted');
+        $this->assertNotSame('idle', $post->fresh()->publish_state);
+
+        // The queued post settles as published; brain answers 409 once, then deletes.
+        $this->brain[self::GROUP][1] = $this->brainPost(self::X_POST, 'x', 'published', [$this->brainTarget('t2', 'published')]);
+        app(ReconcileSocialreinsGroupsAction::class)->reconcileGroup(SocialreinsGroup::query()->first());
+        $this->deleteReplies = [Http::response(['error' => 'not_deletable'], 409)];
+
+        $first = app(TakeDownSocialreinsAction::class)->handle($post->fresh());
+        $this->assertStringContainsString('Try again later', $first[0]);
+        $this->assertSame([], app(TakeDownSocialreinsAction::class)->handle($post->fresh()));
+        $this->assertSame('idle', $post->fresh()->publish_state);
+        $keys = array_map(fn (Request $r) => $r->header('Idempotency-Key')[0], $this->sent('DELETE'));
+        $this->assertCount(2, array_unique($keys));
+        $statuses = Http::recorded()->filter(fn (array $pair): bool => $pair[0]->method() === 'DELETE')
+            ->map(fn (array $pair): int => $pair[1]->status())->values()->all();
+        $this->assertSame([409, 204], $statuses);
+    }
+
+    public function test_a_reused_idempotency_key_keeps_the_row_pending_and_never_gets_a_new_key(): void
+    {
+        Http::fake([self::URL => Http::response(['error' => 'idempotency_key_reused'], 422)]);
+        $post = $this->makePost($this->workspace(), ['facebook' => ['caption' => 'Hello']], ['platforms' => ['facebook']]);
+
+        $first = $this->publish($post);
+        $this->assertStringContainsString('idempotency_key_reused', $first->publish_error);
+        $this->assertSame('pending', SocialreinsGroup::query()->first()->state);
+
+        $this->publish($post);
+
+        [$one, $two] = $this->sent();
+        $this->assertSame($one->header('Idempotency-Key'), $two->header('Idempotency-Key'));
+        $this->assertSame(1, SocialreinsGroup::query()->count());
     }
 
     /** @return array<string, mixed> */

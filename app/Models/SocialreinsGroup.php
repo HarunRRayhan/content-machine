@@ -5,6 +5,7 @@ namespace App\Models;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 
 /**
  * One SocialReins post group created for a Post or Video: one brain
@@ -46,6 +47,27 @@ class SocialreinsGroup extends Model
     public function workspace(): BelongsTo
     {
         return $this->belongsTo(Workspace::class);
+    }
+
+    /**
+     * Change the stored results under a row lock, so a webhook, a reconcile and a take down
+     * that overlap each apply their change to the latest copy instead of overwriting it.
+     * The callback gets the current results and returns the new ones (null leaves them).
+     *
+     * @param  \Closure(array<string, array<string, mixed>>): (array<string, array<string, mixed>>|null)  $change
+     */
+    public function mutateResults(\Closure $change): void
+    {
+        DB::transaction(function () use ($change): void {
+            $locked = static::query()->whereKey($this->getKey())->lockForUpdate()->firstOrFail();
+            $next = $change($locked->results ?? []);
+
+            if ($next !== null) {
+                $locked->forceFill(['results' => $next])->save();
+            }
+        });
+
+        $this->refresh();
     }
 
     public function subject(): Post|Video|null
