@@ -45,7 +45,7 @@ services:
       - -ec
       - |
         stamp=node_modules/.cm-setup.sha256
-        if [ -f .env ] && [ -f public/build/manifest.json ] && sha256sum --status -c "$$stamp" 2>/dev/null; then
+        if [ -f .env ] && [ -f vendor/autoload.php ] && [ -f public/build/manifest.json ] && sha256sum --status -c "$$stamp" 2>/dev/null; then
           php artisan cm:ensure-key
           php artisan migrate
           exec php artisan cm:ensure-admin
