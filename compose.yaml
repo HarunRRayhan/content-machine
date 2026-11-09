@@ -1,4 +1,7 @@
 # Development stack: docker compose up --build. For deployment use compose.prod.yaml.
+# Separate project name so dev commands can never touch production volumes.
+name: content-machine-dev
+
 x-dev: &dev
   build:
     context: .

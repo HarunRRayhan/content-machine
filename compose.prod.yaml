@@ -1,4 +1,6 @@
 # Production stack with automatic HTTPS. Setup steps are in README.md under "Run with Docker".
+name: content-machine
+
 x-app: &app
   build:
     context: .
