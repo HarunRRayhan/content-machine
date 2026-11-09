@@ -269,7 +269,8 @@ docker compose up --build
 ```
 
 The first start installs dependencies, creates `.env` with an app key, and
-migrates the database. Open <http://localhost:8000> and register an account.
+migrates the database. Later starts skip the installs unless a lockfile changed.
+Open <http://localhost:8000> and register an account.
 Code changes reload through Vite. Run commands inside the stack with
 `docker compose exec app php artisan <command>`.
 
