@@ -2,15 +2,21 @@
 
 namespace App\Support\Socialreins;
 
+use App\Models\Post;
+use App\Models\SocialreinsGroup;
+use App\Models\Video;
 use App\Models\Workspace;
+use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\ScriptStudioPostTypes;
+use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Crypt;
 
 /**
  * Workspace SocialReins settings under settings.socialreins, plus the per-workspace
- * driver switch at settings.publish_driver ('postsyncer' by default).
+ * driver switch at settings.publish_driver ('postsyncer' by default) and, under
+ * settings.socialreins.routed_languages, the languages that switch applies to.
  */
 class SocialreinsConfig
 {
@@ -27,6 +33,67 @@ class SocialreinsConfig
     public static function usesSocialreins(Workspace $workspace): bool
     {
         return ($workspace->settings['publish_driver'] ?? null) === self::DRIVER;
+    }
+
+    /**
+     * The driver one subject publishes through. A subject already on a driver stays there
+     * whatever the settings say now; a new one follows the workspace driver, limited to
+     * subjects whose every language is routed. No routed list means every language.
+     *
+     * @param  array<string, mixed>  $options  the publish options, when deciding a publish
+     */
+    public static function routesToSocialreins(Post|Video $subject, Workspace $workspace, array $options = []): bool
+    {
+        if (self::isOnSocialreins($subject)) {
+            return true;
+        }
+
+        if (self::isOnPostsyncer($subject) || ! self::usesSocialreins($workspace)) {
+            return false;
+        }
+
+        $routed = self::fromWorkspace($workspace)->routedLanguages();
+
+        if ($routed === []) {
+            return true;
+        }
+
+        // Only PostSyncer's publish closes a Telegram request, and /cancel relies on that.
+        if (($options['telegram_request_id'] ?? null) !== null) {
+            return false;
+        }
+
+        $languages = $subject instanceof Video
+            ? app(VideoPublishPlanner::class)->knownLanguages($subject)
+            : app(PostPublishPlanner::class)->knownLanguages($subject);
+
+        return $languages !== [] && array_diff($languages, $routed) === [];
+    }
+
+    /** A SocialReins run started and was not fully taken down, or a group may exist there. */
+    private static function isOnSocialreins(Post|Video $subject): bool
+    {
+        if (($subject->publish_progress['driver'] ?? null) === self::DRIVER) {
+            return true;
+        }
+
+        $rows = SocialreinsResults::rowsOf($subject);
+        $states = array_column(SocialreinsResults::byPlatform($rows, requireComplete: false), 'state');
+
+        return array_diff($states, [SocialreinsResults::DELETED]) !== []
+            || array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::PENDING) !== [];
+    }
+
+    /** PostSyncer has groups for it, or a PostSyncer run wrote its progress (no `driver` key). */
+    private static function isOnPostsyncer(Post|Video $subject): bool
+    {
+        foreach ($subject->postsyncer['groups'] ?? [] as $group) {
+            if (is_array($group) && filled($group['post_id'] ?? null)) {
+                return true;
+            }
+        }
+
+        return is_array($subject->publish_progress);
     }
 
     public static function fromWorkspace(Workspace $workspace): self
@@ -86,9 +153,22 @@ class SocialreinsConfig
         ));
     }
 
+    /** @return list<string> languages limited to SocialReins; empty means every language */
+    public function routedLanguages(): array
+    {
+        $languages = $this->data['routed_languages'] ?? [];
+
+        return is_array($languages) ? array_values(array_intersect(PostsyncerConfig::LANGUAGES, $languages)) : [];
+    }
+
+    /** With a routed list, one routed language with a set is enough: the others may have none yet. */
     public function isReadyForPublish(): bool
     {
-        return in_array($this->defaultLanguage(), $this->configuredLanguages(), true);
+        $routed = $this->routedLanguages();
+
+        return $routed === []
+            ? in_array($this->defaultLanguage(), $this->configuredLanguages(), true)
+            : array_intersect($routed, $this->configuredLanguages()) !== [];
     }
 
     /**
@@ -152,6 +232,10 @@ class SocialreinsConfig
             if (array_key_exists($key, $input)) {
                 $current[$key] = $input[$key];
             }
+        }
+
+        if (array_key_exists('routed_languages', $input)) {
+            $current['routed_languages'] = array_values(array_intersect(PostsyncerConfig::LANGUAGES, (array) $input['routed_languages']));
         }
 
         if (is_string($input['webhook_secret'] ?? null) && trim($input['webhook_secret']) !== '') {

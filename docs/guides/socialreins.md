@@ -2,13 +2,38 @@
 
 A workspace publishes through PostSyncer (the default) or through SocialReins. The
 driver is chosen per workspace in **Settings > SocialReins**; the PostSyncer settings,
-jobs and tests are not touched by it. Switching is blocked while a publish is queued
-or running.
+jobs and tests are not touched by it. Changing the driver or its routed languages is
+blocked while a publish is queued or running.
+
+## Language routing
+
+**Languages through SocialReins** limits the driver to some languages, for a staged run
+(tick only Bangla to leave everything with English on PostSyncer). Nothing ticked means
+every language, as before.
+
+- A post or video goes through SocialReins only if the driver is SocialReins and every
+  language it carries is ticked. Otherwise it goes through PostSyncer whole. One subject is
+  never split across the two.
+- A post carries every language it has captions for, as `PostPublishPlanner` reads them. A
+  video carries its one `language`. Publish options (`platforms`) do not change the answer,
+  so publishing a mixed post to one platform still goes through PostSyncer.
+- A language that is only the planners' fallback (an empty or `both` language with untagged
+  captions) is not known, so that subject goes through PostSyncer.
+- With languages ticked, a Telegram publish request stays on PostSyncer, which is what closes the request, unless the post is already on SocialReins.
+- A subject already on a driver stays there for retry, take down, reconcile and status,
+  whatever the settings say later. SocialReins: `publish_progress.driver`, or
+  `socialreins_groups` with a pending or live group. PostSyncer: `postsyncer.groups` with a
+  post id, or a `publish_progress` without a driver. A subject fully taken down from
+  SocialReins follows the settings again.
+- With languages ticked, one ticked language with a set and token makes SocialReins ready,
+  so the default language may have no set. A subject in a ticked language with no set fails
+  with a clear error.
 
 | Field | Purpose |
 |---|---|
 | **Publish driver** | `postsyncer` (default) or `socialreins`. Stored as `settings.publish_driver`. |
 | **API base URL** | Default `https://brain.socialreins.com/v1`. Public HTTPS only (no userinfo, query or fragment, no private or loopback address). Every call re-checks DNS and pins the checked addresses, and redirects are never followed, so the tokens go only to that host. Changing it clears the saved tokens and webhook secret. |
+| **Languages through SocialReins** | Stored as `settings.socialreins.routed_languages`. See [Language routing](#language-routing). |
 | **Set id + token, per language** | One SocialReins set per language (English, Bangla) and its set-limited API token (`sr_set_live_...`). Encrypted, write-only. |
 | **TikTok visibility** | One of `SELF_ONLY`, `FOLLOWER_OF_CREATOR`, `MUTUAL_FOLLOW_FRIENDS`, `PUBLIC_TO_EVERYONE`. Required for TikTok: with none chosen a TikTok publish is refused, never defaulted to public. |
 | **Webhook secret** | The `whsec_...` secret of the SocialReins team webhook. |

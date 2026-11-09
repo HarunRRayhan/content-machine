@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Queue a SocialReins publish for a Post or Video in a workspace whose driver is
- * SocialReins. EnqueuePostPublishAction and EnqueueVideoPublishAction hand over to this.
+ * Queue a SocialReins publish for a Post or Video that routes to SocialReins.
+ * EnqueuePostPublishAction and EnqueueVideoPublishAction hand over to this.
  */
 class EnqueueSocialreinsPublishAction
 {
@@ -32,14 +32,22 @@ class EnqueueSocialreinsPublishAction
             throw $this->refuse(__('SocialReins is not configured for publishing: set the base URL, a set id and a token in Settings.'));
         }
 
+        $requested = $options;
         $options = array_intersect_key(
             array_filter($options, fn (mixed $value): bool => $value !== null),
             array_flip(['when', 'platforms', 'confirm_ask']),
         );
 
         /** @var T $queued */
-        $queued = DB::transaction(function () use ($subject, $options): Post|Video {
+        $queued = DB::transaction(function () use ($subject, $workspace, $requested, $options): Post|Video {
+            // Same lock order as the PostSyncer path and the settings save: workspace, then subject.
+            $lockedWorkspace = Workspace::query()->whereKey($workspace->getKey())->lockForUpdate()->firstOrFail();
             $locked = $subject::query()->whereKey($subject->getKey())->lockForUpdate()->firstOrFail();
+
+            // The route was read before this lock: never start on the other driver's subject.
+            if (! SocialreinsConfig::routesToSocialreins($locked, $lockedWorkspace, $requested)) {
+                throw $this->refuse(__('The publish route changed. Try again.'));
+            }
 
             if ($locked instanceof Post) {
                 if (($locked->approval_state ?? 'approved') !== 'approved') {

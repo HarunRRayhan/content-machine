@@ -313,6 +313,7 @@ class VideosController extends Controller
             $postsyncerConfig,
             $publishOptions,
         ) && ! (bool) ($publishOptions['confirm_ask'] ?? false);
+        $socialreins = SocialreinsConfig::routesToSocialreins($video, $workspace);
 
         return [
             'id' => $video->id,
@@ -338,11 +339,11 @@ class VideosController extends Controller
             'publish_error' => $video->publish_error,
             'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
-            // Legacy name: "a publish driver is ready" (PostSyncer, or SocialReins when chosen).
-            'postsyncer_ready' => SocialreinsConfig::usesSocialreins($workspace)
+            // Legacy name: "this video's publish driver is ready" (PostSyncer, or SocialReins when routed).
+            'postsyncer_ready' => $socialreins
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
                 : $postsyncerConfig->isReadyForPublish(),
-            'video_publish_enabled' => SocialreinsConfig::usesSocialreins($workspace) || $postsyncerConfig->videoPublishEnabled(),
+            'video_publish_enabled' => $socialreins || $postsyncerConfig->videoPublishEnabled(),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
             'series' => VideoScriptSeries::forVideo($video),

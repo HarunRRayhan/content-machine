@@ -423,6 +423,32 @@ class PostPublishPlanner
     }
 
     /**
+     * Every language this post has captions for, before publish options narrow anything.
+     * Empty when one of them is only resolveLanguage()'s fallback, which turns an empty or
+     * "both" post language into bangla: then the language is not actually known.
+     *
+     * @return list<string>
+     */
+    public function knownLanguages(Post $post): array
+    {
+        if ($this->languageFromPart($post->language) !== $this->resolveLanguage($post)) {
+            $captions = $post->captions ?? [];
+
+            if ($this->isFlatCaptionMap($captions)) {
+                return [];
+            }
+
+            foreach (NormalizeCaptions::forDashboard($captions) as $group) {
+                if ($this->languageFromPart($group['part']) === null) {
+                    return [];
+                }
+            }
+        }
+
+        return array_keys($this->captionsByLanguage($post));
+    }
+
+    /**
      * @param  array<mixed>  $fields
      * @return array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}
      */

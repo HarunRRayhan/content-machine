@@ -17,16 +17,23 @@ class SaveSocialreinsSettingsAction
         DB::transaction(function () use ($workspace, $input): void {
             $locked = Workspace::query()->whereKey($workspace->getKey())->lockForUpdate()->firstOrFail();
 
-            // Moving a workspace between drivers mid-publish would strand the run.
-            if (SocialreinsConfig::usesSocialreins($locked) !== (($input['publish_driver'] ?? null) === SocialreinsConfig::DRIVER)
-                && $this->hasPublishInFlight($locked)) {
+            $before = $this->routing($locked);
+            SocialreinsConfig::write($locked, $input);
+
+            // Moving a workspace between drivers mid-publish would strand the run. Throwing
+            // here rolls the write back.
+            if ($before !== $this->routing($locked) && $this->hasPublishInFlight($locked)) {
                 throw ValidationException::withMessages([
-                    'publish_driver' => __('Wait for the running publish to finish before changing the publish driver.'),
+                    'publish_driver' => __('Wait for the running publish to finish before changing the publish driver or its languages.'),
                 ]);
             }
-
-            SocialreinsConfig::write($locked, $input);
         });
+    }
+
+    /** @return array{0: bool, 1: list<string>} */
+    private function routing(Workspace $workspace): array
+    {
+        return [SocialreinsConfig::usesSocialreins($workspace), SocialreinsConfig::fromWorkspace($workspace)->routedLanguages()];
     }
 
     private function hasPublishInFlight(Workspace $workspace): bool
