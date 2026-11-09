@@ -151,6 +151,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.publish');
 
+    Route::post('videos/{human_id}/reconcile', [VideosApiController::class, 'reconcile'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.reconcile');
+
     Route::post('videos/{human_id}/reconcile-create-absent', [VideosApiController::class, 'reconcileCreateAbsent'])
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.reconcile-create-absent');

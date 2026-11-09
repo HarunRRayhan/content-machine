@@ -516,6 +516,46 @@ class VideosApiTest extends TestCase
         $this->assertNull($video->publish_error);
     }
 
+    public function test_reconcile_requires_a_post_id_and_an_uncertain_create(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-RC',
+            'number' => 202,
+            'publish_state' => 'failed',
+            'publish_progress' => null,
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-RC/reconcile', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer_id');
+
+        $this->acting()->postJson('/api/v1/videos/BV-RC/reconcile', [
+            'postsyncer_id' => '170695',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer_id');
+    }
+
+    public function test_reconcile_endpoint_passes_the_post_id_to_the_action(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-RD',
+            'number' => 203,
+            'publish_state' => 'failed',
+        ]);
+
+        $this->mock(PublishVideoAction::class)
+            ->shouldReceive('reconcile')
+            ->once()
+            ->withArgs(fn (Video $video, string $id, bool $confirmFailed): bool => $video->human_id === 'BV-RD'
+                && $id === '170695'
+                && $confirmFailed === false);
+
+        $this->acting()->postJson('/api/v1/videos/BV-RD/reconcile', [
+            'postsyncer_id' => '170695',
+        ])->assertOk();
+    }
+
     public function test_reconcile_create_absent_requires_confirmation_and_an_uncertain_create(): void
     {
         Video::factory()->for($this->workspace)->create([
