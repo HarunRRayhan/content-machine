@@ -20,8 +20,7 @@ RUN composer install \
 # app (vendor installed, APP_KEY set). This mirrors ci.yml's `frontend` job:
 # PHP setup -> composer install -> copy .env -> key:generate ->
 # wayfinder:generate --with-form -> npm ci -> build.
-FROM node:26-trixie-slim AS assets
-WORKDIR /app
+FROM node:26-trixie-slim AS php-node
 
 # Debian trixie ships PHP 8.4 in its default repos, so no extra APT source is
 # needed. This PHP install only exists to run two artisan commands below; it
@@ -38,6 +37,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         php8.4-zip \
     && rm -rf /var/lib/apt/lists/*
 
+FROM php-node AS assets
+WORKDIR /app
+
 COPY --from=vendor /app/vendor ./vendor
 COPY . .
 
@@ -49,6 +51,18 @@ RUN cp .env.example .env \
 
 RUN npm ci
 RUN npm run build
+
+############################################
+# Stage: dev — used by compose.yaml, source is bind-mounted
+############################################
+FROM php-node AS dev
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=composer:2.8 /usr/bin/composer /usr/local/bin/composer
+WORKDIR /app
+# Named volumes inherit this ownership on first mount.
+RUN mkdir -p vendor node_modules && chown -R node:node /app
+USER node
 
 ############################################
 # Stage: app — runtime image

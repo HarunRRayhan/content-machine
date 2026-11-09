@@ -258,22 +258,48 @@ See [production setup](docs/getting-started/production.md) for the environment,
 first key, process commands, uploads, and repeat deployments. The existing
 Railway configuration continues to use its Docker build and `cm:deploy` hook.
 
-### Run with Docker
+## Run with Docker
 
-Needs only Docker. The stack runs PostgreSQL, migrations, the web app with its
-media and publish queues, and a worker with the default queue and scheduler.
+You only need Docker. You do not have to install PHP, Node, or PostgreSQL.
+
+### Development
 
 ```bash
-cp .env.example .env
-sed -i.bak "s|^APP_KEY=.*|APP_KEY=base64:$(openssl rand -base64 32)|" .env && rm .env.bak
-docker compose up --build -d
+docker compose up --build
 ```
 
-Open <http://localhost:8000>. Set `APP_PORT` in `.env` to use another port, and
-`APP_URL` to the address people will use. The app listens on `127.0.0.1` only. To
-serve it publicly, put a TLS reverse proxy in front that overwrites
-`X-Forwarded-For`, because the app trusts forwarded headers. Back up `.env`: encrypted integration
-credentials depend on `APP_KEY`. Data lives in the `db` and `uploads` volumes.
+The first start installs dependencies, creates `.env` with an app key, and
+migrates the database. Open <http://localhost:8000> and register an account.
+Code changes reload through Vite. Run commands inside the stack with
+`docker compose exec app php artisan <command>`.
+
+On Linux the containers run as user 1000. If your user has another id, fix
+ownership of the checkout or the stack cannot write to it.
+
+### Production
+
+On a server with Docker, point your domain's DNS at it and open ports 80 and
+443. From a checkout, create `.env` once and start the stack:
+
+```bash
+cat > .env <<EOF
+APP_DOMAIN=content.example.com
+ADMIN_EMAIL=you@example.com
+APP_KEY=base64:$(openssl rand -base64 32)
+DB_PASSWORD=$(openssl rand -hex 24)
+EOF
+
+docker compose -f compose.prod.yaml up -d --build
+docker compose -f compose.prod.yaml logs migrate | grep -i password
+```
+
+Caddy gets the HTTPS certificate automatically. The last command prints the
+generated password for `ADMIN_EMAIL`, once, on the first start. Public sign-up is
+off unless you set `DISABLE_REGISTRATION=false`. Add integration settings from
+`.env.example` to the same `.env`.
+
+To update, run `git pull`, then the `up` command again. Back up `.env` and the
+`db` and `uploads` volumes: encrypted integration credentials depend on `APP_KEY`.
 
 ## Composer commands
 

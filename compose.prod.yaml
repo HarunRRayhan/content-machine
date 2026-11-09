@@ -1,0 +1,103 @@
+# Production stack with automatic HTTPS. Setup steps are in README.md under "Run with Docker".
+name: content-machine
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile
+  image: content-machine:latest
+  env_file: .env
+  # Queue jobs may run for 900 seconds; let them finish on stop.
+  stop_grace_period: 16m
+  environment:
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_KEY: ${APP_KEY:?Set APP_KEY in .env. See "Run with Docker" in README.md}
+    APP_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env}
+    ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}
+    DISABLE_REGISTRATION: ${DISABLE_REGISTRATION:-true}
+    DB_CONNECTION: pgsql
+    DB_HOST: db
+    DB_PORT: "5432"
+    DB_DATABASE: content_machine
+    DB_USERNAME: content_machine
+    DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    QUEUE_CONNECTION: database
+    POSTSYNCER_QUEUE_RETRY_AFTER: "960"
+    CACHE_STORE: database
+    SESSION_DRIVER: database
+    SESSION_SECURE_COOKIE: "true"
+    LOG_CHANNEL: stderr
+    LOG_LEVEL: info
+    PHP_OPCACHE_ENABLE: "1"
+    # Milliseconds s6 lets the web container's queue workers finish after a stop.
+    S6_SERVICES_GRACETIME: "960000"
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: content_machine
+      POSTGRES_USER: content_machine
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U content_machine -d content_machine
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: migrations and admin bootstrap, the same step Railway runs before a deploy.
+  migrate:
+    <<: *app
+    command: php artisan cm:deploy
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    # The base image's SIGQUIT is ignored by its init, so a stop would hang for the full grace period.
+    stop_signal: SIGTERM
+    restart: unless-stopped
+    volumes:
+      - uploads:/var/www/html/storage/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Default queue and scheduler. Media and publish queues run inside web, next to uploads.
+  worker:
+    <<: *app
+    entrypoint: /usr/local/bin/cm-start-worker
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Terminates TLS and overwrites client X-Forwarded-For, which the app trusts.
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    command: caddy reverse-proxy --from ${APP_DOMAIN:?Set APP_DOMAIN in .env} --to web:8080
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy:/data
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  db:
+  uploads:
+  caddy:
