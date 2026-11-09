@@ -50,6 +50,7 @@ MD;
         $parsed = ParseVideoScript::fromMarkdown($markdown, 'bn');
 
         $this->assertSame('Bangla', $parsed['lang']);
+        $this->assertFalse($parsed['is_talking_points']);
         $this->assertSame('45s', $parsed['length']);
         $this->assertCount(2, $parsed['points']);
         $this->assertSame('Hook', $parsed['points'][0]['label']);
@@ -89,5 +90,6 @@ MD;
             ['label' => '', 'text' => 'Open the app'],
         ], $parsed['points']);
         $this->assertSame([], $parsed['scripts']);
+        $this->assertTrue($parsed['is_talking_points']);
     }
 }

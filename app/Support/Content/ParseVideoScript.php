@@ -27,6 +27,7 @@ final class ParseVideoScript
      *     facts: list<string>,
      *     sources: string,
      *     legal: list<string>,
+     *     is_talking_points: bool,
      * }
      */
     public static function fromMarkdown(string $markdown, string $fallbackLang = 'bn'): array
@@ -103,6 +104,7 @@ final class ParseVideoScript
             'facts' => $facts,
             'sources' => $sources,
             'legal' => $legal,
+            'is_talking_points' => preg_match('/^\*\*Format:\*\*\s*Talking points/mi', $text) === 1,
         ];
     }
 

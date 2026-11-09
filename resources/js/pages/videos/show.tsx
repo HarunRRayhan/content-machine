@@ -38,6 +38,7 @@ type VideoDetail = {
         facts: string[];
         sources: string;
         legal: string[];
+        is_talking_points: boolean;
     };
     captions: CaptionGroup[];
     has_deck: boolean;
@@ -90,10 +91,10 @@ export default function VideoShow({ video }: PageProps) {
         (group) => group.platforms.length > 0,
     );
     const hasDeck = video.has_deck;
-    // A camera-only video has talking points and neither a script nor a deck.
+    // A camera-only video records from talking points; its script is prep only.
     const isTalkingPoints =
         !hasDeck &&
-        video.parsed.scripts.length === 0 &&
+        video.parsed.is_talking_points &&
         video.parsed.points.length > 0;
     const hasFacts =
         video.parsed.facts.length > 0 ||
@@ -103,7 +104,7 @@ export default function VideoShow({ video }: PageProps) {
     const validTabs = useMemo<readonly TabKey[]>(() => {
         const tabs: TabKey[] = ['overview'];
 
-        if (!hasDeck && !isTalkingPoints) {
+        if (!hasDeck) {
             tabs.push('script');
         }
 
@@ -131,9 +132,7 @@ export default function VideoShow({ video }: PageProps) {
             return { script: 'presentation' };
         }
 
-        return isTalkingPoints
-            ? { script: 'talking-points', presentation: 'talking-points' }
-            : {};
+        return isTalkingPoints ? { presentation: 'talking-points' } : {};
     }, [hasDeck, isTalkingPoints]);
     const [tab, setTab] = useStudioTab(validTabs, 'overview', tabAliases);
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
