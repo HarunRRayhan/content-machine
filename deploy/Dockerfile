@@ -87,7 +87,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         arm64) YTDLP_ASSET=yt-dlp_linux_aarch64; YTDLP_EXPECTED_SHA256="${YTDLP_AARCH64_SHA256}" ;; \
         *) echo "Unsupported yt-dlp architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${YTDLP_ASSET}" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${YTDLP_ASSET}" \
     && echo "${YTDLP_EXPECTED_SHA256}  /tmp/yt-dlp" | sha256sum -c - \
     && install -m 0755 /tmp/yt-dlp /usr/local/bin/yt-dlp \
     && rm /tmp/yt-dlp

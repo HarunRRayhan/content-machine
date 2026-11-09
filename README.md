@@ -258,6 +258,21 @@ See [production setup](docs/getting-started/production.md) for the environment,
 first key, process commands, uploads, and repeat deployments. The existing
 Railway configuration continues to use its Docker build and `cm:deploy` hook.
 
+### Run with Docker
+
+Needs only Docker. The stack runs PostgreSQL, migrations, the web app with its
+media and publish queues, and a worker with the default queue and scheduler.
+
+```bash
+cp .env.example .env
+sed -i.bak "s|^APP_KEY=.*|APP_KEY=base64:$(openssl rand -base64 32)|" .env && rm .env.bak
+docker compose up --build -d
+```
+
+Open <http://localhost:8000>. Set `APP_PORT` in `.env` to use another port, and
+`APP_URL` to the address people will use. Back up `.env`: encrypted integration
+credentials depend on `APP_KEY`. Data lives in the `db` and `uploads` volumes.
+
 ## Composer commands
 
 | Command | Purpose |
@@ -280,6 +295,11 @@ before running tests locally.
 ## Security
 
 See [`SECURITY.md`](SECURITY.md) for how to report a vulnerability.
+
+## Sponsor
+
+If Content Machine is useful to you, you can support it through
+[GitHub Sponsors](https://github.com/sponsors/HarunRRayhan).
 
 ## License
 

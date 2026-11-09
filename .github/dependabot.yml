@@ -3,7 +3,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     cooldown:
       default-days: 5
     groups:
@@ -13,8 +13,9 @@ updates:
 
   - package-ecosystem: "composer"
     directory: "/"
+    open-pull-requests-limit: 2
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     groups:
       composer-minor-patch:
         update-types:
@@ -23,8 +24,15 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/"
+    open-pull-requests-limit: 2
     schedule:
-      interval: "weekly"
+      interval: "monthly"
+    ignore:
+      # eslint-plugin-import has no release that accepts ESLint 10 yet.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         update-types:

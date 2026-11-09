@@ -1,0 +1,78 @@
+name: Docker
+
+# The image only changes with these files. Railway still builds it on every deploy.
+on:
+  push:
+    branches:
+      - main
+    paths: &docker-paths
+      - deploy/**
+      - compose.yaml
+      - .dockerignore
+      - .env.example
+      - composer.lock
+      - package-lock.json
+      - .github/workflows/docker.yml
+  pull_request:
+    paths: *docker-paths
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Validate compose.yaml
+        run: cp .env.example .env && APP_KEY=ci docker compose config --quiet
+
+      - name: Build image
+        run: docker build -f deploy/Dockerfile -t cm:ci .
+
+      - name: Smoke test
+        run: |
+          # A bare `php artisan about` needs a real APP_KEY and .env to not
+          # error; give it the throwaway env the assets build stage also uses.
+          docker run --rm cm:ci sh -c "cp .env.example .env && php artisan key:generate --force && php artisan about --only=environment"
+          docker run --rm cm:ci yt-dlp --version
+          docker run --rm cm:ci ffmpeg -version
+
+      - name: Smoke test web queue service
+        run: |
+          docker run --detach --rm --name cm-s6 \
+            --env APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+            --env APP_ENV=production \
+            --env AUTORUN_ENABLED=false \
+            --env CM_MIGRATION_GATE=false \
+            --env CM_SYNC_PRESENTATION_LIBRARY=false \
+            --env QUEUE_CONNECTION=database \
+            --env DB_CONNECTION=pgsql \
+            --env DB_HOST=127.0.0.1 \
+            --env DB_PORT=1 \
+            --env DB_DATABASE=unused \
+            --env DB_USERNAME=unused \
+            --env DB_PASSWORD=unused \
+            --env CACHE_STORE=array \
+            --env SESSION_DRIVER=array \
+            cm:ci /init
+          trap 'docker rm -f cm-s6' EXIT
+
+          for attempt in $(seq 1 30); do
+            if docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue 2>/dev/null | grep -q '^up' \
+              && docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue 2>/dev/null | grep -q '^up'; then
+              break
+            fi
+            sleep 1
+          done
+
+          docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue | grep -q '^up'
+          docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue | grep -q '^up'
