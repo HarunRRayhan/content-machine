@@ -186,6 +186,19 @@ class VideoPublishPlanner
     }
 
     /**
+     * The one language a video publishes in. Empty when that is only resolveLanguage()'s
+     * fallback, which turns an empty or "both" video language into bangla.
+     *
+     * @return list<string>
+     */
+    public function knownLanguages(Video $video): array
+    {
+        $language = $this->resolveLanguage($video);
+
+        return $this->languageFromPart($video->language) === $language ? [$language] : [];
+    }
+
+    /**
      * @param  array<mixed>  $fields
      */
     private function captionText(array $fields): string

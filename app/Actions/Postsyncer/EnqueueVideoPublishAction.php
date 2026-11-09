@@ -26,7 +26,7 @@ class EnqueueVideoPublishAction
     {
         abort_if($video->workspace_id !== $workspace->id, 404);
 
-        if (SocialreinsConfig::usesSocialreins($workspace)) {
+        if (SocialreinsConfig::routesToSocialreins($video, $workspace)) {
             return app(EnqueueSocialreinsPublishAction::class)->handle($video, $workspace, $options);
         }
 
@@ -49,7 +49,7 @@ class EnqueueVideoPublishAction
         $queued = DB::transaction(function () use ($video, $workspace, $filtered): Video {
             $this->assertAtomicQueueConfiguration();
 
-            Workspace::query()
+            $lockedWorkspace = Workspace::query()
                 ->whereKey($workspace->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -60,6 +60,13 @@ class EnqueueVideoPublishAction
                 ->firstOrFail();
 
             abort_if($lockedVideo->workspace_id !== $workspace->id, 404);
+
+            // The route was read before these locks: never start on the other driver's video.
+            if (SocialreinsConfig::routesToSocialreins($lockedVideo, $lockedWorkspace)) {
+                throw ValidationException::withMessages([
+                    'publish' => __('The publish route changed. Try again.'),
+                ]);
+            }
 
             if (in_array($lockedVideo->publish_state, ['queued', 'running'], true)) {
                 throw ValidationException::withMessages([

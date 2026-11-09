@@ -41,6 +41,7 @@ class SocialreinsSettingsController extends Controller
             'tiktokPrivacyLevel' => $config->tiktokPrivacy(),
             'privacyLevels' => SocialreinsConfig::PRIVACY_LEVELS,
             'defaultLanguage' => $config->defaultLanguage(),
+            'routedLanguages' => $config->routedLanguages(),
             'languages' => $languages,
         ]);
     }

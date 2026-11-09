@@ -418,8 +418,8 @@ class PostsController extends Controller
             'approval_state' => $post->approval_state ?? 'approved',
             'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
-            // Legacy name: "a publish driver is ready" (PostSyncer, or SocialReins when chosen).
-            'postsyncer_ready' => $workspace !== null && SocialreinsConfig::usesSocialreins($workspace)
+            // Legacy name: "this post's publish driver is ready" (PostSyncer, or SocialReins when routed).
+            'postsyncer_ready' => $workspace !== null && SocialreinsConfig::routesToSocialreins($post, $workspace)
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
                 : ($postsyncerConfig?->isReadyForPublish() ?? false),
             'needs_confirm_ask' => $needsConfirmAsk,

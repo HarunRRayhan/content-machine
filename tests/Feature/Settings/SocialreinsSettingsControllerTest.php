@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Settings;
 
+use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\LinkResolution\PublicUrlGuard;
@@ -108,6 +109,55 @@ class SocialreinsSettingsControllerTest extends TestCase
         SocialreinsConfig::write($workspace, ['languages' => ['english' => ['set_id' => self::SET]]]);
 
         $this->assertFalse(SocialreinsConfig::fromWorkspace($workspace->fresh())->isReadyForPublish());
+    }
+
+    public function test_routed_languages_are_saved_cleared_and_validated(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+
+        // The form always sends an empty hidden entry so that unticking everything clears the list.
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['', 'bangla']]))->assertRedirect();
+        $this->assertSame(['bangla'], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+        $this->get(route('settings.socialreins.edit'))
+            ->assertInertia(fn ($page) => $page->where('routedLanguages', ['bangla']));
+
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['']]))->assertRedirect();
+        $this->assertSame([], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['french']]))
+            ->assertSessionHasErrors('routed_languages.0');
+    }
+
+    public function test_a_save_without_routed_languages_keeps_them(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['bangla']]))->assertRedirect();
+
+        $this->put('/settings/socialreins', $this->payload())->assertRedirect();
+
+        $this->assertSame(['bangla'], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+    }
+
+    public function test_routing_cannot_change_while_a_publish_is_in_flight_but_other_settings_can(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        $this->put('/settings/socialreins', $this->payload())->assertRedirect();
+        Post::factory()->for($workspace)->create(['publish_state' => 'queued']);
+
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['bangla']]))
+            ->assertSessionHasErrors('publish_driver');
+        $this->assertSame([], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+
+        $this->put('/settings/socialreins', $this->payload(['publish_driver' => 'postsyncer']))
+            ->assertSessionHasErrors('publish_driver');
+        $this->assertTrue(SocialreinsConfig::usesSocialreins($workspace->fresh()));
+
+        $this->put('/settings/socialreins', $this->payload(['tiktok_privacy_level' => 'PUBLIC_TO_EVERYONE']))
+            ->assertSessionHasNoErrors();
+        $this->assertSame('PUBLIC_TO_EVERYONE', SocialreinsConfig::fromWorkspace($workspace->fresh())->tiktokPrivacy());
     }
 
     /** @return array<string, array{string}> */

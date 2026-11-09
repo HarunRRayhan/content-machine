@@ -19,6 +19,7 @@ type PageProps = {
     tiktokPrivacyLevel: string | null;
     privacyLevels: string[];
     defaultLanguage: string;
+    routedLanguages: string[];
     languages: Record<string, Language>;
 };
 
@@ -33,6 +34,7 @@ export default function SocialreinsSettings({
     tiktokPrivacyLevel,
     privacyLevels,
     defaultLanguage,
+    routedLanguages,
     languages,
 }: PageProps) {
     return (
@@ -51,7 +53,7 @@ export default function SocialreinsSettings({
                         }
                     >
                         {driver === 'socialreins'
-                            ? 'Publishing through SocialReins'
+                            ? `Publishing ${routedLanguages.length > 0 ? `${routedLanguages.join(' and ')} ` : ''}through SocialReins`
                             : 'Publishing through PostSyncer'}
                     </Badge>
                     <Form
@@ -121,6 +123,41 @@ export default function SocialreinsSettings({
                                     <InputError
                                         message={errors.default_language}
                                     />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>Languages through SocialReins</Label>
+                                    <input
+                                        type="hidden"
+                                        name="routed_languages[]"
+                                        value=""
+                                    />
+                                    {Object.keys(languages).map((language) => (
+                                        <label
+                                            key={language}
+                                            className="flex items-center gap-2 text-sm capitalize"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                name="routed_languages[]"
+                                                value={language}
+                                                defaultChecked={routedLanguages.includes(
+                                                    language,
+                                                )}
+                                                className="size-4 rounded border-input"
+                                            />
+                                            {language}
+                                        </label>
+                                    ))}
+                                    <InputError
+                                        message={errors.routed_languages}
+                                    />
+                                    <p className="text-sm text-muted-foreground">
+                                        Tick none to send every language. With
+                                        some ticked, a post or video goes
+                                        through SocialReins only if all its
+                                        languages are ticked. Anything else
+                                        stays on PostSyncer.
+                                    </p>
                                 </div>
                                 {Object.entries(languages).map(
                                     ([language, values]) => (

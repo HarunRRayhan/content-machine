@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Queue a SocialReins publish for a Post or Video in a workspace whose driver is
- * SocialReins. EnqueuePostPublishAction and EnqueueVideoPublishAction hand over to this.
+ * Queue a SocialReins publish for a Post or Video that routes to SocialReins.
+ * EnqueuePostPublishAction and EnqueueVideoPublishAction hand over to this.
  */
 class EnqueueSocialreinsPublishAction
 {
@@ -38,8 +38,13 @@ class EnqueueSocialreinsPublishAction
         );
 
         /** @var T $queued */
-        $queued = DB::transaction(function () use ($subject, $options): Post|Video {
+        $queued = DB::transaction(function () use ($subject, $workspace, $options): Post|Video {
             $locked = $subject::query()->whereKey($subject->getKey())->lockForUpdate()->firstOrFail();
+
+            // The route was read before this lock: never start on the other driver's subject.
+            if (! SocialreinsConfig::routesToSocialreins($locked, $workspace)) {
+                throw $this->refuse(__('The publish route changed. Try again.'));
+            }
 
             if ($locked instanceof Post) {
                 if (($locked->approval_state ?? 'approved') !== 'approved') {

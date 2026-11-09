@@ -43,6 +43,8 @@ class UpdateSocialreinsSettingsRequest extends FormRequest
             'webhook_secret' => ['nullable', 'string', 'max:255'],
             'tiktok_privacy_level' => ['nullable', Rule::in(SocialreinsConfig::PRIVACY_LEVELS)],
             'default_language' => ['required', Rule::in(PostsyncerConfig::LANGUAGES)],
+            'routed_languages' => ['nullable', 'array'],
+            'routed_languages.*' => ['nullable', Rule::in(PostsyncerConfig::LANGUAGES)],
         ];
 
         foreach (PostsyncerConfig::LANGUAGES as $language) {
