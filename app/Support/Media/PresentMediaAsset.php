@@ -113,7 +113,7 @@ final class PresentMediaAsset
         $merged = [];
 
         foreach ([...$fromAttachments, ...$fromDecks] as $usage) {
-            $key = ($usage['href'] ?? $usage['label']).'|'.($usage['role'] ?? '');
+            $key = ($usage['href'] ?? $usage['label']).'|'.$usage['role'];
 
             if (isset($seen[$key])) {
                 continue;
