@@ -152,6 +152,10 @@ const mainNavItems: NavItem[] = [
                 href: '/settings/pexels',
             },
             {
+                title: 'SocialReins',
+                href: '/settings/socialreins',
+            },
+            {
                 title: 'AI Models',
                 href: aiProvidersIndex(),
             },

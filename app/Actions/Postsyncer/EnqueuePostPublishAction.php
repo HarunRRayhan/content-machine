@@ -2,6 +2,7 @@
 
 namespace App\Actions\Postsyncer;
 
+use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
 use App\Models\TelegramBotConfig;
@@ -10,6 +11,7 @@ use App\Models\Workspace;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +38,10 @@ class EnqueuePostPublishAction
     public function handle(Post $post, Workspace $workspace, array $options = []): Post
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
+
+        if (SocialreinsConfig::usesSocialreins($workspace)) {
+            return app(EnqueueSocialreinsPublishAction::class)->handle($post, $workspace, $options);
+        }
 
         $config = PostsyncerConfig::fromWorkspace($workspace);
 

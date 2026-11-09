@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\NotificationsApiController;
 use App\Http\Controllers\Api\V1\PexelsApiController;
 use App\Http\Controllers\Api\V1\PostsApiController;
 use App\Http\Controllers\Api\V1\ScratchpadApiController;
+use App\Http\Controllers\Api\V1\SocialreinsTakeDownController;
 use App\Http\Controllers\Api\V1\VideosApiController;
 use App\Http\Controllers\Api\V1\VideoSeriesApiController;
 use App\Http\Controllers\Api\VersionController;
@@ -162,6 +163,14 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('videos/{human_id}/reconcile-media-absent', [VideosApiController::class, 'reconcileMediaAbsent'])
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.reconcile-media-absent');
+
+    Route::post('posts/{human_id}/take-down', [SocialreinsTakeDownController::class, 'post'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.take-down');
+
+    Route::post('videos/{human_id}/take-down', [SocialreinsTakeDownController::class, 'video'])
+        ->middleware('auth.workspace-token:videos:write')
+        ->name('videos.take-down');
 
     Route::post('videos/{human_id}/reschedule', [VideosApiController::class, 'reschedule'])
         ->middleware('auth.workspace-token:videos:write')
