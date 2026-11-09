@@ -18,6 +18,7 @@ use App\Support\Content\PresentationManifest;
 use App\Support\GoogleDrive\GoogleDriveConfig;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
+use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -337,8 +338,11 @@ class VideosController extends Controller
             'publish_error' => $video->publish_error,
             'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
-            'postsyncer_ready' => $postsyncerConfig->isReadyForPublish(),
-            'video_publish_enabled' => $postsyncerConfig->videoPublishEnabled(),
+            // Legacy name: "a publish driver is ready" (PostSyncer, or SocialReins when chosen).
+            'postsyncer_ready' => SocialreinsConfig::usesSocialreins($workspace)
+                ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
+                : $postsyncerConfig->isReadyForPublish(),
+            'video_publish_enabled' => SocialreinsConfig::usesSocialreins($workspace) || $postsyncerConfig->videoPublishEnabled(),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
             'series' => VideoScriptSeries::forVideo($video),

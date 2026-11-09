@@ -34,6 +34,8 @@ class DispatchPendingPostPublishesCommand extends Command
                 ->get(['id']);
 
             Post::query()
+                // SocialReins publishes run their own job; never hand them to PostSyncer's.
+                ->whereRaw("coalesce(publish_progress->>'driver', '') <> 'socialreins'")
                 ->where(function ($query) use ($staleAt): void {
                     $query->where(function ($query) use ($staleAt): void {
                         $query->where('publish_state', 'queued')
