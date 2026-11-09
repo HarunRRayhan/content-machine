@@ -1,0 +1,73 @@
+# Self-host Content Machine. Setup steps are in README.md under "Run with Docker".
+x-app: &app
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile
+  image: content-machine:local
+  env_file: .env
+  # Queue jobs may run for 900 seconds; let them finish on stop.
+  stop_grace_period: 16m
+  environment: &app-env
+    APP_ENV: production
+    APP_DEBUG: "false"
+    APP_KEY: ${APP_KEY:?Set APP_KEY in .env. See "Run with Docker" in README.md}
+    APP_URL: ${APP_URL:-http://localhost:8000}
+    DB_CONNECTION: pgsql
+    DB_HOST: db
+    DB_PORT: "5432"
+    DB_DATABASE: content_machine
+    DB_USERNAME: content_machine
+    DB_PASSWORD: ${DB_PASSWORD:-content_machine}
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: content_machine
+      POSTGRES_USER: content_machine
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-content_machine}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U content_machine -d content_machine
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: migrations and admin bootstrap, the same step Railway runs before a deploy.
+  migrate:
+    <<: *app
+    command: php artisan cm:deploy
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8000}:8080"
+    volumes:
+      - uploads:/var/www/html/storage/app/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # Default queue and scheduler. Media and publish queues run inside web, next to uploads.
+  worker:
+    <<: *app
+    entrypoint: /usr/local/bin/cm-start-worker
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db:
+  uploads:

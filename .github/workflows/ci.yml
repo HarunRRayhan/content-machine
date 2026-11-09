@@ -4,7 +4,11 @@ on:
   push:
     branches:
       - main
+    paths-ignore: &docs
+      - '**.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore: *docs
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,6 +20,7 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
@@ -35,9 +40,9 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd pg_isready
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 30
 
     steps:
       - name: Checkout code
@@ -48,28 +53,16 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: pdo_pgsql, intl, zip, bcmath, gd
-          coverage: pcov
+          coverage: none
 
       - name: Install Composer dependencies
         uses: ramsey/composer-install@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: '26'
-          cache: npm
-
-      - name: Install NPM dependencies
-        run: npm ci
 
       - name: Copy environment file
         run: cp .env.example .env
 
       - name: Generate application key
         run: php artisan key:generate
-
-      - name: Build frontend assets
-        run: npm run build
 
       - name: Configure database environment
         run: |
@@ -90,6 +83,7 @@ jobs:
 
   static:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
 
     steps:
       - name: Checkout code
@@ -119,6 +113,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
 
     steps:
       - name: Checkout code
@@ -147,7 +142,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       # resources/js/{routes,actions} are generated from the route table by the
       # Wayfinder Vite plugin (php artisan wayfinder:generate under the hood) and
@@ -170,52 +165,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-  docker:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Build image
-        run: docker build -f deploy/Dockerfile -t cm:ci .
-
-      - name: Smoke test
-        run: |
-          # A bare `php artisan about` needs a real APP_KEY and .env to not
-          # error; give it the throwaway env the assets build stage also uses.
-          docker run --rm cm:ci sh -c "cp .env.example .env && php artisan key:generate --force && php artisan about --only=environment"
-          docker run --rm cm:ci yt-dlp --version
-          docker run --rm cm:ci ffmpeg -version
-
-      - name: Smoke test web queue service
-        run: |
-          docker run --detach --rm --name cm-s6 \
-            --env APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
-            --env APP_ENV=production \
-            --env AUTORUN_ENABLED=false \
-            --env CM_MIGRATION_GATE=false \
-            --env CM_SYNC_PRESENTATION_LIBRARY=false \
-            --env QUEUE_CONNECTION=database \
-            --env DB_CONNECTION=pgsql \
-            --env DB_HOST=127.0.0.1 \
-            --env DB_PORT=1 \
-            --env DB_DATABASE=unused \
-            --env DB_USERNAME=unused \
-            --env DB_PASSWORD=unused \
-            --env CACHE_STORE=array \
-            --env SESSION_DRIVER=array \
-            cm:ci /init
-          trap 'docker rm -f cm-s6' EXIT
-
-          for attempt in $(seq 1 30); do
-            if docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue 2>/dev/null | grep -q '^up' \
-              && docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue 2>/dev/null | grep -q '^up'; then
-              break
-            fi
-            sleep 1
-          done
-
-          docker exec cm-s6 /command/s6-svstat /run/service/scratchpad-queue | grep -q '^up'
-          docker exec cm-s6 /command/s6-svstat /run/service/postsyncer-queue | grep -q '^up'

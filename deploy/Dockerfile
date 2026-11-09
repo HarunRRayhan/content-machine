@@ -70,6 +70,9 @@ USER root
 ARG YTDLP_VERSION=2026.07.04
 ARG YTDLP_SHA256=6bbb3d314cde4febe36e5fa1d55462e29c974f63444e707871834f6d8cc210ae
 ARG YTDLP_AARCH64_SHA256=b6ce97646773070d7a7ffd6bbbdcaecb47c48483909c54c915bf08a7a9b5e0b1
+# Numeric GitHub asset ids for the same files, used by the download fallback below.
+ARG YTDLP_ASSET_ID=466665339
+ARG YTDLP_AARCH64_ASSET_ID=466665344
 ARG TARGETARCH
 
 # ffmpeg + yt-dlp: not used yet, baked in now for the Telegram bot's media
@@ -83,11 +86,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         supervisor \
     && rm -rf /var/lib/apt/lists/* \
     && case "${TARGETARCH:-amd64}" in \
-        amd64) YTDLP_ASSET=yt-dlp_linux; YTDLP_EXPECTED_SHA256="${YTDLP_SHA256}" ;; \
-        arm64) YTDLP_ASSET=yt-dlp_linux_aarch64; YTDLP_EXPECTED_SHA256="${YTDLP_AARCH64_SHA256}" ;; \
+        amd64) YTDLP_ASSET=yt-dlp_linux; YTDLP_ID="${YTDLP_ASSET_ID}"; YTDLP_EXPECTED_SHA256="${YTDLP_SHA256}" ;; \
+        arm64) YTDLP_ASSET=yt-dlp_linux_aarch64; YTDLP_ID="${YTDLP_AARCH64_ASSET_ID}"; YTDLP_EXPECTED_SHA256="${YTDLP_AARCH64_SHA256}" ;; \
         *) echo "Unsupported yt-dlp architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${YTDLP_ASSET}" \
+    && { curl -fsSL --retry 2 --retry-all-errors --retry-delay 3 -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${YTDLP_ASSET}" \
+        || curl -fsSL --retry 3 --retry-all-errors --retry-delay 3 -H "Accept: application/octet-stream" -o /tmp/yt-dlp "https://api.github.com/repos/yt-dlp/yt-dlp/releases/assets/${YTDLP_ID}"; } \
     && echo "${YTDLP_EXPECTED_SHA256}  /tmp/yt-dlp" | sha256sum -c - \
     && install -m 0755 /tmp/yt-dlp /usr/local/bin/yt-dlp \
     && rm /tmp/yt-dlp
