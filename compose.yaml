@@ -31,7 +31,8 @@ services:
     volumes:
       - db:/var/lib/postgresql/data
     healthcheck:
-      test: pg_isready -U content_machine -d content_machine
+      # TCP on purpose: Postgres's first-boot init server answers only on the Unix socket.
+      test: pg_isready -h 127.0.0.1 -U content_machine -d content_machine
       interval: 2s
       timeout: 5s
       retries: 30
