@@ -39,8 +39,10 @@ class SocialreinsConfig
      * The driver one subject publishes through. A subject already on a driver stays there
      * whatever the settings say now; a new one follows the workspace driver, limited to
      * subjects whose every language is routed. No routed list means every language.
+     *
+     * @param  array<string, mixed>  $options  the publish options, when deciding a publish
      */
-    public static function routesToSocialreins(Post|Video $subject, Workspace $workspace): bool
+    public static function routesToSocialreins(Post|Video $subject, Workspace $workspace, array $options = []): bool
     {
         if (self::isOnSocialreins($subject)) {
             return true;
@@ -54,6 +56,11 @@ class SocialreinsConfig
 
         if ($routed === []) {
             return true;
+        }
+
+        // Only PostSyncer's publish closes a Telegram request, and /cancel relies on that.
+        if (($options['telegram_request_id'] ?? null) !== null) {
+            return false;
         }
 
         $languages = $subject instanceof Video

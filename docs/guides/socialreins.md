@@ -19,6 +19,7 @@ every language, as before.
   so publishing a mixed post to one platform still goes through PostSyncer.
 - A language that is only the planners' fallback (an empty or `both` language with untagged
   captions) is not known, so that subject goes through PostSyncer.
+- With languages ticked, a Telegram publish request stays on PostSyncer, which is what closes the request, unless the post is already on SocialReins.
 - A subject already on a driver stays there for retry, take down, reconcile and status,
   whatever the settings say later. SocialReins: `publish_progress.driver`, or
   `socialreins_groups` with a pending or live group. PostSyncer: `postsyncer.groups` with a

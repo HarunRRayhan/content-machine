@@ -14,6 +14,8 @@ use App\Jobs\PublishSocialreinsJob;
 use App\Jobs\PublishVideoJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramPostRequest;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
@@ -340,6 +342,65 @@ class SocialreinsLanguageRoutingTest extends TestCase
 
         $this->expectException(ValidationException::class);
         app(EnqueueSocialreinsPublishAction::class)->handle($post, $post->workspace, []);
+    }
+
+    private function telegramRequest(Post $post): TelegramPostRequest
+    {
+        $config = TelegramBotConfig::factory()->for($post->workspace)->connected()->create();
+
+        return TelegramPostRequest::factory()->for($post->workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
+    }
+
+    public function test_a_telegram_publish_of_a_routed_post_stays_on_postsyncer(): void
+    {
+        $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+
+        $this->publishPost($post, ['telegram_request_id' => $request->id]);
+
+        $this->assertWentToPostsyncer(PublishPostJob::class);
+        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+        $this->assertArrayNotHasKey('driver', $post->fresh()->publish_progress);
+    }
+
+    public function test_a_telegram_publish_of_a_post_already_on_socialreins_stays_there(): void
+    {
+        $post = $this->makePost($this->workspace(), ['publish_state' => 'failed', 'publish_progress' => [
+            'driver' => 'socialreins', 'state' => 'failed', 'options' => [],
+        ]]);
+
+        $this->publishPost($post, ['telegram_request_id' => $this->telegramRequest($post)->id]);
+
+        $this->assertWentToSocialreins(PublishPostJob::class);
+    }
+
+    public function test_a_telegram_publish_without_a_routed_list_keeps_going_through_socialreins(): void
+    {
+        $post = $this->makePost($this->workspace(null));
+
+        $this->publishPost($post, ['telegram_request_id' => $this->telegramRequest($post)->id]);
+
+        $this->assertWentToSocialreins(PublishPostJob::class);
+    }
+
+    public function test_the_socialreins_recheck_reads_the_locked_workspace(): void
+    {
+        $workspace = $this->workspace();
+        $post = $this->makePost($workspace);
+        $stale = $workspace->fresh();
+        SocialreinsConfig::write($workspace, ['publish_driver' => 'postsyncer']);
+
+        $this->expectException(ValidationException::class);
+
+        try {
+            app(EnqueueSocialreinsPublishAction::class)->handle($post, $stale, []);
+        } finally {
+            Queue::assertNotPushed(PublishSocialreinsJob::class);
+        }
     }
 
     public function test_a_stale_postsyncer_decision_is_refused_once_socialreins_owns_the_post(): void

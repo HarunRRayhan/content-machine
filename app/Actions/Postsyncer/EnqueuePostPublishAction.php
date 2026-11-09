@@ -39,7 +39,7 @@ class EnqueuePostPublishAction
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
 
-        if (SocialreinsConfig::routesToSocialreins($post, $workspace)) {
+        if (SocialreinsConfig::routesToSocialreins($post, $workspace, $options)) {
             return app(EnqueueSocialreinsPublishAction::class)->handle($post, $workspace, $options);
         }
 
@@ -69,7 +69,7 @@ class EnqueuePostPublishAction
             abort_if($lockedPost->workspace_id !== $workspace->id, 404);
 
             // The route was read before these locks: never start on the other driver's post.
-            if (SocialreinsConfig::routesToSocialreins($lockedPost, $lockedWorkspace)) {
+            if (SocialreinsConfig::routesToSocialreins($lockedPost, $lockedWorkspace, $filtered)) {
                 throw ValidationException::withMessages([
                     'publish' => __('The publish route changed. Try again.'),
                 ]);
