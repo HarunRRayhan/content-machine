@@ -3199,3 +3199,78 @@
         transition: none;
     }
 }
+
+.studio-page .tp-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    min-height: calc(100vh - 220px);
+    padding: 24px clamp(20px, 5vw, 72px) 40px;
+    border-radius: 18px;
+    background: var(--bg2);
+}
+
+.studio-page .tp-panel:fullscreen {
+    justify-content: center;
+    border-radius: 0;
+}
+
+.studio-page .tp-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    color: var(--ink-soft);
+}
+
+.studio-page .tp-toolbar button {
+    padding: 6px 14px;
+    border: 1px solid var(--ink-faint);
+    border-radius: 10px;
+    color: var(--ink);
+}
+
+.studio-page .tp-panel:fullscreen .tp-toolbar {
+    display: none;
+}
+
+.studio-page .tp-list {
+    display: grid;
+    gap: clamp(6px, 1.4vh, 16px);
+    margin: auto 0;
+    padding: 0;
+    list-style: none;
+}
+
+.studio-page .tp-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6em;
+    padding: 0.4em 0.7em;
+    border-radius: 14px;
+    font-size: clamp(24px, 3.6vw, 56px);
+    line-height: 1.25;
+    color: var(--ink);
+}
+
+.studio-page .tp-item[aria-current='step'] {
+    background: var(--ink);
+    color: var(--bg2);
+    font-weight: 700;
+}
+
+.studio-page .tp-item.is-done {
+    color: var(--ink-faint);
+}
+
+.studio-page .tp-item.is-done .tp-text {
+    text-decoration: line-through;
+}
+
+.studio-page .tp-mark {
+    flex: none;
+    min-width: 1.2em;
+    font-weight: 700;
+}

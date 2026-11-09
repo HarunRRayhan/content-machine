@@ -60,4 +60,34 @@ MD;
         $this->assertSame('example.com', $parsed['sources']);
         $this->assertSame(['Not financial advice'], $parsed['legal']);
     }
+
+    #[Test]
+    public function it_reads_a_talking_points_only_file_without_a_divider(): void
+    {
+        $markdown = <<<'MD'
+# Test video
+
+**Language:** English
+**Format:** Talking points (camera only, no deck)
+
+## Talking points
+
+- **Hook**: Tap the link?
+1. Check the domain
+2. Open the app
+
+## Fact-check
+
+- A fact that is not a point
+MD;
+
+        $parsed = ParseVideoScript::fromMarkdown($markdown);
+
+        $this->assertSame([
+            ['label' => 'Hook', 'text' => 'Tap the link?'],
+            ['label' => '', 'text' => 'Check the domain'],
+            ['label' => '', 'text' => 'Open the app'],
+        ], $parsed['points']);
+        $this->assertSame([], $parsed['scripts']);
+    }
 }
