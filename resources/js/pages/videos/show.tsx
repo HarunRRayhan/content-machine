@@ -4,6 +4,7 @@ import type { CaptionGroup } from '@/components/content/captions-panel';
 import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PresentationEmbed from '@/components/studio/presentation-embed';
 import ScriptPanel from '@/components/studio/script-panel';
+import TalkingPointsPanel from '@/components/studio/talking-points-panel';
 import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
 import VideoOverview from '@/components/studio/video-overview';
 import { useStudioTab } from '@/hooks/use-studio-tab';
@@ -76,13 +77,24 @@ type PageProps = {
     video: VideoDetail;
 };
 
-type TabKey = 'overview' | 'script' | 'captions' | 'facts' | 'presentation';
+type TabKey =
+    | 'overview'
+    | 'script'
+    | 'captions'
+    | 'facts'
+    | 'presentation'
+    | 'talking-points';
 
 export default function VideoShow({ video }: PageProps) {
     const hasCaptions = video.captions.some(
         (group) => group.platforms.length > 0,
     );
     const hasDeck = video.has_deck;
+    // A camera-only video has talking points and neither a script nor a deck.
+    const isTalkingPoints =
+        !hasDeck &&
+        video.parsed.scripts.length === 0 &&
+        video.parsed.points.length > 0;
     const hasFacts =
         video.parsed.facts.length > 0 ||
         video.parsed.sources !== '' ||
@@ -91,7 +103,7 @@ export default function VideoShow({ video }: PageProps) {
     const validTabs = useMemo<readonly TabKey[]>(() => {
         const tabs: TabKey[] = ['overview'];
 
-        if (!hasDeck) {
+        if (!hasDeck && !isTalkingPoints) {
             tabs.push('script');
         }
 
@@ -107,18 +119,22 @@ export default function VideoShow({ video }: PageProps) {
             tabs.push('presentation');
         }
 
-        return tabs;
-    }, [hasCaptions, hasFacts, hasDeck]);
+        if (isTalkingPoints) {
+            tabs.push('talking-points');
+        }
 
-    const tabAliases = useMemo(
-        () =>
-            hasDeck
-                ? ({ script: 'presentation' } as Partial<
-                      Record<string, TabKey>
-                  >)
-                : {},
-        [hasDeck],
-    );
+        return tabs;
+    }, [hasCaptions, hasFacts, hasDeck, isTalkingPoints]);
+
+    const tabAliases = useMemo<Partial<Record<string, TabKey>>>(() => {
+        if (hasDeck) {
+            return { script: 'presentation' };
+        }
+
+        return isTalkingPoints
+            ? { script: 'talking-points', presentation: 'talking-points' }
+            : {};
+    }, [hasDeck, isTalkingPoints]);
     const [tab, setTab] = useStudioTab(validTabs, 'overview', tabAliases);
     const activeTab = validTabs.includes(tab) ? tab : 'overview';
 
@@ -216,6 +232,16 @@ export default function VideoShow({ video }: PageProps) {
                             🎬 Presentation
                         </button>
                     )}
+                    {isTalkingPoints && (
+                        <button
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === 'talking-points'}
+                            onClick={() => setTab('talking-points')}
+                        >
+                            🎯 Talking points
+                        </button>
+                    )}
                 </div>
 
                 {activeTab === 'overview' && (
@@ -288,6 +314,10 @@ export default function VideoShow({ video }: PageProps) {
                             )}
                         </div>
                     </section>
+                )}
+
+                {activeTab === 'talking-points' && (
+                    <TalkingPointsPanel points={video.parsed.points} />
                 )}
 
                 {activeTab === 'presentation' && hasDeck && (

@@ -46,7 +46,7 @@ final class ParseVideoScript
         $lang = self::normLang($meta['language'] ?? ($fallbackLang === 'en' ? 'English' : 'Bangla'));
 
         $points = [];
-        foreach (self::region($lines, '/Talking points/', ['/^---\s*$/']) as $line) {
+        foreach (self::region($lines, '/^#{1,6}\s.*Talking points/', ['/^---\s*$/', '/^#{1,6}\s/']) as $line) {
             if (preg_match('/^(?:\d+\.|[-*])\s+(.*)$/', trim($line), $match)) {
                 if (preg_match('/^\*\*(.+?)\*\*\s*[-:]\s*(.*)$/', $match[1], $labeled)) {
                     $points[] = ['label' => trim($labeled[1]), 'text' => trim($labeled[2])];

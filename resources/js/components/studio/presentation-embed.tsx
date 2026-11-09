@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 
+import { isTypingTarget } from '@/lib/is-typing-target';
+
 type Props = {
     src: string;
     title: string;
@@ -14,21 +16,6 @@ export default function PresentationEmbed({ src, title }: Props) {
     }, [src]);
 
     useEffect(() => {
-        function isTyping(target: EventTarget | null): boolean {
-            if (!(target instanceof HTMLElement)) {
-                return false;
-            }
-
-            const tag = target.tagName;
-
-            return (
-                tag === 'INPUT' ||
-                tag === 'TEXTAREA' ||
-                tag === 'SELECT' ||
-                target.isContentEditable
-            );
-        }
-
         function post(payload: Record<string, unknown>) {
             const frame = iframeRef.current?.contentWindow;
 
@@ -40,7 +27,7 @@ export default function PresentationEmbed({ src, title }: Props) {
         }
 
         function onKeyDown(event: KeyboardEvent) {
-            if (isTyping(event.target)) {
+            if (isTypingTarget(event.target)) {
                 return;
             }
 
