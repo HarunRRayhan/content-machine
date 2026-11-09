@@ -5,6 +5,8 @@ x-app: &app
     dockerfile: deploy/Dockerfile
   image: content-machine:local
   env_file: .env
+  # Queue jobs may run for 900 seconds; let them finish on stop.
+  stop_grace_period: 16m
   environment: &app-env
     APP_ENV: production
     APP_DEBUG: "false"
@@ -48,7 +50,7 @@ services:
     <<: *app
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-8000}:8080"
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8000}:8080"
     volumes:
       - uploads:/var/www/html/storage/app/uploads
     depends_on:

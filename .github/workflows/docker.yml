@@ -1,6 +1,6 @@
 name: Docker
 
-# The image only changes with these files. Railway still builds it on every deploy.
+# Runs when the build recipe or dependencies change. App-only changes are built by Railway on deploy.
 on:
   push:
     branches:
@@ -10,8 +10,12 @@ on:
       - compose.yaml
       - .dockerignore
       - .env.example
+      - .npmrc
+      - composer.json
       - composer.lock
+      - package.json
       - package-lock.json
+      - vite.config.ts
       - .github/workflows/docker.yml
   pull_request:
     paths: *docker-paths

@@ -270,7 +270,9 @@ docker compose up --build -d
 ```
 
 Open <http://localhost:8000>. Set `APP_PORT` in `.env` to use another port, and
-`APP_URL` to the address people will use. Back up `.env`: encrypted integration
+`APP_URL` to the address people will use. The app listens on `127.0.0.1` only. To
+serve it publicly, put a TLS reverse proxy in front that overwrites
+`X-Forwarded-For`, because the app trusts forwarded headers. Back up `.env`: encrypted integration
 credentials depend on `APP_KEY`. Data lives in the `db` and `uploads` volumes.
 
 ## Composer commands
