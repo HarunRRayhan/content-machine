@@ -24,8 +24,8 @@ migrates, creates `ADMIN_EMAIL` if configured, and builds the frontend.
 `composer run dev` starts the Laravel server, Vite, logs when supported, all
 content queues, and the scheduler together. The app supports PHP 8.3+, while
 the current Pest 5 test suite needs PHP 8.4. See [local development](docs/getting-started/local.md) for the
-PostgreSQL setup used by CI. To self-host without
-installing PHP or Node, see [Run with Docker](README.md#run-with-docker).
+PostgreSQL setup used by CI. To develop or self-host
+without installing PHP or Node, see [Run with Docker](README.md#run-with-docker).
 
 ## Branch naming
 

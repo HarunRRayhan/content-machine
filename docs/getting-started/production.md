@@ -1,6 +1,7 @@
 # Production setup
 
-This guide covers a single-server installation. The repository also includes
+This guide covers a single-server installation without containers. For the
+Docker version, see [Run with Docker](../../README.md#run-with-docker). The repository also includes
 Railway web and worker definitions under `deploy/`; those retain their Docker
 build and `php artisan cm:deploy` pre-deploy hook.
 

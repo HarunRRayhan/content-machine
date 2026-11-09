@@ -8,6 +8,7 @@ on:
     paths: &docker-paths
       - deploy/**
       - compose.yaml
+      - compose.prod.yaml
       - .dockerignore
       - .env.example
       - .npmrc
@@ -36,8 +37,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Validate compose.yaml
-        run: cp .env.example .env && APP_KEY=ci docker compose config --quiet
+      - name: Validate Compose files
+        run: |
+          touch .env
+          docker compose config --quiet
+          APP_KEY=ci APP_DOMAIN=ci ADMIN_EMAIL=ci DB_PASSWORD=ci docker compose -f compose.prod.yaml config --quiet
+
+      - name: Build development image
+        run: docker build -f deploy/Dockerfile --target dev -t cm:dev .
 
       - name: Build image
         run: docker build -f deploy/Dockerfile -t cm:ci .
