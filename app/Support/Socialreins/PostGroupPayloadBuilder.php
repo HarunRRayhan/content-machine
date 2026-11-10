@@ -120,6 +120,11 @@ final class PostGroupPayloadBuilder
             $override['tiktok'] = ['privacy_level' => $privacy];
         }
 
+        // SocialReins uploads to YouTube as private unless told otherwise; CM's videos go out public, as on PostSyncer.
+        if ($platform === 'youtube') {
+            $override['youtube'] = ['privacy' => 'public'];
+        }
+
         return $override;
     }
 }
