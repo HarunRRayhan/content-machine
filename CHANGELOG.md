@@ -9,6 +9,7 @@ once it reaches 1.0.
 ## [Unreleased]
 
 ### Changed
+- PostSyncer status sync skips groups whose scheduled time has not come yet, so it no longer exhausts PostSyncer's rate limit (429) with a call per scheduled group every five minutes.
 - SocialReins publishing asks for public YouTube uploads, matching PostSyncer; SocialReins now uploads private unless told otherwise.
 
 ### Added

@@ -75,6 +75,49 @@ class SyncScheduledPostsActionTest extends TestCase
         $this->assertSame('PUBLISHED', $post->postsyncer['groups'][1]['status']);
     }
 
+    public function test_it_does_not_ask_postsyncer_about_a_group_that_is_not_due_yet(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => [
+                'groups' => [
+                    [
+                        'post_id' => '140001',
+                        'status' => 'SCHEDULED',
+                        'scheduled_at' => now()->addDay()->toIso8601String(),
+                        'platforms' => ['facebook'],
+                        'language' => 'english',
+                    ],
+                    [
+                        'post_id' => '140002',
+                        'status' => 'SCHEDULED',
+                        'scheduled_at' => now()->subMinute()->toIso8601String(),
+                        'platforms' => ['twitter'],
+                        'language' => 'english',
+                    ],
+                ],
+            ],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/140002' => Http::response(['id' => 140002, 'status' => 'PUBLISHED'], 200),
+            '*' => Http::response([], 500),
+        ]);
+
+        $marked = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(0, $marked['posts']);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/posts/140001'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/posts/140002'));
+        $post->refresh();
+        $this->assertSame('scheduled', $post->status);
+        $this->assertSame('SCHEDULED', $post->postsyncer['groups'][0]['status']);
+        $this->assertSame('PUBLISHED', $post->postsyncer['groups'][1]['status']);
+    }
+
     public function test_it_leaves_a_post_scheduled_when_a_group_is_still_queued(): void
     {
         $workspace = Workspace::factory()->create(['settings' => []]);
