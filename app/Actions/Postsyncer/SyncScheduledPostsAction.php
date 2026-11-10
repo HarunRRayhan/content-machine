@@ -7,6 +7,7 @@ use App\Models\Video;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
+use Carbon\CarbonImmutable;
 
 /**
  * Live-check scheduled posts and videos against PostSyncer and mark them
@@ -110,6 +111,16 @@ class SyncScheduledPostsAction
                 continue;
             }
 
+            // A group not due yet cannot be live, and asking anyway burns PostSyncer's rate limit
+            // (every scheduled group, every five minutes). shortcut: a time moved earlier inside
+            // PostSyncer is only noticed once the stored time passes; re-sync it from CM if that matters.
+            if ($this->notDueYet($group, $workspace->timezone)) {
+                $updated[] = $group;
+                $allTerminal = false;
+
+                continue;
+            }
+
             try {
                 $live = $client->getPost((string) $postId);
             } catch (PostsyncerException) {
@@ -160,5 +171,25 @@ class SyncScheduledPostsAction
         $record->forceFill($values)->save();
 
         return $shouldMarkPosted;
+    }
+
+    /**
+     * A time without an offset is read in the workspace's timezone, as the publish path does.
+     *
+     * @param  array<string, mixed>  $group
+     */
+    private function notDueYet(array $group, mixed $timezone): bool
+    {
+        $timezone = is_string($timezone) && trim($timezone) !== '' ? $timezone : 'Asia/Dhaka';
+        $when = $group['scheduled_at'] ?? null;
+        if (! is_string($when) || $when === '') {
+            return false;
+        }
+
+        try {
+            return CarbonImmutable::parse($when, $timezone)->isFuture();
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }
