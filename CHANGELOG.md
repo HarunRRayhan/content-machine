@@ -8,6 +8,9 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
+### Changed
+- SocialReins publishing asks for public YouTube uploads, matching PostSyncer; SocialReins now uploads private unless told otherwise.
+
 ### Added
 - Workspace API tokens: hashed bearer tokens minted/revoked from the Team
   page, with per-token abilities (scratchpad:read/write, ideas:read/write).

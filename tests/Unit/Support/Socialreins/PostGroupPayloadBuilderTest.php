@@ -99,6 +99,15 @@ class PostGroupPayloadBuilderTest extends TestCase
         $this->builder(null)->build('english', [$group], video: true);
     }
 
+    public function test_youtube_asks_for_a_public_upload_and_other_platforms_do_not(): void
+    {
+        $group = $this->group(['youtube', 'facebook'], ['youtube' => "Title\nDescription", 'facebook' => 'F'], ['v.mp4']);
+
+        $payload = $this->builder()->build('english', [$group], video: true);
+        $this->assertSame(['privacy' => 'public'], $payload['overrides']['youtube']['youtube']);
+        $this->assertArrayNotHasKey('youtube', $payload['overrides']['facebook']);
+    }
+
     public function test_schedule_is_utc_and_a_publish_now_time_is_frozen_into_the_body(): void
     {
         $when = CarbonImmutable::parse('2026-11-10 09:00', 'Asia/Dhaka');
