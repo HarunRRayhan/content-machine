@@ -92,6 +92,14 @@ class SyncScheduledPostsActionTest extends TestCase
                         'language' => 'english',
                     ],
                     [
+                        // No offset: read in the workspace's timezone (Asia/Dhaka by default), so due an hour ago.
+                        'post_id' => '140003',
+                        'status' => 'SCHEDULED',
+                        'scheduled_at' => now('Asia/Dhaka')->subHour()->format('Y-m-d H:i'),
+                        'platforms' => ['bluesky'],
+                        'language' => 'english',
+                    ],
+                    [
                         'post_id' => '140002',
                         'status' => 'SCHEDULED',
                         'scheduled_at' => now()->subMinute()->toIso8601String(),
@@ -104,6 +112,7 @@ class SyncScheduledPostsActionTest extends TestCase
 
         Http::fake([
             'postsyncer.com/api/v1/posts/140002' => Http::response(['id' => 140002, 'status' => 'PUBLISHED'], 200),
+            'postsyncer.com/api/v1/posts/140003' => Http::response(['id' => 140003, 'status' => 'SCHEDULED'], 200),
             '*' => Http::response([], 500),
         ]);
 
@@ -112,10 +121,11 @@ class SyncScheduledPostsActionTest extends TestCase
         $this->assertSame(0, $marked['posts']);
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/posts/140001'));
         Http::assertSent(fn ($request) => str_contains($request->url(), '/posts/140002'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/posts/140003'));
         $post->refresh();
         $this->assertSame('scheduled', $post->status);
         $this->assertSame('SCHEDULED', $post->postsyncer['groups'][0]['status']);
-        $this->assertSame('PUBLISHED', $post->postsyncer['groups'][1]['status']);
+        $this->assertSame('PUBLISHED', $post->postsyncer['groups'][2]['status']);
     }
 
     public function test_it_leaves_a_post_scheduled_when_a_group_is_still_queued(): void

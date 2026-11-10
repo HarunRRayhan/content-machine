@@ -114,7 +114,7 @@ class SyncScheduledPostsAction
             // A group not due yet cannot be live, and asking anyway burns PostSyncer's rate limit
             // (every scheduled group, every five minutes). shortcut: a time moved earlier inside
             // PostSyncer is only noticed once the stored time passes; re-sync it from CM if that matters.
-            if ($this->notDueYet($group)) {
+            if ($this->notDueYet($group, $workspace->timezone)) {
                 $updated[] = $group;
                 $allTerminal = false;
 
@@ -173,16 +173,21 @@ class SyncScheduledPostsAction
         return $shouldMarkPosted;
     }
 
-    /** @param array<string, mixed> $group */
-    private function notDueYet(array $group): bool
+    /**
+     * A time without an offset is read in the workspace's timezone, as the publish path does.
+     *
+     * @param  array<string, mixed>  $group
+     */
+    private function notDueYet(array $group, mixed $timezone): bool
     {
+        $timezone = is_string($timezone) && trim($timezone) !== '' ? $timezone : 'Asia/Dhaka';
         $when = $group['scheduled_at'] ?? null;
         if (! is_string($when) || $when === '') {
             return false;
         }
 
         try {
-            return CarbonImmutable::parse($when)->isFuture();
+            return CarbonImmutable::parse($when, $timezone)->isFuture();
         } catch (\Throwable) {
             return false;
         }
