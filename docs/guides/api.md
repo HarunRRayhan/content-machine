@@ -61,8 +61,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/ideas/{human_id}` | read | |
 | POST | `/api/v1/ideas` | write | create; pass `human_id` for idempotent import (bumps `id_sequences`) |
 | PATCH | `/api/v1/ideas/{human_id}` | write | `title` required, plus `score`/`trend`/`rationale`/`body` |
-| GET | `/api/v1/videos` | videos:read | filters: `status`, `language`. Default list is slim (no `script_markdown` / `captions` / `deck_manifest`); pass `include=full` or `include=script_markdown,captions,deck_manifest` to opt in. Always includes `has_script` / `has_captions` / `has_deck`. |
-| GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` (full record, including deck) |
+| GET | `/api/v1/videos` | videos:read | filters: `status`, `language`. Default list is slim (no `script_markdown` / `captions` / `deck_manifest`); pass `include=full` or `include=script_markdown,captions,deck_manifest` to opt in (`include=socialreins` adds the SocialReins half). Always includes `has_script` / `has_captions` / `has_deck`. |
+| GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` (full record, including deck and `socialreins`, see below) |
 | GET | `/api/v1/series` | videos:read | workspace's video series, including part counts |
 | GET | `/api/v1/series/{slug}` | videos:read | one series with videos in explicit part order |
 | PUT | `/api/v1/series/{slug}` | videos:write | create or replace a series using `title` and an ordered `videos` array of human IDs. Parts are numbered from 1. Rejects cross-workspace IDs, duplicates, and videos assigned to another series. |
