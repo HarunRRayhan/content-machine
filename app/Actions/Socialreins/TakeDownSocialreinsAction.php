@@ -40,6 +40,12 @@ class TakeDownSocialreinsAction
     public function handle(Post|Video $subject): array
     {
         $split = $subject instanceof Post && is_array($subject->publish_progress['split'] ?? null);
+
+        // A hand-over still running could create SocialReins posts after this returns.
+        if ($split && (SocialreinsResults::rowsOf($subject) === [] || in_array($subject->publish_state, ['queued', 'running'], true))) {
+            return ['The SocialReins half is still being handed over. Try again when the publish settles.'];
+        }
+
         $problems = $split ? $this->takeDownPostsyncerHalf($subject) : [];
 
         // A request that got no answer may have created a group CM does not know: ask brain

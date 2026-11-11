@@ -82,6 +82,8 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
                 'status' => 'scheduled', 'scheduled_at' => $this->source->utc()->toIso8601String(), 'targets' => [],
             ];
         }
+        $this->brain['p1']['first_comment'] = 'source link';
+        $this->brain['p2']['thread'] = [['body' => 'part 2', 'media' => ['https://example.com/a.jpg']]];
 
         Http::fake(fn (Request $request) => $this->answer($request));
         Http::preventStrayRequests();
@@ -119,7 +121,8 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
                 if (in_array($id, $this->brainRefuses, true)) {
                     return Http::response(['error' => 'not_editable'], 409);
                 }
-                $this->brain[$id] = [...$this->brain[$id], ...$request->data()];
+                // Brain replaces the post with the body: a field left out is lost.
+                $this->brain[$id] = [...$request->data(), 'id' => $id, 'status' => 'scheduled', 'targets' => []];
             }
 
             return Http::response($this->brain[$id]);
@@ -210,8 +213,14 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         $target = $this->target->utc()->format('Y-m-d\TH:i:s\Z');
         $this->assertTrue($this->psAt->equalTo($this->target));
         $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        $expected = fn (string $platform, array $own): array => [
+            'social_set_id' => self::SET, 'platform' => $platform, 'body' => "hi {$platform}", 'media' => [], 'thread' => [],
+            'first_comment' => null, 'cover' => null, 'tiktok' => null, 'youtube' => null, ...$own, 'scheduled_at' => $target,
+        ];
         Http::assertSent(fn (Request $r): bool => $r->method() === 'PUT' && $r->url() === 'https://brain.test/v1/posts/p1'
-            && $r['scheduled_at'] === $target && $r['body'] === 'hi linkedin' && $r['social_set_id'] === self::SET && $r['platform'] === 'linkedin');
+            && $r->data() == $expected('linkedin', ['first_comment' => 'source link']));
+        Http::assertSent(fn (Request $r): bool => $r->method() === 'PUT' && $r->url() === 'https://brain.test/v1/posts/p2'
+            && $r->data() == $expected('threads', ['thread' => [['body' => 'part 2', 'media' => ['https://example.com/a.jpg']]]]));
         $this->assertSame($target, $this->storedAt($post, 'p1'));
         $this->assertSame($target, $this->storedAt($post, 'p2'));
         $post->refresh();
@@ -249,8 +258,9 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         $this->brainRefuses = [];
         $this->reschedule($post)->assertOk();
 
-        // p1 is already at the target and is not sent again.
+        // p1 and the PostSyncer group are already at the target and are not sent again.
         $this->assertSame(['p1', 'p2', 'p2'], $this->brainPuts());
+        $this->assertCount(1, Http::recorded()->filter(fn (array $pair): bool => $pair[0]->method() === 'PUT' && str_contains($pair[0]->url(), 'postsyncer.com')));
         $this->assertNotNull($this->storedAt($post, 'p2'));
     }
 
@@ -304,5 +314,18 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         $this->psDeleted = true;
         $this->withToken($this->token)->postJson("/api/v1/posts/{$post->human_id}/take-down")->assertOk();
         $this->assertSame('ready', $post->refresh()->status);
+    }
+
+    public function test_take_down_waits_while_the_socialreins_half_is_still_being_handed_over(): void
+    {
+        $post = $this->splitPost();
+        $post->forceFill(['publish_state' => 'queued'])->save();
+
+        $this->withToken($this->token)->postJson("/api/v1/posts/{$post->human_id}/take-down")
+            ->assertUnprocessable()
+            ->assertJsonPath('problems.0', fn (string $m): bool => str_contains($m, 'still being handed over'));
+
+        $this->assertFalse($this->psDeleted);
+        $this->assertSame('scheduled', $this->brain['p1']['status']);
     }
 }
