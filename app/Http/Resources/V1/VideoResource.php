@@ -83,7 +83,7 @@ class VideoResource extends JsonResource
             // The SocialReins half of a split publish, as the dashboard shows it (one query, so opt-in on lists).
             'socialreins' => $this->when(
                 $include->wants('socialreins'),
-                fn (): array => SocialreinsResults::presentGroups($this->resource),
+                fn (): array => SocialreinsResults::presentGroupsForApi($this->resource),
             ),
             'idea_id' => $this->idea_id,
             'series' => $this->whenLoaded('series', function () {
