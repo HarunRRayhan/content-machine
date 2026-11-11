@@ -6,6 +6,7 @@ use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Actions\Postsyncer\ReconcileVideoGroupsDeletedAction;
 use App\Actions\Postsyncer\VideoRescheduleAction;
+use App\Actions\Socialreins\RescheduleSplitPostAction;
 use App\Actions\Videos\CreateVideoAction;
 use App\Actions\Videos\UpdateVideoAction;
 use App\Data\Postsyncer\ReschedulePostData;
@@ -19,6 +20,7 @@ use App\Rules\RenderablePresentationManifest;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Socialreins\SocialreinsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -225,8 +227,12 @@ class VideosApiController extends Controller
         return new VideoResource($video->fresh());
     }
 
-    public function reschedule(Request $request, string $humanId, VideoRescheduleAction $action): VideoResource
-    {
+    public function reschedule(
+        Request $request,
+        string $humanId,
+        VideoRescheduleAction $action,
+        RescheduleSplitPostAction $split,
+    ): VideoResource {
         $video = $this->resolveVideo($humanId);
 
         $payload = $request->validate([
@@ -234,12 +240,13 @@ class VideosApiController extends Controller
         ]);
 
         try {
-            $video = $action->handle(
+            // A split video has a SocialReins half to move as well.
+            $video = (is_array($video->publish_progress['split'] ?? null) ? $split : $action)->handle(
                 $video,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),
             );
-        } catch (InvalidArgumentException|PostsyncerException $exception) {
+        } catch (InvalidArgumentException|PostsyncerException|SocialreinsException $exception) {
             throw ValidationException::withMessages([
                 'when' => $exception->getMessage(),
             ]);

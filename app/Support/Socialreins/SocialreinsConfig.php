@@ -40,8 +40,8 @@ class SocialreinsConfig
      * The driver one subject publishes through. A subject already on a driver stays there
      * whatever the settings say now; a new one follows the workspace driver, limited to
      * subjects whose every language is routed (no routed list means every language) and
-     * whose every platform SocialReins covers. A post covered only in part splits (see
-     * splitOf()) and starts on PostSyncer.
+     * whose every platform SocialReins covers. A post or video covered only in part splits
+     * (see splitOf()) and starts on PostSyncer.
      *
      * @param  array<string, mixed>  $options  the publish options, when deciding a publish
      */
@@ -57,21 +57,21 @@ class SocialreinsConfig
     }
 
     /**
-     * A new post whose platforms SocialReins covers only in part: PostSyncer publishes the
-     * `postsyncer` platforms first, then the `socialreins` ones go through SocialReins
-     * (ContinueSplitOnSocialreinsAction). Null when the post goes whole to one driver.
+     * A new post or video whose platforms SocialReins covers only in part: PostSyncer publishes
+     * the `postsyncer` platforms first, then the `socialreins` ones go through SocialReins
+     * (ContinueSplitOnSocialreinsAction). Null when it goes whole to one driver.
      * Telegram publishes never split: only PostSyncer's publish closes their request.
      *
      * @param  array<string, mixed>  $options
      * @return array{socialreins: list<string>, postsyncer: list<string>}|null
      */
-    public static function splitOf(Post $post, Workspace $workspace, array $options = []): ?array
+    public static function splitOf(Post|Video $subject, Workspace $workspace, array $options = []): ?array
     {
-        if (self::isOnSocialreins($post) || ($options['telegram_request_id'] ?? null) !== null) {
+        if (self::isOnSocialreins($subject) || ($options['telegram_request_id'] ?? null) !== null) {
             return null;
         }
 
-        $split = self::newSubjectSplit($post, $workspace, $options);
+        $split = self::newSubjectSplit($subject, $workspace, $options);
 
         return $split !== null && $split['socialreins'] !== [] && $split['postsyncer'] !== [] ? $split : null;
     }

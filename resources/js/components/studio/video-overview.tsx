@@ -124,6 +124,8 @@ type Props = {
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
     socialreinsGroups?: PostsyncerGroup[];
+    /** Set when PostSyncer takes some platforms and SocialReins the rest. */
+    publishSplit?: { socialreins: string[]; postsyncer: string[] } | null;
     series?: VideoSeriesInfo | null;
 };
 
@@ -256,6 +258,7 @@ export default function VideoOverview({
     needsConfirmAsk,
     postsyncer,
     socialreinsGroups,
+    publishSplit,
     series = null,
 }: Props) {
     const [checks, setChecks] = useState<Set<number>>(() =>
@@ -349,8 +352,13 @@ export default function VideoOverview({
         studioStatus !== 'posted' &&
         !publishFailed &&
         (studioStatus === 'recorded' || fakeScheduled);
+    // A split video keeps its PostSyncer groups while its SocialReins half is retried.
     const showRetryForm =
-        !archived && studioStatus !== 'posted' && !hasGroups && publishFailed;
+        !archived &&
+        publishFailed &&
+        (publishSplit
+            ? publishRetryable
+            : studioStatus !== 'posted' && !hasGroups);
     const hasVideoDriveUrl = Boolean(videoDriveValue.trim());
     const missingVideoDriveUrl =
         !hasVideoDriveUrl && studioStatus === 'recorded';
@@ -875,6 +883,14 @@ export default function VideoOverview({
                             </>
                         )}
                     </div>
+
+                    {publishSplit && (
+                        <p className="schedule-it-hint">
+                            Through SocialReins:{' '}
+                            {publishSplit.socialreins.join(', ')}. Through
+                            PostSyncer: {publishSplit.postsyncer.join(', ')}.
+                        </p>
+                    )}
 
                     {shownGroups.length > 0 ? (
                         <div className="schedule-log">

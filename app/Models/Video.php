@@ -138,16 +138,16 @@ class Video extends Model
             return false;
         }
 
+        $progress = $this->publish_progress;
         $groups = $this->postsyncer['groups'] ?? null;
-        if (is_array($groups)) {
+        // A split video keeps its PostSyncer groups while its SocialReins half is retried.
+        if (is_array($groups) && ($progress['driver'] ?? null) !== 'socialreins') {
             foreach ($groups as $group) {
                 if (is_array($group) && filled($group['post_id'] ?? null)) {
                     return false;
                 }
             }
         }
-
-        $progress = $this->publish_progress;
 
         if (! is_array($progress) || ($progress['state'] ?? null) !== 'failed') {
             return false;

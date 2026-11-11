@@ -3,17 +3,14 @@
 namespace Tests\Feature\Socialreins;
 
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
-use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Actions\Postsyncer\SyncScheduledPostsAction;
 use App\Actions\Socialreins\PublishToSocialreinsAction;
 use App\Actions\Socialreins\TakeDownSocialreinsAction;
 use App\Jobs\PublishPostJob;
 use App\Jobs\PublishSocialreinsJob;
-use App\Jobs\PublishVideoJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
-use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
@@ -310,25 +307,6 @@ class SocialreinsSplitPublishTest extends TestCase
         $this->assertNotNull(SocialreinsConfig::splitOf($post, $post->workspace));
         $this->assertNull(SocialreinsConfig::splitOf($post, $post->workspace, ['telegram_request_id' => 7]));
         $this->assertFalse(SocialreinsConfig::routesToSocialreins($post, $post->workspace, ['telegram_request_id' => 7]));
-    }
-
-    public function test_a_video_goes_to_socialreins_only_when_every_platform_is_covered(): void
-    {
-        $video = fn (Workspace $workspace): Video => Video::factory()->for($workspace)->create([
-            'language' => 'en',
-            'captions' => ['facebook' => ['caption' => 'fb'], 'linkedin' => ['caption' => 'li']],
-            'status' => 'ready',
-        ]);
-
-        $partly = $video($this->workspace(['facebook']));
-        app(EnqueueVideoPublishAction::class)->handle($partly, $partly->workspace);
-        Queue::assertPushed(PublishVideoJob::class, 1);
-        Queue::assertNotPushed(PublishSocialreinsJob::class);
-
-        $whole = $video($this->workspace(['facebook', 'linkedin']));
-        app(EnqueueVideoPublishAction::class)->handle($whole, $whole->workspace);
-        Queue::assertPushed(PublishSocialreinsJob::class, 1);
-        Queue::assertPushed(PublishVideoJob::class, 1);
     }
 
     public function test_the_postsyncer_sync_does_not_mark_a_split_post_posted_while_its_socialreins_half_failed(): void

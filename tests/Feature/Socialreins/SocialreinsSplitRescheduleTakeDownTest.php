@@ -7,6 +7,7 @@ use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\User;
+use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
@@ -18,7 +19,7 @@ use Illuminate\Testing\TestResponse;
 use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
-/** Reschedule and take down both halves of a split post: PostSyncer group 42, SocialReins posts p1 and p2. */
+/** Reschedule and take down both halves of a split post or video: PostSyncer group 42, SocialReins posts p1 and p2. */
 class SocialreinsSplitRescheduleTakeDownTest extends TestCase
 {
     use FakesPublicDns, RefreshDatabase;
@@ -144,7 +145,10 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         ];
     }
 
-    private function splitPost(): Post
+    /**
+     * @param  class-string<Post|Video>  $model
+     */
+    private function splitPost(string $model = Post::class): Post|Video
     {
         $payload = [
             'workspace_id' => 15211,
@@ -155,14 +159,14 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         ];
         $group = ['post_id' => '42', 'status' => 'SCHEDULED', 'scheduled_at' => $this->source->format('Y-m-d H:i'), 'platforms' => ['facebook'], 'language' => 'bangla'];
 
-        $post = Post::factory()->for($this->workspace)->create([
+        $post = $model::factory()->for($this->workspace)->create([
             'status' => 'scheduled',
             'publish_state' => 'succeeded',
             'postsyncer' => ['groups' => [$group]],
-            // As ContinueSplitOnSocialreinsAction leaves it.
+            // As ContinueSplitOnSocialreinsAction and the settle leave it.
             'publish_progress' => [
                 'driver' => 'socialreins',
-                'state' => 'failed',
+                'state' => 'succeeded',
                 'options' => ['platforms' => ['linkedin', 'threads']],
                 'split' => [
                     'postsyncer' => ['facebook'],
@@ -174,7 +178,7 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
 
         $result = fn (string $platform): array => ['platform' => $platform, 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []];
         SocialreinsGroup::query()->create([
-            'workspace_id' => $this->workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'workspace_id' => $this->workspace->id, 'subject_type' => $post instanceof Video ? 'video' : 'post', 'subject_id' => $post->id,
             'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created',
             'request' => json_encode(['scheduled_at' => $this->source->utc()->toIso8601String()]),
             'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001', 'expected_targets' => 2,
@@ -184,9 +188,9 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         return $post;
     }
 
-    private function reschedule(Post $post): TestResponse
+    private function reschedule(Post|Video $post): TestResponse
     {
-        return $this->withToken($this->token)->postJson("/api/v1/posts/{$post->human_id}/reschedule", [
+        return $this->withToken($this->token)->postJson('/api/v1/'.($post instanceof Video ? 'videos' : 'posts')."/{$post->human_id}/reschedule", [
             'when' => $this->target->toIso8601String(),
         ]);
     }
@@ -199,7 +203,7 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
             ->map(fn (Request $r): string => basename($r->url()))->values()->all();
     }
 
-    private function storedAt(Post $post, string $postId): ?string
+    private function storedAt(Post|Video $post, string $postId): ?string
     {
         return SocialreinsGroup::query()->where('subject_id', $post->id)->first()->results[$postId]['scheduled_at'] ?? null;
     }
@@ -327,5 +331,67 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
 
         $this->assertFalse($this->psDeleted);
         $this->assertSame('scheduled', $this->brain['p1']['status']);
+    }
+
+    public function test_reschedule_moves_both_halves_of_a_split_video(): void
+    {
+        $video = $this->splitPost(Video::class);
+
+        $this->reschedule($video)->assertOk();
+
+        $target = $this->target->utc()->format('Y-m-d\TH:i:s\Z');
+        $this->assertTrue($this->psAt->equalTo($this->target));
+        $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        $this->assertSame($target, $this->storedAt($video, 'p1'));
+        $this->assertSame($target, $this->storedAt($video, 'p2'));
+        $video->refresh();
+        $this->assertSame('succeeded', $video->publish_state);
+        $this->assertSame('scheduled', $video->status);
+        $this->assertSame($this->target->format('Y-m-d H:i'), $video->postsyncer['groups'][0]['scheduled_at']);
+        // The PostSyncer checkpoint moves inside the split, where a later reschedule reads it.
+        $this->assertSame($this->target->format('H:i'), $video->publish_progress['split']['completed_groups'][0]['expected_payload']['schedule_for']['time']);
+        $this->assertArrayNotHasKey('completed_groups', $video->publish_progress);
+        $this->assertSame('socialreins', $video->publish_progress['driver']);
+    }
+
+    public function test_reschedule_of_a_split_video_refuses_before_moving_anything_when_a_socialreins_post_already_went_out(): void
+    {
+        $video = $this->splitPost(Video::class);
+        $this->brain['p2']['status'] = 'published';
+
+        $this->reschedule($video)->assertUnprocessable()
+            ->assertJsonPath('errors.when.0', fn (string $m): bool => str_contains($m, 'Nothing was rescheduled'));
+
+        $this->assertTrue($this->psAt->equalTo($this->source));
+        $this->assertSame([], $this->brainPuts());
+    }
+
+    public function test_take_down_removes_both_halves_of_a_split_video(): void
+    {
+        $video = $this->splitPost(Video::class);
+
+        $this->withToken($this->token)->postJson("/api/v1/videos/{$video->human_id}/take-down")
+            ->assertOk()->assertJson(['taken_down' => true, 'problems' => []]);
+
+        $this->assertTrue($this->psDeleted);
+        $this->assertSame('deleted', $this->brain['p1']['status']);
+        $this->assertSame('deleted', $this->brain['p2']['status']);
+        $video->refresh();
+        $this->assertSame('recorded', $video->status);
+        $this->assertSame('idle', $video->publish_state);
+        $this->assertNull($video->publish_progress);
+        $this->assertSame([], $video->postsyncer['groups']);
+        $this->assertSame('DELETED', $video->postsyncer['cleared_groups'][0]['status']);
+    }
+
+    public function test_the_postsyncer_only_reset_refuses_a_split_video(): void
+    {
+        $video = $this->splitPost(Video::class);
+
+        $this->withToken($this->token)->postJson("/api/v1/videos/{$video->human_id}/reconcile-groups-deleted", ['confirmed_deleted' => true])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.confirmed_deleted.0', fn (string $m): bool => str_contains($m, 'Take it down instead'));
+
+        $this->assertSame('scheduled', $video->refresh()->status);
     }
 }
