@@ -21,6 +21,8 @@ type PublishDialogProps = {
     publishError?: string | null;
     /** Lifecycle status: draft | scheduled | posted | … Used to word the banner. */
     contentStatus?: string | null;
+    /** Where the post went, for the banner wording. */
+    via?: string;
     publishUrl: string;
     entityLabel: string;
     needsConfirmAsk?: boolean;
@@ -31,6 +33,7 @@ type PublishDialogProps = {
 function publishStatusLabel(
     publishState: string,
     contentStatus?: string | null,
+    via = 'PostSyncer',
 ): string {
     const lifecycle = (contentStatus || '').toLowerCase();
 
@@ -48,11 +51,11 @@ function publishStatusLabel(
 
     if (publishState === 'succeeded') {
         if (lifecycle === 'scheduled') {
-            return 'Scheduled on PostSyncer. Not published yet.';
+            return `Scheduled on ${via}. Not published yet.`;
         }
 
         if (lifecycle === 'posted') {
-            return 'Published on PostSyncer.';
+            return `Published on ${via}.`;
         }
 
         return 'PostSyncer job succeeded.';
@@ -65,9 +68,10 @@ export function PublishStatusBanner({
     publishState,
     publishError,
     contentStatus,
+    via,
 }: Pick<
     PublishDialogProps,
-    'publishState' | 'publishError' | 'contentStatus'
+    'publishState' | 'publishError' | 'contentStatus' | 'via'
 >) {
     if (publishState === 'idle' && !publishError) {
         return null;
@@ -82,7 +86,7 @@ export function PublishStatusBanner({
             }
         >
             <p className="font-medium">
-                {publishStatusLabel(publishState, contentStatus)}
+                {publishStatusLabel(publishState, contentStatus, via)}
             </p>
             {publishError && (
                 <p className="mt-1 text-muted-foreground">{publishError}</p>

@@ -7,6 +7,7 @@ use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostPublishPlanner;
@@ -329,6 +330,35 @@ class PostsControllerTest extends TestCase
                 ->where('post.postsyncer_ready', false)
                 ->has('post.needs_confirm_ask')
                 ->has('post.postsyncer')
+            );
+    }
+
+    public function test_show_lists_the_socialreins_half_of_a_split_post(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'publish_state' => 'succeeded',
+            'publish_progress' => ['state' => 'failed', 'split' => ['socialreins' => ['platforms' => ['facebook', 'instagram']], 'postsyncer' => ['x']]],
+            'postsyncer' => ['groups' => [['post_id' => 174141, 'status' => 'scheduled', 'platforms' => ['x'], 'language' => 'english']]],
+        ]);
+        $result = fn (string $platform): array => ['platform' => $platform, 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []];
+        SocialreinsGroup::query()->create([
+            'workspace_id' => $workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created',
+            'request' => json_encode(['scheduled_at' => '2026-11-12T05:27:00Z']),
+            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001',
+            'results' => ['p1' => $result('facebook'), 'p2' => $result('instagram')],
+        ]);
+
+        $this->get(route('posts.show', $post))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('posts/show')
+                ->where('post.socialreins_groups', [
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['facebook'], 'language' => 'english'],
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['instagram'], 'language' => 'english'],
+                ])
             );
     }
 

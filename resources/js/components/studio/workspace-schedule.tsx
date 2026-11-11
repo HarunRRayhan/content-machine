@@ -20,6 +20,8 @@ import type { HandleDirectory } from '@/lib/studio-workspaces';
 import { STUDIO_HANDLES } from '@/lib/studio-workspaces';
 
 export type PostsyncerGroup = {
+    /** Set on a SocialReins post shown in the PostSyncer group shape. */
+    source?: 'socialreins';
     post_id?: string | number;
     status?: string;
     scheduled_at?: string | null;
@@ -549,7 +551,11 @@ function ScheduleGroupList({
                                     {group.status}
                                 </span>
                             ) : null}
-                            {id !== undefined && id !== '' ? (
+                            {group.source === 'socialreins' ? (
+                                <span className="schedule-log-id">
+                                    SocialReins
+                                </span>
+                            ) : id !== undefined && id !== '' ? (
                                 <span className="schedule-log-id">
                                     #{String(id)}
                                 </span>

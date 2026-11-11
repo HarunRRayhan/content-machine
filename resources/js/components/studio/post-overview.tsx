@@ -68,6 +68,7 @@ type Props = {
     timezone: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
+    socialreinsGroups?: PostsyncerGroup[];
     handles?: HandleDirectory;
 };
 
@@ -245,6 +246,7 @@ export default function PostOverview({
     timezone,
     needsConfirmAsk,
     postsyncer,
+    socialreinsGroups,
     handles,
 }: Props) {
     const effectiveTimezone = timezone.trim() || DEFAULT_TIMEZONE;
@@ -259,9 +261,12 @@ export default function PostOverview({
     const [busy, setBusy] = useState(false);
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
-    const workspaceBuckets = hasGroups
-        ? bucketsFromGroups(groups)
-        : (workspaces ?? []);
+    // Both halves of a split are listed; publish controls still key off PostSyncer groups.
+    const shownGroups = [...groups, ...(socialreinsGroups ?? [])];
+    const workspaceBuckets =
+        shownGroups.length > 0
+            ? bucketsFromGroups(shownGroups)
+            : (workspaces ?? []);
     const hasWorkspaceBuckets = workspaceBuckets.length > 0;
     const publishBusy = ['queued', 'running'].includes(publishState);
     const showPublishControls =
@@ -296,7 +301,7 @@ export default function PostOverview({
         publishProgress.current.phase !== 'uploading',
     );
     const awaitingApproval = approvalState === 'pending';
-    const scheduledAt = earliestWhen(groups, effectiveTimezone);
+    const scheduledAt = earliestWhen(shownGroups, effectiveTimezone);
 
     function advanceStatus(nextStatus: 'archived' | 'draft' | 'posted') {
         if (nextStatus === 'posted' && studioStatus !== 'archived') {
@@ -359,7 +364,7 @@ export default function PostOverview({
                 <div className="pane-head">
                     <span className="k">Status</span>
                 </div>
-                {hasGroups || hasWorkspaceBuckets ? (
+                {hasWorkspaceBuckets ? (
                     <WorkspacePlatformChips
                         buckets={workspaceBuckets}
                         handles={handles}
@@ -545,7 +550,8 @@ export default function PostOverview({
                                 : 'Scheduled posts'
                         }
                         empty={
-                            studioStatus === 'scheduled' && !hasGroups
+                            studioStatus === 'scheduled' &&
+                            shownGroups.length === 0
                                 ? 'Marked scheduled, but Content Machine has no PostSyncer ids for this post yet.'
                                 : undefined
                         }
