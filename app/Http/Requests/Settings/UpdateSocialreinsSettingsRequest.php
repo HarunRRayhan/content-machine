@@ -50,6 +50,9 @@ class UpdateSocialreinsSettingsRequest extends FormRequest
         foreach (PostsyncerConfig::LANGUAGES as $language) {
             $rules["languages.{$language}.set_id"] = ['nullable', 'uuid'];
             $rules["languages.{$language}.token"] = ['nullable', 'string', 'max:255'];
+            $rules["languages.{$language}.platforms"] = ['nullable', 'array'];
+            // An empty entry is the form's "none ticked" marker; the write drops it.
+            $rules["languages.{$language}.platforms.*"] = ['nullable', Rule::in(UpdatePostsyncerSettingsRequest::PLATFORMS)];
         }
 
         return $rules;

@@ -58,6 +58,10 @@ type PostDetail = {
     publish_retryable: boolean;
     publish_progress: {
         state?: string;
+        split?: {
+            socialreins?: { platforms?: string[] };
+            postsyncer?: string[];
+        };
         current?: {
             index?: number;
             group_key?: string;

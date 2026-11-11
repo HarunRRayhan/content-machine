@@ -2,6 +2,7 @@
 
 namespace App\Actions\Postsyncer;
 
+use App\Actions\Socialreins\ContinueSplitOnSocialreinsAction;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
@@ -15,6 +16,7 @@ use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
+use App\Support\Socialreins\SocialreinsConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
@@ -1782,6 +1784,7 @@ class PublishPostAction
                 'publish_error' => null,
                 'publish_progress' => $progress,
             ])->save();
+            app(ContinueSplitOnSocialreinsAction::class)->handle($lockedPost);
         });
 
         $post->refresh();
@@ -2481,7 +2484,9 @@ class PublishPostAction
                 }
             }
 
-            if ($locked->publish_state === 'succeeded') {
+            // A split post handed over to SocialReins: PostSyncer's half is done.
+            if ($locked->publish_state === 'succeeded'
+                || (is_array($progress) && ($progress['driver'] ?? null) === SocialreinsConfig::DRIVER)) {
                 return null;
             }
 
@@ -2721,6 +2726,7 @@ class PublishPostAction
             ])->save();
 
             $this->updateTelegramPostRequests($locked, TelegramPostRequest::PUBLISHED, null, $options);
+            app(ContinueSplitOnSocialreinsAction::class)->handle($locked);
 
             return true;
         });

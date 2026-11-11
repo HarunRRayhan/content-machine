@@ -111,6 +111,20 @@ class EnqueuePostPublishAction
                 unset($filtered['append_missing']);
             }
 
+            // A new post SocialReins covers only in part: PostSyncer takes its platforms
+            // now, and ContinueSplitOnSocialreinsAction sends the rest once this succeeds.
+            $split = $baseGroups === null ? SocialreinsConfig::splitOf($lockedPost, $lockedWorkspace, $filtered) : null;
+            if ($split !== null) {
+                $split = [
+                    'socialreins' => [
+                        ...array_intersect_key($filtered, array_flip(['when', 'confirm_ask'])),
+                        'platforms' => $split['socialreins'],
+                    ],
+                    'postsyncer' => $split['postsyncer'],
+                ];
+                $filtered['platforms'] = $split['postsyncer'];
+            }
+
             $isRetry = $lockedPost->publish_state === 'failed' && $baseGroups === null;
             $progress = $baseGroups !== null ? null : $lockedPost->publish_progress;
             $runToken = (string) Str::uuid();
@@ -133,6 +147,10 @@ class EnqueuePostPublishAction
 
                 if ($baseGroups !== null) {
                     $progress['base_groups'] = $baseGroups;
+                }
+
+                if ($split !== null) {
+                    $progress['split'] = $split;
                 }
             }
 

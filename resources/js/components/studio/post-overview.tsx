@@ -53,6 +53,10 @@ type Props = {
     publishRetryable: boolean;
     publishProgress: {
         state?: string;
+        split?: {
+            socialreins?: { platforms?: string[] };
+            postsyncer?: string[];
+        };
         current?: {
             index?: number;
             group_key?: string;
@@ -279,6 +283,11 @@ export default function PostOverview({
           : !postsyncerReady
             ? 'Configure PostSyncer in Settings before publishing.'
             : null;
+    const split = publishProgress?.split;
+    // A split post keeps its PostSyncer groups while its SocialReins half is retried.
+    const splitRetry = Boolean(
+        split && publishState === 'failed' && publishRetryable && !archived,
+    );
     const publishUncertain = Boolean(
         publishState === 'failed' &&
         publishProgress?.state === 'uncertain' &&
@@ -437,6 +446,17 @@ export default function PostOverview({
                                     </>
                                 )}
                             </Form>
+                        ) : splitRetry ? (
+                            <PublishDialog
+                                disabled={!postsyncerReady}
+                                disabledReason={publishDisabledReason}
+                                publishState={publishState}
+                                publishUrl={publishUrl}
+                                entityLabel="post"
+                                needsConfirmAsk={false}
+                                retryOnly
+                                showStatus={false}
+                            />
                         ) : archived ? (
                             <>
                                 <span className="badge archived">
@@ -502,6 +522,15 @@ export default function PostOverview({
                             </span>
                         )}
                     </div>
+
+                    {split && (
+                        <p className="schedule-it-hint">
+                            Through SocialReins:{' '}
+                            {(split.socialreins?.platforms ?? []).join(', ')}.
+                            Through PostSyncer:{' '}
+                            {(split.postsyncer ?? []).join(', ')}.
+                        </p>
+                    )}
 
                     <WorkspaceScheduleLog
                         buckets={workspaceBuckets}
