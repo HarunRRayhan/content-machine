@@ -7,6 +7,7 @@ use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Content\PresentationManifest;
 use App\Support\CurrentApiToken;
+use App\Support\Socialreins\SocialreinsResults;
 use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -79,6 +80,11 @@ class VideoResource extends JsonResource
                 ? null
                 : 'Publishing failed. Inspect the dashboard for details.',
             'postsyncer' => $this->postsyncer,
+            // The SocialReins half of a split publish, as the dashboard shows it (one query, so opt-in on lists).
+            'socialreins' => $this->when(
+                $include->wants('socialreins'),
+                fn (): array => SocialreinsResults::presentGroups($this->resource),
+            ),
             'idea_id' => $this->idea_id,
             'series' => $this->whenLoaded('series', function () {
                 if ($this->series === null || ! VideoScriptSeries::includesSeries($this->script_markdown)) {

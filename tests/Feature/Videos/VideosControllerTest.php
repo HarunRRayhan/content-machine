@@ -398,8 +398,8 @@ class VideosControllerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('videos/show')
                 ->where('video.socialreins_groups', [
-                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['youtube'], 'language' => 'bangla'],
-                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['facebook'], 'language' => 'bangla'],
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['youtube'], 'language' => 'bangla', 'post_id' => 'p1', 'detail' => null, 'targets' => []],
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['facebook'], 'language' => 'bangla', 'post_id' => 'p2', 'detail' => null, 'targets' => []],
                 ])
             );
     }

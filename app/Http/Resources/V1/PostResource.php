@@ -7,6 +7,7 @@ use App\Models\Post;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\CurrentApiToken;
+use App\Support\Socialreins\SocialreinsResults;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -74,6 +75,11 @@ class PostResource extends JsonResource
             'publish_progress' => $this->publish_progress,
             'approval_state' => $this->approval_state ?? 'approved',
             'postsyncer' => $this->postsyncer,
+            // The SocialReins half of a split publish, as the dashboard shows it (one query, so opt-in on lists).
+            'socialreins' => $this->when(
+                $include->wants('socialreins'),
+                fn (): array => SocialreinsResults::presentGroups($this->resource),
+            ),
             'idea_id' => $this->idea_id,
             'attachments' => $this->relationLoaded('attachments')
                 ? $this->presentAttachments()
