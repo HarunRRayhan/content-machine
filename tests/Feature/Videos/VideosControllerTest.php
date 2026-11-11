@@ -5,6 +5,7 @@ namespace Tests\Feature\Videos;
 use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
+use App\Models\SocialreinsGroup;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
@@ -373,6 +374,33 @@ class VideosControllerTest extends TestCase
                 ->where('video.postsyncer_ready', false)
                 ->has('video.needs_confirm_ask')
                 ->has('video.postsyncer')
+            );
+    }
+
+    public function test_show_lists_the_socialreins_posts_of_a_video(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $video = Video::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'publish_state' => 'succeeded',
+        ]);
+        $result = fn (string $platform): array => ['platform' => $platform, 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []];
+        SocialreinsGroup::query()->create([
+            'workspace_id' => $workspace->id, 'subject_type' => 'video', 'subject_id' => $video->id,
+            'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created',
+            'request' => json_encode(['scheduled_at' => '2026-11-12T05:27:00Z']),
+            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000002',
+            'results' => ['p1' => $result('youtube'), 'p2' => $result('facebook')],
+        ]);
+
+        $this->get(route('videos.show', $video))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('videos/show')
+                ->where('video.socialreins_groups', [
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['youtube'], 'language' => 'bangla'],
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['facebook'], 'language' => 'bangla'],
+                ])
             );
     }
 

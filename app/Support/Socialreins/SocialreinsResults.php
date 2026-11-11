@@ -53,6 +53,44 @@ final class SocialreinsResults
     }
 
     /**
+     * The SocialReins posts of a post or video in the PostSyncer group shape (one per language and
+     * platform, the newest group winning), so the page lists both halves of a split the same way.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function presentGroups(Post|Video $subject): array
+    {
+        $groups = [];
+
+        foreach (self::rowsOf($subject) as $row) {
+            if ($row->state !== SocialreinsGroup::CREATED) {
+                continue;
+            }
+
+            $request = json_decode($row->request, true);
+            $scheduledAt = is_array($request) && is_string($request['scheduled_at'] ?? null) ? $request['scheduled_at'] : null;
+
+            foreach ($row->results ?? [] as $result) {
+                $state = self::classify($result)['state'];
+
+                $groups[$row->language.':'.$result['platform']] = [
+                    'source' => 'socialreins',
+                    // Brain's own status (scheduled, published) unless a target went wrong.
+                    'status' => in_array($state, [self::FAILED, self::PARTIAL, self::UNKNOWN], true)
+                        ? $state
+                        : (string) $result['status'],
+                    // A reschedule records the post's new time on its result.
+                    'scheduled_at' => $result['scheduled_at'] ?? $scheduledAt,
+                    'platforms' => [$result['platform']],
+                    'language' => $row->language,
+                ];
+            }
+        }
+
+        return array_values($groups);
+    }
+
+    /**
      * One brain post (a `POST /post-groups` or `GET /posts` element) as a stored result.
      *
      * @param  array<string, mixed>  $post

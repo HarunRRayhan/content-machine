@@ -10,7 +10,6 @@ use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
-use App\Models\SocialreinsGroup;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\PostWorkspaceBuckets;
@@ -308,44 +307,6 @@ class PostsController extends Controller
     }
 
     /**
-     * The SocialReins posts of this post in the PostSyncer group shape (one per language and
-     * platform, the newest group winning), so the page lists both halves of a split the same way.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function presentSocialreinsGroups(Post $post): array
-    {
-        $groups = [];
-
-        foreach (SocialreinsResults::rowsOf($post) as $row) {
-            if ($row->state !== SocialreinsGroup::CREATED) {
-                continue;
-            }
-
-            $request = json_decode($row->request, true);
-            $scheduledAt = is_array($request) && is_string($request['scheduled_at'] ?? null) ? $request['scheduled_at'] : null;
-
-            foreach ($row->results ?? [] as $result) {
-                $state = SocialreinsResults::classify($result)['state'];
-
-                $groups[$row->language.':'.$result['platform']] = [
-                    'source' => 'socialreins',
-                    // Brain's own status (scheduled, published) unless a target went wrong.
-                    'status' => in_array($state, [SocialreinsResults::FAILED, SocialreinsResults::PARTIAL, SocialreinsResults::UNKNOWN], true)
-                        ? $state
-                        : (string) $result['status'],
-                    // A reschedule records the post's new time on its result.
-                    'scheduled_at' => $result['scheduled_at'] ?? $scheduledAt,
-                    'platforms' => [$result['platform']],
-                    'language' => $row->language,
-                ];
-            }
-        }
-
-        return array_values($groups);
-    }
-
-    /**
      * @return array<string, mixed>
      */
     private function presentDetail(Post $post): array
@@ -458,7 +419,7 @@ class PostsController extends Controller
             'approval_state' => $post->approval_state ?? 'approved',
             'timezone' => $timezone,
             'postsyncer' => $post->postsyncer,
-            'socialreins_groups' => $this->presentSocialreinsGroups($post),
+            'socialreins_groups' => SocialreinsResults::presentGroups($post),
             // Legacy name: "this post's publish driver is ready" (PostSyncer, or SocialReins when routed).
             'postsyncer_ready' => $workspace !== null && SocialreinsConfig::routesToSocialreins($post, $workspace)
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
