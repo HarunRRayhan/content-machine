@@ -53,6 +53,23 @@ final class SocialreinsResults
     }
 
     /**
+     * presentGroups() for the API: error text stays on the dashboard, as with publish_error.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function presentGroupsForApi(Post|Video $subject): array
+    {
+        $redact = fn (mixed $text): ?string => $text === null ? null : 'Publishing failed. Inspect the dashboard for details.';
+
+        return array_map(function (array $group) use ($redact): array {
+            $group['detail'] = $redact($group['detail'] ?? null);
+            $group['targets'] = array_map(fn (array $target): array => array_merge($target, ['error' => $redact($target['error'] ?? null)]), $group['targets'] ?? []);
+
+            return $group;
+        }, self::presentGroups($subject));
+    }
+
+    /**
      * The SocialReins posts of a post or video in the PostSyncer group shape (one per language and
      * platform, the newest group winning), so the page lists both halves of a split the same way.
      * The API returns the same list as `socialreins`, so a client can verify that half too.

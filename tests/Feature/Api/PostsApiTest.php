@@ -212,8 +212,8 @@ class PostsApiTest extends TestCase
                 ],
                 [
                     'source' => 'socialreins', 'status' => 'failed', 'scheduled_at' => '2026-11-12T05:27:00Z',
-                    'platforms' => ['instagram'], 'language' => 'english', 'post_id' => 'p2', 'detail' => 'media rejected',
-                    'targets' => [['status' => 'failed', 'remote_url' => null, 'error' => 'media rejected']],
+                    'platforms' => ['instagram'], 'language' => 'english', 'post_id' => 'p2', 'detail' => 'Publishing failed. Inspect the dashboard for details.',
+                    'targets' => [['status' => 'failed', 'remote_url' => null, 'error' => 'Publishing failed. Inspect the dashboard for details.']],
                 ],
             ]);
 
