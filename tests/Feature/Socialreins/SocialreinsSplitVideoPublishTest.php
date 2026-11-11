@@ -188,6 +188,12 @@ class SocialreinsSplitVideoPublishTest extends TestCase
         app(PublishVideoAction::class)->handle($video, ['platforms' => ['tiktok']]);
         $this->assertCount(1, $this->sentTo(self::PS_URL));
         $this->assertSame('succeeded', $video->fresh()->publish_state);
+
+        // Nor does a legacy job (no run token) failing late while the SocialReins half is queued.
+        $video->refresh()->forceFill(['publish_state' => 'queued'])->save();
+        (new PublishVideoJob($video, ['platforms' => ['tiktok']]))->failed(new \RuntimeException('late'));
+        $this->assertSame('queued', $video->fresh()->publish_state);
+        $this->assertSame('succeeded', $video->fresh()->publish_progress['state']);
     }
 
     public function test_a_socialreins_failure_after_postsyncer_retries_only_socialreins(): void

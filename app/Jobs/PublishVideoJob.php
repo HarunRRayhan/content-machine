@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Models\Video;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -91,9 +92,11 @@ class PublishVideoJob implements ShouldBeUnique, ShouldQueue
                 ->lockForUpdate()
                 ->first();
 
+            // A split video handed over to SocialReins is no longer PostSyncer's to fail.
             if ($lockedVideo === null
                 || ! $this->isCurrentRun($lockedVideo)
-                || $lockedVideo->publish_state === 'succeeded') {
+                || $lockedVideo->publish_state === 'succeeded'
+                || ($lockedVideo->publish_progress['driver'] ?? null) === SocialreinsConfig::DRIVER) {
                 return false;
             }
 
