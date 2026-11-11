@@ -454,6 +454,15 @@ class PostsyncerClient
     }
 
     /**
+     * DELETE /posts/{id}: removes the post from PostSyncer and cancels its scheduled publishing.
+     * Only for posts not yet published: PostSyncer does not say it removes a live post.
+     */
+    public function deletePost(int|string $id): void
+    {
+        $this->request('delete', '/posts/'.rawurlencode((string) $id));
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function getPost(int|string $id): array
@@ -584,6 +593,7 @@ class PostsyncerClient
                 'get' => $pending->get($url),
                 'post' => $pending->post($url, $body),
                 'put' => $pending->put($url, $body),
+                'delete' => $pending->delete($url),
                 default => throw new \InvalidArgumentException("Unsupported HTTP method: {$method}"),
             };
         } catch (Throwable $exception) {

@@ -88,6 +88,22 @@ group is taken down like any other), a post still publishing and a partly
 published failed post (brain cannot delete a failed post) are reported; a post that failed with
 nothing live is skipped. Brain cannot delete on TikTok; that platform is reported as a problem.
 
+A split post (PostSyncer half plus SocialReins half) is handled whole:
+
+- Take down also deletes each still-scheduled PostSyncer group (`DELETE /posts/{id}` on
+  PostSyncer, recorded at once as `DELETED`). A PostSyncer group that is already published is
+  reported, because PostSyncer does not say its delete removes a live post: remove it on the
+  platform and in PostSyncer, then take down again. The post resets only when both halves are
+  down, and its PostSyncer groups move to `postsyncer.cleared_groups`.
+- Reschedule (`POST /api/v1/posts/{human_id}/reschedule`) first reads every SocialReins post and
+  refuses, changing nothing, unless each is still `scheduled`. Then the PostSyncer groups move
+  (the normal PostSyncer reschedule), then each SocialReins post with `PUT /posts/{id}` and the
+  new `scheduled_at`, recorded on its stored result. An error names the half that failed;
+  retrying with the same time finishes, since a post already at that time is skipped.
+- Reschedule needs the PostSyncer half's verified payloads, which the split keeps from this
+  change on (`publish_progress.split.completed_groups`). A split post published earlier cannot
+  be rescheduled from CM.
+
 ## Status
 
 `post.target.published|failed|deleted` webhooks (HMAC-SHA256 over `<t>.<raw body>`,

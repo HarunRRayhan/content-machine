@@ -24,6 +24,9 @@ class ContinueSplitOnSocialreinsAction
         }
 
         $options = $split['socialreins'];
+        // ReschedulePostAction needs the PostSyncer half's verified payloads. Kept in the split, which
+        // a SocialReins retry carries over, and not at the top, where PostSyncer code would read it.
+        $split['completed_groups'] = $locked->publish_progress['completed_groups'] ?? [];
 
         $locked->forceFill([
             'publish_state' => 'queued',
