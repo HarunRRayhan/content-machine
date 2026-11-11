@@ -85,7 +85,8 @@ class EnqueueSocialreinsPublishAction
                     'driver' => SocialreinsConfig::DRIVER,
                     'state' => 'failed',
                     'options' => $options,
-                    ...(is_array($split) ? ['split' => $split] : []),
+                    // A split post also keeps its PostSyncer reschedule checkpoint.
+                    ...(is_array($split) ? ['split' => $split] + array_intersect_key($locked->publish_progress, ['reschedule' => true]) : []),
                 ],
             ])->save();
 

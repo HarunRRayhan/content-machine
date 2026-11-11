@@ -5,10 +5,14 @@ namespace App\Actions\Socialreins;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
+use App\Support\Postsyncer\PostsyncerClient;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Socialreins\SocialreinsClient;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsException;
 use App\Support\Socialreins\SocialreinsResults;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Takes a Post or Video down from SocialReins: `DELETE /posts/{id}` for every brain post
@@ -22,6 +26,9 @@ use App\Support\Socialreins\SocialreinsResults;
  * - a post that failed after part of it went out (another account, thread parts) cannot be
  *   deleted by brain at all: it is reported, not skipped;
  * - a post that failed with nothing live has nothing to take down and is skipped.
+ *
+ * A split post's PostSyncer half is taken down too (takeDownPostsyncerHalf()), and the post
+ * resets only once both halves are down.
  */
 class TakeDownSocialreinsAction
 {
@@ -32,13 +39,8 @@ class TakeDownSocialreinsAction
     /** @return list<string> what could not be taken down; empty when everything is down */
     public function handle(Post|Video $subject): array
     {
-        // shortcut: a split post's PostSyncer half would be left live but hidden, so refuse; add a
-        // combined take-down if Harun needs one.
-        if (is_array($subject->publish_progress['split'] ?? null)) {
-            return ['This post also went out through PostSyncer. Take it down in PostSyncer and SocialReins directly.'];
-        }
-
-        $problems = [];
+        $split = $subject instanceof Post && is_array($subject->publish_progress['split'] ?? null);
+        $problems = $split ? $this->takeDownPostsyncerHalf($subject) : [];
 
         // A request that got no answer may have created a group CM does not know: ask brain
         // what its key made before anything else.
@@ -79,17 +81,84 @@ class TakeDownSocialreinsAction
         }
 
         if ($problems === [] && $rows !== []) {
+            $postsyncer = $split ? $subject->fresh()?->postsyncer : null;
             // A query, not the held model: its copy of publish_state may be stale.
             $subject::query()->whereKey($subject->getKey())->update([
                 'status' => $subject instanceof Video ? 'recorded' : 'ready',
                 'publish_state' => 'idle',
                 'publish_error' => null,
                 'publish_progress' => null,
+                // A split post's PostSyncer half is gone too: keep its groups for audit only, so the
+                // post can be published again (as ReconcileVideoGroupsDeletedAction does).
+                ...($split ? ['postsyncer' => json_encode(['groups' => [], 'cleared_groups' => [
+                    ...($postsyncer['cleared_groups'] ?? []),
+                    ...($postsyncer['groups'] ?? []),
+                ]])] : []),
                 'updated_at' => now(),
             ]);
         }
 
         return $problems;
+    }
+
+    /**
+     * Deletes each still-scheduled PostSyncer group of a split post. A published one is reported:
+     * PostSyncer does not say its delete removes a live post, so the owner removes it there.
+     *
+     * @return list<string> what could not be taken down
+     */
+    private function takeDownPostsyncerHalf(Post $post): array
+    {
+        $client = new PostsyncerClient(PostsyncerConfig::fromWorkspace($post->workspace));
+        $problems = [];
+
+        foreach ($post->postsyncer['groups'] ?? [] as $group) {
+            $postId = (string) ($group['post_id'] ?? '');
+            $name = 'PostSyncer '.implode(', ', (array) ($group['platforms'] ?? []));
+            if ($postId === '' || ($group['status'] ?? null) === 'DELETED') {
+                continue;
+            }
+
+            try {
+                $remote = $client->getPost($postId);
+                $status = strtoupper((string) ((is_array($remote['data'] ?? null) ? $remote['data'] : $remote)['status'] ?? ''));
+
+                if (! in_array($status, ['SCHEDULED', 'DRAFT'], true)) {
+                    $problems[] = "{$name}: {$status} in PostSyncer (post {$postId}), which cannot take a published post off the platform. "
+                        .'Remove it on the platform and delete it in PostSyncer, then take down again.';
+
+                    continue;
+                }
+
+                $client->deletePost($postId);
+            } catch (PostsyncerException $exception) {
+                // Already gone counts as down.
+                if ($exception->getCode() !== 404) {
+                    $problems[] = "{$name}: ".$exception->getMessage();
+
+                    continue;
+                }
+            }
+
+            $this->markPostsyncerGroupDeleted($post, $postId);
+        }
+
+        return $problems;
+    }
+
+    /** Recorded at once, under the row lock, so a retry skips it and nothing done is forgotten. */
+    private function markPostsyncerGroupDeleted(Post $post, string $postId): void
+    {
+        DB::transaction(function () use ($post, $postId): void {
+            $locked = Post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
+            $postsyncer = $locked->postsyncer;
+            foreach ($postsyncer['groups'] ?? [] as $i => $group) {
+                if ((string) ($group['post_id'] ?? '') === $postId) {
+                    $postsyncer['groups'][$i]['status'] = 'DELETED';
+                }
+            }
+            $locked->forceFill(['postsyncer' => $postsyncer])->save();
+        });
     }
 
     /** @param  array<string, mixed>  $result */

@@ -12,6 +12,7 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Actions\Postsyncer\ReschedulePostAction;
+use App\Actions\Socialreins\RescheduleSplitPostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\AttachPostMotionData;
@@ -33,6 +34,7 @@ use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Socialreins\SocialreinsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -279,6 +281,7 @@ class PostsApiController extends Controller
         Request $request,
         string $humanId,
         ReschedulePostAction $action,
+        RescheduleSplitPostAction $split,
     ): PostResource {
         $post = $this->resolvePost($humanId);
 
@@ -287,12 +290,13 @@ class PostsApiController extends Controller
         ]);
 
         try {
-            $post = $action->handle(
+            // A split post has a SocialReins half to move as well.
+            $post = (is_array($post->publish_progress['split'] ?? null) ? $split : $action)->handle(
                 $post,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),
             );
-        } catch (InvalidArgumentException|PostsyncerException $exception) {
+        } catch (InvalidArgumentException|PostsyncerException|SocialreinsException $exception) {
             throw ValidationException::withMessages([
                 'when' => $exception->getMessage(),
             ]);

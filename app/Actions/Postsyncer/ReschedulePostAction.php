@@ -219,7 +219,8 @@ final class ReschedulePostAction
         }
 
         $progress = $post->publish_progress;
-        $completed = is_array($progress) ? ($progress['completed_groups'] ?? null) : null;
+        // A split post keeps its PostSyncer groups in the split (ContinueSplitOnSocialreinsAction).
+        $completed = is_array($progress) ? ($progress['completed_groups'] ?? $progress['split']['completed_groups'] ?? null) : null;
         $supplemental = is_array($progress) ? ($progress['supplemental_groups'] ?? []) : [];
         $publicGroups = $this->publicGroups($post);
 

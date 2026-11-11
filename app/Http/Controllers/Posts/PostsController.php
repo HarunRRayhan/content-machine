@@ -334,7 +334,8 @@ class PostsController extends Controller
                     'status' => in_array($state, [SocialreinsResults::FAILED, SocialreinsResults::PARTIAL, SocialreinsResults::UNKNOWN], true)
                         ? $state
                         : (string) $result['status'],
-                    'scheduled_at' => $scheduledAt,
+                    // A reschedule records the post's new time on its result.
+                    'scheduled_at' => $result['scheduled_at'] ?? $scheduledAt,
                     'platforms' => [$result['platform']],
                     'language' => $row->language,
                 ];

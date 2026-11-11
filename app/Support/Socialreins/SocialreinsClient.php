@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * SocialReins (brain) API v1 for one language: its set-limited token.
- * Every write carries an Idempotency-Key.
+ * Every write carries an Idempotency-Key, except updatePost() (see there).
  */
 class SocialreinsClient
 {
@@ -111,6 +111,30 @@ class SocialreinsClient
             ->delete($this->url('/posts/'.rawurlencode($postId))));
 
         return $response->status() === 204 ? [] : $this->decode($response);
+    }
+
+    /**
+     * GET /posts/{id}: one brain post with its status and scheduled_at.
+     *
+     * @return array<string, mixed>
+     */
+    public function post(string $postId): array
+    {
+        return $this->decode($this->send(fn (PendingRequest $http) => $http
+            ->get($this->url('/posts/'.rawurlencode($postId)))));
+    }
+
+    /**
+     * PUT /posts/{id}: replaces a draft or scheduled post (409 not_editable otherwise). No
+     * Idempotency-Key: the same body twice leaves the same post, and a caller re-reads first.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array<string, mixed>
+     */
+    public function updatePost(string $postId, array $body): array
+    {
+        return $this->decode($this->send(fn (PendingRequest $http) => $http
+            ->put($this->url('/posts/'.rawurlencode($postId)), $body)));
     }
 
     /** @param  callable(PendingRequest): Response  $call */

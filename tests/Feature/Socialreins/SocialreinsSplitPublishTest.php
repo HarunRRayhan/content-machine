@@ -185,6 +185,8 @@ class SocialreinsSplitPublishTest extends TestCase
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame('socialreins', $post->publish_progress['driver']);
         $this->assertSame(['linkedin'], $post->postsyncer['groups'][0]['platforms']);
+        // Kept for a later reschedule of the PostSyncer half.
+        $this->assertSame('42', (string) $post->publish_progress['split']['completed_groups'][0]['post_id']);
         $this->assertSame(1, SocialreinsGroup::query()->where('state', 'created')->count());
         $this->assertTrue(SocialreinsConfig::routesToSocialreins($post, $post->workspace));
     }
@@ -344,7 +346,7 @@ class SocialreinsSplitPublishTest extends TestCase
         $this->assertSame('scheduled', $post->status);
     }
 
-    public function test_take_down_refuses_a_split_post(): void
+    public function test_take_down_reports_a_published_postsyncer_half(): void
     {
         $this->fakeApis();
         $post = $this->makePost($this->workspace());
