@@ -4,7 +4,10 @@ import { PublishStatusBanner } from '@/components/content/publish-dialog';
 import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostDraftEditor from '@/components/studio/post-draft-editor';
 import PostOverview from '@/components/studio/post-overview';
-import type { WorkspaceBucket } from '@/components/studio/workspace-schedule';
+import type {
+    PostsyncerGroup,
+    WorkspaceBucket,
+} from '@/components/studio/workspace-schedule';
 import { useStudioTab } from '@/hooks/use-studio-tab';
 import type { LangCode } from '@/lib/lang-meta';
 import type { HandleDirectory, MotionSlide } from '@/lib/post-caption-mock';
@@ -71,6 +74,7 @@ type PostDetail = {
     approval_state: string;
     timezone: string;
     postsyncer: Record<string, unknown> | null;
+    socialreins_groups?: PostsyncerGroup[];
     postsyncer_ready: boolean;
     needs_confirm_ask: boolean;
     idea_id: number | null;
@@ -105,6 +109,16 @@ export default function PostShow({ post }: PageProps) {
           : post.language === 'bn'
             ? 'bn'
             : null;
+    const postsyncerGroups = post.postsyncer?.groups;
+    const onPostsyncer =
+        Array.isArray(postsyncerGroups) && postsyncerGroups.length > 0;
+    const onSocialreins = (post.socialreins_groups ?? []).length > 0;
+    const via =
+        onPostsyncer && onSocialreins
+            ? 'PostSyncer and SocialReins'
+            : onSocialreins
+              ? 'SocialReins'
+              : 'PostSyncer';
     const editable =
         ['draft', 'ready'].includes(post.status) &&
         !['queued', 'running'].includes(post.publish_state);
@@ -140,6 +154,7 @@ export default function PostShow({ post }: PageProps) {
                     publishState={post.publish_state}
                     publishError={post.publish_error}
                     contentStatus={post.status}
+                    via={via}
                 />
 
                 <div className="tabbar post-tabbar" role="tablist">
@@ -182,6 +197,7 @@ export default function PostShow({ post }: PageProps) {
                         timezone={post.timezone}
                         needsConfirmAsk={post.needs_confirm_ask}
                         postsyncer={post.postsyncer}
+                        socialreinsGroups={post.socialreins_groups}
                         handles={post.handles}
                     />
                 )}
