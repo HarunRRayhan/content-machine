@@ -12,8 +12,8 @@ blocked while a publish is queued or running.
 every language, as before.
 
 - A post or video goes through SocialReins only if the driver is SocialReins and every
-  language it carries is ticked. Otherwise it goes through PostSyncer whole. One subject is
-  never split across the two.
+  language it carries is ticked. Otherwise it goes through PostSyncer whole. Languages never
+  split one subject across the two (platforms can, see the split below).
 - A post carries every language it has captions for, as `PostPublishPlanner` reads them. A
   video carries its one `language`. Publish options (`platforms`) do not change the answer,
   so publishing a mixed post to one platform still goes through PostSyncer.
@@ -88,14 +88,17 @@ group is taken down like any other), a post still publishing and a partly
 published failed post (brain cannot delete a failed post) are reported; a post that failed with
 nothing live is skipped. Brain cannot delete on TikTok; that platform is reported as a problem.
 
-A split post (PostSyncer half plus SocialReins half) is handled whole:
+A split post or video (PostSyncer half plus SocialReins half: a new subject whose platforms the
+set covers only in part, see the per-language platform list) is handled whole. PostSyncer
+publishes its platforms first, then the rest go to SocialReins; a Telegram publish never splits.
+A platform goes to SocialReins only if every language the subject uses covers it.
 
 - Take down also deletes each still-scheduled PostSyncer group (`DELETE /posts/{id}` on
   PostSyncer, recorded at once as `DELETED`). A PostSyncer group that is already published is
   reported, because PostSyncer does not say its delete removes a live post: remove it on the
   platform and in PostSyncer, then take down again. The post resets only when both halves are
   down, and its PostSyncer groups move to `postsyncer.cleared_groups`.
-- Reschedule (`POST /api/v1/posts/{human_id}/reschedule`) first reads every SocialReins post and
+- Reschedule (`POST /api/v1/posts|videos/{human_id}/reschedule`) first reads every SocialReins post and
   refuses, changing nothing, unless each is still `scheduled`. Then the PostSyncer groups move
   (the normal PostSyncer reschedule), then each SocialReins post with `PUT /posts/{id}` and the
   new `scheduled_at`, recorded on its stored result. An error names the half that failed;

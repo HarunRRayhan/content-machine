@@ -27,8 +27,8 @@ use Illuminate\Support\Facades\DB;
  *   deleted by brain at all: it is reported, not skipped;
  * - a post that failed with nothing live has nothing to take down and is skipped.
  *
- * A split post's PostSyncer half is taken down too (takeDownPostsyncerHalf()), and the post
- * resets only once both halves are down.
+ * A split subject's PostSyncer half is taken down too (takeDownPostsyncerHalf()), and the
+ * subject resets only once both halves are down.
  */
 class TakeDownSocialreinsAction
 {
@@ -39,7 +39,7 @@ class TakeDownSocialreinsAction
     /** @return list<string> what could not be taken down; empty when everything is down */
     public function handle(Post|Video $subject): array
     {
-        $split = $subject instanceof Post && is_array($subject->publish_progress['split'] ?? null);
+        $split = is_array($subject->publish_progress['split'] ?? null);
 
         // A hand-over still running could create SocialReins posts after this returns.
         if ($split && (SocialreinsResults::rowsOf($subject) === [] || in_array($subject->publish_state, ['queued', 'running'], true))) {
@@ -94,7 +94,7 @@ class TakeDownSocialreinsAction
                 'publish_state' => 'idle',
                 'publish_error' => null,
                 'publish_progress' => null,
-                // A split post's PostSyncer half is gone too: keep its groups for audit only, so the
+                // A split subject's PostSyncer half is gone too: keep its groups for audit only, so the
                 // post can be published again (as ReconcileVideoGroupsDeletedAction does).
                 ...($split ? ['postsyncer' => json_encode(['groups' => [], 'cleared_groups' => [
                     ...($postsyncer['cleared_groups'] ?? []),
@@ -108,12 +108,12 @@ class TakeDownSocialreinsAction
     }
 
     /**
-     * Deletes each still-scheduled PostSyncer group of a split post. A published one is reported:
+     * Deletes each still-scheduled PostSyncer group of a split post or video. A published one is reported:
      * PostSyncer does not say its delete removes a live post, so the owner removes it there.
      *
      * @return list<string> what could not be taken down
      */
-    private function takeDownPostsyncerHalf(Post $post): array
+    private function takeDownPostsyncerHalf(Post|Video $post): array
     {
         $client = new PostsyncerClient(PostsyncerConfig::fromWorkspace($post->workspace));
         $problems = [];
@@ -153,10 +153,10 @@ class TakeDownSocialreinsAction
     }
 
     /** Recorded at once, under the row lock, so a retry skips it and nothing done is forgotten. */
-    private function markPostsyncerGroupDeleted(Post $post, string $postId): void
+    private function markPostsyncerGroupDeleted(Post|Video $post, string $postId): void
     {
         DB::transaction(function () use ($post, $postId): void {
-            $locked = Post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
+            $locked = $post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
             $postsyncer = $locked->postsyncer;
             foreach ($postsyncer['groups'] ?? [] as $i => $group) {
                 if ((string) ($group['post_id'] ?? '') === $postId) {

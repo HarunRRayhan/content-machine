@@ -3,9 +3,11 @@
 namespace App\Actions\Socialreins;
 
 use App\Actions\Postsyncer\ReschedulePostAction;
+use App\Actions\Postsyncer\VideoRescheduleAction;
 use App\Data\Postsyncer\ReschedulePostData;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
+use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Socialreins\SocialreinsClient;
@@ -15,8 +17,9 @@ use App\Support\Socialreins\SocialreinsResults;
 use Carbon\CarbonImmutable;
 
 /**
- * Moves both halves of a split post to a new time: the PostSyncer groups through
- * ReschedulePostAction (its own checkpoint), then each SocialReins post with `PUT /posts/{id}`.
+ * Moves both halves of a split post or video to a new time: the PostSyncer groups through
+ * ReschedulePostAction or VideoRescheduleAction (their own checkpoint), then each SocialReins
+ * post with `PUT /posts/{id}`.
  *
  * Every SocialReins post is read first and must still be scheduled, so a post that already went
  * out stops the reschedule before anything moves. A post already at the target time is skipped,
@@ -27,9 +30,10 @@ class RescheduleSplitPostAction
 {
     public function __construct(
         private readonly ReschedulePostAction $postsyncer,
+        private readonly VideoRescheduleAction $videos,
     ) {}
 
-    public function handle(Post $post, Workspace $workspace, ReschedulePostData $data): Post
+    public function handle(Post|Video $post, Workspace $workspace, ReschedulePostData $data): Post|Video
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
 
@@ -38,7 +42,9 @@ class RescheduleSplitPostAction
         $todo = $this->socialreinsPosts($post, $config, $target);
 
         try {
-            $post = $this->postsyncer->handle($post, $workspace, $data);
+            $post = $post instanceof Video
+                ? $this->videos->handle($post, $workspace, $data)
+                : $this->postsyncer->handle($post, $workspace, $data);
         } catch (PostsyncerException $exception) {
             throw new PostsyncerException(
                 'PostSyncer half not rescheduled (the SocialReins half was not changed): '.$exception->getMessage(),
@@ -85,7 +91,7 @@ class RescheduleSplitPostAction
      *
      * @return list<array{0: SocialreinsGroup, 1: string, 2: array<string, mixed>|null, 3: string}>
      */
-    private function socialreinsPosts(Post $post, SocialreinsConfig $config, CarbonImmutable $target): array
+    private function socialreinsPosts(Post|Video $post, SocialreinsConfig $config, CarbonImmutable $target): array
     {
         $rows = SocialreinsResults::rowsOf($post);
         $latest = [];

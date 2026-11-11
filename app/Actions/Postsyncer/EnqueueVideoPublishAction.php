@@ -26,7 +26,7 @@ class EnqueueVideoPublishAction
     {
         abort_if($video->workspace_id !== $workspace->id, 404);
 
-        if (SocialreinsConfig::routesToSocialreins($video, $workspace)) {
+        if (SocialreinsConfig::routesToSocialreins($video, $workspace, $options)) {
             return app(EnqueueSocialreinsPublishAction::class)->handle($video, $workspace, $options);
         }
 
@@ -62,7 +62,7 @@ class EnqueueVideoPublishAction
             abort_if($lockedVideo->workspace_id !== $workspace->id, 404);
 
             // The route was read before these locks: never start on the other driver's video.
-            if (SocialreinsConfig::routesToSocialreins($lockedVideo, $lockedWorkspace)) {
+            if (SocialreinsConfig::routesToSocialreins($lockedVideo, $lockedWorkspace, $filtered)) {
                 throw ValidationException::withMessages([
                     'publish' => __('The publish route changed. Try again.'),
                 ]);
@@ -80,6 +80,20 @@ class EnqueueVideoPublishAction
                 ]);
             }
 
+            // A new video SocialReins covers only in part: PostSyncer takes its platforms
+            // now, and ContinueSplitOnSocialreinsAction sends the rest once this succeeds.
+            $split = SocialreinsConfig::splitOf($lockedVideo, $lockedWorkspace, $filtered);
+            if ($split !== null) {
+                $split = [
+                    'socialreins' => [
+                        ...array_intersect_key($filtered, array_flip(['when', 'confirm_ask'])),
+                        'platforms' => $split['socialreins'],
+                    ],
+                    'postsyncer' => $split['postsyncer'],
+                ];
+                $filtered['platforms'] = $split['postsyncer'];
+            }
+
             $progress = $lockedVideo->publish_progress;
             $runToken = (string) Str::uuid();
 
@@ -87,6 +101,10 @@ class EnqueueVideoPublishAction
                 [$filtered, $progress] = $this->resumeOptions($lockedVideo, $filtered);
             } else {
                 $progress = $this->newProgress($filtered, $runToken);
+
+                if ($split !== null) {
+                    $progress['split'] = $split;
+                }
             }
 
             // A retry is a new run even when it resumes the same operation.

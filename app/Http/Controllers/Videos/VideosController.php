@@ -315,6 +315,7 @@ class VideosController extends Controller
             $publishOptions,
         ) && ! (bool) ($publishOptions['confirm_ask'] ?? false);
         $socialreins = SocialreinsConfig::routesToSocialreins($video, $workspace);
+        $split = $video->publish_progress['split'] ?? null;
 
         return [
             'id' => $video->id,
@@ -341,6 +342,10 @@ class VideosController extends Controller
             'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
             'socialreins_groups' => SocialreinsResults::presentGroups($video),
+            'publish_split' => is_array($split) ? [
+                'socialreins' => $split['socialreins']['platforms'] ?? [],
+                'postsyncer' => $split['postsyncer'] ?? [],
+            ] : null,
             // Legacy name: "this video's publish driver is ready" (PostSyncer, or SocialReins when routed).
             'postsyncer_ready' => $socialreins
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()

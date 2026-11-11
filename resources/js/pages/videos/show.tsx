@@ -62,6 +62,7 @@ type VideoDetail = {
     publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
     socialreins_groups?: PostsyncerGroup[];
+    publish_split?: { socialreins: string[]; postsyncer: string[] } | null;
     postsyncer_ready: boolean;
     video_publish_enabled: boolean;
     needs_confirm_ask: boolean;
@@ -274,6 +275,7 @@ export default function VideoShow({ video }: PageProps) {
                         needsConfirmAsk={video.needs_confirm_ask}
                         postsyncer={video.postsyncer}
                         socialreinsGroups={video.socialreins_groups}
+                        publishSplit={video.publish_split}
                         series={video.series}
                     />
                 )}

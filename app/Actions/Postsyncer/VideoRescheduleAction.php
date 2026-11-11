@@ -111,7 +111,8 @@ final class VideoRescheduleAction
      */
     private function completedGroups(Video $video, array $progress): array
     {
-        $completed = array_values(array_filter($progress['completed_groups'] ?? [], 'is_array'));
+        // A split video keeps its PostSyncer groups in the split (ContinueSplitOnSocialreinsAction).
+        $completed = array_values(array_filter($progress['completed_groups'] ?? $progress['split']['completed_groups'] ?? [], 'is_array'));
         $public = $video->postsyncer['groups'] ?? null;
 
         if ($completed === [] || ! is_array($public) || count($public) !== count($completed)) {
@@ -234,12 +235,18 @@ final class VideoRescheduleAction
             }
 
             $inProgress = 0;
-            foreach ($progress['completed_groups'] ?? [] as $i => $group) {
+            $completed = $progress['completed_groups'] ?? $progress['split']['completed_groups'] ?? [];
+            foreach ($completed as $i => $group) {
                 if (is_array($group) && (string) ($group['post_id'] ?? '') === $postId) {
-                    $progress['completed_groups'][$i]['expected_payload'] = $payload;
-                    $progress['completed_groups'][$i]['scheduled_at'] = $scheduledAt;
+                    $completed[$i]['expected_payload'] = $payload;
+                    $completed[$i]['scheduled_at'] = $scheduledAt;
                     $inProgress++;
                 }
+            }
+            if (isset($progress['completed_groups'])) {
+                $progress['completed_groups'] = $completed;
+            } else {
+                $progress['split']['completed_groups'] = $completed;
             }
 
             $inPublic = 0;

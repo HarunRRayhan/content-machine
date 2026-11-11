@@ -268,13 +268,10 @@ export default function SocialreinsSettings({
                                                     }
                                                 />
                                                 <p className="text-sm text-muted-foreground">
-                                                    A new post publishes ticked
-                                                    platforms through
-                                                    SocialReins and the rest
-                                                    through PostSyncer. A video
-                                                    uses SocialReins only when
-                                                    all its platforms are
-                                                    ticked.
+                                                    A new post or video
+                                                    publishes ticked platforms
+                                                    through SocialReins and the
+                                                    rest through PostSyncer.
                                                 </p>
                                             </div>
                                         </fieldset>

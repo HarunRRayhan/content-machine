@@ -2,6 +2,7 @@
 
 namespace App\Actions\Postsyncer;
 
+use App\Actions\Socialreins\ContinueSplitOnSocialreinsAction;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\LegacyPublishProgress;
@@ -10,6 +11,7 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
 use App\Support\Postsyncer\VideoPublishPlanner;
+use App\Support\Socialreins\SocialreinsConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
@@ -253,6 +255,7 @@ class PublishVideoAction
                     'publish_error' => null,
                     'publish_progress' => $progress,
                 ])->save();
+                app(ContinueSplitOnSocialreinsAction::class)->handle($lockedVideo);
             });
         } catch (Throwable $e) {
             $unknownOutcome = $this->recordFailureForRun(
@@ -858,6 +861,7 @@ class PublishVideoAction
                 'publish_error' => null,
                 'publish_progress' => $progress,
             ])->save();
+            app(ContinueSplitOnSocialreinsAction::class)->handle($lockedVideo);
         });
 
         $video->refresh();
@@ -1634,11 +1638,14 @@ class PublishVideoAction
                 return false;
             }
 
-            if ($lockedVideo->publish_state === 'succeeded') {
+            $progress = $lockedVideo->publish_progress;
+
+            // A split video handed over to SocialReins: PostSyncer's half is done.
+            if ($lockedVideo->publish_state === 'succeeded'
+                || (is_array($progress) && ($progress['driver'] ?? null) === SocialreinsConfig::DRIVER)) {
                 return false;
             }
 
-            $progress = $lockedVideo->publish_progress;
             if ($this->hasRunToken($progress)
                 && ! $this->runTokenMatches($progress, $runToken)) {
                 return false;

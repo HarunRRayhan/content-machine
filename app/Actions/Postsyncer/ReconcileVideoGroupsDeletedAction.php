@@ -34,6 +34,11 @@ final class ReconcileVideoGroupsDeletedAction
             throw new PostsyncerException('The video has a publish in progress or an uncertain publish. Reconcile it first.');
         }
 
+        // Resetting here would hide a split video's live SocialReins half.
+        if (is_array($video->publish_progress['split'] ?? null)) {
+            throw new PostsyncerException('This video also went out through SocialReins. Take it down instead, which removes both halves.');
+        }
+
         $reschedule = is_array($video->publish_progress) ? ($video->publish_progress['reschedule'] ?? null) : null;
         if (is_array($reschedule) && ($reschedule['state'] ?? null) === 'running') {
             throw new PostsyncerException('A reschedule is running for this video. Wait for it to finish first.');
