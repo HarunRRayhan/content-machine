@@ -184,6 +184,7 @@ class SocialreinsSplitPublishTest extends TestCase
         $post->refresh();
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame('socialreins', $post->publish_progress['driver']);
+        $this->assertSame('succeeded', $post->publish_progress['state']);
         $this->assertSame(['linkedin'], $post->postsyncer['groups'][0]['platforms']);
         // Kept for a later reschedule of the PostSyncer half.
         $this->assertSame('42', (string) $post->publish_progress['split']['completed_groups'][0]['post_id']);
@@ -201,6 +202,7 @@ class SocialreinsSplitPublishTest extends TestCase
 
         $post->refresh();
         $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
         $this->assertNotEmpty($post->postsyncer['groups']);
         $this->assertTrue($post->canRetryPublish());
 
