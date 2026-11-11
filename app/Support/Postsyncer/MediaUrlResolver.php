@@ -7,6 +7,7 @@ use App\Models\Post;
 use App\Models\Video;
 use App\Support\GoogleDrive\GoogleDriveLink;
 use App\Support\LinkResolution\PublicUrlGuard;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use InvalidArgumentException;
@@ -15,9 +16,20 @@ class MediaUrlResolver
 {
     private const SIGNED_URL_TTL_HOURS = 3;
 
+    /** SocialReins downloads media at publish time, so links must outlive the scheduled time. */
+    private const SIGNED_URL_DAYS_AFTER_PUBLISH = 2;
+
+    private ?CarbonImmutable $publishAt = null;
+
     public function __construct(
         private readonly ?PublicUrlGuard $publicUrlGuard = null,
     ) {}
+
+    /** Sign links that stay valid past this publish time (null: publish now). */
+    public function publishingAt(?CarbonImmutable $when): void
+    {
+        $this->publishAt = $when;
+    }
 
     /**
      * @return list<string>
@@ -183,7 +195,10 @@ class MediaUrlResolver
     {
         return URL::temporarySignedRoute(
             'publish-media.post',
-            now()->addHours(self::SIGNED_URL_TTL_HOURS),
+            max(
+                now()->addHours(self::SIGNED_URL_TTL_HOURS),
+                $this->publishAt?->addDays(self::SIGNED_URL_DAYS_AFTER_PUBLISH),
+            ),
             ['post' => $post->id, 'mediaAsset' => $media->id],
             absolute: true,
         );

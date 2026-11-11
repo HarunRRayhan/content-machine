@@ -114,6 +114,7 @@ class PostPublishPlanner
         $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($post));
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
         $selected = $this->selectedPlatforms($post, $options);
+        $this->mediaUrlResolver->publishingAt($when);
         $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
         $byLanguage = $this->captionsByLanguage($post);
 
