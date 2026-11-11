@@ -5,7 +5,9 @@ namespace Tests\Feature\Socialreins;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Actions\Postsyncer\SyncScheduledPostsAction;
 use App\Actions\Socialreins\PublishToSocialreinsAction;
+use App\Actions\Socialreins\TakeDownSocialreinsAction;
 use App\Jobs\PublishPostJob;
 use App\Jobs\PublishSocialreinsJob;
 use App\Jobs\PublishVideoJob;
@@ -323,5 +325,38 @@ class SocialreinsSplitPublishTest extends TestCase
         app(EnqueueVideoPublishAction::class)->handle($whole, $whole->workspace);
         Queue::assertPushed(PublishSocialreinsJob::class, 1);
         Queue::assertPushed(PublishVideoJob::class, 1);
+    }
+
+    public function test_the_postsyncer_sync_does_not_mark_a_split_post_posted_while_its_socialreins_half_failed(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422]]);
+        $post = $this->makePost($this->workspace());
+
+        $this->publish($post);
+        $this->runQueued();
+        $post->refresh()->forceFill(['status' => 'scheduled'])->save();
+        $this->assertSame('failed', $post->publish_state);
+
+        app(SyncScheduledPostsAction::class)->handle();
+
+        $post->refresh();
+        $this->assertSame('PUBLISHED', $post->postsyncer['groups'][0]['status']);
+        $this->assertSame('scheduled', $post->status);
+    }
+
+    public function test_take_down_refuses_a_split_post(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace());
+        $this->publish($post);
+        $this->runQueued();
+        $before = $post->refresh()->status;
+
+        $problems = app(TakeDownSocialreinsAction::class)->handle($post);
+
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('PostSyncer', $problems[0]);
+        $this->assertSame($before, $post->refresh()->status);
+        $this->assertSame('succeeded', $post->publish_state);
     }
 }

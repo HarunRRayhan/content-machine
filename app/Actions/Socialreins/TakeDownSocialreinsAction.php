@@ -32,6 +32,12 @@ class TakeDownSocialreinsAction
     /** @return list<string> what could not be taken down; empty when everything is down */
     public function handle(Post|Video $subject): array
     {
+        // shortcut: a split post's PostSyncer half would be left live but hidden, so refuse; add a
+        // combined take-down if Harun needs one.
+        if (is_array($subject->publish_progress['split'] ?? null)) {
+            return ['This post also went out through PostSyncer. Take it down in PostSyncer and SocialReins directly.'];
+        }
+
         $problems = [];
 
         // A request that got no answer may have created a group CM does not know: ask brain
