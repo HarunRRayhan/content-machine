@@ -115,6 +115,7 @@ the post's own status, `expected_targets`); a group counts as settled only when 
 have reported, and reconcile keeps checking groups until it does. Results are merged under a row lock
 and never move a target backwards, so an older snapshot cannot overwrite a newer webhook.
 An event for a group CM does not know answers 404 so brain retries it.
+The API returns these results as `socialreins` on a post or video ([api.md](api.md)).
 
 Not supported through this driver: PostSyncer-style reconcile commands (not needed, the key
 replay covers them) and Telegram publish requests (the request keeps its approved state).

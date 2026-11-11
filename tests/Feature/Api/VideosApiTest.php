@@ -158,7 +158,8 @@ class VideosApiTest extends TestCase
         $this->acting()->getJson('/api/v1/videos/BV-65')
             ->assertOk()
             ->assertJsonPath('data.script_markdown', '# show')
-            ->assertJsonPath('data.deck_manifest.js', 'deck');
+            ->assertJsonPath('data.deck_manifest.js', 'deck')
+            ->assertJsonPath('data.socialreins', []);
     }
 
     public function test_store_imports_a_video_with_explicit_human_id(): void

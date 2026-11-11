@@ -10,6 +10,7 @@ use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
@@ -179,6 +180,46 @@ class PostsApiTest extends TestCase
         $this->acting()->getJson('/api/v1/posts/P-290')->assertOk()->assertJsonPath('data.id', $old->id);
         // The database id is never an address.
         $this->acting()->getJson("/api/v1/posts/{$old->id}")->assertNotFound();
+    }
+
+    public function test_show_returns_the_socialreins_half_of_a_split_post(): void
+    {
+        $post = Post::factory()->create(['workspace_id' => $this->workspace->id, 'number' => 324, 'human_id' => 'P-324']);
+
+        $this->acting()->getJson('/api/v1/posts/P-324')->assertOk()->assertJsonPath('data.socialreins', []);
+
+        $target = fn (string $status, ?string $error = null): array => [
+            'status' => $status, 'remote_id' => null, 'remote_url' => null, 'parts' => 0, 'error' => $error, 'at' => 1, 'unknown' => false,
+        ];
+        SocialreinsGroup::query()->create([
+            'workspace_id' => $this->workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created',
+            'request' => json_encode(['scheduled_at' => '2026-11-12T05:27:00Z']),
+            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001',
+            'results' => [
+                'p1' => ['platform' => 'facebook', 'status' => 'scheduled', 'error' => null, 'at' => 1, 'targets' => ['t1' => $target('pending')]],
+                'p2' => ['platform' => 'instagram', 'status' => 'failed', 'error' => null, 'at' => 1, 'targets' => ['t2' => $target('failed', 'media rejected')]],
+            ],
+        ]);
+
+        $this->acting()->getJson('/api/v1/posts/P-324')
+            ->assertOk()
+            ->assertJsonPath('data.socialreins', [
+                [
+                    'source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z',
+                    'platforms' => ['facebook'], 'language' => 'english', 'post_id' => 'p1', 'detail' => null,
+                    'targets' => [['status' => 'pending', 'remote_url' => null, 'error' => null]],
+                ],
+                [
+                    'source' => 'socialreins', 'status' => 'failed', 'scheduled_at' => '2026-11-12T05:27:00Z',
+                    'platforms' => ['instagram'], 'language' => 'english', 'post_id' => 'p2', 'detail' => 'media rejected',
+                    'targets' => [['status' => 'failed', 'remote_url' => null, 'error' => 'media rejected']],
+                ],
+            ]);
+
+        // A slim list skips it (one query per post); include=socialreins opts in.
+        $this->acting()->getJson('/api/v1/posts')->assertOk()->assertJsonMissingPath('data.0.socialreins');
+        $this->acting()->getJson('/api/v1/posts?include=socialreins')->assertOk()->assertJsonPath('data.0.socialreins.1.status', 'failed');
     }
 
     public function test_an_unknown_post_number_is_not_found(): void

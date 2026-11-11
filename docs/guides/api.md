@@ -61,8 +61,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | GET | `/api/v1/ideas/{human_id}` | read | |
 | POST | `/api/v1/ideas` | write | create; pass `human_id` for idempotent import (bumps `id_sequences`) |
 | PATCH | `/api/v1/ideas/{human_id}` | write | `title` required, plus `score`/`trend`/`rationale`/`body` |
-| GET | `/api/v1/videos` | videos:read | filters: `status`, `language`. Default list is slim (no `script_markdown` / `captions` / `deck_manifest`); pass `include=full` or `include=script_markdown,captions,deck_manifest` to opt in. Always includes `has_script` / `has_captions` / `has_deck`. |
-| GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` (full record, including deck) |
+| GET | `/api/v1/videos` | videos:read | filters: `status`, `language`. Default list is slim (no `script_markdown` / `captions` / `deck_manifest`); pass `include=full` or `include=script_markdown,captions,deck_manifest` to opt in (`include=socialreins` adds the SocialReins half). Always includes `has_script` / `has_captions` / `has_deck`. |
+| GET | `/api/v1/videos/{human_id}` | videos:read | `V-12` or imported `BV-53` (full record, including deck and `socialreins`, see below) |
 | GET | `/api/v1/series` | videos:read | workspace's video series, including part counts |
 | GET | `/api/v1/series/{slug}` | videos:read | one series with videos in explicit part order |
 | PUT | `/api/v1/series/{slug}` | videos:write | create or replace a series using `title` and an ordered `videos` array of human IDs. Parts are numbered from 1. Rejects cross-workspace IDs, duplicates, and videos assigned to another series. |
@@ -75,8 +75,8 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 | POST | `/api/v1/google-drive/files/{file_id}/make-public` | `drive:write` | add a public reader permission and return the share URL |
 | POST | `/api/v1/videos/{human_id}/publish` | videos:write | queue a PostSyncer schedule/publish (`when`, `platforms`, `confirm_ask`). The video needs a Video Drive URL. Always send `when` to schedule. Retries preserve the original options; an uncertain create requires `postsyncer:reconcile-video` before retrying. |
 | POST | `/api/v1/videos/{human_id}/reconcile` | videos:write | checkpoint a PostSyncer post created by an uncertain video create (`{ "postsyncer_id": "123", "confirm_failed": false }`); verifies the remote post against the publish plan and requires an uncertain create. Retry publish with the same options to finish. |
-| GET | `/api/v1/posts` | posts:read | filters: `status`, `language`. Default list is slim (no `body` / `captions`); pass `include=full` or `include=body,captions` to opt in. Always includes `has_body` / `has_captions`. |
-| GET | `/api/v1/posts/{human_id}` | posts:read | full record. `{human_id}` accepts `P-290`, `p-290` or bare `290` (same post; the P- prefix is only a label). The database `id` is never an address: old posts have `id != number`. All `/posts/{human_id}/...` routes resolve the same way. |
+| GET | `/api/v1/posts` | posts:read | filters: `status`, `language`. Default list is slim (no `body` / `captions`); pass `include=full` or `include=body,captions` to opt in (`include=socialreins` adds the SocialReins half). Always includes `has_body` / `has_captions`. |
+| GET | `/api/v1/posts/{human_id}` | posts:read | full record. `{human_id}` accepts `P-290`, `p-290` or bare `290` (same post; the P- prefix is only a label). The database `id` is never an address: old posts have `id != number`. All `/posts/{human_id}/...` routes resolve the same way. Includes `socialreins` (see below). |
 | POST | `/api/v1/posts` | posts:write | create / idempotent import. With no `human_id`, the server sets `number` = the new row's `id` and `human_id` = `P-{id}` (response has `id`, `number`, `human_id`). With an explicit `human_id` (+ `number`) it imports as before. |
 | PATCH | `/api/v1/posts/{human_id}` | posts:write | body, captions, platforms, status, blocked_reason, image_drive_urls, … (publish metadata is read-only). Post `status` is one of `draft`, `ready`, `scheduled`, `posted`, `blocked`, `archived`. `blocked` = stuck on an external limit (e.g. the scheduler cannot publish it); set `blocked_reason` (nullable, max 2000) to show the blocker. `blocked_reason` is cleared when status leaves `blocked`. A blocked post is never scheduled or published: publish refuses it, and it is never picked up by the scheduled-post sync. Blocking a publish-locked post (one with PostSyncer groups) is allowed only when every group is terminal (`PUBLISHED` or `FAILED`) and no publish is queued, running, or uncertain (`publish_state`, `publish_progress.state`); any `SCHEDULED`, `IN_QUEUE`, `PENDING`, `IN_PROGRESS`, or status-less group refuses it with a 422. Blocking only flips `status` and `blocked_reason`: the groups, media, captions, and `postsyncer` data are left as they are. Leaving `blocked` for a publish-locked post (same settled check) may only go to `posted` or `archived`; `draft` and `scheduled` are refused because the groups already exist and are not pending, so `posted` is the restore target. An unlocked post (no groups) can leave `blocked` for any status, and draft is the usual choice. `blocked_reason` is cleared when status leaves `blocked`. Legacy `dropped` was merged into `archived` (2026-10-14). |
 | POST | `/api/v1/posts/{human_id}/images` | posts:write | multipart `image`; attaches to the post (idempotent on same bytes) |
@@ -95,6 +95,24 @@ ideas by `human_id` (`PI-7`, `VI-3`).
 Captures made through the API are recorded with `source: api`. The history tables
 attribute status transitions and field changes to the token name, as they do for
 dashboard changes.
+
+### SocialReins half (`socialreins`)
+
+A post or video sent through SocialReins (fully, or the SocialReins half of a split publish)
+carries `socialreins`: the same list the dashboard shows, one entry per language and platform
+(the newest group wins), `[]` when nothing went through SocialReins. Single-record reads and
+`include=full` lists return it; slim lists omit it (`include=socialreins` opts in).
+
+```json
+{"source": "socialreins", "language": "english", "platforms": ["facebook"],
+ "status": "scheduled", "scheduled_at": "2026-11-12T05:27:00Z", "post_id": "<brain post id>",
+ "detail": null, "targets": [{"status": "pending", "remote_url": null, "error": null}]}
+```
+
+`status` is brain's post status (`scheduled`, `queued`, `publishing`, `published`, `deleted`)
+unless a target went wrong: then `failed`, `partial` (part is live) or `unknown` (may already
+have posted, check by hand). `detail` joins the errors. Webhooks and the five-minute
+`socialreins:reconcile` keep it current, so a published post reads `published` within minutes.
 
 ### Telegram notifications
 

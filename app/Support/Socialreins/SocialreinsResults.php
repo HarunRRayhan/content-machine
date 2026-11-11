@@ -55,6 +55,7 @@ final class SocialreinsResults
     /**
      * The SocialReins posts of a post or video in the PostSyncer group shape (one per language and
      * platform, the newest group winning), so the page lists both halves of a split the same way.
+     * The API returns the same list as `socialreins`, so a client can verify that half too.
      *
      * @return list<array<string, mixed>>
      */
@@ -70,8 +71,8 @@ final class SocialreinsResults
             $request = json_decode($row->request, true);
             $scheduledAt = is_array($request) && is_string($request['scheduled_at'] ?? null) ? $request['scheduled_at'] : null;
 
-            foreach ($row->results ?? [] as $result) {
-                $state = self::classify($result)['state'];
+            foreach ($row->results ?? [] as $postId => $result) {
+                ['state' => $state, 'detail' => $detail] = self::classify($result);
 
                 $groups[$row->language.':'.$result['platform']] = [
                     'source' => 'socialreins',
@@ -83,6 +84,13 @@ final class SocialreinsResults
                     'scheduled_at' => $result['scheduled_at'] ?? $scheduledAt,
                     'platforms' => [$result['platform']],
                     'language' => $row->language,
+                    'post_id' => (string) $postId,
+                    'detail' => $detail === '' ? null : $detail,
+                    'targets' => array_values(array_map(fn (array $target): array => [
+                        'status' => (string) $target['status'],
+                        'remote_url' => $target['remote_url'] ?? null,
+                        'error' => $target['error'] ?? null,
+                    ], is_array($result['targets'] ?? null) ? $result['targets'] : [])),
                 ];
             }
         }
