@@ -54,17 +54,23 @@ class PublishMediaController extends Controller
             return false;
         }
 
-        $requests = SocialreinsGroup::query()
+        $rows = SocialreinsGroup::query()
             ->where('subject_type', 'post')
             ->where('subject_id', $post->id)
             ->where('state', '!=', SocialreinsGroup::REJECTED)
-            ->pluck('request');
+            ->get(['request', 'results']);
 
-        foreach ($requests as $json) {
-            $at = json_decode((string) $json, true)['scheduled_at'] ?? null;
+        foreach ($rows as $row) {
+            // A reschedule keeps the sent media URLs and records the new time on the result.
+            $times = [
+                json_decode((string) $row->request, true)['scheduled_at'] ?? null,
+                ...array_column($row->results ?? [], 'scheduled_at'),
+            ];
 
-            if (is_string($at) && CarbonImmutable::parse($at)->addDays(self::SOCIALREINS_GRACE_DAYS)->isFuture()) {
-                return true;
+            foreach ($times as $at) {
+                if (is_string($at) && CarbonImmutable::parse($at)->addDays(self::SOCIALREINS_GRACE_DAYS)->isFuture()) {
+                    return true;
+                }
             }
         }
 

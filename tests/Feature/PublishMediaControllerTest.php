@@ -117,13 +117,25 @@ class PublishMediaControllerTest extends TestCase
         return [$post, $url];
     }
 
-    private function socialreinsGroup(Post $post, string $scheduledAt, string $state = SocialreinsGroup::CREATED): void
+    /** @param  array<string, array<string, mixed>>|null  $results */
+    private function socialreinsGroup(Post $post, string $scheduledAt, string $state = SocialreinsGroup::CREATED, ?array $results = null): void
     {
         SocialreinsGroup::query()->create([
             'workspace_id' => $post->workspace_id, 'subject_type' => 'post', 'subject_id' => $post->id,
             'language' => 'english', 'sequence' => 1, 'idempotency_key' => "k{$post->id}", 'state' => $state,
             'request' => json_encode(['scheduled_at' => $scheduledAt]),
+            'results' => $results,
         ]);
+    }
+
+    public function test_expired_link_streams_for_a_socialreins_post_rescheduled_later(): void
+    {
+        [$post, $url] = $this->expiredLink();
+        $this->socialreinsGroup($post, now()->subDays(10)->utc()->format('Y-m-d\\TH:i:s\\Z'), results: [
+            'p1' => ['platform' => 'facebook', 'status' => 'scheduled', 'scheduled_at' => now()->addDay()->utc()->format('Y-m-d\\TH:i:s\\Z')],
+        ]);
+
+        $this->get($url)->assertOk();
     }
 
     public function test_expired_link_still_streams_for_a_scheduled_socialreins_post(): void
