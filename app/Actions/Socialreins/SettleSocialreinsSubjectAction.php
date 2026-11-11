@@ -7,6 +7,7 @@ use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
+use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsResults;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -136,6 +137,13 @@ class SettleSocialreinsSubjectAction
 
         if ($status !== null) {
             $values['status'] = $status;
+        }
+
+        // Keep the progress state in step, so readers of the raw record never see a
+        // succeeded publish as failed. canRetryPublish() still needs 'failed' on a failure.
+        $progress = $subject->publish_progress;
+        if (is_array($progress) && ($progress['driver'] ?? null) === SocialreinsConfig::DRIVER) {
+            $values['publish_progress'] = ['state' => $state] + $progress;
         }
 
         $subject->forceFill($values)->save();
