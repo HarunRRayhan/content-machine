@@ -10,6 +10,8 @@ type TalkingPoint = {
 };
 
 export type PostsyncerGroup = {
+    /** Set on a SocialReins post shown in the PostSyncer group shape. */
+    source?: 'socialreins';
     post_id?: string;
     status?: string;
     scheduled_at?: string | null;
@@ -121,6 +123,7 @@ type Props = {
     publishRetryable: boolean;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
+    socialreinsGroups?: PostsyncerGroup[];
     series?: VideoSeriesInfo | null;
 };
 
@@ -252,6 +255,7 @@ export default function VideoOverview({
     publishRetryable,
     needsConfirmAsk,
     postsyncer,
+    socialreinsGroups,
     series = null,
 }: Props) {
     const [checks, setChecks] = useState<Set<number>>(() =>
@@ -335,6 +339,8 @@ export default function VideoOverview({
 
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
+    // SocialReins posts are listed too; publish controls still key off PostSyncer groups.
+    const shownGroups = [...groups, ...(socialreinsGroups ?? [])];
     const fakeScheduled = studioStatus === 'scheduled' && !hasGroups;
     const publishBusy = ['queued', 'running'].includes(publishState);
     const publishFailed = publishState === 'failed';
@@ -363,7 +369,7 @@ export default function VideoOverview({
         hasVideoDriveUrl &&
         publishRetryable;
     const retryDisabled = !canRetry || (needsConfirmAsk && !confirmAskChecked);
-    const scheduledAt = earliestWhen(groups);
+    const scheduledAt = earliestWhen(shownGroups);
 
     const chips = [
         lang ? (
@@ -870,13 +876,13 @@ export default function VideoOverview({
                         )}
                     </div>
 
-                    {hasGroups ? (
+                    {shownGroups.length > 0 ? (
                         <div className="schedule-log">
                             <div className="schedule-log-h">
                                 Scheduled posts
                             </div>
                             <ul>
-                                {groups.map((group, index) => {
+                                {shownGroups.map((group, index) => {
                                     const when = formatWhen(groupWhen(group));
 
                                     return (
@@ -892,9 +898,11 @@ export default function VideoOverview({
                                             group.platforms.length > 0
                                                 ? ` · ${group.platforms.join(', ')}`
                                                 : ''}
-                                            {group.post_id
-                                                ? ` · PostSyncer #${group.post_id}`
-                                                : ''}
+                                            {group.source === 'socialreins'
+                                                ? ` · SocialReins${group.status ? ` ${group.status}` : ''}`
+                                                : group.post_id
+                                                  ? ` · PostSyncer #${group.post_id}`
+                                                  : ''}
                                         </li>
                                     );
                                 })}

@@ -19,6 +19,7 @@ use App\Support\GoogleDrive\GoogleDriveConfig;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\VideoPublishPlanner;
 use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Socialreins\SocialreinsResults;
 use App\Support\Videos\VideoScriptSeries;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -339,6 +340,7 @@ class VideosController extends Controller
             'publish_error' => $video->publish_error,
             'publish_retryable' => $video->canRetryPublish(),
             'postsyncer' => $video->postsyncer,
+            'socialreins_groups' => SocialreinsResults::presentGroups($video),
             // Legacy name: "this video's publish driver is ready" (PostSyncer, or SocialReins when routed).
             'postsyncer_ready' => $socialreins
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
