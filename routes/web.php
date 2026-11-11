@@ -26,9 +26,8 @@ Route::post('socialreins/webhook/{workspace}', SocialreinsWebhookController::cla
     ->whereNumber('workspace')
     ->name('socialreins.webhook');
 
-// PostSyncer fetches these during link-upload; signature replaces bearer auth.
+// PostSyncer and SocialReins fetch these; the signature, checked in the controller, replaces bearer auth.
 Route::get('publish-media/posts/{post:id}/{mediaAsset}', [PublishMediaController::class, 'post'])
-    ->middleware('signed')
     ->name('publish-media.post');
 
 Route::get('.well-known/passkey-endpoints', function () {

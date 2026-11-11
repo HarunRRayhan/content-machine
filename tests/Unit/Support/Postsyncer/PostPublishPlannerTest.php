@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\Support\Postsyncer;
 
+use App\Models\Attachment;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Postsyncer\MediaUrlResolver;
@@ -11,6 +13,7 @@ use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use Tests\TestCase;
 
@@ -198,6 +201,30 @@ class PostPublishPlannerTest extends TestCase
         $this->assertInstanceOf(CarbonImmutable::class, $group->when);
         $this->assertSame($when, $group->when->format('Y-m-d H:i:s'));
         $this->assertSame('Asia/Dhaka', $group->when->timezoneName);
+    }
+
+    public function test_scheduled_plan_signs_media_links_past_the_scheduled_time(): void
+    {
+        Storage::fake('scratchpad');
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Later'],
+        ]);
+        $media = MediaAsset::factory()->for($workspace)->create(['disk' => 'scratchpad', 'path' => 'posts/s.png']);
+        Storage::disk('scratchpad')->put('posts/s.png', 'bytes');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create();
+
+        $when = CarbonImmutable::now('Asia/Dhaka')->addDays(4)->startOfMinute();
+        $group = $this->planner->plan($post->fresh(), $config, [
+            'when' => $when->format('Y-m-d H:i:s'),
+            'confirm_ask' => false,
+        ])[0];
+
+        parse_str((string) parse_url($group->mediaUrls[0], PHP_URL_QUERY), $query);
+        $this->assertSame($when->addDays(2)->timestamp, (int) $query['expires']);
     }
 
     public function test_invalid_when_is_reported_as_a_validation_error(): void

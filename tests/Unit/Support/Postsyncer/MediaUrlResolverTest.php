@@ -8,6 +8,7 @@ use App\Models\Post;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\MediaUrlResolver;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
@@ -282,5 +283,34 @@ class MediaUrlResolverTest extends TestCase
         $this->expectExceptionMessage('public HTTP(S) address');
 
         $this->resolver->forVideo($video);
+    }
+
+    public function test_signed_links_outlive_the_publish_time(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $media = MediaAsset::factory()->for($workspace)->create(['disk' => 'scratchpad', 'path' => 'posts/a.png']);
+        Storage::disk('scratchpad')->put('posts/a.png', 'bytes');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create();
+
+        $this->resolver->publishingAt(null);
+        $this->assertEqualsWithDelta(now()->addHours(3)->timestamp, $this->expiresOf($post), 5);
+
+        $when = CarbonImmutable::now()->addDays(3);
+        $this->resolver->publishingAt($when);
+        $this->assertEqualsWithDelta($when->addDays(2)->timestamp, $this->expiresOf($post), 5);
+
+        // A past or near time never shortens the link below the 3 hour floor.
+        $this->resolver->publishingAt(CarbonImmutable::now()->subDays(5));
+        $this->assertEqualsWithDelta(now()->addHours(3)->timestamp, $this->expiresOf($post), 5);
+    }
+
+    private function expiresOf(Post $post): int
+    {
+        parse_str((string) parse_url($this->resolver->forPost($post->fresh())[0], PHP_URL_QUERY), $query);
+
+        return (int) $query['expires'];
     }
 }
