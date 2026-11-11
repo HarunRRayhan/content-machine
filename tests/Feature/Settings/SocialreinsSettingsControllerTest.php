@@ -111,6 +111,34 @@ class SocialreinsSettingsControllerTest extends TestCase
         $this->assertFalse(SocialreinsConfig::fromWorkspace($workspace->fresh())->isReadyForPublish());
     }
 
+    public function test_covered_platforms_default_to_all_and_are_saved_cleared_and_validated(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        $this->put('/settings/socialreins', $this->payload())->assertRedirect();
+
+        // Never saved: every platform is covered, and the page shows them all ticked.
+        $this->assertNull(SocialreinsConfig::fromWorkspace($workspace->fresh())->coveredPlatforms('english'));
+        $this->get(route('settings.socialreins.edit'))->assertInertia(fn ($page) => $page
+            ->where('languages.english.platforms', fn ($platforms): bool => count($platforms) === 8));
+
+        $this->put('/settings/socialreins', $this->payload([
+            'languages' => ['english' => ['set_id' => self::SET, 'platforms' => ['', 'twitter', 'facebook']]],
+        ]))->assertRedirect();
+        $this->assertSame(['facebook', 'twitter'], SocialreinsConfig::fromWorkspace($workspace->fresh())->coveredPlatforms('english'));
+        $this->assertSame('sr_set_live_secret', SocialreinsConfig::fromWorkspace($workspace->fresh())->token('english'));
+
+        // Only the hidden entry: nothing ticked, so nothing is covered.
+        $this->put('/settings/socialreins', $this->payload([
+            'languages' => ['english' => ['set_id' => self::SET, 'platforms' => ['']]],
+        ]))->assertRedirect();
+        $this->assertSame([], SocialreinsConfig::fromWorkspace($workspace->fresh())->coveredPlatforms('english'));
+
+        $this->put('/settings/socialreins', $this->payload([
+            'languages' => ['english' => ['set_id' => self::SET, 'platforms' => ['myspace']]],
+        ]))->assertSessionHasErrors('languages.english.platforms.0');
+    }
+
     public function test_routed_languages_are_saved_cleared_and_validated(): void
     {
         $workspace = Workspace::factory()->create();

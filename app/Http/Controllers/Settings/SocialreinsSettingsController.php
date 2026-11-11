@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Settings;
 use App\Actions\Socialreins\SaveSocialreinsSettingsAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
+use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Http\Requests\Settings\UpdateSocialreinsSettingsRequest;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
@@ -29,6 +30,7 @@ class SocialreinsSettingsController extends Controller
             $languages[$language] = [
                 'set_id' => $config->setId($language),
                 'token_configured' => $config->token($language) !== null,
+                'platforms' => $config->coveredPlatforms($language) ?? UpdatePostsyncerSettingsRequest::PLATFORMS,
             ];
         }
 
@@ -43,6 +45,7 @@ class SocialreinsSettingsController extends Controller
             'defaultLanguage' => $config->defaultLanguage(),
             'routedLanguages' => $config->routedLanguages(),
             'languages' => $languages,
+            'platforms' => UpdatePostsyncerSettingsRequest::PLATFORMS,
         ]);
     }
 

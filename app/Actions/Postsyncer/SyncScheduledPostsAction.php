@@ -19,7 +19,7 @@ use Carbon\CarbonImmutable;
 class SyncScheduledPostsAction
 {
     /** @var list<string> */
-    private const TERMINAL_GROUP_STATUSES = ['PUBLISHED', 'FAILED'];
+    public const TERMINAL_GROUP_STATUSES = ['PUBLISHED', 'FAILED'];
 
     /**
      * @return array{posts: int, videos: int}
@@ -158,7 +158,9 @@ class SyncScheduledPostsAction
             }
         }
 
-        $shouldMarkPosted = $anyChecked && $allTerminal && $anyPublished;
+        // A split post is posted only once its SocialReins half has succeeded too.
+        $splitPending = is_array($record->publish_progress['split'] ?? null) && $record->publish_state !== 'succeeded';
+        $shouldMarkPosted = $anyChecked && $allTerminal && $anyPublished && ! $splitPending;
 
         $values = [
             'postsyncer' => array_merge($stored, ['groups' => $updated]),

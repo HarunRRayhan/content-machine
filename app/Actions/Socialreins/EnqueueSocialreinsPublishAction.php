@@ -68,13 +68,25 @@ class EnqueueSocialreinsPublishAction
                 throw $this->refuse(__('This is already published through SocialReins. Take it down first to publish again.'));
             }
 
+            // The SocialReins half of a split post keeps its own options: other platforms
+            // went through PostSyncer and must never be sent here as well.
+            $split = $locked->publish_progress['split'] ?? null;
+            if (is_array($split) && is_array($split['socialreins'] ?? null)) {
+                $options = $split['socialreins'];
+            }
+
             $locked->forceFill([
                 'publish_state' => 'queued',
                 'publish_error' => null,
                 // `driver` keeps the PostSyncer recovery sweep away from the row. `state` is
                 // read only once publish_state is failed, and makes canRetryPublish() true:
                 // a SocialReins retry is always safe (frozen request, same Idempotency-Key).
-                'publish_progress' => ['driver' => SocialreinsConfig::DRIVER, 'state' => 'failed', 'options' => $options],
+                'publish_progress' => [
+                    'driver' => SocialreinsConfig::DRIVER,
+                    'state' => 'failed',
+                    'options' => $options,
+                    ...(is_array($split) ? ['split' => $split] : []),
+                ],
             ])->save();
 
             // The database queue shares this connection: the job commits with the row.

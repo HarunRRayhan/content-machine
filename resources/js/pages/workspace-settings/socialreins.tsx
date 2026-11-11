@@ -9,7 +9,11 @@ import { SettingsShell } from '@/components/workspace-settings/settings-shell';
 import { home } from '@/routes/dashboard';
 import { index as settingsIndex } from '@/routes/settings';
 
-type Language = { set_id: string | null; token_configured: boolean };
+type Language = {
+    set_id: string | null;
+    token_configured: boolean;
+    platforms: string[];
+};
 
 type PageProps = {
     driver: 'postsyncer' | 'socialreins';
@@ -21,6 +25,7 @@ type PageProps = {
     defaultLanguage: string;
     routedLanguages: string[];
     languages: Record<string, Language>;
+    platforms: string[];
 };
 
 const selectClass =
@@ -36,6 +41,7 @@ export default function SocialreinsSettings({
     defaultLanguage,
     routedLanguages,
     languages,
+    platforms,
 }: PageProps) {
     return (
         <>
@@ -220,6 +226,55 @@ export default function SocialreinsSettings({
                                                     Limited to this language's
                                                     set. Encrypted, never shown
                                                     again.
+                                                </p>
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label>
+                                                    Platforms this set covers
+                                                </Label>
+                                                <input
+                                                    type="hidden"
+                                                    name={`languages[${language}][platforms][]`}
+                                                    value=""
+                                                />
+                                                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                                    {platforms.map(
+                                                        (platform) => (
+                                                            <label
+                                                                key={platform}
+                                                                className="flex items-center gap-2 text-sm capitalize"
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    name={`languages[${language}][platforms][]`}
+                                                                    value={
+                                                                        platform
+                                                                    }
+                                                                    defaultChecked={values.platforms.includes(
+                                                                        platform,
+                                                                    )}
+                                                                    className="size-4 rounded border-input"
+                                                                />
+                                                                {platform}
+                                                            </label>
+                                                        ),
+                                                    )}
+                                                </div>
+                                                <InputError
+                                                    message={
+                                                        errors[
+                                                            `languages.${language}.platforms`
+                                                        ]
+                                                    }
+                                                />
+                                                <p className="text-sm text-muted-foreground">
+                                                    A new post publishes ticked
+                                                    platforms through
+                                                    SocialReins and the rest
+                                                    through PostSyncer. A video
+                                                    uses SocialReins only when
+                                                    all its platforms are
+                                                    ticked.
                                                 </p>
                                             </div>
                                         </fieldset>

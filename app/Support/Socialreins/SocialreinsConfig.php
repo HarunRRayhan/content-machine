@@ -2,6 +2,7 @@
 
 namespace App\Support\Socialreins;
 
+use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
@@ -38,7 +39,9 @@ class SocialreinsConfig
     /**
      * The driver one subject publishes through. A subject already on a driver stays there
      * whatever the settings say now; a new one follows the workspace driver, limited to
-     * subjects whose every language is routed. No routed list means every language.
+     * subjects whose every language is routed (no routed list means every language) and
+     * whose every platform SocialReins covers. A post covered only in part splits (see
+     * splitOf()) and starts on PostSyncer.
      *
      * @param  array<string, mixed>  $options  the publish options, when deciding a publish
      */
@@ -48,26 +51,95 @@ class SocialreinsConfig
             return true;
         }
 
+        $split = self::newSubjectSplit($subject, $workspace, $options);
+
+        return $split !== null && $split['postsyncer'] === [];
+    }
+
+    /**
+     * A new post whose platforms SocialReins covers only in part: PostSyncer publishes the
+     * `postsyncer` platforms first, then the `socialreins` ones go through SocialReins
+     * (ContinueSplitOnSocialreinsAction). Null when the post goes whole to one driver.
+     * Telegram publishes never split: only PostSyncer's publish closes their request.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{socialreins: list<string>, postsyncer: list<string>}|null
+     */
+    public static function splitOf(Post $post, Workspace $workspace, array $options = []): ?array
+    {
+        if (self::isOnSocialreins($post) || ($options['telegram_request_id'] ?? null) !== null) {
+            return null;
+        }
+
+        $split = self::newSubjectSplit($post, $workspace, $options);
+
+        return $split !== null && $split['socialreins'] !== [] && $split['postsyncer'] !== [] ? $split : null;
+    }
+
+    /**
+     * Null when a subject not yet on SocialReins stays on PostSyncer for a reason other than
+     * its platforms; otherwise which of its platforms SocialReins covers.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{socialreins: list<string>, postsyncer: list<string>}|null
+     */
+    private static function newSubjectSplit(Post|Video $subject, Workspace $workspace, array $options): ?array
+    {
         if (self::isOnPostsyncer($subject) || ! self::usesSocialreins($workspace)) {
-            return false;
+            return null;
         }
 
-        $routed = self::fromWorkspace($workspace)->routedLanguages();
+        $config = self::fromWorkspace($workspace);
+        $routed = $config->routedLanguages();
 
-        if ($routed === []) {
-            return true;
+        if ($routed !== []) {
+            // Only PostSyncer's publish closes a Telegram request, and /cancel relies on that.
+            if (($options['telegram_request_id'] ?? null) !== null) {
+                return null;
+            }
+
+            $languages = $subject instanceof Video
+                ? app(VideoPublishPlanner::class)->knownLanguages($subject)
+                : app(PostPublishPlanner::class)->knownLanguages($subject);
+
+            if ($languages === [] || array_diff($languages, $routed) !== []) {
+                return null;
+            }
         }
 
-        // Only PostSyncer's publish closes a Telegram request, and /cancel relies on that.
-        if (($options['telegram_request_id'] ?? null) !== null) {
-            return false;
+        return $config->platformSplit($subject, $workspace, $options);
+    }
+
+    /**
+     * Splits the (language, platform) pairs a subject would publish. A platform goes to
+     * SocialReins only when every language it is published in covers it, because one set of
+     * publish options picks the platforms for all languages.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{socialreins: list<string>, postsyncer: list<string>}
+     */
+    private function platformSplit(Post|Video $subject, Workspace $workspace, array $options): array
+    {
+        // No language lists its platforms: SocialReins takes everything, as before the list existed.
+        $lists = array_map(fn (string $language): ?array => $this->coveredPlatforms($language), PostsyncerConfig::LANGUAGES);
+        if (array_filter($lists, fn (?array $list): bool => $list !== null) === []) {
+            return ['socialreins' => [], 'postsyncer' => []];
         }
 
-        $languages = $subject instanceof Video
-            ? app(VideoPublishPlanner::class)->knownLanguages($subject)
-            : app(PostPublishPlanner::class)->knownLanguages($subject);
+        $pairs = $subject instanceof Video
+            ? app(VideoPublishPlanner::class)->candidatePairs($subject, $this->planningConfig($workspace), $options)
+            : app(PostPublishPlanner::class)->candidatePairs($subject, $options);
 
-        return $languages !== [] && array_diff($languages, $routed) === [];
+        $covered = [];
+        foreach ($pairs as [$language, $platform]) {
+            $list = $this->coveredPlatforms($language);
+            $covered[$platform] = ($covered[$platform] ?? true) && ($list === null || in_array($platform, $list, true));
+        }
+
+        return [
+            'socialreins' => array_keys(array_filter($covered)),
+            'postsyncer' => array_keys(array_diff_key($covered, array_filter($covered))),
+        ];
     }
 
     /** A SocialReins run started and was not fully taken down, or a group may exist there. */
@@ -125,6 +197,19 @@ class SocialreinsConfig
         $id = $this->languageData($language)['set_id'] ?? null;
 
         return is_string($id) && $id !== '' ? $id : null;
+    }
+
+    /**
+     * The CM platforms this language's set has accounts for. Null (never saved) means every
+     * platform, which keeps workspaces from before the list on SocialReins for everything.
+     *
+     * @return list<string>|null
+     */
+    public function coveredPlatforms(string $language): ?array
+    {
+        $platforms = $this->languageData($language)['platforms'] ?? null;
+
+        return is_array($platforms) ? array_values(array_intersect(UpdatePostsyncerSettingsRequest::PLATFORMS, $platforms)) : null;
     }
 
     /** The TikTok visibility this workspace chose; null means TikTok posts are refused. */
@@ -250,6 +335,9 @@ class SocialreinsConfig
             $entry = is_array($current['languages'][$language] ?? null) ? $current['languages'][$language] : [];
             if (array_key_exists('set_id', $values)) {
                 $entry['set_id'] = $values['set_id'];
+            }
+            if (is_array($values['platforms'] ?? null)) {
+                $entry['platforms'] = array_values(array_intersect(UpdatePostsyncerSettingsRequest::PLATFORMS, $values['platforms']));
             }
             if (is_string($values['token'] ?? null) && trim($values['token']) !== '') {
                 $entry['token'] = Crypt::encryptString(trim($values['token']));

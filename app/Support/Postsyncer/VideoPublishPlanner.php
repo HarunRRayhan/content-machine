@@ -199,6 +199,20 @@ class VideoPublishPlanner
     }
 
     /**
+     * (language, platform) pairs a publish with these options would select, before the
+     * matrix narrows them.
+     *
+     * @param  array<string, mixed>  $options
+     * @return list<array{0: string, 1: string}>
+     */
+    public function candidatePairs(Video $video, PostsyncerConfig $config, array $options): array
+    {
+        $language = $this->resolveLanguage($video);
+
+        return array_map(fn (string $platform): array => [$language, $platform], $this->selectedPlatforms($video, $config, $options));
+    }
+
+    /**
      * @param  array<mixed>  $fields
      */
     private function captionText(array $fields): string

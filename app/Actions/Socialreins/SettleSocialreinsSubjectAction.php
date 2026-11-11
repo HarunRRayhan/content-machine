@@ -2,6 +2,7 @@
 
 namespace App\Actions\Socialreins;
 
+use App\Actions\Postsyncer\SyncScheduledPostsAction;
 use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
@@ -105,12 +106,33 @@ class SettleSocialreinsSubjectAction
             .'if it is not there, retry from SocialReins.';
     }
 
+    private function hasPendingPostsyncerGroups(Post|Video $subject): bool
+    {
+        if (! is_array($subject->publish_progress['split'] ?? null)) {
+            return false;
+        }
+
+        foreach ($subject->postsyncer['groups'] ?? [] as $group) {
+            if (is_array($group) && ! in_array($group['status'] ?? null, SyncScheduledPostsAction::TERMINAL_GROUP_STATUSES, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function save(Post|Video $subject, ?string $status, string $state, ?string $error): void
     {
         $values = [
             'publish_state' => $state,
             'publish_error' => $error,
         ];
+
+        // A split post stays scheduled while PostSyncer groups are still pending, so the
+        // PostSyncer sync keeps checking them and marks it posted later.
+        if ($status === 'posted' && $this->hasPendingPostsyncerGroups($subject)) {
+            $status = 'scheduled';
+        }
 
         if ($status !== null) {
             $values['status'] = $status;
