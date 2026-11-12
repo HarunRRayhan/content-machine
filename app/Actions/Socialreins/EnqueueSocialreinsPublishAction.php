@@ -4,12 +4,15 @@ namespace App\Actions\Socialreins;
 
 use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
+use App\Models\TelegramPostRequest;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsResults;
+use App\Support\Telegram\TelegramPublishRequests;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 /**
  * Queue a SocialReins publish for a Post or Video that routes to SocialReins.
@@ -21,7 +24,7 @@ class EnqueueSocialreinsPublishAction
      * @template T of Post|Video
      *
      * @param  T  $subject
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int|string}  $options
      * @return T
      */
     public function handle(Post|Video $subject, Workspace $workspace, array $options = []): Post|Video
@@ -35,11 +38,22 @@ class EnqueueSocialreinsPublishAction
         $requested = $options;
         $options = array_intersect_key(
             array_filter($options, fn (mixed $value): bool => $value !== null),
-            array_flip(['when', 'platforms', 'confirm_ask']),
+            array_flip(['when', 'platforms', 'confirm_ask', 'telegram_request_id']),
         );
 
+        // Only posts have Telegram requests.
+        if ($subject instanceof Video) {
+            unset($options['telegram_request_id']);
+        }
+
+        try {
+            $requestId = TelegramPublishRequests::idFrom($options);
+        } catch (InvalidArgumentException) {
+            throw $this->refuse(__('The Telegram publish request is invalid.'));
+        }
+
         /** @var T $queued */
-        $queued = DB::transaction(function () use ($subject, $workspace, $requested, $options): Post|Video {
+        $queued = DB::transaction(function () use ($subject, $workspace, $requested, $options, $requestId): Post|Video {
             // Same lock order as the PostSyncer path and the settings save: workspace, then subject.
             $lockedWorkspace = Workspace::query()->whereKey($workspace->getKey())->lockForUpdate()->firstOrFail();
             $locked = $subject::query()->whereKey($subject->getKey())->lockForUpdate()->firstOrFail();
@@ -75,6 +89,24 @@ class EnqueueSocialreinsPublishAction
                 $options = $split['socialreins'];
             }
 
+            // Same admission as the PostSyncer enqueue: the request must be approved (or failed,
+            // on a retry), and the run that closes it keeps its id in the stored options.
+            unset($options['telegram_request_id']);
+            $telegramRequest = null;
+            if ($locked instanceof Post) {
+                // A run that never settled (its worker died) left its request open: keep it.
+                $stored = $locked->publish_progress['options']['telegram_request_id'] ?? null;
+                if ($requestId === null && is_int($stored) && $locked->telegramPostRequests()->whereKey($stored)
+                    ->whereIn('state', [TelegramPostRequest::APPROVED, TelegramPostRequest::FAILED])->exists()) {
+                    $requestId = $stored;
+                }
+
+                $telegramRequest = TelegramPublishRequests::admit($locked, $requestId, $locked->publish_state === 'failed');
+            }
+            if ($telegramRequest !== null) {
+                $options['telegram_request_id'] = $telegramRequest->id;
+            }
+
             $locked->forceFill([
                 'publish_state' => 'queued',
                 'publish_error' => null,
@@ -89,6 +121,13 @@ class EnqueueSocialreinsPublishAction
                     ...(is_array($split) ? ['split' => $split] + array_intersect_key($locked->publish_progress, ['reschedule' => true]) : []),
                 ],
             ])->save();
+
+            if ($telegramRequest?->state === TelegramPostRequest::FAILED) {
+                $telegramRequest->forceFill([
+                    'state' => TelegramPostRequest::APPROVED,
+                    'error_message' => null,
+                ])->save();
+            }
 
             // The database queue shares this connection: the job commits with the row.
             dispatch(new PublishSocialreinsJob($locked, $options))->beforeCommit();

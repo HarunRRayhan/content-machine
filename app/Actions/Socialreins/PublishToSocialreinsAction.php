@@ -4,6 +4,7 @@ namespace App\Actions\Socialreins;
 
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
+use App\Models\TelegramPostRequest;
 use App\Models\Video;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerException;
@@ -14,6 +15,7 @@ use App\Support\Socialreins\SocialreinsClient;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsException;
 use App\Support\Socialreins\SocialreinsResults;
+use App\Support\Telegram\TelegramPublishRequests;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -39,10 +41,17 @@ class PublishToSocialreinsAction
         private readonly ResolveSocialreinsGroupAction $resolve,
     ) {}
 
-    /** @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options */
+    /** @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options */
     public function handle(Post|Video $subject, array $options = []): void
     {
-        $subject = $this->claim($subject);
+        try {
+            $subject = $this->claim($subject, $options);
+        } catch (PostsyncerException|InvalidArgumentException $exception) {
+            // The Telegram request or its bot connection changed: nothing was sent.
+            $this->markFailed($subject, $exception->getMessage());
+
+            return;
+        }
 
         if ($subject === null) {
             return;
@@ -86,24 +95,51 @@ class PublishToSocialreinsAction
     /** Fail a publish that is still running; a state a webhook already settled is kept. */
     public function markFailed(Post|Video $subject, string $message): void
     {
-        $subject::query()
-            ->whereKey($subject->getKey())
-            ->whereIn('publish_state', ['queued', 'running'])
-            ->update([
-                'publish_state' => 'failed',
-                'publish_error' => $message,
-                'updated_at' => now(),
-            ]);
+        DB::transaction(function () use ($subject, $message): void {
+            $locked = $subject::query()->whereKey($subject->getKey())->lockForUpdate()->first();
+
+            if ($locked === null || ! in_array($locked->publish_state, ['queued', 'running'], true)) {
+                return;
+            }
+
+            $locked->forceFill(['publish_state' => 'failed', 'publish_error' => $message])->save();
+
+            if ($locked instanceof Post) {
+                SettleSocialreinsSubjectAction::closeTelegramRequest($locked, 'failed', $message);
+            }
+        });
     }
 
-    private function claim(Post|Video $subject): Post|Video|null
+    /**
+     * @param  array<string, mixed>  $options
+     *
+     * @throws PostsyncerException|InvalidArgumentException
+     */
+    private function claim(Post|Video $subject, array $options): Post|Video|null
     {
-        return DB::transaction(function () use ($subject): Post|Video|null {
+        return DB::transaction(function () use ($subject, $options): Post|Video|null {
             $locked = $subject::query()->whereKey($subject->getKey())->lockForUpdate()->first();
 
             // A queue redelivery after the first run settled must not run again.
             if ($locked === null || $locked->publish_state !== 'queued') {
                 return null;
+            }
+
+            // As on the PostSyncer claim: a request cancelled or already published in the
+            // meantime stops the run before anything is sent.
+            $request = $locked instanceof Post
+                ? TelegramPublishRequests::lock($locked, TelegramPublishRequests::idFrom($options))
+                : null;
+
+            if ($request !== null
+                && in_array($request->state, [TelegramPostRequest::CANCELLED, TelegramPostRequest::PUBLISHED], true)) {
+                $locked->forceFill(['publish_state' => 'idle', 'publish_error' => null])->save();
+
+                return null;
+            }
+
+            if ($request?->state === TelegramPostRequest::FAILED) {
+                $request->forceFill(['state' => TelegramPostRequest::APPROVED, 'error_message' => null])->save();
             }
 
             $locked->forceFill(['publish_state' => 'running'])->save();

@@ -5,13 +5,13 @@ namespace App\Actions\Postsyncer;
 use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
-use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Telegram\TelegramPublishRequests;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Facades\DB;
@@ -117,7 +117,8 @@ class EnqueuePostPublishAction
             if ($split !== null) {
                 $split = [
                     'socialreins' => [
-                        ...array_intersect_key($filtered, array_flip(['when', 'confirm_ask'])),
+                        // The request id travels with the SocialReins half, which closes the request.
+                        ...array_intersect_key($filtered, array_flip(['when', 'confirm_ask', 'telegram_request_id'])),
                         'platforms' => $split['socialreins'],
                     ],
                     'postsyncer' => $split['postsyncer'],
@@ -154,8 +155,7 @@ class EnqueuePostPublishAction
                 }
             }
 
-            $this->lockTelegramBotConfig($lockedPost, $filtered, $isRetry);
-            $telegramRequest = $this->telegramRequest($filtered, $lockedPost, $isRetry);
+            $telegramRequest = TelegramPublishRequests::admit($lockedPost, $this->telegramRequestId($filtered), $isRetry);
 
             // A retry is a new run even when it resumes the same operation.
             // This fences off an automatic queue retry still holding the old
@@ -446,146 +446,15 @@ class EnqueuePostPublishAction
     /**
      * @param  array<string, mixed>  $options
      */
-    private function telegramRequest(array $options, Post $post, bool $isRetry): ?TelegramPostRequest
-    {
-        $id = $options['telegram_request_id'] ?? null;
-
-        if ($id === null) {
-            if (! $isRetry) {
-                return null;
-            }
-
-            $requests = $post->telegramPostRequests()
-                ->where('state', TelegramPostRequest::FAILED)
-                ->latest('id')
-                ->get();
-
-            if ($requests->count() > 1) {
-                throw ValidationException::withMessages([
-                    'publish' => __('Specify the Telegram post request to retry.'),
-                ]);
-            }
-
-            return $requests->first();
-        }
-
-        if (! is_int($id) && ! (is_string($id) && ctype_digit($id))) {
-            throw ValidationException::withMessages([
-                'publish' => __('The Telegram publish request is invalid.'),
-            ]);
-        }
-
-        $request = TelegramPostRequest::query()
-            ->whereKey((int) $id)
-            ->lockForUpdate()
-            ->first();
-
-        if ($request === null
-            || $request->workspace_id !== $post->workspace_id
-            || $request->post_id !== $post->id
-            || ! in_array($request->state, [
-                TelegramPostRequest::APPROVED,
-                ...($isRetry ? [TelegramPostRequest::FAILED] : []),
-            ], true)
-        ) {
-            throw ValidationException::withMessages([
-                'publish' => __('This Telegram draft is no longer approved for publishing.'),
-            ]);
-        }
-
-        return $request;
-    }
-
-    /**
-     * Serialize a Telegram publish with disconnect/rotation. The workspace is
-     * already locked by the caller, matching DisconnectTelegramBotAction's
-     * lock order.
-     *
-     * @param  array<string, mixed>  $options
-     */
-    private function lockTelegramBotConfig(Post $post, array $options, bool $isRetry): void
-    {
-        $requestId = $this->telegramRequestId($options);
-
-        if ($requestId === null && ! $isRetry) {
-            return;
-        }
-
-        if ($requestId === null) {
-            $requests = $post->telegramPostRequests()
-                ->where('state', TelegramPostRequest::FAILED)
-                ->latest('id')
-                ->limit(2)
-                ->get(['id']);
-
-            if ($requests->count() > 1) {
-                throw ValidationException::withMessages([
-                    'publish' => __('Specify the Telegram post request to retry.'),
-                ]);
-            }
-
-            $requestId = $requests->first()?->id;
-        }
-
-        if ($requestId === null) {
-            return;
-        }
-
-        $request = TelegramPostRequest::query()->whereKey($requestId)->first();
-        $configId = $request?->telegram_bot_config_id;
-
-        if ($configId === null) {
-            throw ValidationException::withMessages([
-                'publish' => __('The Telegram publish request is invalid.'),
-            ]);
-        }
-
-        $config = TelegramBotConfig::query()
-            ->whereKey($configId)
-            ->lockForUpdate()
-            ->first();
-
-        if ($config === null
-            || ! $config->isConnected()
-            || $request->workspace_id !== $post->workspace_id
-            || $request->post_id !== $post->id
-            || ($request->webhook_generation !== null
-                && $request->webhook_generation !== $config->webhook_generation)
-        ) {
-            throw ValidationException::withMessages([
-                'publish' => __('This Telegram draft is no longer approved for publishing.'),
-            ]);
-        }
-
-        if ($request->webhook_generation === null && $config->webhook_generation !== null) {
-            $request->forceFill([
-                'webhook_generation' => $config->webhook_generation,
-            ])->save();
-        }
-    }
-
-    /**
-     * @param  array<string, mixed>  $options
-     */
     private function telegramRequestId(array $options): ?int
     {
-        $id = $options['telegram_request_id'] ?? null;
-
-        if ($id === null) {
-            return null;
+        try {
+            return TelegramPublishRequests::idFrom($options);
+        } catch (InvalidArgumentException) {
+            throw ValidationException::withMessages([
+                'publish' => __('The Telegram publish request is invalid.'),
+            ]);
         }
-
-        if (is_int($id) && $id > 0) {
-            return $id;
-        }
-
-        if (is_string($id) && ctype_digit($id) && (int) $id > 0) {
-            return (int) $id;
-        }
-
-        throw ValidationException::withMessages([
-            'publish' => __('The Telegram publish request is invalid.'),
-        ]);
     }
 
     private function alreadyPublishedOnPostsyncer(Post $post): bool

@@ -6,7 +6,6 @@ use App\Actions\Socialreins\ContinueSplitOnSocialreinsAction;
 use App\Data\Postsyncer\RepairPostAccountMappingData;
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
-use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\LegacyPublishProgress;
@@ -17,10 +16,12 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PublishGroup;
 use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Telegram\TelegramPublishRequests;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Throwable;
 
 class PublishPostAction
@@ -2415,23 +2416,7 @@ class PublishPostAction
             return;
         }
 
-        $requestId = $this->telegramRequestId($options);
-        if ($requestId === null) {
-            return;
-        }
-
-        $query = $post->telegramPostRequests()
-            ->whereIn('state', [
-                TelegramPostRequest::AWAITING_APPROVAL,
-                TelegramPostRequest::APPROVED,
-                TelegramPostRequest::FAILED,
-            ])
-            ->whereKey($requestId);
-
-        $query->update([
-            'state' => $state,
-            'error_message' => $errorMessage,
-        ]);
+        TelegramPublishRequests::update($post, $state, $errorMessage, $this->telegramRequestId($options));
     }
 
     /**
@@ -2605,63 +2590,7 @@ class PublishPostAction
      */
     private function lockTelegramRequest(Post $post, array $options): ?TelegramPostRequest
     {
-        $requestId = $this->telegramRequestId($options);
-        if ($requestId === null) {
-            return null;
-        }
-
-        $request = TelegramPostRequest::query()->whereKey($requestId)->first();
-
-        if ($request === null
-            || $request->workspace_id !== $post->workspace_id
-            || $request->post_id !== $post->id) {
-            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
-        }
-
-        $config = TelegramBotConfig::query()
-            ->whereKey($request->telegram_bot_config_id)
-            ->lockForUpdate()
-            ->first();
-
-        if ($config === null
-            || ! $config->isConnected()
-            || ($request->webhook_generation !== null
-                && $request->webhook_generation !== $config->webhook_generation)
-        ) {
-            throw new PostsyncerException(
-                'The Telegram bot connection changed before this publish could run.',
-            );
-        }
-
-        $request = TelegramPostRequest::query()
-            ->whereKey($requestId)
-            ->lockForUpdate()
-            ->first();
-
-        if ($request === null
-            || $request->workspace_id !== $post->workspace_id
-            || $request->post_id !== $post->id
-            || ($request->webhook_generation !== null
-                && $request->webhook_generation !== $config->webhook_generation)) {
-            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
-        }
-
-        if ($request->webhook_generation === null && $config->webhook_generation !== null) {
-            $request->forceFill([
-                'webhook_generation' => $config->webhook_generation,
-            ])->save();
-        }
-
-        if (! in_array($request->state, [
-            TelegramPostRequest::APPROVED,
-            TelegramPostRequest::FAILED,
-            TelegramPostRequest::CANCELLED,
-            TelegramPostRequest::PUBLISHED,
-        ], true)) {
-            throw new PostsyncerException('The Telegram draft is not ready to publish.');
-        }
-
-        return $request;
+        return TelegramPublishRequests::lock($post, $this->telegramRequestId($options));
     }
 
     /**
@@ -2725,8 +2654,13 @@ class PublishPostAction
                 'publish_lease_id' => null,
             ])->save();
 
-            $this->updateTelegramPostRequests($locked, TelegramPostRequest::PUBLISHED, null, $options);
             app(ContinueSplitOnSocialreinsAction::class)->handle($locked);
+
+            // A split post was just handed over (queued again): its request closes when the
+            // SocialReins half settles, never while that half is still pending.
+            if ($locked->publish_state === 'succeeded') {
+                $this->updateTelegramPostRequests($locked, TelegramPostRequest::PUBLISHED, null, $options);
+            }
 
             return true;
         });
@@ -2737,21 +2671,11 @@ class PublishPostAction
      */
     private function telegramRequestId(array $options): ?int
     {
-        $id = $options['telegram_request_id'] ?? null;
-
-        if ($id === null) {
-            return null;
+        try {
+            return TelegramPublishRequests::idFrom($options);
+        } catch (InvalidArgumentException $exception) {
+            throw new PostsyncerException($exception->getMessage());
         }
-
-        if (is_int($id) && $id > 0) {
-            return $id;
-        }
-
-        if (is_string($id) && ctype_digit($id) && (int) $id > 0) {
-            return (int) $id;
-        }
-
-        throw new PostsyncerException('The Telegram publish request id is invalid.');
     }
 
     /**

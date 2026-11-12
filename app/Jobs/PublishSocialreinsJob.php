@@ -31,7 +31,7 @@ class PublishSocialreinsJob implements ShouldQueue
 
     public int $tries = 1;
 
-    /** @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool}  $options */
+    /** @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, telegram_request_id?: int}  $options */
     public function __construct(
         public readonly Post|Video $subject,
         public readonly array $options = [],

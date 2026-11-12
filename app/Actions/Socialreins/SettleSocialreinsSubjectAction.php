@@ -6,9 +6,11 @@ use App\Actions\Postsyncer\SyncScheduledPostsAction;
 use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
+use App\Models\TelegramPostRequest;
 use App\Models\Video;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsResults;
+use App\Support\Telegram\TelegramPublishRequests;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -147,6 +149,28 @@ class SettleSocialreinsSubjectAction
         }
 
         $subject->forceFill($values)->save();
+
+        if ($subject instanceof Post) {
+            self::closeTelegramRequest($subject, $state, $error);
+        }
+    }
+
+    /**
+     * Close the Telegram request this run was queued for (its id is in the stored options, so
+     * a webhook or the reconcile can find it). As on PostSyncer, a post handed over counts as
+     * published whether it went out now or is scheduled: /cancel can no longer cancel it. A
+     * split post only gets here after its PostSyncer half succeeded. Call under the post's lock.
+     */
+    public static function closeTelegramRequest(Post $post, string $publishState, ?string $error): void
+    {
+        $options = $post->publish_progress['options'] ?? null;
+
+        TelegramPublishRequests::update(
+            $post,
+            $publishState === 'succeeded' ? TelegramPostRequest::PUBLISHED : TelegramPostRequest::FAILED,
+            $publishState === 'succeeded' ? null : $error,
+            is_array($options) ? TelegramPublishRequests::idFrom($options) : null,
+        );
     }
 
     /**
