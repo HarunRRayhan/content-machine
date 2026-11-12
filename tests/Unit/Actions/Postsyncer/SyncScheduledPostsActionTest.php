@@ -230,7 +230,8 @@ class SyncScheduledPostsActionTest extends TestCase
         ]);
 
         Http::fake([
-            'postsyncer.com/api/v1/posts/1' => Http::response(['status' => 'PUBLISHED'], 200),
+            // The {data: resource} envelope is read too.
+            'postsyncer.com/api/v1/posts/1' => Http::response(['data' => ['status' => 'PUBLISHED']], 200),
             '*' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '30']),
         ]);
 

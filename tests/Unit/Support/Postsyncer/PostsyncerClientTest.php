@@ -84,7 +84,7 @@ class PostsyncerClientTest extends TestCase
         Sleep::fake();
         Http::fake([
             'postsyncer.com/api/v1/posts/1' => Http::response(['id' => 1], 200, ['X-RateLimit-Remaining' => '12']),
-            'postsyncer.com/api/v1/posts/2' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '5']),
+            'postsyncer.com/api/v1/posts/2' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '0']),
         ]);
 
         $client = $this->clientWithKey(rateLimitWaitSeconds: 0);

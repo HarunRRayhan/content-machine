@@ -546,7 +546,8 @@ class PostsyncerClient
                 }
 
                 $backoff = self::RATE_LIMIT_BACKOFF_SECONDS;
-                $wait = min($exception->retryAfter ?? $backoff[$attempt] ?? 0, self::RATE_LIMIT_MAX_WAIT_SECONDS);
+                // At least a second, so a client without a budget never sends the request again.
+                $wait = max(1, min($exception->retryAfter ?? $backoff[$attempt] ?? 0, self::RATE_LIMIT_MAX_WAIT_SECONDS));
 
                 if ($attempt >= count($backoff) || $wait > $this->rateLimitWaitSeconds) {
                     throw $exception;

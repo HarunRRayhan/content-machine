@@ -72,6 +72,8 @@ class SyncScheduledPostsAction
 
             try {
                 $live = $client->getPost($check['post_id']);
+                // PostSyncer has answered both the bare resource and {data: resource}.
+                $live = is_array($live['data'] ?? null) ? $live['data'] : $live;
             } catch (PostsyncerException $exception) {
                 // Rate limited: stop quietly and change nothing; the next run catches up.
                 if ($exception->getCode() === 429) {
