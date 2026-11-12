@@ -18,6 +18,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 class PublishPostActionTest extends TestCase
@@ -2454,6 +2455,113 @@ class PublishPostActionTest extends TestCase
         $this->assertSame('retryable', $post->publish_progress['current']['phase']);
         $this->assertSame([915], $post->publish_progress['current']['media_ids']);
         Http::assertNothingSent();
+    }
+
+    /**
+     * A one-image Facebook post whose PostSyncer calls answer 429 the given number of times
+     * before they work.
+     *
+     * @param  array{upload?: int, create?: int}  $rateLimited
+     * @param  array<string, int>  $calls
+     */
+    private function rateLimitedPost(array $rateLimited, array &$calls): Post
+    {
+        Sleep::fake();
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $calls = ['upload' => 0, 'create' => 0];
+
+        Http::fake(function ($request) use ($rateLimited, &$calls) {
+            $call = match (true) {
+                str_ends_with($request->url(), '/media/upload/url') => 'upload',
+                $request->url() === 'https://postsyncer.com/api/v1/posts' => 'create',
+                default => null,
+            };
+
+            if ($call !== null && ++$calls[$call] <= ($rateLimited[$call] ?? 0)) {
+                return Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '50']);
+            }
+
+            return match ($call) {
+                'upload' => Http::response(['media' => [['id' => 915]], 'count_stored' => 1], 200),
+                'create' => Http::response(['id' => 42, 'status' => 'published'], 201),
+                default => Http::response([
+                    'id' => 42,
+                    'workspace_id' => 15211,
+                    'content' => [['text' => 'Caption', 'media' => [['id' => 915]]]],
+                    'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                        'post_type' => 'POST', 'caption' => 'Caption',
+                    ]]],
+                    'status' => 'PUBLISHED',
+                ], 200),
+            };
+        });
+
+        return Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
+        ]);
+    }
+
+    public function test_a_rate_limited_image_upload_and_create_wait_and_then_succeed(): void
+    {
+        $calls = [];
+        $post = $this->rateLimitedPost(['upload' => 1, 'create' => 1], $calls);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
+        $this->assertSame(['upload' => 2, 'create' => 2], $calls);
+        Sleep::assertSequence([Sleep::for(50)->seconds(), Sleep::for(50)->seconds()]);
+    }
+
+    public function test_a_rate_limit_that_outlasts_the_retries_is_a_plain_retryable_failure(): void
+    {
+        $calls = [];
+        $post = $this->rateLimitedPost(['upload' => 3], $calls);
+
+        // Not rethrown: the job has already waited, so the worker must not spin on it.
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_state);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertNull($post->publish_progress['current']);
+        $this->assertStringContainsString('rate limit', (string) $post->publish_error);
+        $this->assertStringContainsString('Retry in a minute', (string) $post->publish_error);
+        $this->assertStringNotContainsString('uncertain', (string) $post->publish_error);
+        // Two 50-second waits fit the 120-second budget; the third 429 ends the attempt.
+        Sleep::assertSequence([Sleep::for(50)->seconds(), Sleep::for(50)->seconds()]);
+        $this->assertSame(3, $calls['upload']);
+
+        // No reconciliation step: publishing again simply works.
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+        $this->assertSame(4, $calls['upload']);
+    }
+
+    public function test_a_rate_limited_create_keeps_its_uploaded_media_for_the_retry(): void
+    {
+        $calls = [];
+        $post = $this->rateLimitedPost(['create' => 3], $calls);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertSame('retryable', $post->publish_progress['current']['phase']);
+        $this->assertStringContainsString('rate limit', (string) $post->publish_error);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $this->assertSame('succeeded', $post->refresh()->publish_state);
+        $this->assertSame(1, $calls['upload']);
     }
 
     public function test_uncertain_media_upload_can_be_reconciled_without_uploading_again(): void

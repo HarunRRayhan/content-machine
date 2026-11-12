@@ -28,8 +28,10 @@ class PostsyncerClientTest extends TestCase
         $this->app->instance(PublicUrlGuard::class, new PublicUrlGuard(fn (): array => [['ip' => '142.250.0.1']]));
     }
 
-    private function clientWithKey(string $apiKey = 'test-api-key'): PostsyncerClient
-    {
+    private function clientWithKey(
+        string $apiKey = 'test-api-key',
+        int $rateLimitWaitSeconds = PostsyncerClient::PUBLISH_RATE_LIMIT_WAIT_SECONDS,
+    ): PostsyncerClient {
         $workspace = Workspace::factory()->create(['settings' => []]);
         PostsyncerConfig::write($workspace, [
             'api_key' => $apiKey,
@@ -37,7 +39,68 @@ class PostsyncerClientTest extends TestCase
         ]);
         $workspace->refresh();
 
-        return new PostsyncerClient(PostsyncerConfig::fromWorkspace($workspace));
+        return new PostsyncerClient(
+            PostsyncerConfig::fromWorkspace($workspace),
+            rateLimitWaitSeconds: $rateLimitWaitSeconds,
+        );
+    }
+
+    public function test_every_call_waits_out_a_rate_limit_inside_the_shared_budget(): void
+    {
+        Sleep::fake();
+        $this->travelTo(now()->startOfSecond());
+        Http::fake([
+            'postsyncer.com/api/v1/media/upload/url' => Http::sequence()
+                // The documented header: a UNIX time for the end of the window.
+                ->push(['message' => 'Too Many Attempts.'], 429, ['X-RateLimit-Reset' => (string) (time() + 20)])
+                ->push(['media' => [['id' => 915]], 'count_stored' => 1], 200),
+            'postsyncer.com/api/v1/posts' => Http::sequence()
+                ->push(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '45'])
+                ->push(['id' => 42], 201),
+            'postsyncer.com/api/v1/posts/42' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '56']),
+        ]);
+
+        $client = $this->clientWithKey();
+
+        $this->assertSame([915], $client->uploadFromUrls(15211, ['https://example.com/a.png']));
+        $this->assertSame(['id' => 42], $client->createPost(['content' => []], 'op:post'));
+
+        // 20 + 45 of the 120 seconds are spent; a 56-second wait no longer fits.
+        try {
+            $client->getPost(42);
+            $this->fail('Expected the exhausted budget to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertSame(429, $exception->getCode());
+            $this->assertFalse($exception->outcomeUnknown);
+            $this->assertTrue($exception->safeToRetry);
+            $this->assertStringContainsString('rate limit', $exception->getMessage());
+        }
+
+        Sleep::assertSequence([Sleep::for(20)->seconds(), Sleep::for(45)->seconds()]);
+    }
+
+    public function test_a_client_without_a_wait_budget_never_sleeps_and_reports_the_remaining_allowance(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'postsyncer.com/api/v1/posts/1' => Http::response(['id' => 1], 200, ['X-RateLimit-Remaining' => '12']),
+            'postsyncer.com/api/v1/posts/2' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '5']),
+        ]);
+
+        $client = $this->clientWithKey(rateLimitWaitSeconds: 0);
+        $this->assertNull($client->rateLimitRemaining());
+        $client->getPost(1);
+        $this->assertSame(12, $client->rateLimitRemaining());
+
+        try {
+            $client->getPost(2);
+            $this->fail('Expected the rate limit to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertSame(429, $exception->getCode());
+        }
+
+        Sleep::assertNeverSlept();
+        Http::assertSentCount(2);
     }
 
     public function test_upload_from_urls_returns_media_ids(): void
