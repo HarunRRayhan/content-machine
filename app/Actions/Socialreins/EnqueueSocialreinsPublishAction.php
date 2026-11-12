@@ -41,11 +41,6 @@ class EnqueueSocialreinsPublishAction
             array_flip(['when', 'platforms', 'confirm_ask', 'telegram_request_id']),
         );
 
-        // Only posts have Telegram requests.
-        if ($subject instanceof Video) {
-            unset($options['telegram_request_id']);
-        }
-
         try {
             $requestId = TelegramPublishRequests::idFrom($options);
         } catch (InvalidArgumentException) {
@@ -91,13 +86,15 @@ class EnqueueSocialreinsPublishAction
 
             // Same admission as the PostSyncer enqueue: the request must be approved (or failed,
             // on a retry), and the run that closes it keeps its id in the stored options.
+            // Only posts have Telegram requests.
             unset($options['telegram_request_id']);
             $telegramRequest = null;
             if ($locked instanceof Post) {
-                // A run that never settled (its worker died) left its request open: keep it.
+                // A run that never settled (its worker died) left its request approved: keep it.
+                // A failed one is found by admit() itself.
                 $stored = $locked->publish_progress['options']['telegram_request_id'] ?? null;
                 if ($requestId === null && is_int($stored) && $locked->telegramPostRequests()->whereKey($stored)
-                    ->whereIn('state', [TelegramPostRequest::APPROVED, TelegramPostRequest::FAILED])->exists()) {
+                    ->where('state', TelegramPostRequest::APPROVED)->exists()) {
                     $requestId = $stored;
                 }
 

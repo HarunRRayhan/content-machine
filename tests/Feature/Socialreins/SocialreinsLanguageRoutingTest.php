@@ -355,16 +355,25 @@ class SocialreinsLanguageRoutingTest extends TestCase
         ]);
     }
 
-    public function test_a_telegram_publish_of_a_routed_post_stays_on_postsyncer(): void
+    public function test_a_telegram_publish_of_a_routed_post_goes_through_socialreins_with_its_request(): void
     {
         $post = $this->makePost($this->workspace());
         $request = $this->telegramRequest($post);
 
         $this->publishPost($post, ['telegram_request_id' => $request->id]);
 
+        $this->assertWentToSocialreins(PublishPostJob::class);
+        Queue::assertPushed(PublishSocialreinsJob::class, fn (PublishSocialreinsJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+        $this->assertSame($request->id, $post->fresh()->publish_progress['options']['telegram_request_id']);
+    }
+
+    public function test_a_telegram_publish_of_an_unrouted_language_stays_on_postsyncer(): void
+    {
+        $post = $this->makePost($this->workspace(), ['language' => 'en', 'captions' => ['facebook' => ['caption' => 'English text']]]);
+
+        $this->publishPost($post, ['telegram_request_id' => $this->telegramRequest($post)->id]);
+
         $this->assertWentToPostsyncer(PublishPostJob::class);
-        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->options['telegram_request_id'] === $request->id);
-        $this->assertArrayNotHasKey('driver', $post->fresh()->publish_progress);
     }
 
     public function test_a_telegram_publish_of_a_post_already_on_socialreins_stays_there(): void

@@ -294,7 +294,7 @@ class PublishPostAction
             // failures that are safe to repeat should reach the queue worker.
             if (! $unknownOutcome
                 && ! ($e instanceof PostsyncerException && ! $e->retryable)
-                && ! ($e instanceof \InvalidArgumentException)) {
+                && ! ($e instanceof InvalidArgumentException)) {
                 throw $e;
             }
 
