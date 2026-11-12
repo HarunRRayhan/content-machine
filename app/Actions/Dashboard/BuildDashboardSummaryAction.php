@@ -10,6 +10,7 @@ use App\Models\ScratchpadEntry;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Calendar\CollectCalendarOccurrences;
+use App\Support\Content\PublishGroups;
 use Carbon\CarbonImmutable;
 
 /**
@@ -131,16 +132,20 @@ final class BuildDashboardSummaryAction
         $horizon = $today->addDays(14)->endOfDay();
         $events = [];
 
-        foreach (Post::query()->where('workspace_id', $workspace->id)->where('status', 'scheduled')->whereNotNull('postsyncer')->get() as $post) {
-            foreach ($this->occurrences->fromRecord('post', $post->id, $post->human_id, $post->title, $post->postsyncer, $timezone) as $event) {
+        $rows = PublishGroups::rowsBySubject('post', Post::query()->select('id')->where('workspace_id', $workspace->id)->where('status', 'scheduled'));
+        foreach (Post::query()->where('workspace_id', $workspace->id)->where('status', 'scheduled')
+            ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $post) {
+            foreach ($this->occurrences->fromRecord('post', $post->id, $post->human_id, $post->title, ['groups' => PublishGroups::of($post, $rows[$post->id] ?? [])], $timezone) as $event) {
                 if ($this->isUpcoming($event, $today, $horizon, $timezone)) {
                     $events[] = $event;
                 }
             }
         }
 
-        foreach (Video::query()->where('workspace_id', $workspace->id)->where('status', 'scheduled')->whereNotNull('postsyncer')->get() as $video) {
-            foreach ($this->occurrences->fromRecord('video', $video->id, $video->human_id, $video->title, $video->postsyncer, $timezone) as $event) {
+        $rows = PublishGroups::rowsBySubject('video', Video::query()->select('id')->where('workspace_id', $workspace->id)->where('status', 'scheduled'));
+        foreach (Video::query()->where('workspace_id', $workspace->id)->where('status', 'scheduled')
+            ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $video) {
+            foreach ($this->occurrences->fromRecord('video', $video->id, $video->human_id, $video->title, ['groups' => PublishGroups::of($video, $rows[$video->id] ?? [])], $timezone) as $event) {
                 if ($this->isUpcoming($event, $today, $horizon, $timezone)) {
                     $events[] = $event;
                 }

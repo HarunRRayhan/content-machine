@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Postsyncer\PublishVideoAction;
 use App\Actions\Postsyncer\ReconcileVideoGroupsDeletedAction;
-use App\Actions\Postsyncer\VideoRescheduleAction;
 use App\Actions\Socialreins\RescheduleSplitPostAction;
 use App\Actions\Videos\CreateVideoAction;
 use App\Actions\Videos\UpdateVideoAction;
@@ -230,8 +229,7 @@ class VideosApiController extends Controller
     public function reschedule(
         Request $request,
         string $humanId,
-        VideoRescheduleAction $action,
-        RescheduleSplitPostAction $split,
+        RescheduleSplitPostAction $action,
     ): VideoResource {
         $video = $this->resolveVideo($humanId);
 
@@ -240,8 +238,8 @@ class VideosApiController extends Controller
         ]);
 
         try {
-            // A split video has a SocialReins half to move as well.
-            $video = (is_array($video->publish_progress['split'] ?? null) ? $split : $action)->handle(
+            // Moves the PostSyncer groups, the SocialReins posts, or both halves of a split.
+            $video = $action->handle(
                 $video,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),

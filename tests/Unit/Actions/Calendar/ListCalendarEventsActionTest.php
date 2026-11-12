@@ -4,10 +4,15 @@ namespace Tests\Unit\Actions\Calendar;
 
 use App\Actions\Calendar\ListCalendarEventsAction;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Calendar\CollectCalendarOccurrences;
+use App\Support\Content\PublishGroups;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class ListCalendarEventsActionTest extends TestCase
@@ -190,5 +195,96 @@ class ListCalendarEventsActionTest extends TestCase
             'BV-1' => 'video_bn',
             'EV-1' => 'video_en',
         ], $categories);
+    }
+
+    public function test_it_lists_socialreins_content_once_per_post_or_video(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+
+        $socialreins = function (Post|Video $subject, array $results) use ($workspace): void {
+            SocialreinsGroup::query()->create([
+                'workspace_id' => $workspace->id, 'subject_type' => $subject instanceof Video ? 'video' : 'post', 'subject_id' => $subject->id,
+                'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'k'.$subject->human_id, 'state' => 'created',
+                'request' => json_encode(['scheduled_at' => '2026-08-26T03:00:00Z']),
+                'group_id' => null, 'expected_targets' => count($results), 'results' => $results,
+            ]);
+        };
+        $result = fn (string $platform, string $status = 'scheduled', array $own = []): array => ['platform' => $platform, 'status' => $status, 'error' => null, 'at' => 0, 'targets' => [], ...$own];
+
+        // Whole on SocialReins, no PostSyncer data at all.
+        $only = Post::factory()->for($workspace)->create(['title' => 'Only', 'human_id' => 'P-80', 'status' => 'scheduled', 'postsyncer' => null]);
+        $socialreins($only, ['p1' => $result('linkedin'), 'p2' => $result('threads')]);
+
+        // A split: PostSyncer half at 09:00, SocialReins half rescheduled to 10:00 the same day.
+        $split = Post::factory()->for($workspace)->create([
+            'title' => 'Split', 'human_id' => 'P-81', 'status' => 'scheduled',
+            'postsyncer' => ['groups' => [['post_id' => '42', 'scheduled_at' => '2026-08-27T09:00:00+06:00', 'platforms' => ['facebook']]]],
+        ]);
+        $socialreins($split, ['p3' => $result('linkedin', 'scheduled', ['scheduled_at' => '2026-08-27T04:00:00Z'])]);
+
+        // Published through SocialReins.
+        $video = Video::factory()->for($workspace)->create(['title' => 'Live', 'human_id' => 'BV-80', 'status' => 'posted', 'postsyncer' => null]);
+        $socialreins($video, ['p4' => $result('youtube', 'published')]);
+
+        // Taken down from SocialReins: nothing is scheduled any more.
+        $gone = Post::factory()->for($workspace)->create(['title' => 'Gone', 'human_id' => 'P-82', 'status' => 'ready', 'postsyncer' => null]);
+        $socialreins($gone, ['p5' => $result('linkedin', 'deleted')]);
+
+        $events = $this->action()->handle($workspace, 2026, 8);
+
+        $this->assertSame(['P-80', 'BV-80', 'P-81'], array_column($events, 'human_id'));
+        $this->assertSame(['scheduled', 'published', 'scheduled'], array_column($events, 'state'));
+        $this->assertSame('2026-08-26T09:00:00+06:00', $events[0]['at']);
+        $this->assertSame('2026-08-27T09:00:00+06:00', $events[2]['at']);
+    }
+
+    public function test_it_reads_only_the_socialreins_rows_of_the_visible_month_in_one_query_per_kind(): void
+    {
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+
+        $socialreins = function (Post $post, ?string $scheduledAt, array $result) use ($workspace): void {
+            SocialreinsGroup::query()->create([
+                'workspace_id' => $workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+                'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'k'.$post->human_id, 'state' => 'created',
+                'request' => json_encode(['scheduled_at' => $scheduledAt, 'posts' => [['body' => str_repeat('x', 500)]]]),
+                'expected_targets' => 1,
+                'results' => ['p'.$post->id => ['platform' => 'linkedin', 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => [], ...$result]],
+            ]);
+        };
+        $post = fn (string $humanId, string $status = 'scheduled'): Post => Post::factory()->for($workspace)
+            ->create(['title' => $humanId, 'human_id' => $humanId, 'status' => $status, 'postsyncer' => null]);
+
+        // Created for July, then rescheduled into August.
+        $socialreins($moved = $post('P-90'), '2026-07-10T03:00:00Z', ['scheduled_at' => '2026-08-12T03:00:00Z']);
+        // Published at once: no scheduled time, only when its result was stored.
+        $socialreins($live = $post('P-91', 'posted'), null, ['status' => 'published', 'at' => CarbonImmutable::parse('2026-08-13T03:00:00Z')->getTimestamp()]);
+        // Another month, and a group whose results were emptied.
+        $socialreins($post('P-92'), '2026-11-10T03:00:00Z', []);
+        SocialreinsGroup::query()->create([
+            'workspace_id' => $workspace->id, 'subject_type' => 'post', 'subject_id' => $post('P-93')->id,
+            'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'kP-93', 'state' => 'created',
+            'request' => json_encode(['scheduled_at' => null]), 'results' => [],
+        ]);
+
+        $loaded = [];
+        DB::listen(function (QueryExecuted $query) use (&$loaded): void {
+            if (str_contains($query->sql, 'from "socialreins_groups"')) {
+                $loaded[] = $query->sql;
+            }
+        });
+
+        $events = $this->action()->handle($workspace, 2026, 8);
+
+        $this->assertSame(['P-90', 'P-91'], array_column($events, 'human_id'));
+        $this->assertSame(['scheduled', 'published'], array_column($events, 'state'));
+        // One for posts, one for videos, neither selecting the whole stored request.
+        $this->assertCount(2, $loaded);
+        $this->assertStringNotContainsString('select *', $loaded[0]);
+        $this->assertSame(
+            [$moved->id, $live->id],
+            array_keys(PublishGroups::rowsBySubject('post', PublishGroups::subjectsBetween(
+                $workspace, 'post', CarbonImmutable::parse('2026-07-26T00:00:00+06:00'), CarbonImmutable::parse('2026-09-05T23:59:59+06:00'),
+            ))),
+        );
     }
 }

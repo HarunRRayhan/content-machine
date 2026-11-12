@@ -7,6 +7,7 @@ use App\Models\Post;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Calendar\CollectCalendarOccurrences;
+use App\Support\Content\PublishGroups;
 use Carbon\CarbonImmutable;
 
 /**
@@ -30,13 +31,15 @@ final class ListCalendarEventsAction
 
         $events = [];
 
-        foreach (Post::query()->where('workspace_id', $workspace->id)->whereNotNull('postsyncer')->get() as $post) {
+        $rows = PublishGroups::rowsBySubject('post', PublishGroups::subjectsBetween($workspace, 'post', $gridStart, $gridEnd));
+        foreach (Post::query()->where('workspace_id', $workspace->id)
+            ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $post) {
             foreach ($this->occurrences->fromRecord(
                 'post',
                 $post->id,
                 $post->human_id,
                 $post->title,
-                $post->postsyncer,
+                ['groups' => PublishGroups::of($post, $rows[$post->id] ?? [])],
                 $timezone,
                 'post_'.$post->category,
             ) as $event) {
@@ -44,13 +47,15 @@ final class ListCalendarEventsAction
             }
         }
 
-        foreach (Video::query()->where('workspace_id', $workspace->id)->whereNotNull('postsyncer')->get() as $video) {
+        $rows = PublishGroups::rowsBySubject('video', PublishGroups::subjectsBetween($workspace, 'video', $gridStart, $gridEnd));
+        foreach (Video::query()->where('workspace_id', $workspace->id)
+            ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $video) {
             foreach ($this->occurrences->fromRecord(
                 'video',
                 $video->id,
                 $video->human_id,
                 $video->title,
-                $video->postsyncer,
+                ['groups' => PublishGroups::of($video, $rows[$video->id] ?? [])],
                 $timezone,
                 $video->language === 'en' ? 'video_en' : 'video_bn',
             ) as $event) {

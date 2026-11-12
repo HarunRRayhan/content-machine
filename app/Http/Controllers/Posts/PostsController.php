@@ -10,10 +10,12 @@ use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\Workspace;
 use App\Support\Content\NormalizeCaptions;
 use App\Support\Content\PostWorkspaceBuckets;
 use App\Support\Content\PresenceFlags;
+use App\Support\Content\PublishGroups;
 use App\Support\Media\PostDesignTemplate;
 use App\Support\Postsyncer\PostPublishPlanner;
 use App\Support\Postsyncer\PostsyncerClient;
@@ -117,10 +119,10 @@ class PostsController extends Controller
                 'created_at',
             ]);
 
-            $items = $postsQuery
-                ->paginate(20)
-                ->withQueryString()
-                ->through(fn (Post $post) => $this->presentSummary($post));
+            $items = $postsQuery->paginate(20)->withQueryString();
+            // One query for the whole page's SocialReins rows.
+            $rows = PublishGroups::rowsBySubject('post', $items->getCollection()->modelKeys());
+            $items->through(fn (Post $post) => $this->presentSummary($post, $rows[$post->id] ?? []));
         }
 
         return Inertia::render('posts/index', [
@@ -254,10 +256,14 @@ class PostsController extends Controller
     }
 
     /**
+     * @param  list<SocialreinsGroup>  $rows  the post's SocialReins rows
      * @return array<string, mixed>
      */
-    private function presentSummary(Post $post): array
+    private function presentSummary(Post $post, array $rows): array
     {
+        // Both drivers. The chips list each language's platforms once, so a split post is one row of chips.
+        $groups = PublishGroups::of($post, $rows);
+
         return [
             'type' => 'post',
             'id' => $post->id,
@@ -272,8 +278,8 @@ class PostsController extends Controller
             'approval_state' => $post->approval_state ?? 'approved',
             'language' => $post->language,
             'platforms' => $post->platforms ?? [],
-            'groups' => $this->presentGroups($post),
-            'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post),
+            'groups' => $groups,
+            'workspaces' => app(PostWorkspaceBuckets::class)->forPost($post, $groups),
             'has_captions' => PresenceFlags::bool(
                 $post,
                 'has_captions',
@@ -286,24 +292,6 @@ class PostsController extends Controller
             ),
             'created_at' => $post->created_at?->toIso8601String(),
         ];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function presentGroups(Post $post): array
-    {
-        $postsyncer = $post->postsyncer;
-        $groups = is_array($postsyncer) ? ($postsyncer['groups'] ?? null) : null;
-
-        if (! is_array($groups)) {
-            return [];
-        }
-
-        return array_values(array_filter(
-            $groups,
-            fn (mixed $group): bool => is_array($group),
-        ));
     }
 
     /**

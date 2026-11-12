@@ -74,13 +74,14 @@ final class SocialreinsResults
      * platform, the newest group winning), so the page lists both halves of a split the same way.
      * The API returns the same list as `socialreins`, so a client can verify that half too.
      *
+     * @param  list<SocialreinsGroup>|null  $rows  the subject's rows when the caller already loaded them
      * @return list<array<string, mixed>>
      */
-    public static function presentGroups(Post|Video $subject): array
+    public static function presentGroups(Post|Video $subject, ?array $rows = null): array
     {
         $groups = [];
 
-        foreach (self::rowsOf($subject) as $row) {
+        foreach ($rows ?? self::rowsOf($subject) as $row) {
             if ($row->state !== SocialreinsGroup::CREATED) {
                 continue;
             }
@@ -177,8 +178,11 @@ final class SocialreinsResults
             $incoming['targets'][$id]['remote_id'] ??= $existing['targets'][$id]['remote_id'] ?? null;
             $incoming['targets'][$id]['parts'] = max($target['parts'], (int) ($existing['targets'][$id]['parts'] ?? 0));
         }
-        if (isset($existing['delete_attempt'])) {
-            $incoming['delete_attempt'] = $existing['delete_attempt'];
+        // Brain's answer knows neither: a retry must not undo a reschedule or forget a take down.
+        foreach (['delete_attempt', 'scheduled_at'] as $kept) {
+            if (isset($existing[$kept])) {
+                $incoming[$kept] = $existing[$kept];
+            }
         }
 
         return $incoming;
