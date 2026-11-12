@@ -61,6 +61,13 @@ response, the current group is marked `uncertain` and must be reconciled before
 retrying; it is never replayed automatically. Older partial video records
 without progress metadata are rejected rather than guessed.
 
+A `429` is the exception: PostSyncer's throttle (60 requests a minute per key,
+`Too Many Attempts.`) answers before the request reaches any handler, so nothing
+was stored. A publish job waits it out (`Retry-After` or `X-RateLimit-Reset`,
+at most 60 seconds a wait and 120 seconds a job, shared by every call) and
+sends the same request again. If the limit outlasts that, the publish ends as a
+plain failure that can be published again without reconciling.
+
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
 buttons use the same enqueue path. The private progress checkpoint is an
 internal database field and is not returned by the API; callers use
@@ -334,6 +341,13 @@ The Laravel scheduler already runs on Railway `cm-worker` (`php artisan
 schedule:work`). `postsyncer:sync-scheduled` every five minutes live-checks
 PostSyncer and marks a scheduled post or video `posted` once every group is
 `PUBLISHED`. Do not add a separate cron service.
+
+The sync shares PostSyncer's 60 requests a minute with publishing, so a run
+makes at most 20 requests (`SyncScheduledPostsAction::MAX_REQUESTS_PER_RUN`),
+least recently checked group first. A group due in the last day is checked every
+run; a `PUBLISHED` group never again; a group still in the future, `FAILED`, or
+more than a day overdue once a day. A `429`, or fewer than 30 requests left in
+the window, ends the run; the next one continues.
 
 Markdown `**PostSyncer:**` lines in personal-content post files remain an
 archive after cutover; CM records are the source of truth.

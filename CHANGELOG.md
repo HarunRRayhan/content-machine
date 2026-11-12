@@ -9,6 +9,8 @@ once it reaches 1.0.
 ## [Unreleased]
 
 ### Changed
+- PostSyncer status sync makes at most 20 requests a run, never re-checks a published group, checks future, failed and long-overdue groups once a day, and stops on a 429 or when the remaining allowance is low, so it no longer starves publishes of PostSyncer's 60 requests a minute.
+- A PostSyncer 429 during a publish is waited out and retried on every call (media upload, create, lookups); one that outlasts the 120-second budget is a plain failure that can be retried, no longer an "uncertain" outcome that needs reconciling.
 - PostSyncer status sync skips groups whose scheduled time has not come yet, so it no longer exhausts PostSyncer's rate limit (429) with a call per scheduled group every five minutes.
 - SocialReins publishing asks for public YouTube uploads, matching PostSyncer; SocialReins now uploads private unless told otherwise.
 
