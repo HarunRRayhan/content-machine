@@ -65,7 +65,7 @@ class PostsyncerClientTest extends TestCase
         $this->assertSame([915], $client->uploadFromUrls(15211, ['https://example.com/a.png']));
         $this->assertSame(['id' => 42], $client->createPost(['content' => []], 'op:post'));
 
-        // 20 + 45 of the 120 seconds are spent; a 56-second wait no longer fits.
+        // 22 + 47 of the 120 seconds are spent (each wait is padded by 2); 58 no longer fit.
         try {
             $client->getPost(42);
             $this->fail('Expected the exhausted budget to throw.');
@@ -76,7 +76,59 @@ class PostsyncerClientTest extends TestCase
             $this->assertStringContainsString('rate limit', $exception->getMessage());
         }
 
-        Sleep::assertSequence([Sleep::for(20)->seconds(), Sleep::for(45)->seconds()]);
+        Sleep::assertSequence([Sleep::for(22)->seconds(), Sleep::for(47)->seconds()]);
+    }
+
+    public function test_a_429_without_the_throttle_signature_is_never_sent_again(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            // Relayed by a handler that may already have stored the post.
+            'postsyncer.com/api/v1/posts' => Http::response(
+                ['message' => 'Instagram rate limit reached'], 429, ['Retry-After' => '5', 'X-RateLimit-Remaining' => '0'],
+            ),
+            // The throttle's header alone is enough for a call that is not a create.
+            'postsyncer.com/api/v1/posts/7' => Http::sequence()
+                ->push(['message' => 'Slow down'], 429, ['X-RateLimit-Remaining' => '0'])
+                ->push(['id' => 7], 200),
+            'postsyncer.com/api/v1/posts/8' => Http::response(['message' => 'Slow down'], 429, ['Retry-After' => '5']),
+        ]);
+        $client = $this->clientWithKey();
+
+        foreach ([fn () => $client->createPost(['content' => []]), fn () => $client->getPost(8)] as $call) {
+            try {
+                $call();
+                $this->fail('Expected the 429 to throw.');
+            } catch (PostsyncerException $exception) {
+                $this->assertSame(429, $exception->getCode());
+                $this->assertTrue($exception->outcomeUnknown);
+                $this->assertFalse($exception->safeToRetry);
+                $this->assertStringNotContainsString('before storing anything', $exception->getMessage());
+            }
+        }
+
+        Sleep::assertNeverSlept();
+        $this->assertSame(['id' => 7], $client->getPost(7));
+        Http::assertSentCount(4);
+    }
+
+    public function test_a_throttled_create_is_sent_again_once_at_most(): void
+    {
+        Sleep::fake();
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '5']),
+        ]);
+
+        try {
+            $this->clientWithKey()->createPost(['content' => []]);
+            $this->fail('Expected the rate limit to throw.');
+        } catch (PostsyncerException $exception) {
+            $this->assertTrue($exception->safeToRetry);
+            $this->assertFalse($exception->outcomeUnknown);
+        }
+
+        Sleep::assertSequence([Sleep::for(7)->seconds()]);
+        Http::assertSentCount(2);
     }
 
     public function test_a_client_without_a_wait_budget_never_sleeps_and_reports_the_remaining_allowance(): void
@@ -295,7 +347,8 @@ class PostsyncerClientTest extends TestCase
         $ids = $this->clientWithKey()->uploadFilesFromUrls(15211, ['https://drive.usercontent.google.com/download?id=video']);
 
         $this->assertSame([915], $ids);
-        Sleep::assertSequence([Sleep::for(7)->seconds(), Sleep::for(60)->seconds()]);
+        // Retry-After is padded by 2 seconds and capped at 60.
+        Sleep::assertSequence([Sleep::for(9)->seconds(), Sleep::for(60)->seconds()]);
     }
 
     public function test_upload_files_from_urls_gives_up_on_rate_limit_and_names_stored_ids(): void

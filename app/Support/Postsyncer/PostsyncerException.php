@@ -21,7 +21,10 @@ class PostsyncerException extends Exception
         parent::__construct($message, $code, $previous);
     }
 
-    public static function fromResponse(Response $response): self
+    /**
+     * @param  bool  $create  The request was POST /posts, which PostSyncer cannot deduplicate.
+     */
+    public static function fromResponse(Response $response, bool $create = false): self
     {
         $message = $response->json('message') ?? $response->json('error') ?? $response->body();
 
@@ -32,9 +35,17 @@ class PostsyncerException extends Exception
         $status = $response->status();
         $retryAfter = $response->header('Retry-After');
 
-        // PostSyncer's throttle ("Too Many Attempts.") answers before the request reaches any
-        // handler, so a 429 stored nothing: a definitive rejection that is safe to send again.
-        if ($status === 429) {
+        // Only PostSyncer's own API throttle answers before the request reaches a handler, so
+        // only its 429 means nothing was stored and the request is safe to send again. Any other
+        // 429 (a social platform's limit relayed by a handler that already stored the post)
+        // keeps an unknown outcome. Laravel's throttle also stamps X-RateLimit-Remaining: 0 on
+        // the last request it lets through, so for a create only the message counts.
+        $throttled = $status === 429 && (
+            stripos($message, 'Too Many Attempts') !== false
+            || (! $create && $response->header('X-RateLimit-Remaining') === '0')
+        );
+
+        if ($throttled) {
             // The documented header is X-RateLimit-Reset (a UNIX time); Retry-After wins when sent.
             $reset = $response->header('X-RateLimit-Reset');
 
@@ -52,7 +63,7 @@ class PostsyncerException extends Exception
             );
         }
 
-        $outcomeUnknown = in_array($status, [408, 425], true) || $status >= 500;
+        $outcomeUnknown = in_array($status, [408, 425, 429], true) || $status >= 500;
 
         return new self(
             "PostSyncer API error {$status}: {$message}",

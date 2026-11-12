@@ -21,10 +21,11 @@ use Illuminate\Support\Facades\DB;
  * allowance, so a run asks about few groups and only those that can have changed:
  *
  * - PUBLISHED is final and is never asked about again.
- * - A group due in the last day (or with no stored time) is asked about every run.
+ * - A group due in the last day (or with no stored time) is asked about every run, FAILED
+ *   or not: PostSyncer may still deliver a freshly failed group late.
  * - Everything else is asked about once a day: a group still in the future cannot be
- *   live, so the daily look only picks up a time changed inside PostSyncer; a FAILED
- *   or long-overdue group only changes if PostSyncer delivers it late.
+ *   live, so the daily look only picks up a time changed inside PostSyncer; a
+ *   long-overdue group only changes if PostSyncer delivers it very late.
  */
 class SyncScheduledPostsAction
 {
@@ -84,10 +85,14 @@ class SyncScheduledPostsAction
             }
 
             $result['requests']++;
-            $checked[spl_object_id($record)] = true;
 
-            if ($this->store($record, $check['post_id'], $live)) {
-                $result[$record instanceof Post ? 'posts' : 'videos']++;
+            // A failed lookup says nothing: the check time stays, so the group is asked again.
+            if ($live !== null) {
+                $checked[spl_object_id($record)] = true;
+
+                if ($this->store($record, $check['post_id'], $live)) {
+                    $result[$record instanceof Post ? 'posts' : 'videos']++;
+                }
             }
 
             $remaining = $client->rateLimitRemaining();
@@ -148,10 +153,12 @@ class SyncScheduledPostsAction
 
                 // shortcut: a group with no stored time stays in the every-run set until it is
                 // terminal; give it a first-seen time if such groups ever pile up.
-                if ($status !== 'FAILED' && ($when === null || $when->between(
+                // A FAILED group has no failure time, so "failed in the last day" is read from its
+                // scheduled time; without one it is checked daily.
+                if (($when === null && $status !== 'FAILED') || $when?->between(
                     $now->subHours(self::RECENTLY_DUE_HOURS),
                     $now->addMinutes(self::DUE_MARGIN_MINUTES),
-                ))) {
+                )) {
                     $due[] = $check;
                 } elseif ($check['synced_at'] === ''
                     || $this->parse($check['synced_at'])?->lte($now->subHours(self::DAILY_CHECK_HOURS)) !== false) {
@@ -178,7 +185,7 @@ class SyncScheduledPostsAction
      * Write one lookup's answer onto the freshly locked row (a publish or reschedule may have
      * rewritten its groups since this run read them) and mark the row posted when it is done.
      *
-     * @param  array<string, mixed>|null  $live  null when the lookup failed: only the check time is stored
+     * @param  array<string, mixed>|null  $live  null when no lookup was made
      * @return bool whether the record was marked posted
      */
     private function store(Post|Video $record, ?string $postId = null, ?array $live = null): bool

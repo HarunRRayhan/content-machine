@@ -413,7 +413,7 @@ class PostsyncerClient
         $headers = $idempotencyKey === null || trim($idempotencyKey) === ''
             ? []
             : ['Idempotency-Key' => $idempotencyKey];
-        $response = $this->request('post', '/posts', $body, $headers);
+        $response = $this->request('post', '/posts', $body, $headers, create: true);
 
         return $this->decodeResponse($response);
     }
@@ -523,9 +523,10 @@ class PostsyncerClient
     }
 
     /**
-     * PostSyncer's throttle answers 429 before storing anything, so the same request is sent
-     * again after Retry-After (capped) or a fixed backoff, while the client's wait budget lasts.
-     * A 429 that outlasts the budget is still a definitive rejection.
+     * PostSyncer's API throttle answers 429 before storing anything, so the same request is sent
+     * again after Retry-After (padded, capped) or a fixed backoff, while the client's wait budget
+     * lasts. A throttle 429 that outlasts the budget is still a definitive rejection. A 429
+     * without the throttle's signature is never sent again (see PostsyncerException).
      *
      * @param  array<string, mixed>  $body
      * @param  array<string, string>  $headers
@@ -536,20 +537,27 @@ class PostsyncerClient
         array $body = [],
         array $headers = [],
         ?string $filePath = null,
+        bool $create = false,
     ): Response {
+        $backoff = self::RATE_LIMIT_BACKOFF_SECONDS;
+        // shortcut: PostSyncer ignores idempotency keys on create and there is no id to look up
+        // before a resend, so a create is sent again once at most; lift this when a lookup exists.
+        $resends = $create ? 1 : count($backoff);
+
         for ($attempt = 0; ; $attempt++) {
             try {
-                return $this->send($method, $path, $body, $headers, $filePath);
+                return $this->send($method, $path, $body, $headers, $filePath, $create);
             } catch (PostsyncerException $exception) {
-                if ($exception->getCode() !== 429) {
+                if ($exception->getCode() !== 429 || ! $exception->safeToRetry) {
                     throw $exception;
                 }
 
-                $backoff = self::RATE_LIMIT_BACKOFF_SECONDS;
+                // Two seconds past Retry-After, so the resend does not land on the window's edge.
+                $wait = $exception->retryAfter === null ? $backoff[$attempt] ?? 0 : $exception->retryAfter + 2;
                 // At least a second, so a client without a budget never sends the request again.
-                $wait = max(1, min($exception->retryAfter ?? $backoff[$attempt] ?? 0, self::RATE_LIMIT_MAX_WAIT_SECONDS));
+                $wait = max(1, min($wait, self::RATE_LIMIT_MAX_WAIT_SECONDS));
 
-                if ($attempt >= count($backoff) || $wait > $this->rateLimitWaitSeconds) {
+                if ($attempt >= $resends || $wait > $this->rateLimitWaitSeconds) {
                     throw $exception;
                 }
 
@@ -569,6 +577,7 @@ class PostsyncerClient
         array $body,
         array $headers,
         ?string $filePath,
+        bool $create = false,
     ): Response {
         $apiKey = $this->config->apiKey();
 
@@ -629,7 +638,7 @@ class PostsyncerClient
         $this->rateLimitRemaining = ctype_digit($remaining) ? (int) $remaining : null;
 
         if (! $response->successful()) {
-            throw PostsyncerException::fromResponse($response);
+            throw PostsyncerException::fromResponse($response, $create);
         }
 
         return $response;

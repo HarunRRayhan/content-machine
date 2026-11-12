@@ -2461,25 +2461,34 @@ class PublishPostActionTest extends TestCase
      * A one-image Facebook post whose PostSyncer calls answer 429 the given number of times
      * before they work.
      *
-     * @param  array{upload?: int, create?: int}  $rateLimited
+     * @param  array{upload?: int, create?: int, verify?: int}  $rateLimited
      * @param  array<string, int>  $calls
+     * @param  array<string, string>  $headers
      */
-    private function rateLimitedPost(array $rateLimited, array &$calls): Post
-    {
+    private function rateLimitedPost(
+        array $rateLimited,
+        array &$calls,
+        string $message = 'Too Many Attempts.',
+        array $headers = ['Retry-After' => '50'],
+    ): Post {
         Sleep::fake();
         $workspace = Workspace::factory()->create();
         $this->configureWorkspace($workspace);
-        $calls = ['upload' => 0, 'create' => 0];
+        $calls = ['upload' => 0, 'create' => 0, 'verify' => 0];
 
-        Http::fake(function ($request) use ($rateLimited, &$calls) {
+        Http::fake(function ($request) use ($rateLimited, &$calls, $message, $headers) {
             $call = match (true) {
                 str_ends_with($request->url(), '/media/upload/url') => 'upload',
                 $request->url() === 'https://postsyncer.com/api/v1/posts' => 'create',
-                default => null,
+                default => 'verify',
             };
 
-            if ($call !== null && ++$calls[$call] <= ($rateLimited[$call] ?? 0)) {
-                return Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '50']);
+            if ($call === 'create' && $message === 'timeout') {
+                throw new ConnectionException('Operation timed out');
+            }
+
+            if (++$calls[$call] <= ($rateLimited[$call] ?? 0)) {
+                return Http::response(['message' => $message], 429, $headers);
             }
 
             return match ($call) {
@@ -2516,8 +2525,8 @@ class PublishPostActionTest extends TestCase
         $post->refresh();
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame('42', $post->postsyncer['groups'][0]['post_id']);
-        $this->assertSame(['upload' => 2, 'create' => 2], $calls);
-        Sleep::assertSequence([Sleep::for(50)->seconds(), Sleep::for(50)->seconds()]);
+        $this->assertSame(['upload' => 2, 'create' => 2, 'verify' => 1], $calls);
+        Sleep::assertSequence([Sleep::for(52)->seconds(), Sleep::for(52)->seconds()]);
     }
 
     public function test_a_rate_limit_that_outlasts_the_retries_is_a_plain_retryable_failure(): void
@@ -2535,8 +2544,8 @@ class PublishPostActionTest extends TestCase
         $this->assertStringContainsString('rate limit', (string) $post->publish_error);
         $this->assertStringContainsString('Retry in a minute', (string) $post->publish_error);
         $this->assertStringNotContainsString('uncertain', (string) $post->publish_error);
-        // Two 50-second waits fit the 120-second budget; the third 429 ends the attempt.
-        Sleep::assertSequence([Sleep::for(50)->seconds(), Sleep::for(50)->seconds()]);
+        // Two padded 52-second waits fit the 120-second budget; the third 429 ends the attempt.
+        Sleep::assertSequence([Sleep::for(52)->seconds(), Sleep::for(52)->seconds()]);
         $this->assertSame(3, $calls['upload']);
 
         // No reconciliation step: publishing again simply works.
@@ -2562,6 +2571,123 @@ class PublishPostActionTest extends TestCase
 
         $this->assertSame('succeeded', $post->refresh()->publish_state);
         $this->assertSame(1, $calls['upload']);
+    }
+
+    public function test_a_429_on_create_without_the_throttle_signature_is_not_resent_and_stays_uncertain(): void
+    {
+        $calls = [];
+        // Relayed by PostSyncer's create handler, which may already have stored the post.
+        $post = $this->rateLimitedPost(
+            ['create' => 9],
+            $calls,
+            'Instagram rate limit reached',
+            ['Retry-After' => '5', 'X-RateLimit-Remaining' => '0'],
+        );
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame(1, $calls['create']);
+        Sleep::assertNeverSlept();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertSame('creating', $post->publish_progress['current']['phase']);
+        $this->assertStringContainsString('create outcome is uncertain', (string) $post->publish_error);
+        $this->assertStringNotContainsString('before storing anything', (string) $post->publish_error);
+    }
+
+    public function test_a_rate_limited_verify_lookup_after_create_stays_uncertain_and_says_the_post_exists(): void
+    {
+        $calls = [];
+        $post = $this->rateLimitedPost(['verify' => 99], $calls);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame(1, $calls['create']);
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertStringContainsString('PostSyncer accepted post 42', (string) $post->publish_error);
+        $this->assertStringContainsString('rejected the lookup', (string) $post->publish_error);
+        $this->assertStringNotContainsString('before storing anything', (string) $post->publish_error);
+        $this->assertStringNotContainsString('Retry in a minute', (string) $post->publish_error);
+    }
+
+    public function test_a_create_timeout_still_becomes_uncertain(): void
+    {
+        $calls = [];
+        $post = $this->rateLimitedPost([], $calls, 'timeout');
+
+        try {
+            $this->action->handle($post, ['confirm_ask' => false]);
+        } catch (\Throwable) {
+            // Whether the worker sees it or not, the record must say uncertain.
+        }
+
+        $post->refresh();
+        $this->assertSame('uncertain', $post->publish_progress['state']);
+        $this->assertStringContainsString('create outcome is uncertain', (string) $post->publish_error);
+        Sleep::assertNeverSlept();
+    }
+
+    public function test_a_throttled_create_resumes_after_the_completed_group_without_recreating_it(): void
+    {
+        Sleep::fake();
+        $workspace = Workspace::factory()->create();
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook', 'linkedin'],
+            'captions' => ['main' => [
+                'facebook' => ['caption' => 'FB caption', 'images' => []],
+                'linkedin' => ['caption' => 'LinkedIn caption', 'images' => []],
+            ]],
+        ]);
+
+        /** @var list<string> $created the caption of every create that was sent */
+        $created = [];
+        $throttled = 2;
+        $remote = fn (int $id, string $platform, int $account, array $settings): array => [
+            'id' => $id,
+            'workspace_id' => 15211,
+            'content' => [['text' => ($platform === 'facebook' ? 'FB' : 'LinkedIn').' caption', 'media' => []]],
+            'platforms' => [['platform' => $platform, 'account_id' => $account, 'settings' => $settings]],
+            'status' => 'PUBLISHED',
+        ];
+        Http::fake(function ($request) use (&$created, &$throttled, $remote) {
+            if ($request->url() !== 'https://postsyncer.com/api/v1/posts') {
+                return str_ends_with($request->url(), '/posts/10')
+                    ? Http::response($remote(10, 'linkedin', 102, []), 200)
+                    : Http::response($remote(11, 'facebook', 100, ['post_type' => 'POST', 'caption' => 'FB caption']), 200);
+            }
+
+            $created[] = $request['content'][0]['text'];
+
+            if (count($created) > 1 && $throttled-- > 0) {
+                return Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '5']);
+            }
+
+            return Http::response(['id' => end($created) === 'LinkedIn caption' ? 10 : 11, 'status' => 'published'], 201);
+        });
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        // The second group's create was throttled, resent once, and then failed cleanly.
+        $this->assertCount(3, $created);
+        $this->assertSame('failed', $post->publish_progress['state']);
+        $this->assertCount(1, $post->publish_progress['completed_groups']);
+        $this->assertStringNotContainsString('uncertain', (string) $post->publish_error);
+
+        $this->action->handle($post, ['confirm_ask' => false]);
+
+        $post->refresh();
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertEqualsCanonicalizing(['10', '11'], array_column($post->postsyncer['groups'], 'post_id'));
+        // One create for the first group, ever; every later create is the second group's.
+        $this->assertCount(4, $created);
+        $this->assertCount(1, array_keys($created, $created[0], true));
     }
 
     public function test_uncertain_media_upload_can_be_reconciled_without_uploading_again(): void

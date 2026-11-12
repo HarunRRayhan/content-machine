@@ -1087,7 +1087,10 @@ class PublishVideoAction
 
         $message = 'PostSyncer accepted video post '.(string) $postId
             .' but its canonical payload could not be verified.';
-        if ($lastException->getMessage() !== '') {
+        if ($lastException instanceof PostsyncerException && $lastException->getCode() === 429) {
+            // The 429's own text says nothing was stored, which is true of the lookup only.
+            $message .= " PostSyncer's rate limit rejected the lookup (429); the post itself was created.";
+        } elseif ($lastException->getMessage() !== '') {
             $message .= ' '.$lastException->getMessage();
         }
 

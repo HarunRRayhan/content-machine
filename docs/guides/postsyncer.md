@@ -61,12 +61,21 @@ response, the current group is marked `uncertain` and must be reconciled before
 retrying; it is never replayed automatically. Older partial video records
 without progress metadata are rejected rather than guessed.
 
-A `429` is the exception: PostSyncer's throttle (60 requests a minute per key,
-`Too Many Attempts.`) answers before the request reaches any handler, so nothing
-was stored. A publish job waits it out (`Retry-After` or `X-RateLimit-Reset`,
-at most 60 seconds a wait and 120 seconds a job, shared by every call) and
-sends the same request again. If the limit outlasts that, the publish ends as a
-plain failure that can be published again without reconciling.
+A `429` from PostSyncer's own API throttle is the exception. The throttle (60
+requests a minute per key) answers before the request reaches any handler, so
+nothing was stored. It is recognised by its message `Too Many Attempts`, or by
+`X-RateLimit-Remaining: 0` on a call that is not a create. A publish job waits
+it out (`Retry-After` or `X-RateLimit-Reset` plus 2 seconds, at most 60 seconds
+a wait and 120 seconds a job, shared by every call) and sends the same request
+again. If the limit outlasts that, the publish ends as a plain failure that can
+be published again without reconciling.
+
+Any other `429` (for example a social platform's limit relayed by a handler
+that already stored the post) is never sent again and keeps an unknown outcome.
+`POST /posts` is stricter: PostSyncer ignores idempotency keys on create and
+there is no id to look up before a resend, so only the throttle message counts
+and a create is sent again once at most. A `429` on the lookup that verifies a
+finished create stays uncertain: the post exists.
 
 `POST /api/v1/posts/{human_id}/publish` and the dashboard Schedule/Publish
 buttons use the same enqueue path. The private progress checkpoint is an
@@ -345,9 +354,11 @@ PostSyncer and marks a scheduled post or video `posted` once every group is
 The sync shares PostSyncer's 60 requests a minute with publishing, so a run
 makes at most 20 requests (`SyncScheduledPostsAction::MAX_REQUESTS_PER_RUN`),
 least recently checked group first. A group due in the last day is checked every
-run; a `PUBLISHED` group never again; a group still in the future, `FAILED`, or
-more than a day overdue once a day. A `429`, or fewer than 30 requests left in
-the window, ends the run; the next one continues.
+run, `FAILED` included, so a post PostSyncer delivers late is picked up within
+minutes; a `PUBLISHED` group never again; a group still in the future or more
+than a day overdue once a day. Only an answered lookup counts as a check. A
+`429`, or fewer than 30 requests left in the window, ends the run; the next one
+continues.
 
 Markdown `**PostSyncer:**` lines in personal-content post files remain an
 archive after cutover; CM records are the source of truth.
