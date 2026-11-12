@@ -61,7 +61,10 @@ class PublishVideoAction
             if (! $config->publishEnabled() || ! $config->videoPublishEnabled()) {
                 throw new PostsyncerException(PostsyncerConfig::VIDEO_PUBLISH_DISABLED_MESSAGE);
             }
-            $client = new PostsyncerClient($config);
+            $client = new PostsyncerClient(
+                $config,
+                rateLimitWaitSeconds: PostsyncerClient::PUBLISH_RATE_LIMIT_WAIT_SECONDS,
+            );
             $groups = $this->planner->plan($video, $config, $options);
 
             if ($groups === []) {

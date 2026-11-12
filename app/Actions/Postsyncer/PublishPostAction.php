@@ -92,7 +92,10 @@ class PublishPostAction
             if (! $config->publishEnabled()) {
                 throw new PostsyncerException('PostSyncer publishing is disabled in Settings.');
             }
-            $client = new PostsyncerClient($config);
+            $client = new PostsyncerClient(
+                $config,
+                rateLimitWaitSeconds: PostsyncerClient::PUBLISH_RATE_LIMIT_WAIT_SECONDS,
+            );
             $groups = $this->planner->plan($post, $config, $options);
 
             if ($groups === []) {

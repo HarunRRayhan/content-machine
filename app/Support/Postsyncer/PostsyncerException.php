@@ -30,8 +30,29 @@ class PostsyncerException extends Exception
         }
 
         $status = $response->status();
-        $outcomeUnknown = in_array($status, [408, 425, 429], true) || $status >= 500;
         $retryAfter = $response->header('Retry-After');
+
+        // PostSyncer's throttle ("Too Many Attempts.") answers before the request reaches any
+        // handler, so a 429 stored nothing: a definitive rejection that is safe to send again.
+        if ($status === 429) {
+            // The documented header is X-RateLimit-Reset (a UNIX time); Retry-After wins when sent.
+            $reset = $response->header('X-RateLimit-Reset');
+
+            return new self(
+                "PostSyncer API error 429: {$message} PostSyncer's rate limit rejected this request before"
+                .' storing anything. Retry in a minute.',
+                429,
+                responseReceived: true,
+                safeToRetry: true,
+                retryAfter: match (true) {
+                    ctype_digit($retryAfter) => (int) $retryAfter,
+                    ctype_digit($reset) => max(0, (int) $reset - time()),
+                    default => null,
+                },
+            );
+        }
+
+        $outcomeUnknown = in_array($status, [408, 425], true) || $status >= 500;
 
         return new self(
             "PostSyncer API error {$status}: {$message}",

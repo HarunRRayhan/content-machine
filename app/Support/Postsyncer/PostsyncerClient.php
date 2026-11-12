@@ -18,17 +18,33 @@ class PostsyncerClient
 
     private const MAX_DOWNLOAD_REDIRECTS = 5;
 
-    private const UPLOAD_RATE_LIMIT_BACKOFF_SECONDS = [30, 60, 60];
+    /**
+     * What a publish job may spend waiting out 429s, shared by every call the client makes, so
+     * the waits plus re-sent uploads stay well inside the 900-second job timeout.
+     */
+    public const PUBLISH_RATE_LIMIT_WAIT_SECONDS = 120;
 
-    private const UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS = 60;
+    private const RATE_LIMIT_BACKOFF_SECONDS = [30, 60, 60];
 
-    // Shared by every file in one publish group so retries stay well inside the job timeout.
-    private const UPLOAD_RATE_LIMIT_TOTAL_WAIT_SECONDS = 120;
+    private const RATE_LIMIT_MAX_WAIT_SECONDS = 60;
 
+    private ?int $rateLimitRemaining = null;
+
+    /**
+     * @param  int  $rateLimitWaitSeconds  Seconds this client may sleep on 429s before giving up.
+     *                                     Zero (web requests, the status sync) never waits.
+     */
     public function __construct(
         private readonly PostsyncerConfig $config,
         private readonly ?PublicUrlGuard $urlGuard = null,
+        private int $rateLimitWaitSeconds = 0,
     ) {}
+
+    /** X-RateLimit-Remaining from the latest response, or null when PostSyncer did not send it. */
+    public function rateLimitRemaining(): ?int
+    {
+        return $this->rateLimitRemaining;
+    }
 
     /**
      * PostSyncer workspaces from GET /workspaces, including the display name.
@@ -204,7 +220,6 @@ class PostsyncerClient
     public function uploadFilesFromUrls(int|string $workspaceId, array $urls, ?string $idempotencyKey = null): array
     {
         $paths = [];
-        $waitBudget = self::UPLOAD_RATE_LIMIT_TOTAL_WAIT_SECONDS;
 
         try {
             foreach ($urls as $url) {
@@ -224,7 +239,9 @@ class PostsyncerClient
                     : ['Idempotency-Key' => $idempotencyKey.':'.$index];
 
                 try {
-                    $response = $this->uploadFileWithRateLimitRetry($workspaceId, $headers, $path, $waitBudget);
+                    $response = $this->request('post', '/media/upload/file', [
+                        'workspace_id' => $workspaceId,
+                    ], $headers, $path);
                 } catch (PostsyncerException $exception) {
                     // A definitive rejection before any file was stored left
                     // nothing behind in PostSyncer, so a retry cannot duplicate.
@@ -247,7 +264,8 @@ class PostsyncerClient
                             $exception->retryable,
                             $exception->outcomeUnknown,
                             $exception->responseReceived,
-                            $exception->safeToRetry,
+                            // Media is already stored, so a blind retry would duplicate it.
+                            false,
                         );
                     }
 
@@ -270,46 +288,6 @@ class PostsyncerClient
         } finally {
             foreach ($paths as $path) {
                 @unlink($path);
-            }
-        }
-    }
-
-    /**
-     * PostSyncer's upload throttle answers 429 before storing anything, so the
-     * same file is retried after Retry-After (capped) or a fixed backoff. All
-     * files in one call share a 120 s wait budget, so retries plus re-sent
-     * uploads stay inside the 900-second publish job timeout.
-     * A 429 that outlasts the retries is still a definitive rejection.
-     *
-     * @param  array<string, string>  $headers
-     */
-    private function uploadFileWithRateLimitRetry(int|string $workspaceId, array $headers, string $path, int &$waitBudget): Response
-    {
-        $backoff = self::UPLOAD_RATE_LIMIT_BACKOFF_SECONDS;
-
-        for ($attempt = 0; ; $attempt++) {
-            try {
-                return $this->request('post', '/media/upload/file', [
-                    'workspace_id' => $workspaceId,
-                ], $headers, $path);
-            } catch (PostsyncerException $exception) {
-                if ($exception->getCode() !== 429) {
-                    throw $exception;
-                }
-
-                $wait = min($exception->retryAfter ?? $backoff[$attempt] ?? 0, self::UPLOAD_RATE_LIMIT_MAX_WAIT_SECONDS);
-
-                if ($attempt >= count($backoff) || $wait > $waitBudget) {
-                    throw new PostsyncerException(
-                        $exception->getMessage().' Gave up after '.count($backoff).' retries.',
-                        429,
-                        $exception,
-                        responseReceived: true,
-                    );
-                }
-
-                $waitBudget -= $wait;
-                Sleep::for($wait)->seconds();
             }
         }
     }
@@ -545,6 +523,10 @@ class PostsyncerClient
     }
 
     /**
+     * PostSyncer's throttle answers 429 before storing anything, so the same request is sent
+     * again after Retry-After (capped) or a fixed backoff, while the client's wait budget lasts.
+     * A 429 that outlasts the budget is still a definitive rejection.
+     *
      * @param  array<string, mixed>  $body
      * @param  array<string, string>  $headers
      */
@@ -554,6 +536,38 @@ class PostsyncerClient
         array $body = [],
         array $headers = [],
         ?string $filePath = null,
+    ): Response {
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                return $this->send($method, $path, $body, $headers, $filePath);
+            } catch (PostsyncerException $exception) {
+                if ($exception->getCode() !== 429) {
+                    throw $exception;
+                }
+
+                $backoff = self::RATE_LIMIT_BACKOFF_SECONDS;
+                $wait = min($exception->retryAfter ?? $backoff[$attempt] ?? 0, self::RATE_LIMIT_MAX_WAIT_SECONDS);
+
+                if ($attempt >= count($backoff) || $wait > $this->rateLimitWaitSeconds) {
+                    throw $exception;
+                }
+
+                $this->rateLimitWaitSeconds -= $wait;
+                Sleep::for($wait)->seconds();
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $body
+     * @param  array<string, string>  $headers
+     */
+    private function send(
+        string $method,
+        string $path,
+        array $body,
+        array $headers,
+        ?string $filePath,
     ): Response {
         $apiKey = $this->config->apiKey();
 
@@ -609,6 +623,9 @@ class PostsyncerClient
                 false,
             );
         }
+
+        $remaining = $response->header('X-RateLimit-Remaining');
+        $this->rateLimitRemaining = ctype_digit($remaining) ? (int) $remaining : null;
 
         if (! $response->successful()) {
             throw PostsyncerException::fromResponse($response);
