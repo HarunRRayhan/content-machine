@@ -689,8 +689,7 @@ class UpdatePostActionTest extends TestCase
         ]));
         $row = SocialreinsGroup::query()->create([
             'workspace_id' => $post->workspace_id, 'subject_type' => 'post', 'subject_id' => $post->id,
-            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created', 'request' => '{}',
-            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001', 'expected_targets' => 1,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'lock', 'state' => 'created', 'request' => '{}', 'expected_targets' => 1,
             'results' => ['p1' => ['platform' => 'linkedin', 'status' => 'published', 'error' => null, 'at' => 0, 'targets' => []]],
         ]);
 
