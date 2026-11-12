@@ -188,6 +188,32 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         return $post;
     }
 
+    /**
+     * A post or video that went whole to SocialReins, in a workspace with no PostSyncer settings.
+     *
+     * @param  class-string<Post|Video>  $model
+     */
+    private function socialreinsOnly(string $model = Post::class): Post|Video
+    {
+        $post = $this->splitPost($model);
+        // As EnqueueSocialreinsPublishAction and the settle leave it.
+        $post->forceFill([
+            'postsyncer' => null,
+            'publish_progress' => ['driver' => 'socialreins', 'state' => 'succeeded', 'options' => ['platforms' => ['linkedin', 'threads']]],
+        ])->save();
+
+        $settings = $this->workspace->settings;
+        unset($settings['postsyncer']);
+        $this->workspace->forceFill(['settings' => $settings])->save();
+
+        return $post;
+    }
+
+    private function assertPostsyncerNotCalled(): void
+    {
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'postsyncer.com'));
+    }
+
     private function reschedule(Post|Video $post): TestResponse
     {
         return $this->withToken($this->token)->postJson('/api/v1/'.($post instanceof Video ? 'videos' : 'posts')."/{$post->human_id}/reschedule", [
@@ -277,6 +303,85 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
             ->assertJsonPath('errors.when.0', fn (string $m): bool => str_contains($m, 'PostSyncer half not rescheduled'));
 
         $this->assertSame([], $this->brainPuts());
+    }
+
+    public function test_reschedule_moves_a_socialreins_only_post_without_postsyncer(): void
+    {
+        $post = $this->socialreinsOnly();
+
+        $this->reschedule($post)->assertOk();
+
+        $target = $this->target->utc()->format('Y-m-d\TH:i:s\Z');
+        $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        Http::assertSent(fn (Request $r): bool => $r->method() === 'PUT' && $r->url() === 'https://brain.test/v1/posts/p1'
+            && $r['scheduled_at'] === $target && $r['first_comment'] === 'source link');
+        $this->assertPostsyncerNotCalled();
+        $this->assertSame($target, $this->storedAt($post, 'p1'));
+        $this->assertSame($target, $this->storedAt($post, 'p2'));
+        $post->refresh();
+        $this->assertSame('scheduled', $post->status);
+        $this->assertSame('succeeded', $post->publish_state);
+    }
+
+    public function test_reschedule_moves_a_socialreins_only_video_without_postsyncer(): void
+    {
+        $video = $this->socialreinsOnly(Video::class);
+
+        $this->reschedule($video)->assertOk();
+
+        $target = $this->target->utc()->format('Y-m-d\TH:i:s\Z');
+        $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        $this->assertPostsyncerNotCalled();
+        $this->assertSame($target, $this->storedAt($video, 'p1'));
+        $this->assertSame($target, $this->storedAt($video, 'p2'));
+    }
+
+    public function test_a_socialreins_only_reschedule_refused_by_brain_reports_it_and_a_retry_finishes(): void
+    {
+        $post = $this->socialreinsOnly();
+        $this->brainRefuses = ['p2'];
+
+        $this->reschedule($post)->assertUnprocessable()
+            ->assertJsonPath('errors.when.0', fn (string $m): bool => str_contains($m, 'The SocialReins reschedule did not finish')
+                && ! str_contains($m, 'PostSyncer') && str_contains($m, 'Moved: bangla linkedin') && str_contains($m, 'bangla threads failed'));
+
+        $this->assertNull($this->storedAt($post, 'p2'));
+
+        $this->brainRefuses = [];
+        $this->reschedule($post)->assertOk();
+
+        $this->assertSame(['p1', 'p2', 'p2'], $this->brainPuts());
+        $this->assertNotNull($this->storedAt($post, 'p2'));
+        $this->assertPostsyncerNotCalled();
+    }
+
+    public function test_a_socialreins_only_reschedule_moves_nothing_when_one_platform_already_went_out(): void
+    {
+        $post = $this->socialreinsOnly();
+        $this->brain['p2']['status'] = 'published';
+
+        $this->reschedule($post)->assertUnprocessable()
+            ->assertJsonPath('errors.when.0', fn (string $m): bool => str_contains($m, 'Nothing was rescheduled') && str_contains($m, 'threads is published'));
+
+        $this->assertSame([], $this->brainPuts());
+    }
+
+    public function test_a_socialreins_only_reschedule_keeps_the_existing_rules(): void
+    {
+        $post = $this->socialreinsOnly();
+
+        $post->forceFill(['status' => 'posted'])->save();
+        $this->reschedule($post)->assertUnprocessable()->assertJsonPath('errors.when.0', 'Only scheduled posts can be rescheduled.');
+
+        $post->forceFill(['status' => 'scheduled', 'publish_state' => 'running'])->save();
+        $this->reschedule($post)->assertUnprocessable()->assertJsonPath('errors.when.0', 'A publish is already in progress.');
+
+        $post->forceFill(['publish_state' => 'succeeded'])->save();
+        $this->target = CarbonImmutable::now()->subHour();
+        $this->reschedule($post)->assertUnprocessable()->assertJsonPath('errors.when.0', 'The new schedule must be in the future.');
+
+        // Refused before brain was asked anything.
+        Http::assertNothingSent();
     }
 
     public function test_take_down_removes_both_halves(): void

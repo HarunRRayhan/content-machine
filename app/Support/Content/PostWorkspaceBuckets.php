@@ -49,10 +49,6 @@ final class PostWorkspaceBuckets
         ];
 
         foreach ($groups as $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-
             $key = $this->groupLanguageKey($group);
 
             foreach ($group['platforms'] ?? [] as $platform) {

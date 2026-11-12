@@ -6,6 +6,7 @@ use App\Actions\Dashboard\BuildDashboardSummaryAction;
 use App\Models\Idea;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
+use App\Models\SocialreinsGroup;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Calendar\CollectCalendarOccurrences;
@@ -116,5 +117,38 @@ class BuildDashboardSummaryActionTest extends TestCase
         $this->assertSame('/posts/P-50', $summary['upcoming'][0]['href']);
         $this->assertSame($soon->id, $summary['upcoming'][0]['id']);
         $this->assertSame(1, $summary['posts']['scheduled']);
+    }
+
+    public function test_upcoming_lists_socialreins_scheduled_content_once(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-27 10:00:00', 'Asia/Dhaka'));
+
+        $workspace = Workspace::factory()->create(['timezone' => 'Asia/Dhaka']);
+
+        $socialreins = function (Post|Video $subject, string $at) use ($workspace): void {
+            $result = fn (string $platform): array => ['platform' => $platform, 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []];
+            SocialreinsGroup::query()->create([
+                'workspace_id' => $workspace->id, 'subject_type' => $subject instanceof Video ? 'video' : 'post', 'subject_id' => $subject->id,
+                'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'k'.$subject->human_id, 'state' => 'created',
+                'request' => json_encode(['scheduled_at' => $at]),
+                'group_id' => null, 'expected_targets' => 2,
+                'results' => ['p1' => $result('linkedin'), 'p2' => $result('threads')],
+            ]);
+        };
+
+        $only = Video::factory()->for($workspace)->create(['title' => 'Only', 'human_id' => 'BV-80', 'status' => 'scheduled', 'postsyncer' => null]);
+        $socialreins($only, '2026-08-28T03:00:00Z');
+
+        $split = Post::factory()->for($workspace)->create([
+            'title' => 'Split', 'human_id' => 'P-81', 'status' => 'scheduled',
+            'postsyncer' => ['groups' => [['post_id' => '42', 'scheduled_at' => '2026-08-29T09:00:00+06:00']]],
+        ]);
+        $socialreins($split, '2026-08-29T03:00:00Z');
+
+        $upcoming = $this->action()->handle($workspace)->toArray()['upcoming'];
+
+        $this->assertSame(['BV-80', 'P-81'], array_column($upcoming, 'human_id'));
+        $this->assertSame('2026-08-28T09:00:00+06:00', $upcoming[0]['at']);
+        $this->assertSame('scheduled', $upcoming[0]['state']);
     }
 }

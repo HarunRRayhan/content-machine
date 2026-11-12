@@ -6,6 +6,7 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -677,6 +678,31 @@ class UpdatePostActionTest extends TestCase
         (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['captions' => $captions], $post));
 
         $this->assertSame('approved', $post->refresh()->approval_state);
+    }
+
+    public function test_a_post_published_through_socialreins_is_locked_until_it_is_taken_down(): void
+    {
+        $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+            'status' => 'posted',
+            'postsyncer' => null,
+            'publish_progress' => ['driver' => 'socialreins', 'state' => 'succeeded', 'options' => []],
+        ]));
+        $row = SocialreinsGroup::query()->create([
+            'workspace_id' => $post->workspace_id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'k', 'state' => 'created', 'request' => '{}',
+            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000001', 'expected_targets' => 1,
+            'results' => ['p1' => ['platform' => 'linkedin', 'status' => 'published', 'error' => null, 'at' => 0, 'targets' => []]],
+        ]);
+
+        $this->assertLockedUpdateRefused($post, ['title' => 'Renamed']);
+        // A platform SocialReins already published cannot be added as a new caption section.
+        $captions = $post->captions;
+        $captions['English']['linkedin'] = ['title' => '', 'caption' => 'LinkedIn teaser', 'first_comment' => '', 'images' => ['p.pdf'], 'thread' => []];
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions, 'platforms' => ['facebook', 'instagram', 'linkedin', 'twitter']]);
+
+        $row->update(['results' => ['p1' => ['status' => 'deleted'] + $row->results['p1']]]);
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['title' => 'Renamed'], $post));
+        $this->assertSame('Renamed', $post->refresh()->title);
     }
 
     /**
