@@ -31,7 +31,7 @@ final class ListCalendarEventsAction
 
         $events = [];
 
-        $rows = PublishGroups::rowsByWorkspace($workspace, 'post');
+        $rows = PublishGroups::rowsBySubject('post', PublishGroups::subjectsBetween($workspace, 'post', $gridStart, $gridEnd));
         foreach (Post::query()->where('workspace_id', $workspace->id)
             ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $post) {
             foreach ($this->occurrences->fromRecord(
@@ -47,7 +47,7 @@ final class ListCalendarEventsAction
             }
         }
 
-        $rows = PublishGroups::rowsByWorkspace($workspace, 'video');
+        $rows = PublishGroups::rowsBySubject('video', PublishGroups::subjectsBetween($workspace, 'video', $gridStart, $gridEnd));
         foreach (Video::query()->where('workspace_id', $workspace->id)
             ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $video) {
             foreach ($this->occurrences->fromRecord(

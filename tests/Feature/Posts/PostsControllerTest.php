@@ -15,6 +15,7 @@ use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -64,6 +65,53 @@ class PostsControllerTest extends TestCase
                 ->where('items.data.0.type', 'post')
                 ->where('items.data.0.id', $mine->id)
                 ->where('filters.status', 'draft')
+            );
+    }
+
+    public function test_index_shows_socialreins_platforms_once_and_makes_a_fixed_number_of_queries(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        $socialreins = function (Post $post) use ($workspace): void {
+            SocialreinsGroup::query()->create([
+                'workspace_id' => $workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+                'language' => 'bangla', 'sequence' => 1, 'idempotency_key' => 'k'.$post->id, 'state' => 'created',
+                'request' => json_encode(['scheduled_at' => '2026-08-26T03:00:00Z']), 'expected_targets' => 1,
+                'results' => ['p'.$post->id => ['platform' => 'linkedin', 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []]],
+            ]);
+        };
+        $queries = function (): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->get(route('posts.index', ['status' => 'scheduled']))->assertOk();
+            DB::disableQueryLog();
+
+            return count(DB::getQueryLog());
+        };
+
+        // A split post: Facebook through PostSyncer, LinkedIn through SocialReins.
+        $split = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled', 'language' => 'bn', 'platforms' => ['facebook', 'linkedin'],
+            'postsyncer' => ['groups' => [['post_id' => '42', 'status' => 'SCHEDULED', 'language' => 'bangla', 'platforms' => ['facebook']]]],
+        ]);
+        $socialreins($split);
+        $queries(); // the first request also fills per-process caches
+        $one = $queries();
+
+        foreach (range(1, 6) as $ignored) {
+            $socialreins(Post::factory()->for($workspace)->create(['status' => 'scheduled', 'postsyncer' => null]));
+        }
+        $this->assertSame($one, $queries());
+
+        $this->get(route('posts.index', ['status' => 'scheduled', 'q' => $split->human_id]))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('items.data', 1)
+                ->has('items.data.0.groups', 2)
+                ->where('items.data.0.groups.0.post_id', '42')
+                ->where('items.data.0.groups.1.source', 'socialreins')
+                ->where('items.data.0.groups.1.status', 'scheduled')
+                ->where('items.data.0.groups.1.scheduled_at', '2026-08-26T03:00:00Z')
+                ->where('items.data.0.workspaces', [['key' => 'bn', 'groups' => [], 'platforms' => ['facebook', 'linkedin']]])
             );
     }
 

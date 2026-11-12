@@ -132,7 +132,7 @@ final class BuildDashboardSummaryAction
         $horizon = $today->addDays(14)->endOfDay();
         $events = [];
 
-        $rows = PublishGroups::rowsByWorkspace($workspace, 'post');
+        $rows = PublishGroups::rowsBySubject('post', Post::query()->select('id')->where('workspace_id', $workspace->id)->where('status', 'scheduled'));
         foreach (Post::query()->where('workspace_id', $workspace->id)->where('status', 'scheduled')
             ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $post) {
             foreach ($this->occurrences->fromRecord('post', $post->id, $post->human_id, $post->title, ['groups' => PublishGroups::of($post, $rows[$post->id] ?? [])], $timezone) as $event) {
@@ -142,7 +142,7 @@ final class BuildDashboardSummaryAction
             }
         }
 
-        $rows = PublishGroups::rowsByWorkspace($workspace, 'video');
+        $rows = PublishGroups::rowsBySubject('video', Video::query()->select('id')->where('workspace_id', $workspace->id)->where('status', 'scheduled'));
         foreach (Video::query()->where('workspace_id', $workspace->id)->where('status', 'scheduled')
             ->where(fn ($query) => $query->whereNotNull('postsyncer')->orWhereIn('id', array_keys($rows)))->get() as $video) {
             foreach ($this->occurrences->fromRecord('video', $video->id, $video->human_id, $video->title, ['groups' => PublishGroups::of($video, $rows[$video->id] ?? [])], $timezone) as $event) {
