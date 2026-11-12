@@ -19,7 +19,7 @@ every language, as before.
   so publishing a mixed post to one platform still goes through PostSyncer.
 - A language that is only the planners' fallback (an empty or `both` language with untagged
   captions) is not known, so that subject goes through PostSyncer.
-- With languages ticked, a Telegram publish request stays on PostSyncer, which is what closes the request, unless the post is already on SocialReins.
+- A Telegram publish request follows the same rules as any other publish, with or without ticked languages. The SocialReins run keeps the request id in its stored options and closes the request when it settles: published once the post is handed over (scheduled counts, as on PostSyncer, so `/cancel` no longer applies), failed when the run fails. A retry reopens a failed request. A late webhook or reconcile never closes a request that an edit moved back to awaiting approval. A dashboard retry names no request: it adopts the post's one failed request when the bot is still connected, and otherwise publishes without it. Once the PostSyncer half of a split is live, a bot disconnect does not stop the SocialReins half.
 - A subject already on a driver stays there for retry, take down, reconcile and status,
   whatever the settings say later. SocialReins: `publish_progress.driver`, or
   `socialreins_groups` with a pending or live group. PostSyncer: `postsyncer.groups` with a
@@ -90,7 +90,8 @@ nothing live is skipped. Brain cannot delete on TikTok; that platform is reporte
 
 A split post or video (PostSyncer half plus SocialReins half: a new subject whose platforms the
 set covers only in part, see the per-language platform list) is handled whole. PostSyncer
-publishes its platforms first, then the rest go to SocialReins; a Telegram publish never splits.
+publishes its platforms first, then the rest go to SocialReins. A Telegram publish splits too: its
+request stays approved through the PostSyncer half and closes when the SocialReins half settles.
 A platform goes to SocialReins only if every language the subject uses covers it.
 
 - Take down also deletes each still-scheduled PostSyncer group (`DELETE /posts/{id}` on
@@ -121,4 +122,4 @@ An event for a group CM does not know answers 404 so brain retries it.
 The API returns these results as `socialreins` on a post or video ([api.md](api.md)).
 
 Not supported through this driver: PostSyncer-style reconcile commands (not needed, the key
-replay covers them) and Telegram publish requests (the request keeps its approved state).
+replay covers them). Videos have no Telegram publish requests on either driver.

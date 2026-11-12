@@ -60,14 +60,13 @@ class SocialreinsConfig
      * A new post or video whose platforms SocialReins covers only in part: PostSyncer publishes
      * the `postsyncer` platforms first, then the `socialreins` ones go through SocialReins
      * (ContinueSplitOnSocialreinsAction). Null when it goes whole to one driver.
-     * Telegram publishes never split: only PostSyncer's publish closes their request.
      *
      * @param  array<string, mixed>  $options
      * @return array{socialreins: list<string>, postsyncer: list<string>}|null
      */
     public static function splitOf(Post|Video $subject, Workspace $workspace, array $options = []): ?array
     {
-        if (self::isOnSocialreins($subject) || ($options['telegram_request_id'] ?? null) !== null) {
+        if (self::isOnSocialreins($subject)) {
             return null;
         }
 
@@ -93,11 +92,6 @@ class SocialreinsConfig
         $routed = $config->routedLanguages();
 
         if ($routed !== []) {
-            // Only PostSyncer's publish closes a Telegram request, and /cancel relies on that.
-            if (($options['telegram_request_id'] ?? null) !== null) {
-                return null;
-            }
-
             $languages = $subject instanceof Video
                 ? app(VideoPublishPlanner::class)->knownLanguages($subject)
                 : app(PostPublishPlanner::class)->knownLanguages($subject);

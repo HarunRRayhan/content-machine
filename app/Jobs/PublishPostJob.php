@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Post;
 use App\Models\TelegramPostRequest;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -116,6 +117,13 @@ class PublishPostJob implements ShouldBeUnique, ShouldQueue
             }
 
             $progress = $post->publish_progress;
+
+            // A split post handed over to SocialReins is no longer this job's to fail: the
+            // SocialReins half owns the publish state and the Telegram request.
+            if (is_array($progress) && ($progress['driver'] ?? null) === SocialreinsConfig::DRIVER) {
+                return false;
+            }
+
             if ($this->operationId !== null
                 && (! is_array($progress) || ($progress['operation_id'] ?? null) !== $this->operationId)
             ) {

@@ -2,15 +2,21 @@
 
 namespace Tests\Feature\Socialreins;
 
+use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Actions\Postsyncer\SyncScheduledPostsAction;
 use App\Actions\Socialreins\PublishToSocialreinsAction;
+use App\Actions\Socialreins\SettleSocialreinsSubjectAction;
 use App\Actions\Socialreins\TakeDownSocialreinsAction;
+use App\Actions\Telegram\CancelTelegramPostRequestAction;
 use App\Jobs\PublishPostJob;
 use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
+use App\Models\TelegramBotConfig;
+use App\Models\TelegramBotLink;
+use App\Models\TelegramPostRequest;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
@@ -18,6 +24,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
@@ -88,15 +97,18 @@ class SocialreinsSplitPublishTest extends TestCase
         ]);
     }
 
-    /** @param  list<mixed>  $srAnswers  brain answers for successive `POST /post-groups` */
-    private function fakeApis(array $srAnswers = [], int $psCreateStatus = 201): void
+    /**
+     * @param  list<mixed>  $srAnswers  brain answers for successive `POST /post-groups`
+     * @param  array<string, mixed>  $stubs  replace the answer of a URL
+     */
+    private function fakeApis(array $srAnswers = [], int $psCreateStatus = 201, array $stubs = []): void
     {
         $sr = Http::sequence();
         foreach ($srAnswers ?: [[$this->srGroup(), 201]] as [$body, $status]) {
             $sr->push($body, $status);
         }
 
-        $this->fakeHttp([
+        $this->fakeHttp($stubs + [
             self::SR_URL => $sr,
             self::PS_URL => Http::response(['id' => 42, 'status' => 'published'], $psCreateStatus),
             self::PS_URL.'/42' => Http::response([
@@ -300,13 +312,367 @@ class SocialreinsSplitPublishTest extends TestCase
         $this->assertNull(SocialreinsConfig::splitOf($queued, $queued->workspace));
     }
 
-    public function test_a_telegram_publish_never_splits(): void
+    private function telegramRequest(Post $post): TelegramPostRequest
+    {
+        $config = TelegramBotConfig::factory()->for($post->workspace)->connected()->create();
+        TelegramBotLink::factory()->create(['telegram_bot_config_id' => $config->id, 'telegram_user_id' => 42]);
+
+        return TelegramPostRequest::factory()->for($post->workspace)->create([
+            'telegram_bot_config_id' => $config->id,
+            'telegram_user_id' => 42,
+            'telegram_chat_id' => 555,
+            'post_id' => $post->id,
+            'state' => TelegramPostRequest::APPROVED,
+        ]);
+    }
+
+    /** @return array<string, array{list<string>|null}> */
+    public static function routedLists(): array
+    {
+        return ['no routed list' => [null], 'a routed list' => [['english']]];
+    }
+
+    /** @param  list<string>|null  $routed */
+    #[DataProvider('routedLists')]
+    public function test_a_telegram_publish_routed_whole_to_socialreins_closes_its_request_as_published(?array $routed): void
+    {
+        $this->fakeApis();
+        $workspace = $this->workspace(['facebook', 'linkedin']);
+        if ($routed !== null) {
+            SocialreinsConfig::write($workspace, ['routed_languages' => $routed]);
+        }
+        $post = $this->makePost($workspace->fresh());
+        $request = $this->telegramRequest($post);
+
+        $queued = $this->publish($post, ['telegram_request_id' => $request->id]);
+
+        Queue::assertNotPushed(PublishPostJob::class);
+        Queue::assertPushed(PublishSocialreinsJob::class, fn (PublishSocialreinsJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+        $this->assertSame($request->id, $queued->publish_progress['options']['telegram_request_id']);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+
+        $this->runQueued();
+
+        // Handed over and scheduled counts as published, as on PostSyncer.
+        $this->assertSame('scheduled', $post->fresh()->status);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+
+        // /cancel finds nothing to cancel: the scheduled post stays, and so does the request.
+        app(CancelTelegramPostRequestAction::class)->handle($request, $request->telegramBotConfig, 42, 555);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_failed_socialreins_telegram_publish_fails_its_request_and_a_retry_reopens_it(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422], [$this->srGroup(), 201]]);
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+        $this->assertNotNull($request->fresh()->error_message);
+
+        // A dashboard retry carries no request id: the post's failed request is picked up.
+        $queued = $this->publish($post->fresh());
+
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+        $this->assertNull($request->fresh()->error_message);
+        $this->assertSame($request->id, $queued->publish_progress['options']['telegram_request_id']);
+
+        $this->runQueued();
+
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_settle_after_the_job_still_finds_the_request(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+        $request->forceFill(['state' => TelegramPostRequest::FAILED])->save();
+
+        // What a webhook or the reconcile runs: no publish options, only the stored ones.
+        app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
+
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_late_settle_leaves_a_request_the_user_moved_back_to_awaiting_approval(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422]]);
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+
+        // The user edits the failed post: the approval and the request are open again.
+        $post->refresh()->forceFill(['approval_state' => 'approved'])->save();
+        $post->invalidateApproval();
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->fresh()->state);
+
+        // The next webhook or reconcile settles the old run as failed once more.
+        app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
+
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->fresh()->state);
+
+        // So /approve still works, and a settle before the new publish starts keeps it approved.
+        $link = TelegramBotLink::query()->where('telegram_user_id', 42)->firstOrFail();
+        app(ApprovePostAction::class)->handle($post->fresh(), $link->user, $request->fresh(), $request->telegramBotConfig, 42, 555);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+
+        app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
+
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+    }
+
+    public function test_a_dashboard_retry_is_not_refused_when_the_bot_was_disconnected(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $request->telegramBotConfig->forceFill(['bot_token' => null])->save();
+
+        // Nothing is live yet, so the run stops and fails its request.
+        $this->runQueued();
+
+        $this->assertSame([], $this->sentTo(self::SR_URL));
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+
+        // A publish that names the request keeps the strict check.
+        try {
+            $this->publish($post->fresh(), ['telegram_request_id' => $request->id]);
+            $this->fail('A named request of a disconnected bot must be refused.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('no longer approved', $exception->getMessage());
+        }
+
+        // The dashboard retry names none: it goes out without the request.
+        $queued = $this->publish($post->fresh());
+
+        $this->assertArrayNotHasKey('telegram_request_id', $queued->publish_progress['options']);
+        // Only the retry's own job: the first run's job is long gone from a real queue.
+        Queue::pushed(PublishSocialreinsJob::class)->last()->handle(app(PublishToSocialreinsAction::class));
+        $this->assertCount(1, $this->sentTo(self::SR_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+    }
+
+    public function test_a_dashboard_retry_is_not_refused_when_the_post_has_two_failed_requests(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422], [$this->srGroup(), 201]]);
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+        $other = $request->fresh()->replicate()->fill(['telegram_update_key' => 'other']);
+        $other->save();
+        $this->assertSame(TelegramPostRequest::FAILED, $other->fresh()->state);
+
+        $queued = $this->publish($post->fresh());
+
+        $this->assertArrayNotHasKey('telegram_request_id', $queued->publish_progress['options']);
+        // Only the retry's own job: the first run's job is long gone from a real queue.
+        Queue::pushed(PublishSocialreinsJob::class)->last()->handle(app(PublishToSocialreinsAction::class));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+        $this->assertSame(TelegramPostRequest::FAILED, $other->fresh()->state);
+    }
+
+    public function test_a_bot_disconnect_after_the_postsyncer_half_is_live_does_not_strand_the_split(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        Queue::pushed(PublishPostJob::class)->first()->handle(app(PublishPostAction::class));
+        $this->assertCount(1, $this->sentTo(self::PS_URL));
+        $request->telegramBotConfig->forceFill(['bot_token' => null])->save();
+
+        $this->runQueued();
+
+        $this->assertCount(1, $this->sentTo(self::SR_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        // Both halves went out: the request is closed as published, disconnected bot or not.
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_cancelled_telegram_request_is_not_published_through_socialreins(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $request->forceFill(['state' => TelegramPostRequest::CANCELLED])->save();
+
+        $this->runQueued();
+
+        $this->assertSame([], $this->sentTo(self::SR_URL));
+        $this->assertSame('idle', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::CANCELLED, $request->fresh()->state);
+    }
+
+    public function test_a_socialreins_job_that_fails_for_good_fails_the_telegram_request(): void
+    {
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $queued = $this->publish($post, ['telegram_request_id' => $request->id]);
+
+        (new PublishSocialreinsJob($queued, $queued->publish_progress['options']))->failed(null);
+
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+    }
+
+    public function test_a_split_telegram_publish_closes_its_request_only_after_both_halves(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+
+        $queued = $this->publish($post, ['telegram_request_id' => $request->id]);
+
+        $this->assertSame($request->id, $queued->publish_progress['split']['socialreins']['telegram_request_id']);
+        Queue::assertPushed(PublishPostJob::class, 1);
+
+        // PostSyncer's half alone: handed over, the request is still open and cannot be cancelled.
+        Queue::pushed(PublishPostJob::class)->first()->handle(app(PublishPostAction::class));
+
+        $this->assertCount(1, $this->sentTo(self::PS_URL));
+        $this->assertSame('queued', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+        app(CancelTelegramPostRequestAction::class)->handle($request, $request->telegramBotConfig, 42, 555);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+
+        $this->runQueued();
+
+        $this->assertCount(1, $this->sentTo(self::PS_URL));
+        $this->assertCount(1, $this->sentTo(self::SR_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_split_telegram_publish_fails_its_request_when_the_socialreins_half_fails(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422], [$this->srGroup(), 201]]);
+        $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+
+        // The bot's /post retry names the request; only the SocialReins half goes out again.
+        $this->publish($post->fresh(), ['confirm_ask' => true, 'telegram_request_id' => $request->id]);
+        $this->runQueued();
+
+        $this->assertCount(1, $this->sentTo(self::PS_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_split_telegram_publish_fails_its_request_when_the_postsyncer_half_fails(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace(linkedinAccount: false));
+        $request = $this->telegramRequest($post);
+
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+
+        $this->assertSame([], $this->sentTo(self::SR_URL));
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+    }
+
+    public function test_a_postsyncer_job_failing_after_the_handover_leaves_the_socialreins_half_alone(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $job = Queue::pushed(PublishPostJob::class)->first();
+        $job->handle(app(PublishPostAction::class));
+        $this->assertSame('queued', $post->fresh()->publish_state);
+
+        // The job as queued today, and one serialized before run tokens and leases existed.
+        $job->failed(new RuntimeException('late failure'));
+        $this->assertSame('queued', $post->fresh()->publish_state);
+        (new PublishPostJob($post->fresh(), $job->options))->failed(new RuntimeException('late failure'));
+
+        $this->assertSame('queued', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+
+        $this->runQueued();
+
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_plan_drift_recovery_hands_the_split_over_with_its_telegram_request(): void
     {
         $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+        // The post changes while PostSyncer creates its group: the run fails with every group checkpointed.
+        $this->fakeApis(stubs: [self::PS_URL => function () use ($post) {
+            Post::query()->whereKey($post->id)->update(['captions' => ['English' => [
+                'facebook' => ['caption' => 'EN fb'],
+                'linkedin' => ['caption' => 'Changed li'],
+            ]]]);
 
-        $this->assertNotNull(SocialreinsConfig::splitOf($post, $post->workspace));
-        $this->assertNull(SocialreinsConfig::splitOf($post, $post->workspace, ['telegram_request_id' => 7]));
-        $this->assertFalse(SocialreinsConfig::routesToSocialreins($post, $post->workspace, ['telegram_request_id' => 7]));
+            return Http::response(['id' => 42, 'status' => 'published'], 201);
+        }]);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+        $this->assertSame([], $this->sentTo(self::SR_URL));
+
+        app(PublishPostAction::class)->recoverPlanDrift($post);
+
+        $post->refresh();
+        $this->assertSame('queued', $post->publish_state);
+        $this->assertSame('socialreins', $post->publish_progress['driver']);
+        $this->assertSame($request->id, $post->publish_progress['options']['telegram_request_id']);
+        Queue::assertPushed(PublishSocialreinsJob::class, fn (PublishSocialreinsJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+
+        $this->runQueued();
+
+        $this->assertCount(1, $this->sentTo(self::SR_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_webhook_settle_while_the_job_is_still_working_changes_nothing(): void
+    {
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $seen = null;
+        // The settle a webhook runs lands while the job waits for brain's answer to the create.
+        $this->fakeApis(stubs: [self::SR_URL => function () use ($post, $request, &$seen) {
+            app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
+            $seen = [$post->fresh()->publish_state, $request->fresh()->state];
+
+            return Http::response($this->srGroup(), 201);
+        }]);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+
+        $this->runQueued();
+
+        $this->assertSame(['running', TelegramPostRequest::APPROVED], $seen);
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
     }
 
     public function test_the_postsyncer_sync_does_not_mark_a_split_post_posted_while_its_socialreins_half_failed(): void
