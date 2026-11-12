@@ -15,6 +15,7 @@ use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsException;
 use App\Support\Socialreins\SocialreinsResults;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Moves both halves of a split post or video to a new time: the PostSyncer groups through
@@ -28,9 +29,17 @@ use Carbon\CarbonImmutable;
  *
  * A post or video that went whole to SocialReins has no PostSyncer half: only its SocialReins
  * posts move, and PostSyncer does not have to be configured.
+ *
+ * One reschedule runs at a time per post or video (see claim()).
  */
 class RescheduleSplitPostAction
 {
+    /** Key of the reschedule lease in `publish_progress`. */
+    private const LEASE = 'socialreins_reschedule';
+
+    /** As VideoRescheduleAction: longer than any reschedule takes. */
+    private const LEASE_MINUTES = 15;
+
     public function __construct(
         private readonly ReschedulePostAction $postsyncer,
         private readonly VideoRescheduleAction $videos,
@@ -53,20 +62,71 @@ class RescheduleSplitPostAction
 
         $target = $data->when->setSecond(0)->utc();
 
-        if (! $split) {
-            // The rules the PostSyncer actions apply, which the split path gets from them.
-            $noun = $post instanceof Video ? 'videos' : 'posts';
-            if ($post->status !== 'scheduled') {
-                throw new SocialreinsException("Only scheduled {$noun} can be rescheduled.");
-            }
-            if (in_array($post->publish_state, ['queued', 'running'], true)) {
-                throw new SocialreinsException('A publish is already in progress.');
-            }
-            if ($target->lessThanOrEqualTo(CarbonImmutable::now())) {
-                throw new SocialreinsException('The new schedule must be in the future.');
-            }
+        $this->claim($post, $split, $target);
+
+        try {
+            $post = $this->move($post, $workspace, $data, $split, $target);
+        } finally {
+            $this->release($post);
         }
 
+        return $post->refresh();
+    }
+
+    /**
+     * Admits one reschedule at a time, as VideoRescheduleAction's marker does for the PostSyncer
+     * groups: a lease in `publish_progress`, written under the row lock the publish path takes,
+     * so two calls cannot interleave their PUTs. It expires, so a crashed call does not lock the
+     * post for good. The rules of the SocialReins-only path are checked under the same lock.
+     */
+    private function claim(Post|Video $post, bool $split, CarbonImmutable $target): void
+    {
+        DB::transaction(function () use ($post, $split, $target): void {
+            $locked = $post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
+            $noun = $locked instanceof Video ? 'video' : 'post';
+
+            if (! $split) {
+                // The rules the PostSyncer actions apply, which the split path gets from them.
+                if ($locked->status !== 'scheduled') {
+                    throw new SocialreinsException("Only scheduled {$noun}s can be rescheduled.");
+                }
+                if (in_array($locked->publish_state, ['queued', 'running'], true)) {
+                    throw new SocialreinsException('A publish is already in progress.');
+                }
+                if ($locked instanceof Video && ($locked->publish_state !== 'succeeded' || $locked->hasUncertainPublish())) {
+                    throw new SocialreinsException('The video has a publish in progress or an uncertain publish. Reconcile it first.');
+                }
+                if ($target->lessThanOrEqualTo(CarbonImmutable::now())) {
+                    throw new SocialreinsException('The new schedule must be in the future.');
+                }
+            }
+
+            $progress = is_array($locked->publish_progress) ? $locked->publish_progress : [];
+            $startedAt = $progress[self::LEASE]['started_at'] ?? null;
+            if (is_string($startedAt) && CarbonImmutable::parse($startedAt)->addMinutes(self::LEASE_MINUTES)->isFuture()) {
+                throw new SocialreinsException("Another reschedule is already running for this {$noun}.");
+            }
+
+            $progress[self::LEASE] = ['started_at' => CarbonImmutable::now()->toIso8601String()];
+            $locked->forceFill(['publish_progress' => $progress])->save();
+        });
+    }
+
+    private function release(Post|Video $post): void
+    {
+        DB::transaction(function () use ($post): void {
+            $locked = $post::query()->whereKey($post->getKey())->lockForUpdate()->first();
+            $progress = $locked?->publish_progress;
+
+            if ($locked !== null && is_array($progress) && isset($progress[self::LEASE])) {
+                unset($progress[self::LEASE]);
+                $locked->forceFill(['publish_progress' => $progress])->save();
+            }
+        });
+    }
+
+    private function move(Post|Video $post, Workspace $workspace, ReschedulePostData $data, bool $split, CarbonImmutable $target): Post|Video
+    {
         $config = SocialreinsConfig::fromWorkspace($workspace);
         $todo = $this->socialreinsPosts($post, $config, $target);
 

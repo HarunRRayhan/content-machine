@@ -384,6 +384,56 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_a_second_reschedule_of_a_socialreins_only_post_waits_for_the_running_one(): void
+    {
+        $this->assertOneRescheduleAtATime($this->socialreinsOnly(), 'post');
+    }
+
+    public function test_a_second_reschedule_of_a_split_video_waits_for_the_running_one(): void
+    {
+        $this->assertOneRescheduleAtATime($this->splitPost(Video::class), 'video');
+    }
+
+    private function assertOneRescheduleAtATime(Post|Video $subject, string $noun): void
+    {
+        $lease = fn (CarbonImmutable $startedAt): bool => $subject->forceFill([
+            'publish_progress' => [...$subject->publish_progress, 'socialreins_reschedule' => ['started_at' => $startedAt->toIso8601String()]],
+        ])->save();
+
+        // Another call holds the lease: nothing is read or sent.
+        $lease(CarbonImmutable::now()->subMinute());
+        $this->reschedule($subject)->assertUnprocessable()
+            ->assertJsonPath('errors.when.0', "Another reschedule is already running for this {$noun}.");
+        Http::assertNothingSent();
+
+        // A call that died left its lease behind: it expires, and a finished call leaves none.
+        $lease(CarbonImmutable::now()->subMinutes(16));
+        $this->reschedule($subject)->assertOk()->assertJsonMissingPath('data.publish_progress.socialreins_reschedule');
+        $this->assertArrayNotHasKey('socialreins_reschedule', $subject->refresh()->publish_progress);
+        $this->assertSame('succeeded', $subject->publish_state);
+
+        // A failed call releases it too.
+        $this->target = $this->target->addHour();
+        $this->brainRefuses = ['p1'];
+        $this->reschedule($subject)->assertUnprocessable();
+        $this->assertArrayNotHasKey('socialreins_reschedule', $subject->refresh()->publish_progress);
+    }
+
+    public function test_a_socialreins_only_video_must_have_a_settled_publish(): void
+    {
+        $video = $this->socialreinsOnly(Video::class);
+
+        $video->forceFill(['publish_state' => 'failed'])->save();
+        $this->reschedule($video)->assertUnprocessable()
+            ->assertJsonPath('errors.when.0', 'The video has a publish in progress or an uncertain publish. Reconcile it first.');
+
+        $video->forceFill(['publish_state' => 'succeeded', 'publish_progress' => [...$video->publish_progress, 'state' => 'uncertain']])->save();
+        $this->reschedule($video)->assertUnprocessable()
+            ->assertJsonPath('errors.when.0', 'The video has a publish in progress or an uncertain publish. Reconcile it first.');
+
+        Http::assertNothingSent();
+    }
+
     public function test_take_down_removes_both_halves(): void
     {
         $post = $this->splitPost();
