@@ -47,7 +47,7 @@ class PublishToSocialreinsAction
         try {
             $subject = $this->claim($subject, $options);
         } catch (PostsyncerException|InvalidArgumentException $exception) {
-            // The Telegram request or its bot connection changed: nothing was sent.
+            // The approval, the Telegram request or its bot connection changed: nothing was sent.
             $this->markFailed($subject, $exception->getMessage());
 
             return;
@@ -125,13 +125,31 @@ class PublishToSocialreinsAction
                 return null;
             }
 
+            // As on the PostSyncer claim: an edit since the enqueue needs a new approval.
+            if ($locked instanceof Post && ($locked->approval_state ?? 'approved') !== 'approved') {
+                throw new PostsyncerException('This post needs human approval before it can be published.');
+            }
+
+            // A split post whose PostSyncer half is live must finish: the user approved the
+            // post, so a request that can no longer be locked (bot disconnected or rotated) or
+            // that was closed is left as it is, and the settle closes it if it still can.
+            $halfLive = is_array($locked->publish_progress['split'] ?? null)
+                && ($locked->postsyncer['groups'] ?? []) !== [];
+
+            try {
+                $request = $locked instanceof Post
+                    ? TelegramPublishRequests::lock($locked, TelegramPublishRequests::idFrom($options))
+                    : null;
+            } catch (PostsyncerException|InvalidArgumentException $exception) {
+                if (! $halfLive) {
+                    throw $exception;
+                }
+                $request = null;
+            }
+
             // As on the PostSyncer claim: a request cancelled or already published in the
             // meantime stops the run before anything is sent.
-            $request = $locked instanceof Post
-                ? TelegramPublishRequests::lock($locked, TelegramPublishRequests::idFrom($options))
-                : null;
-
-            if ($request !== null
+            if ($request !== null && ! $halfLive
                 && in_array($request->state, [TelegramPostRequest::CANCELLED, TelegramPostRequest::PUBLISHED], true)) {
                 $locked->forceFill(['publish_state' => 'idle', 'publish_error' => null])->save();
 

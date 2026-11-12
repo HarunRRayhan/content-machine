@@ -24,6 +24,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
@@ -426,6 +427,79 @@ class SocialreinsSplitPublishTest extends TestCase
         app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
 
         $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+    }
+
+    public function test_a_dashboard_retry_is_not_refused_when_the_bot_was_disconnected(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $request->telegramBotConfig->forceFill(['bot_token' => null])->save();
+
+        // Nothing is live yet, so the run stops and fails its request.
+        $this->runQueued();
+
+        $this->assertSame([], $this->sentTo(self::SR_URL));
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+
+        // A publish that names the request keeps the strict check.
+        try {
+            $this->publish($post->fresh(), ['telegram_request_id' => $request->id]);
+            $this->fail('A named request of a disconnected bot must be refused.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('no longer approved', $exception->getMessage());
+        }
+
+        // The dashboard retry names none: it goes out without the request.
+        $queued = $this->publish($post->fresh());
+
+        $this->assertArrayNotHasKey('telegram_request_id', $queued->publish_progress['options']);
+        // Only the retry's own job: the first run's job is long gone from a real queue.
+        Queue::pushed(PublishSocialreinsJob::class)->last()->handle(app(PublishToSocialreinsAction::class));
+        $this->assertCount(1, $this->sentTo(self::SR_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+    }
+
+    public function test_a_dashboard_retry_is_not_refused_when_the_post_has_two_failed_requests(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422], [$this->srGroup(), 201]]);
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+        $other = $request->fresh()->replicate()->fill(['telegram_update_key' => 'other']);
+        $other->save();
+        $this->assertSame(TelegramPostRequest::FAILED, $other->fresh()->state);
+
+        $queued = $this->publish($post->fresh());
+
+        $this->assertArrayNotHasKey('telegram_request_id', $queued->publish_progress['options']);
+        // Only the retry's own job: the first run's job is long gone from a real queue.
+        Queue::pushed(PublishSocialreinsJob::class)->last()->handle(app(PublishToSocialreinsAction::class));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+        $this->assertSame(TelegramPostRequest::FAILED, $other->fresh()->state);
+    }
+
+    public function test_a_bot_disconnect_after_the_postsyncer_half_is_live_does_not_strand_the_split(): void
+    {
+        $this->fakeApis();
+        $post = $this->makePost($this->workspace());
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        Queue::pushed(PublishPostJob::class)->first()->handle(app(PublishPostAction::class));
+        $this->assertCount(1, $this->sentTo(self::PS_URL));
+        $request->telegramBotConfig->forceFill(['bot_token' => null])->save();
+
+        $this->runQueued();
+
+        $this->assertCount(1, $this->sentTo(self::SR_URL));
+        $this->assertSame('succeeded', $post->fresh()->publish_state);
+        // Both halves went out: the request is closed as published, disconnected bot or not.
+        $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
     }
 
     public function test_a_cancelled_telegram_request_is_not_published_through_socialreins(): void

@@ -84,21 +84,32 @@ class EnqueueSocialreinsPublishAction
                 $options = $split['socialreins'];
             }
 
-            // Same admission as the PostSyncer enqueue: the request must be approved (or failed,
-            // on a retry), and the run that closes it keeps its id in the stored options.
-            // Only posts have Telegram requests.
+            // A publish that names its request gets the PostSyncer enqueue's admission: the
+            // request must be approved (or failed, on a retry). The run that closes a request
+            // keeps its id in the stored options. Only posts have Telegram requests.
             unset($options['telegram_request_id']);
             $telegramRequest = null;
             if ($locked instanceof Post) {
+                $named = $requestId !== null;
+
                 // A run that never settled (its worker died) left its request approved: keep it.
                 // A failed one is found by admit() itself.
                 $stored = $locked->publish_progress['options']['telegram_request_id'] ?? null;
-                if ($requestId === null && is_int($stored) && $locked->telegramPostRequests()->whereKey($stored)
+                if (! $named && is_int($stored) && $locked->telegramPostRequests()->whereKey($stored)
                     ->where('state', TelegramPostRequest::APPROVED)->exists()) {
                     $requestId = $stored;
                 }
 
-                $telegramRequest = TelegramPublishRequests::admit($locked, $requestId, $locked->publish_state === 'failed');
+                try {
+                    $telegramRequest = TelegramPublishRequests::admit($locked, $requestId, $locked->publish_state === 'failed');
+                } catch (ValidationException $exception) {
+                    // The dashboard cannot name a request, and the post itself is approved: a
+                    // request that cannot be adopted (bot disconnected or rotated, several
+                    // failed ones) is left alone and the publish goes out without it.
+                    if ($named) {
+                        throw $exception;
+                    }
+                }
             }
             if ($telegramRequest !== null) {
                 $options['telegram_request_id'] = $telegramRequest->id;
