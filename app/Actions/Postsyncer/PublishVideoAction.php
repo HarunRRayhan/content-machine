@@ -61,7 +61,10 @@ class PublishVideoAction
             if (! $config->publishEnabled() || ! $config->videoPublishEnabled()) {
                 throw new PostsyncerException(PostsyncerConfig::VIDEO_PUBLISH_DISABLED_MESSAGE);
             }
-            $client = new PostsyncerClient($config);
+            $client = new PostsyncerClient(
+                $config,
+                rateLimitWaitSeconds: PostsyncerClient::PUBLISH_RATE_LIMIT_WAIT_SECONDS,
+            );
             $groups = $this->planner->plan($video, $config, $options);
 
             if ($groups === []) {
@@ -1084,7 +1087,10 @@ class PublishVideoAction
 
         $message = 'PostSyncer accepted video post '.(string) $postId
             .' but its canonical payload could not be verified.';
-        if ($lastException->getMessage() !== '') {
+        if ($lastException instanceof PostsyncerException && $lastException->getCode() === 429) {
+            // The 429's own text says nothing was stored, which is true of the lookup only.
+            $message .= " PostSyncer's rate limit rejected the lookup (429); the post itself was created.";
+        } elseif ($lastException->getMessage() !== '') {
             $message .= ' '.$lastException->getMessage();
         }
 

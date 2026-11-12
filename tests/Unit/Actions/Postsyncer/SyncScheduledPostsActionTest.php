@@ -88,6 +88,7 @@ class SyncScheduledPostsActionTest extends TestCase
                         'post_id' => '140001',
                         'status' => 'SCHEDULED',
                         'scheduled_at' => now()->addDay()->toIso8601String(),
+                        'synced_at' => now()->subHours(3)->toIso8601String(),
                         'platforms' => ['facebook'],
                         'language' => 'english',
                     ],
@@ -126,6 +127,218 @@ class SyncScheduledPostsActionTest extends TestCase
         $this->assertSame('scheduled', $post->status);
         $this->assertSame('SCHEDULED', $post->postsyncer['groups'][0]['status']);
         $this->assertSame('PUBLISHED', $post->postsyncer['groups'][2]['status']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     * @return array<string, mixed>
+     */
+    private function group(int $postId, array $overrides = []): array
+    {
+        return array_merge([
+            'post_id' => (string) $postId,
+            'status' => 'SCHEDULED',
+            'scheduled_at' => now()->subMinutes(10)->toIso8601String(),
+            'platforms' => ['facebook'],
+            'language' => 'english',
+        ], $overrides);
+    }
+
+    public function test_a_far_future_group_is_checked_once_a_day_and_a_published_group_never(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+        $nextWeek = now()->addWeek()->toIso8601String();
+        $moved = now()->addDays(3)->toIso8601String();
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [
+                $this->group(1, ['scheduled_at' => $nextWeek]),
+                $this->group(2, ['scheduled_at' => $nextWeek, 'synced_at' => now()->subHours(25)->toIso8601String()]),
+                $this->group(3, ['scheduled_at' => $nextWeek, 'synced_at' => now()->subHours(23)->toIso8601String()]),
+                $this->group(4, ['status' => 'PUBLISHED']),
+                $this->group(5, [
+                    'status' => 'FAILED',
+                    'scheduled_at' => now()->subDays(2)->toIso8601String(),
+                    'synced_at' => now()->subHour()->toIso8601String(),
+                ]),
+            ]],
+        ]);
+
+        Http::fake(['*' => Http::response(['status' => 'SCHEDULED', 'scheduled_at' => $moved], 200)]);
+
+        $result = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(2, $result['requests']);
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/posts/1'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), '/posts/2'));
+        Http::assertSentCount(2);
+        // The daily look is what notices a time moved inside PostSyncer.
+        $this->assertSame($moved, $post->refresh()->postsyncer['groups'][0]['scheduled_at']);
+
+        (new SyncScheduledPostsAction)->handle();
+
+        Http::assertSentCount(2);
+    }
+
+    public function test_a_group_that_failed_in_the_last_day_is_checked_every_run(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [
+                $this->group(1, ['status' => 'FAILED', 'synced_at' => now()->subMinutes(5)->toIso8601String()]),
+            ]],
+        ]);
+        Http::fake(['*' => Http::sequence()
+            ->push(['status' => 'FAILED'], 200)
+            // Delivered late by PostSyncer.
+            ->push(['status' => 'PUBLISHED'], 200)]);
+
+        (new SyncScheduledPostsAction)->handle();
+        $this->assertSame('scheduled', $post->refresh()->status);
+
+        (new SyncScheduledPostsAction)->handle();
+        $this->assertSame('posted', $post->refresh()->status);
+    }
+
+    public function test_a_failed_lookup_does_not_stamp_the_check_time(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+        $checkedAt = now()->subHours(25)->toIso8601String();
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [
+                $this->group(1, ['scheduled_at' => now()->addWeek()->toIso8601String(), 'synced_at' => $checkedAt]),
+                $this->group(2, ['scheduled_at' => now()->addWeek()->toIso8601String()]),
+            ]],
+        ]);
+        Http::fake(['*' => Http::response(['message' => 'Server error'], 500)]);
+
+        $result = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(2, $result['requests']);
+        $groups = $post->refresh()->postsyncer['groups'];
+        $this->assertSame($checkedAt, $groups[0]['synced_at']);
+        $this->assertArrayNotHasKey('synced_at', $groups[1]);
+        $this->assertSame('SCHEDULED', $groups[0]['status']);
+
+        // Still due for its daily look on the next run.
+        (new SyncScheduledPostsAction)->handle();
+        Http::assertSentCount(4);
+    }
+
+    public function test_a_run_stays_within_its_request_budget_and_reaches_every_group_over_time(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+        $budget = SyncScheduledPostsAction::MAX_REQUESTS_PER_RUN;
+
+        // More due groups and more daily checks than one run may ask about.
+        Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => array_map(fn (int $id): array => $this->group($id), range(1, $budget + 5))],
+        ]);
+        Video::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => array_map(
+                fn (int $id): array => $this->group($id, ['scheduled_at' => now()->addWeek()->toIso8601String()]),
+                range(101, 110),
+            )],
+        ]);
+
+        Http::fake(['*' => Http::response(['status' => 'SCHEDULED'], 200)]);
+
+        $first = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame($budget, $first['requests']);
+        $this->assertFalse($first['rate_limited']);
+        Http::assertSentCount($budget);
+        $asked = fn (): array => Http::recorded()->map(fn (array $pair): int => (int) basename($pair[0]->url()))->all();
+        // Due groups come first, but daily checks keep a share so they cannot be starved.
+        $this->assertCount(15, array_filter($asked(), fn (int $id): bool => $id <= 100));
+        $this->assertCount(5, array_filter($asked(), fn (int $id): bool => $id > 100));
+
+        $this->travel(5)->minutes();
+        (new SyncScheduledPostsAction)->handle();
+        $this->travel(5)->minutes();
+        (new SyncScheduledPostsAction)->handle();
+
+        Http::assertSentCount($budget * 3);
+        // Least recently checked first: three runs reached every one of the 35 groups.
+        $this->assertCount($budget + 15, array_unique($asked()));
+    }
+
+    public function test_a_rate_limit_ends_the_run_without_marking_anything_failed(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [$this->group(1), $this->group(2), $this->group(3)]],
+        ]);
+
+        Http::fake([
+            // The {data: resource} envelope is read too.
+            'postsyncer.com/api/v1/posts/1' => Http::response(['data' => ['status' => 'PUBLISHED']], 200),
+            '*' => Http::response(['message' => 'Too Many Attempts.'], 429, ['Retry-After' => '30']),
+        ]);
+
+        $result = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertTrue($result['rate_limited']);
+        $this->assertSame(1, $result['requests']);
+        // One answered lookup, one 429, and the third group is not asked at all.
+        Http::assertSentCount(2);
+        $post->refresh();
+        $this->assertSame('scheduled', $post->status);
+        $this->assertNull($post->publish_error);
+        $this->assertSame(['PUBLISHED', 'SCHEDULED', 'SCHEDULED'], array_column($post->postsyncer['groups'], 'status'));
+        // The unanswered groups stay first in line for the next run.
+        $this->assertArrayNotHasKey('synced_at', $post->postsyncer['groups'][1]);
+    }
+
+    public function test_a_run_stops_when_the_remaining_allowance_drops_below_the_floor(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [$this->group(1), $this->group(2), $this->group(3)]],
+        ]);
+
+        Http::fake(['*' => Http::sequence()
+            ->push(['status' => 'SCHEDULED'], 200, ['X-RateLimit-Remaining' => (string) SyncScheduledPostsAction::RATE_LIMIT_FLOOR])
+            ->push(['status' => 'SCHEDULED'], 200, ['X-RateLimit-Remaining' => (string) (SyncScheduledPostsAction::RATE_LIMIT_FLOOR - 1)])
+            ->push(['status' => 'SCHEDULED'], 200)]);
+
+        $result = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertTrue($result['rate_limited']);
+        Http::assertSentCount(2);
+    }
+
+    public function test_a_record_whose_groups_are_already_terminal_is_marked_without_a_lookup(): void
+    {
+        $workspace = Workspace::factory()->create(['settings' => []]);
+        $this->configureWorkspace($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'scheduled',
+            'postsyncer' => ['groups' => [$this->group(1, ['status' => 'PUBLISHED'])]],
+        ]);
+        Http::fake();
+
+        $result = (new SyncScheduledPostsAction)->handle();
+
+        $this->assertSame(1, $result['posts']);
+        $this->assertSame('posted', $post->refresh()->status);
+        Http::assertNothingSent();
     }
 
     public function test_it_leaves_a_post_scheduled_when_a_group_is_still_queued(): void
