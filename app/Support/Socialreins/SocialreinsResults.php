@@ -178,8 +178,11 @@ final class SocialreinsResults
             $incoming['targets'][$id]['remote_id'] ??= $existing['targets'][$id]['remote_id'] ?? null;
             $incoming['targets'][$id]['parts'] = max($target['parts'], (int) ($existing['targets'][$id]['parts'] ?? 0));
         }
-        if (isset($existing['delete_attempt'])) {
-            $incoming['delete_attempt'] = $existing['delete_attempt'];
+        // Brain's answer knows neither: a retry must not undo a reschedule or forget a take down.
+        foreach (['delete_attempt', 'scheduled_at'] as $kept) {
+            if (isset($existing[$kept])) {
+                $incoming[$kept] = $existing[$kept];
+            }
         }
 
         return $incoming;
