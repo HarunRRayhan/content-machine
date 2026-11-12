@@ -5,6 +5,7 @@ namespace App\Actions\Posts;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Models\Post;
+use App\Support\Content\PublishGroups;
 use App\Support\Postsyncer\PostPublishPlanner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -25,7 +26,9 @@ class UpdatePostAction
 
             $contentChanged = $this->contentChanged($post, $data);
             $checkpointedPublish = $this->hasCheckpointedPublishAttempt($post);
-            $hasPublishedGroups = $this->hasPublishedGroups($post);
+            // Both drivers, read once: a post handed to SocialReins is locked like one handed to PostSyncer.
+            $groups = PublishGroups::of($post);
+            $hasPublishedGroups = $this->hasPublishedGroups($groups);
             $statusChanged = $data->status !== null && $data->status !== $post->status;
 
             $publishLocked = $checkpointedPublish || $hasPublishedGroups;
@@ -48,11 +51,11 @@ class UpdatePostAction
             }
 
             if ($publishLocked
-                && (($contentChanged && ! $this->isAdditivePlatformChange($post, $data))
-                    || ($statusChanged && ! $this->isSafePublishedStatusTransition($post, $data->status)))
+                && (($contentChanged && ! $this->isAdditivePlatformChange($post, $data, $groups))
+                    || ($statusChanged && ! $this->isSafePublishedStatusTransition($post, $data->status, $groups)))
             ) {
                 throw ValidationException::withMessages([
-                    'post' => __('This post cannot be edited after a PostSyncer publish attempt. Reconcile or retry it first.'),
+                    'post' => __('This post cannot be edited after a publish attempt. Reconcile or retry it first.'),
                 ]);
             }
 
@@ -174,11 +177,13 @@ class UpdatePostAction
 
     /**
      * A publish-locked post may only gain caption sections (and platforms
-     * entries) for platforms no PostSyncer group has touched yet, so the
+     * entries) for platforms no publish group has touched yet, so the
      * append-missing publish flow has a caption to schedule. Every existing
      * section and every other content field must stay exactly as stored.
+     *
+     * @param  list<array<string, mixed>>  $groups  the post's PublishGroups
      */
-    private function isAdditivePlatformChange(Post $post, UpdatePostData $data): bool
+    private function isAdditivePlatformChange(Post $post, UpdatePostData $data, array $groups): bool
     {
         if ($post->title !== $data->title
             || ($data->hasBody && $post->body !== $data->body)
@@ -203,7 +208,7 @@ class UpdatePostAction
 
         if ($added === null
             || array_diff($added, UpdatePostsyncerSettingsRequest::PLATFORMS) !== []
-            || array_intersect($added, $this->groupPlatforms($post)) !== []
+            || array_intersect($added, $this->groupPlatforms($post, $groups)) !== []
         ) {
             return false;
         }
@@ -368,14 +373,15 @@ class UpdatePostAction
     }
 
     /**
-     * Every platform in a stored or checkpointed PostSyncer group, whatever its status.
+     * Every platform in a stored or checkpointed publish group, whatever its status.
      *
+     * @param  list<array<string, mixed>>  $groups  the post's PublishGroups
      * @return list<string>
      */
-    private function groupPlatforms(Post $post): array
+    private function groupPlatforms(Post $post, array $groups): array
     {
         $groups = array_merge(
-            is_array($post->postsyncer['groups'] ?? null) ? $post->postsyncer['groups'] : [],
+            $groups,
             is_array($post->publish_progress['completed_groups'] ?? null) ? $post->publish_progress['completed_groups'] : [],
         );
 
@@ -411,19 +417,10 @@ class UpdatePostAction
                 && $progress['completed_groups'] !== []);
     }
 
-    private function hasPublishedGroups(Post $post): bool
+    /** @param  list<array<string, mixed>>  $groups  the post's PublishGroups */
+    private function hasPublishedGroups(array $groups): bool
     {
-        $groups = $post->postsyncer['groups'] ?? null;
-
-        if (! is_array($groups)) {
-            return false;
-        }
-
         foreach ($groups as $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-
             $postId = $group['post_id'] ?? null;
             if (is_int($postId) || is_float($postId)) {
                 if ($postId > 0) {
@@ -437,14 +434,15 @@ class UpdatePostAction
         return false;
     }
 
-    private function isSafePublishedStatusTransition(Post $post, ?string $nextStatus): bool
+    /** @param  list<array<string, mixed>>  $groups  the post's PublishGroups */
+    private function isSafePublishedStatusTransition(Post $post, ?string $nextStatus, array $groups): bool
     {
         if (($post->status === 'posted' && $nextStatus === 'archived')
             || ($post->status === 'archived' && $nextStatus === 'posted')) {
             return true;
         }
 
-        if (! $this->publishSettled($post)) {
+        if (! $this->publishSettled($post, $groups)) {
             return false;
         }
 
@@ -456,10 +454,12 @@ class UpdatePostAction
     }
 
     /**
-     * No publish job is in flight and every PostSyncer group is terminal.
+     * No publish job is in flight and every publish group is terminal.
      * A post with no groups counts as settled.
+     *
+     * @param  list<array<string, mixed>>  $groups  the post's PublishGroups
      */
-    private function publishSettled(Post $post): bool
+    private function publishSettled(Post $post, array $groups): bool
     {
         if (in_array($post->publish_state, ['queued', 'running'], true)) {
             return false;
@@ -470,10 +470,8 @@ class UpdatePostAction
             return false;
         }
 
-        $groups = is_array($post->postsyncer) ? ($post->postsyncer['groups'] ?? []) : [];
-
-        foreach (is_array($groups) ? $groups : [] as $group) {
-            $rawStatus = is_array($group) ? ($group['status'] ?? null) : null;
+        foreach ($groups as $group) {
+            $rawStatus = $group['status'] ?? null;
             $status = is_string($rawStatus) ? strtoupper($rawStatus) : '';
 
             if (! in_array($status, ['PUBLISHED', 'FAILED'], true)) {

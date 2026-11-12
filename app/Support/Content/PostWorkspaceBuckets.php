@@ -11,11 +11,12 @@ use App\Models\Post;
 final class PostWorkspaceBuckets
 {
     /**
+     * @param  list<array<string, mixed>>|null  $groups  the post's PublishGroups when the caller already has them
      * @return list<array{key: string, platforms: list<string>}>
      */
-    public function forPost(Post $post): array
+    public function forPost(Post $post, ?array $groups = null): array
     {
-        $fromGroups = $this->fromPostsyncerGroups($post);
+        $fromGroups = $this->fromPostsyncerGroups($groups ?? PublishGroups::of($post));
 
         if ($fromGroups !== []) {
             return $fromGroups;
@@ -31,14 +32,14 @@ final class PostWorkspaceBuckets
     }
 
     /**
+     * Groups of both drivers: a post scheduled through SocialReins has no PostSyncer groups.
+     *
+     * @param  list<array<string, mixed>>  $groups
      * @return list<array{key: string, platforms: list<string>}>
      */
-    private function fromPostsyncerGroups(Post $post): array
+    private function fromPostsyncerGroups(array $groups): array
     {
-        $postsyncer = $post->postsyncer;
-        $groups = is_array($postsyncer) ? ($postsyncer['groups'] ?? null) : null;
-
-        if (! is_array($groups) || $groups === []) {
+        if ($groups === []) {
             return [];
         }
 
@@ -49,10 +50,6 @@ final class PostWorkspaceBuckets
         ];
 
         foreach ($groups as $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-
             $key = $this->groupLanguageKey($group);
 
             foreach ($group['platforms'] ?? [] as $platform) {

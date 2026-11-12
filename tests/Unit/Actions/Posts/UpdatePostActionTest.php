@@ -6,9 +6,11 @@ use App\Actions\Posts\UpdatePostAction;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Requests\Posts\UpdatePostRequest;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -679,6 +681,144 @@ class UpdatePostActionTest extends TestCase
         $this->assertSame('approved', $post->refresh()->approval_state);
     }
 
+    public function test_a_post_published_through_socialreins_is_locked_until_it_is_taken_down(): void
+    {
+        $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+            'status' => 'posted',
+            'postsyncer' => null,
+            'publish_progress' => ['driver' => 'socialreins', 'state' => 'succeeded', 'options' => []],
+        ]));
+        $row = SocialreinsGroup::query()->create([
+            'workspace_id' => $post->workspace_id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'lock', 'state' => 'created', 'request' => '{}', 'expected_targets' => 1,
+            'results' => ['p1' => ['platform' => 'linkedin', 'status' => 'published', 'error' => null, 'at' => 0, 'targets' => []]],
+        ]);
+
+        $this->assertLockedUpdateRefused($post, ['title' => 'Renamed']);
+        // A platform SocialReins already published cannot be added as a new caption section.
+        $captions = $post->captions;
+        $captions['English']['linkedin'] = ['title' => '', 'caption' => 'LinkedIn teaser', 'first_comment' => '', 'images' => ['p.pdf'], 'thread' => []];
+        $this->assertLockedUpdateRefused($post, ['captions' => $captions, 'platforms' => ['facebook', 'instagram', 'linkedin', 'twitter']]);
+
+        $row->update(['results' => ['p1' => ['status' => 'deleted'] + $row->results['p1']]]);
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['title' => 'Renamed'], $post));
+        $this->assertSame('Renamed', $post->refresh()->title);
+    }
+
+    /**
+     * The same edits against the same post scheduled through each driver: what PostSyncer
+     * allows and refuses, SocialReins allows and refuses.
+     */
+    public function test_a_post_scheduled_through_socialreins_locks_the_same_fields_as_one_scheduled_through_postsyncer(): void
+    {
+        $postsyncer = fn (): Post => Post::factory()->create($this->scheduledBilingualPost());
+        $socialreins = function (): Post {
+            $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), [
+                'postsyncer' => null,
+                'publish_progress' => ['driver' => 'socialreins', 'state' => 'succeeded', 'options' => []],
+            ]));
+            foreach (['bangla' => ['facebook'], 'english' => ['facebook', 'twitter']] as $language => $platforms) {
+                $results = [];
+                foreach ($platforms as $platform) {
+                    $results["{$language}-{$platform}"] = ['platform' => $platform, 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []];
+                }
+                SocialreinsGroup::query()->create([
+                    'workspace_id' => $post->workspace_id, 'subject_type' => 'post', 'subject_id' => $post->id,
+                    'language' => $language, 'sequence' => 1, 'idempotency_key' => "scheduled-{$post->id}-{$language}", 'state' => 'created',
+                    'request' => json_encode(['scheduled_at' => '2030-01-01T03:00:00Z']), 'expected_targets' => count($platforms), 'results' => $results,
+                ]);
+            }
+
+            return $post;
+        };
+
+        $section = ['title' => '', 'caption' => 'LinkedIn teaser', 'first_comment' => '', 'images' => ['p.pdf'], 'thread' => []];
+        $with = function (Post $post, string $part, string $platform, array $value): array {
+            $captions = $post->captions;
+            $captions[$part][$platform] = $value;
+
+            return $captions;
+        };
+        $without = function (Post $post, string $part, string $platform): array {
+            $captions = $post->captions;
+            unset($captions[$part][$platform]);
+
+            return $captions;
+        };
+
+        /** @var array<string, \Closure(Post): array<string, mixed>> $locked */
+        $locked = [
+            'title' => fn (Post $post): array => ['title' => 'Renamed'],
+            'body' => fn (Post $post): array => ['body' => 'Rewritten.'],
+            'image_drive_urls' => fn (Post $post): array => ['image_drive_urls' => ['https://drive.google.com/file/d/abc/view']],
+            'language' => fn (Post $post): array => ['language' => 'en', 'platforms' => $post->platforms],
+            'an existing caption section' => fn (Post $post): array => ['captions' => $with($post, 'English', 'twitter', ['caption' => 'edited'])],
+            'a removed caption section' => fn (Post $post): array => ['captions' => $without($post, 'English', 'twitter')],
+            'a removed platform' => fn (Post $post): array => ['platforms' => ['facebook', 'instagram']],
+            'a section for a platform already scheduled' => fn (Post $post): array => ['captions' => $with($post, 'Bangla', 'twitter', ['caption' => 'new'])],
+            'status back to draft' => fn (Post $post): array => ['status' => 'draft'],
+            'status to blocked while a group is pending' => fn (Post $post): array => ['status' => 'blocked', 'blocked_reason' => 'Why'],
+            'status to posted' => fn (Post $post): array => ['status' => 'posted'],
+        ];
+
+        foreach (['postsyncer' => $postsyncer, 'socialreins' => $socialreins] as $driver => $make) {
+            foreach ($locked as $field => $payload) {
+                $post = $make();
+                $before = $post->only(['title', 'body', 'captions', 'platforms', 'language', 'image_drive_urls', 'status', 'approval_state']);
+
+                try {
+                    (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload($payload($post), $post));
+                    $this->fail("{$driver}: expected {$field} to be locked.");
+                } catch (ValidationException $exception) {
+                    $this->assertSame(
+                        'This post cannot be edited after a publish attempt. Reconcile or retry it first.',
+                        $exception->validator->errors()->first('post'),
+                        "{$driver}: {$field}",
+                    );
+                }
+
+                $this->assertEquals($before, $post->refresh()->only(array_keys($before)), "{$driver}: {$field}");
+            }
+
+            // Still editable: calendar metadata, and a caption section for a platform not handed over yet.
+            $post = $make();
+            (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['category' => 'evening_carousel'], $post));
+            $this->assertSame('evening_carousel', $post->refresh()->category, $driver);
+            $this->assertSame('approved', $post->approval_state, $driver);
+
+            (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload([
+                'captions' => $with($post, 'English', 'linkedin', $section),
+                'platforms' => ['facebook', 'instagram', 'linkedin', 'twitter'],
+            ], $post));
+            $post->refresh();
+            $this->assertSame('LinkedIn teaser', $post->captions['English']['linkedin']['caption'], $driver);
+            $this->assertSame(['facebook', 'instagram', 'linkedin', 'twitter'], $post->platforms, $driver);
+            $this->assertSame('pending', $post->approval_state, $driver);
+            $this->assertSame('scheduled', $post->status, $driver);
+            $this->assertSame('succeeded', $post->publish_state, $driver);
+        }
+    }
+
+    public function test_the_lock_reads_the_socialreins_rows_once(): void
+    {
+        $post = Post::factory()->create(array_merge($this->scheduledBilingualPost(), ['postsyncer' => null, 'publish_progress' => null]));
+        SocialreinsGroup::query()->create([
+            'workspace_id' => $post->workspace_id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'once', 'state' => 'created', 'request' => '{}', 'expected_targets' => 1,
+            'results' => ['p1' => ['platform' => 'facebook', 'status' => 'published', 'error' => null, 'at' => 0, 'targets' => []]],
+        ]);
+        $captions = $post->captions;
+        $captions['English']['linkedin'] = ['caption' => 'LinkedIn teaser'];
+
+        DB::enableQueryLog();
+        // Content and status both change, so every lock rule runs.
+        (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload(['captions' => $captions, 'status' => 'blocked', 'blocked_reason' => 'Why'], $post));
+        DB::disableQueryLog();
+
+        $this->assertCount(1, array_filter(DB::getQueryLog(), fn (array $query): bool => str_contains($query['query'], 'from "socialreins_groups"')));
+        $this->assertSame('blocked', $post->refresh()->status);
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
@@ -690,7 +830,7 @@ class UpdatePostActionTest extends TestCase
             (new UpdatePostAction)->handle($post, UpdatePostData::fromApiPayload($payload, $post));
             $this->fail('Expected the publish-locked update to be refused.');
         } catch (ValidationException $exception) {
-            $this->assertStringContainsString('after a PostSyncer publish attempt', $exception->getMessage());
+            $this->assertSame('This post cannot be edited after a publish attempt. Reconcile or retry it first.', $exception->validator->errors()->first('post'));
         }
 
         $this->assertEquals($before, $post->refresh()->only(array_keys($before)));
