@@ -5,6 +5,7 @@ namespace App\Actions\Posts;
 use App\Data\Posts\UpdatePostData;
 use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Models\Post;
+use App\Support\Content\PublishGroups;
 use App\Support\Postsyncer\PostPublishPlanner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -375,7 +376,7 @@ class UpdatePostAction
     private function groupPlatforms(Post $post): array
     {
         $groups = array_merge(
-            is_array($post->postsyncer['groups'] ?? null) ? $post->postsyncer['groups'] : [],
+            PublishGroups::of($post),
             is_array($post->publish_progress['completed_groups'] ?? null) ? $post->publish_progress['completed_groups'] : [],
         );
 
@@ -413,17 +414,8 @@ class UpdatePostAction
 
     private function hasPublishedGroups(Post $post): bool
     {
-        $groups = $post->postsyncer['groups'] ?? null;
-
-        if (! is_array($groups)) {
-            return false;
-        }
-
-        foreach ($groups as $group) {
-            if (! is_array($group)) {
-                continue;
-            }
-
+        // Both drivers: a post handed to SocialReins is locked like one handed to PostSyncer.
+        foreach (PublishGroups::of($post) as $group) {
             $postId = $group['post_id'] ?? null;
             if (is_int($postId) || is_float($postId)) {
                 if ($postId > 0) {
@@ -470,10 +462,8 @@ class UpdatePostAction
             return false;
         }
 
-        $groups = is_array($post->postsyncer) ? ($post->postsyncer['groups'] ?? []) : [];
-
-        foreach (is_array($groups) ? $groups : [] as $group) {
-            $rawStatus = is_array($group) ? ($group['status'] ?? null) : null;
+        foreach (PublishGroups::of($post) as $group) {
+            $rawStatus = $group['status'] ?? null;
             $status = is_string($rawStatus) ? strtoupper($rawStatus) : '';
 
             if (! in_array($status, ['PUBLISHED', 'FAILED'], true)) {

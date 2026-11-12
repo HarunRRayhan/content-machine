@@ -74,13 +74,14 @@ final class SocialreinsResults
      * platform, the newest group winning), so the page lists both halves of a split the same way.
      * The API returns the same list as `socialreins`, so a client can verify that half too.
      *
+     * @param  list<SocialreinsGroup>|null  $rows  the subject's rows when the caller already loaded them
      * @return list<array<string, mixed>>
      */
-    public static function presentGroups(Post|Video $subject): array
+    public static function presentGroups(Post|Video $subject, ?array $rows = null): array
     {
         $groups = [];
 
-        foreach (self::rowsOf($subject) as $row) {
+        foreach ($rows ?? self::rowsOf($subject) as $row) {
             if ($row->state !== SocialreinsGroup::CREATED) {
                 continue;
             }

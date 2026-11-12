@@ -25,6 +25,9 @@ use Carbon\CarbonImmutable;
  * out stops the reschedule before anything moves. A post already at the target time is skipped,
  * so retrying with the same time finishes a partial run. Each moved post records its new
  * `scheduled_at` in its stored result, and an error names the half that failed.
+ *
+ * A post or video that went whole to SocialReins has no PostSyncer half: only its SocialReins
+ * posts move, and PostSyncer does not have to be configured.
  */
 class RescheduleSplitPostAction
 {
@@ -37,20 +40,48 @@ class RescheduleSplitPostAction
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
 
-        $config = SocialreinsConfig::fromWorkspace($workspace);
-        $target = $data->when->setSecond(0)->utc();
-        $todo = $this->socialreinsPosts($post, $config, $target);
+        $post->refresh();
+        $progress = is_array($post->publish_progress) ? $post->publish_progress : [];
+        $split = is_array($progress['split'] ?? null);
 
-        try {
-            $post = $post instanceof Video
+        // Published through PostSyncer alone: nothing here to move.
+        if (! $split && ($progress['driver'] ?? null) !== SocialreinsConfig::DRIVER) {
+            return $post instanceof Video
                 ? $this->videos->handle($post, $workspace, $data)
                 : $this->postsyncer->handle($post, $workspace, $data);
-        } catch (PostsyncerException $exception) {
-            throw new PostsyncerException(
-                'PostSyncer half not rescheduled (the SocialReins half was not changed): '.$exception->getMessage(),
-                0,
-                $exception,
-            );
+        }
+
+        $target = $data->when->setSecond(0)->utc();
+
+        if (! $split) {
+            // The rules the PostSyncer actions apply, which the split path gets from them.
+            $noun = $post instanceof Video ? 'videos' : 'posts';
+            if ($post->status !== 'scheduled') {
+                throw new SocialreinsException("Only scheduled {$noun} can be rescheduled.");
+            }
+            if (in_array($post->publish_state, ['queued', 'running'], true)) {
+                throw new SocialreinsException('A publish is already in progress.');
+            }
+            if ($target->lessThanOrEqualTo(CarbonImmutable::now())) {
+                throw new SocialreinsException('The new schedule must be in the future.');
+            }
+        }
+
+        $config = SocialreinsConfig::fromWorkspace($workspace);
+        $todo = $this->socialreinsPosts($post, $config, $target);
+
+        if ($split) {
+            try {
+                $post = $post instanceof Video
+                    ? $this->videos->handle($post, $workspace, $data)
+                    : $this->postsyncer->handle($post, $workspace, $data);
+            } catch (PostsyncerException $exception) {
+                throw new PostsyncerException(
+                    'PostSyncer half not rescheduled (the SocialReins half was not changed): '.$exception->getMessage(),
+                    0,
+                    $exception,
+                );
+            }
         }
 
         $moved = [];
@@ -63,7 +94,7 @@ class RescheduleSplitPostAction
                     ]);
                 } catch (SocialreinsException $exception) {
                     throw new SocialreinsException(
-                        'The PostSyncer half moved, but the SocialReins half did not finish. '
+                        ($split ? 'The PostSyncer half moved, but the SocialReins half did not finish. ' : 'The SocialReins reschedule did not finish. ')
                             .($moved === [] ? '' : 'Moved: '.implode(', ', $moved).'. ')
                             ."{$name} failed: {$exception->getMessage()} Retry with the same time to finish.",
                         $exception->status,

@@ -11,7 +11,6 @@ use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
-use App\Actions\Postsyncer\ReschedulePostAction;
 use App\Actions\Socialreins\RescheduleSplitPostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
@@ -280,8 +279,7 @@ class PostsApiController extends Controller
     public function reschedule(
         Request $request,
         string $humanId,
-        ReschedulePostAction $action,
-        RescheduleSplitPostAction $split,
+        RescheduleSplitPostAction $action,
     ): PostResource {
         $post = $this->resolvePost($humanId);
 
@@ -290,8 +288,8 @@ class PostsApiController extends Controller
         ]);
 
         try {
-            // A split post has a SocialReins half to move as well.
-            $post = (is_array($post->publish_progress['split'] ?? null) ? $split : $action)->handle(
+            // Moves the PostSyncer groups, the SocialReins posts, or both halves of a split.
+            $post = $action->handle(
                 $post,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),

@@ -35,10 +35,10 @@ final class PostWorkspaceBuckets
      */
     private function fromPostsyncerGroups(Post $post): array
     {
-        $postsyncer = $post->postsyncer;
-        $groups = is_array($postsyncer) ? ($postsyncer['groups'] ?? null) : null;
+        // Both drivers: a post scheduled through SocialReins has no PostSyncer groups.
+        $groups = PublishGroups::of($post);
 
-        if (! is_array($groups) || $groups === []) {
+        if ($groups === []) {
             return [];
         }
 
