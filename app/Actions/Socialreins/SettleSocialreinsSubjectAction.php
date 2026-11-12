@@ -148,10 +148,13 @@ class SettleSocialreinsSubjectAction
             $values['publish_progress'] = ['state' => $state] + $progress;
         }
 
+        // Read before the save: only a run still in flight leaves its request approved.
+        $inFlight = in_array($subject->publish_state, ['queued', 'running'], true);
+
         $subject->forceFill($values)->save();
 
         if ($subject instanceof Post) {
-            self::closeTelegramRequest($subject, $state, $error);
+            self::closeTelegramRequest($subject, $state, $error, $inFlight);
         }
     }
 
@@ -160,8 +163,12 @@ class SettleSocialreinsSubjectAction
      * a webhook or the reconcile can find it). As on PostSyncer, a post handed over counts as
      * published whether it went out now or is scheduled: /cancel can no longer cancel it. A
      * split post only gets here after its PostSyncer half succeeded. Call under the post's lock.
+     *
+     * A late settle (webhook, reconcile) of a run that already closed its request finds the
+     * post no longer in flight: it may still turn a failed request into a published one, but
+     * an approved request was approved again since, for a publish that has not started.
      */
-    public static function closeTelegramRequest(Post $post, string $publishState, ?string $error): void
+    public static function closeTelegramRequest(Post $post, string $publishState, ?string $error, bool $inFlight = true): void
     {
         $options = $post->publish_progress['options'] ?? null;
 
@@ -170,6 +177,7 @@ class SettleSocialreinsSubjectAction
             $publishState === 'succeeded' ? TelegramPostRequest::PUBLISHED : TelegramPostRequest::FAILED,
             $publishState === 'succeeded' ? null : $error,
             is_array($options) ? TelegramPublishRequests::idFrom($options) : null,
+            $inFlight ? [TelegramPostRequest::APPROVED, TelegramPostRequest::FAILED] : [TelegramPostRequest::FAILED],
         );
     }
 

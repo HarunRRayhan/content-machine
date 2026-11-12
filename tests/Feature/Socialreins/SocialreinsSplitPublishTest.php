@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Socialreins;
 
+use App\Actions\Posts\ApprovePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
 use App\Actions\Postsyncer\SyncScheduledPostsAction;
@@ -395,6 +396,36 @@ class SocialreinsSplitPublishTest extends TestCase
         app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
 
         $this->assertSame(TelegramPostRequest::PUBLISHED, $request->fresh()->state);
+    }
+
+    public function test_a_late_settle_leaves_a_request_the_user_moved_back_to_awaiting_approval(): void
+    {
+        $this->fakeApis([[['error' => 'too_long'], 422]]);
+        $post = $this->makePost($this->workspace(['facebook', 'linkedin']));
+        $request = $this->telegramRequest($post);
+        $this->publish($post, ['telegram_request_id' => $request->id]);
+        $this->runQueued();
+        $this->assertSame(TelegramPostRequest::FAILED, $request->fresh()->state);
+
+        // The user edits the failed post: the approval and the request are open again.
+        $post->refresh()->forceFill(['approval_state' => 'approved'])->save();
+        $post->invalidateApproval();
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->fresh()->state);
+
+        // The next webhook or reconcile settles the old run as failed once more.
+        app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
+
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame(TelegramPostRequest::AWAITING_APPROVAL, $request->fresh()->state);
+
+        // So /approve still works, and a settle before the new publish starts keeps it approved.
+        $link = TelegramBotLink::query()->where('telegram_user_id', 42)->firstOrFail();
+        app(ApprovePostAction::class)->handle($post->fresh(), $link->user, $request->fresh(), $request->telegramBotConfig, 42, 555);
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
+
+        app(SettleSocialreinsSubjectAction::class)->handle($post->fresh());
+
+        $this->assertSame(TelegramPostRequest::APPROVED, $request->fresh()->state);
     }
 
     public function test_a_cancelled_telegram_request_is_not_published_through_socialreins(): void

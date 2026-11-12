@@ -183,21 +183,27 @@ class TelegramPublishRequests
     }
 
     /**
-     * Close (published, failed) the request a publish owns. A cancelled or already published
-     * request is never touched. Dashboard/API publishes simply have no request.
+     * Close (published, failed) the request a publish owns. Only a request in a state a
+     * running publish leaves it in is touched: never a cancelled or published one, and never
+     * one the user moved back to awaiting approval by editing the post (/approve needs it
+     * there). `$from` narrows that further for a close that no running job stands behind.
+     * Dashboard/API publishes simply have no request.
+     *
+     * @param  list<string>  $from
      */
-    public static function update(Post $post, string $state, ?string $errorMessage, ?int $requestId): void
-    {
-        if ($requestId === null) {
+    public static function update(
+        Post $post,
+        string $state,
+        ?string $errorMessage,
+        ?int $requestId,
+        array $from = [TelegramPostRequest::APPROVED, TelegramPostRequest::FAILED],
+    ): void {
+        if ($requestId === null || ($post->approval_state ?? 'approved') !== 'approved') {
             return;
         }
 
         $post->telegramPostRequests()
-            ->whereIn('state', [
-                TelegramPostRequest::AWAITING_APPROVAL,
-                TelegramPostRequest::APPROVED,
-                TelegramPostRequest::FAILED,
-            ])
+            ->whereIn('state', $from)
             ->whereKey($requestId)
             ->update([
                 'state' => $state,
