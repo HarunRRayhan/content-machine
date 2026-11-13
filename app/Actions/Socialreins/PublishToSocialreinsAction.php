@@ -71,10 +71,11 @@ class PublishToSocialreinsAction
                     }
                 }
             } else {
-                $fresh = $this->createRows($subject, $rows, $options);
+                $dropped = 0;
+                $fresh = $this->createRows($subject, $rows, $options, $dropped);
                 $retried = $this->retryFailedGroups($rows);
 
-                if ($fresh === [] && $retried === 0) {
+                if ($fresh === [] && $retried === 0 && $dropped === 0) {
                     throw new SocialreinsException($this->nothingToSend($rows));
                 }
 
@@ -176,9 +177,10 @@ class PublishToSocialreinsAction
      *
      * @param  list<SocialreinsGroup>  $rows
      * @param  array<string, mixed>  $options
+     * @param  int  $dropped  set to the left-out platforms that are no longer planned
      * @return list<SocialreinsGroup>
      */
-    private function createRows(Post|Video $subject, array $rows, array $options): array
+    private function createRows(Post|Video $subject, array $rows, array $options, int &$dropped = 0): array
     {
         $workspace = $subject->workspace;
         $config = SocialreinsConfig::fromWorkspace($workspace);
@@ -190,9 +192,31 @@ class PublishToSocialreinsAction
 
         [$live, $skipped] = $this->liveLanguages($rows);
         $byLanguage = [];
+        $planned = [];
         foreach ($groups as $group) {
+            $planned[$group->language] = [...($planned[$group->language] ?? []), ...$group->platforms];
             if (! in_array($group->language, $live, true) || isset($skipped[$group->language])) {
                 $byLanguage[$group->language][] = $group;
+            }
+        }
+
+        // A left-out platform the subject no longer plans (it was removed instead of fixed)
+        // will never be sent: its record stops counting as a failure.
+        foreach ($skipped as $language => $names) {
+            foreach (array_diff($names, $planned[$language] ?? []) as $name) {
+                foreach ($rows as $row) {
+                    if ($row->state === SocialreinsGroup::CREATED && $row->language === $language) {
+                        $row->mutateResults(function (array $results) use ($name): ?array {
+                            if (! isset($results["skipped:{$name}"])) {
+                                return null;
+                            }
+                            $results["skipped:{$name}"]['status'] = 'deleted';
+
+                            return $results;
+                        });
+                    }
+                }
+                $dropped++;
             }
         }
 
@@ -253,9 +277,13 @@ class PublishToSocialreinsAction
         $skipped = [];
         foreach (SocialreinsResults::byPlatform($rows) as $key => $platform) {
             [$language, $name] = explode(':', $key, 2);
+            // Taken down, or a left-out platform that was dropped: neither live nor to send.
+            if ($platform['state'] === SocialreinsResults::DELETED) {
+                continue;
+            }
             if ($platform['skipped']) {
                 $skipped[$language][] = $name;
-            } elseif ($platform['state'] !== SocialreinsResults::DELETED) {
+            } else {
                 $live[] = $language;
             }
         }

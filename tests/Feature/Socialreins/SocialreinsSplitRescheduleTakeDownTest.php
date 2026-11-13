@@ -210,6 +210,9 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         return $post;
     }
 
+    /** @var array<string, mixed> a result moved between rows by a test */
+    private array $moved = [];
+
     private function assertPostsyncerNotCalled(): void
     {
         Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'postsyncer.com'));
@@ -335,6 +338,54 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
 
         $this->assertSame(['p1', 'p2'], $this->brainPuts());
         Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'skipped'));
+    }
+
+    /** @param  array<string, mixed>  $values */
+    private function addRow(Post $post, int $sequence, string $state, array $values = []): SocialreinsGroup
+    {
+        return SocialreinsGroup::query()->create([
+            'workspace_id' => $this->workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'bangla', 'sequence' => $sequence, 'idempotency_key' => "k{$sequence}", 'state' => $state,
+            'request' => json_encode(['scheduled_at' => $this->source->utc()->toIso8601String()]),
+            ...$values,
+        ]);
+    }
+
+    public function test_reschedule_moves_a_retried_left_out_platform_with_the_rest_and_passes_over_a_refused_retry(): void
+    {
+        $post = $this->socialreinsOnly();
+        // Threads was left out of the first group, sent by a retry in its own group; a later retry was refused.
+        SocialreinsGroup::query()->where('subject_id', $post->id)->sole()->mutateResults(function (array $results): array {
+            $threads = $results['p2'];
+            unset($results['p2']);
+            $this->moved = $threads;
+
+            return $results + SocialreinsResults::fromSkipped([['platform' => 'threads', 'problems' => [['code' => 'too_long']]]], time());
+        });
+        $retry = $this->addRow($post, 2, 'created', ['group_id' => 'aaaaaaaa-0000-4000-8000-000000000002', 'expected_targets' => 1, 'results' => ['p2' => $this->moved]]);
+        $this->addRow($post, 3, 'rejected', ['error' => 'SocialReins answered 422.']);
+
+        $this->reschedule($post)->assertOk();
+
+        $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        $this->assertSame($this->target->utc()->format('Y-m-d\TH:i:s\Z'), $retry->fresh()->results['p2']['scheduled_at']);
+
+        // An unanswered request may still have created a group: that blocks, as before.
+        $this->addRow($post, 4, 'pending');
+        $this->reschedule($post)->assertStatus(422);
+    }
+
+    public function test_reschedule_leaves_an_older_group_the_newest_one_replaced_alone(): void
+    {
+        $post = $this->socialreinsOnly();
+        $this->addRow($post, 0, 'created', ['group_id' => 'aaaaaaaa-0000-4000-8000-000000000000', 'expected_targets' => 1, 'results' => [
+            'old1' => ['platform' => 'facebook', 'status' => 'failed', 'error' => 'boom', 'at' => 0, 'targets' => []],
+        ]]);
+
+        $this->reschedule($post)->assertOk();
+
+        $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'old1'));
     }
 
     public function test_reschedule_moves_a_socialreins_only_video_without_postsyncer(): void

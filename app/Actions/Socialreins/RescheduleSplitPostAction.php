@@ -177,6 +177,18 @@ class RescheduleSplitPostAction
         return $post;
     }
 
+    /** Whether every platform of `$newer` is one SocialReins left out of `$older`. */
+    private function retriesSkippedOf(SocialreinsGroup $newer, SocialreinsGroup $older): bool
+    {
+        foreach (array_column($newer->results ?? [], 'platform') as $platform) {
+            if (! isset($older->results["skipped:{$platform}"])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
      * Every SocialReins post of the split, read live. Null `live` means it is already at the target.
      *
@@ -184,27 +196,39 @@ class RescheduleSplitPostAction
      */
     private function socialreinsPosts(Post|Video $post, SocialreinsConfig $config, CarbonImmutable $target): array
     {
-        $rows = SocialreinsResults::rowsOf($post);
-        $latest = [];
-        foreach ($rows as $row) {
-            $latest[$row->language] = $row;
+        $byLanguage = [];
+        foreach (SocialreinsResults::rowsOf($post) as $row) {
+            $byLanguage[$row->language][] = $row;
         }
 
-        foreach ($latest as $language => $row) {
-            if ($row->state !== SocialreinsGroup::CREATED) {
+        // Per language: its newest created group, and before it the groups that one retried a
+        // left-out platform of (those still hold the language's other posts).
+        $scope = [];
+        $newest = [];
+        foreach ($byLanguage as $language => $rows) {
+            $created = array_values(array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::CREATED));
+
+            // A refused retry created nothing and is passed over; an unanswered one may have.
+            if ($created === [] || end($rows)->state === SocialreinsGroup::PENDING) {
                 throw new SocialreinsException("SocialReins half ({$language}) is not fully handed over. Settle the publish before rescheduling.");
             }
+
+            $newest[$language] = $first = array_pop($created);
+            $scope[] = $first;
+            while ($created !== [] && $this->retriesSkippedOf($first, end($created))) {
+                $scope[] = $first = array_pop($created);
+            }
         }
+        usort($scope, fn (SocialreinsGroup $a, SocialreinsGroup $b): int => $a->id <=> $b->id);
 
         $todo = [];
-        // Each platform's newest post. A platform SocialReins left out as invalid has no post;
-        // once a retry sent it, it lives in a newer group than the rest of its language.
-        foreach (SocialreinsResults::byPlatform($rows, requireComplete: false) as $key => $platform) {
+        foreach (SocialreinsResults::byPlatform($scope, requireComplete: false) as $key => $platform) {
             $language = $platform['language'];
             $postId = $platform['post_id'];
-            $row = collect($rows)->firstWhere('group_id', $platform['group_id']);
+            $row = collect($scope)->firstWhere('group_id', $platform['group_id']);
 
-            if ($platform['skipped'] || ($row !== $latest[$language] && $platform['state'] === SocialreinsResults::DELETED)) {
+            // A left-out platform has no post; an older group's taken-down post has nothing to move.
+            if ($platform['skipped'] || ($row !== $newest[$language] && $platform['state'] === SocialreinsResults::DELETED)) {
                 continue;
             }
 

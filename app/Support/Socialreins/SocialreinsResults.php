@@ -109,6 +109,7 @@ final class SocialreinsResults
                     'language' => $row->language,
                     // A skipped platform has no post at SocialReins.
                     'post_id' => ($result['skipped'] ?? false) ? null : (string) $postId,
+                    'skipped' => (bool) ($result['skipped'] ?? false),
                     'detail' => $detail === '' ? null : $detail,
                     'targets' => array_values(array_map(fn (array $target): array => [
                         'status' => (string) $target['status'],

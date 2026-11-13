@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Socialreins;
 
+use App\Actions\Posts\UpdatePostAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Socialreins\ApplySocialreinsWebhookAction;
 use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
@@ -9,6 +10,7 @@ use App\Actions\Socialreins\PublishToSocialreinsAction;
 use App\Actions\Socialreins\ReconcileSocialreinsGroupsAction;
 use App\Actions\Socialreins\SettleSocialreinsSubjectAction;
 use App\Actions\Socialreins\TakeDownSocialreinsAction;
+use App\Data\Posts\UpdatePostData;
 use App\Jobs\PublishPostJob;
 use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
@@ -948,8 +950,33 @@ class SocialreinsPublishTest extends TestCase
         $this->assertSame('failed', $again->publish_state);
         $this->assertStringContainsString('Still too long.', $again->publish_error);
 
-        // Fixed: the retry sends the post as it is now.
-        $post->forceFill(['captions' => ['English' => ['facebook' => ['caption' => 'FB'], 'twitter' => ['caption' => 'X short']]]])->save();
+        // Only the left-out platform's caption can be edited; facebook is scheduled and stays locked.
+        $post->forceFill(['approval_state' => 'approved'])->save();
+        $edit = fn (string $facebook, string $twitter): Post => app(UpdatePostAction::class)->handle($post, new UpdatePostData(
+            title: $post->title,
+            body: $post->body,
+            captions: ['English' => ['facebook' => ['caption' => $facebook], 'twitter' => ['caption' => $twitter]]],
+            hasCaptions: true,
+        ));
+        try {
+            $edit('FB changed', 'X short');
+            $this->fail('A scheduled platform must stay locked.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('cannot be edited after a publish attempt', $exception->getMessage());
+        }
+        $edited = $edit('FB', 'X short');
+        $this->assertSame('failed', $edited->publish_state, 'the edit keeps the publish retryable');
+
+        // The edit needs approval again before the retry is accepted.
+        $this->assertSame('pending', $edited->approval_state);
+        try {
+            app(EnqueueSocialreinsPublishAction::class)->handle($post->fresh(), $workspace, []);
+            $this->fail('An edited post needs approval before the retry.');
+        } catch (ValidationException) {
+            $this->assertCount(2, $this->creates());
+        }
+        $post->fresh()->forceFill(['approval_state' => 'approved'])->save();
+
         $x = $this->brainPost(self::X_POST, 'x', 'scheduled');
         $this->brain[self::GROUP_2] = [$x];
         $this->createReplies = [Http::response(['group_id' => self::GROUP_2, 'expected_targets' => 1, 'posts' => [$x], 'skipped' => []], 201)];
@@ -981,6 +1008,20 @@ class SocialreinsPublishTest extends TestCase
         } catch (ValidationException) {
             $this->assertCount(3, $this->creates());
         }
+    }
+
+    public function test_a_left_out_platform_that_is_no_longer_planned_stops_failing_the_post(): void
+    {
+        [, $post] = $this->groupWithSkippedX();
+
+        // The user gives up on X and retries with facebook alone.
+        $retried = $this->publish($post, ['platforms' => ['facebook']]);
+
+        $this->assertSame('succeeded', $retried->publish_state);
+        $this->assertNull($retried->publish_error);
+        $this->assertSame('scheduled', $retried->status);
+        $this->assertCount(1, $this->creates(), 'nothing was sent again');
+        $this->assertSame('deleted', SocialreinsGroup::query()->sole()->results['skipped:twitter']['status']);
     }
 
     public function test_a_lost_answer_found_by_the_lookup_records_what_brain_left_out(): void
