@@ -122,6 +122,7 @@ class PostGroupPayloadBuilderTest extends TestCase
     {
         $this->assertSame("Title\nMore", PostGroupPayloadBuilder::youtubeBody("Title\nMore"));
         $this->assertSame('a b', PostGroupPayloadBuilder::youtubeBody('<a> b'));
+        $this->assertSame('Title', PostGroupPayloadBuilder::youtubeBody("\u{A0}\nTitle"));
 
         $long = str_repeat('é', 150);
         [$title, $description] = explode("\n", PostGroupPayloadBuilder::youtubeBody($long."\nTail"), 2);

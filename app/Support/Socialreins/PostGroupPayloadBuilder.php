@@ -32,16 +32,18 @@ final class PostGroupPayloadBuilder
      */
     public static function youtubeBody(string $caption): string
     {
-        $caption = trim(str_replace(['<', '>'], '', $caption));
+        // Brain trims Unicode whitespace (a no-break space too), so the same is trimmed here.
+        $trim = fn (string $text): string => (string) preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $text);
+        $caption = $trim(str_replace(['<', '>'], '', $caption));
         [$first, $rest] = array_pad(explode("\n", $caption, 2), 2, '');
-        $first = trim($first);
+        $first = $trim($first);
 
         if (mb_strlen($first) > self::YOUTUBE_MAX_TITLE) {
             $rest = $caption;
             $first = rtrim(mb_substr($first, 0, self::YOUTUBE_MAX_TITLE - 1)).'…';
         }
 
-        $rest = trim(mb_strcut(trim($rest), 0, self::YOUTUBE_MAX_DESCRIPTION_BYTES, 'UTF-8'));
+        $rest = $trim(mb_strcut($trim($rest), 0, self::YOUTUBE_MAX_DESCRIPTION_BYTES, 'UTF-8'));
 
         return $rest === '' ? $first : $first."\n".$rest;
     }
