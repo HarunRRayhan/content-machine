@@ -12,6 +12,11 @@ use Illuminate\Support\Collection;
  * `{brain post id: {platform, status, error, at, targets: {target id: {status, remote_id,
  * remote_url, parts, error, at}}}}`.
  *
+ * A platform brain left out of a group (`on_invalid: skip`) has no post there. It is kept in
+ * the same map under `skipped:{platform}` as a failed result without targets and with
+ * `skipped: true`, so it reads as a failed platform everywhere; brain never reports on that
+ * key, so a reconcile or a webhook leaves it alone. Only a new group can supersede it.
+ *
  * Brain's post status alone is not enough (a post can settle `published` while one target
  * failed), and a webhook only reports the target it is about, so a post counts as settled
  * only when a snapshot (the create answer or `GET /posts?group_id=`) says the post itself
@@ -62,6 +67,8 @@ final class SocialreinsResults
         $redact = fn (mixed $text): ?string => $text === null ? null : 'Publishing failed. Inspect the dashboard for details.';
 
         return array_map(function (array $group) use ($redact): array {
+            // Internal: the editor reads it to keep a left-out platform's caption editable.
+            unset($group['skipped']);
             $group['detail'] = $redact($group['detail'] ?? null);
             $group['targets'] = array_map(fn (array $target): array => array_merge($target, ['error' => $redact($target['error'] ?? null)]), $group['targets'] ?? []);
 
@@ -102,7 +109,9 @@ final class SocialreinsResults
                     'scheduled_at' => $result['scheduled_at'] ?? $scheduledAt,
                     'platforms' => [$result['platform']],
                     'language' => $row->language,
-                    'post_id' => (string) $postId,
+                    // A skipped platform has no post at SocialReins.
+                    'post_id' => ($result['skipped'] ?? false) ? null : (string) $postId,
+                    'skipped' => (bool) ($result['skipped'] ?? false),
                     'detail' => $detail === '' ? null : $detail,
                     'targets' => array_values(array_map(fn (array $target): array => [
                         'status' => (string) $target['status'],
@@ -114,6 +123,38 @@ final class SocialreinsResults
         }
 
         return array_values($groups);
+    }
+
+    /**
+     * Brain's `skipped` list of a group create as stored results, keyed `skipped:{platform}`.
+     * The reason is the first problem's `detail`, or its `code`.
+     *
+     * @param  array<mixed>  $skipped
+     * @return array<string, array<string, mixed>>
+     */
+    public static function fromSkipped(array $skipped, int $at): array
+    {
+        $results = [];
+        foreach ($skipped as $entry) {
+            if (! is_array($entry) || ! is_string($entry['platform'] ?? null)) {
+                continue;
+            }
+
+            $platform = PostGroupPayloadBuilder::cmPlatform($entry['platform']);
+            $problem = is_array($entry['problems'] ?? null) && is_array($entry['problems'][0] ?? null) ? $entry['problems'][0] : [];
+            $reason = array_filter([$problem['detail'] ?? null, $problem['code'] ?? null], fn (mixed $text): bool => is_string($text) && $text !== '');
+
+            $results['skipped:'.$platform] = [
+                'platform' => $platform,
+                'status' => 'failed',
+                'error' => array_values($reason)[0] ?? 'not valid for this platform',
+                'at' => $at,
+                'targets' => [],
+                'skipped' => true,
+            ];
+        }
+
+        return $results;
     }
 
     /**
@@ -288,7 +329,7 @@ final class SocialreinsResults
      *
      * @param  list<SocialreinsGroup>  $rows
      * @param  bool  $requireComplete  false to classify posts even before the group has fully reported
-     * @return array<string, array{state: string, detail: string, post_id: string, language: string, group_id: string|null}> keyed "language:platform"
+     * @return array<string, array{state: string, detail: string, post_id: string, language: string, group_id: string|null, skipped: bool}> keyed "language:platform"; `skipped` marks a platform brain left out of the group (its `post_id` is the results key, not a brain post)
      */
     public static function byPlatform(array $rows, bool $requireComplete = true): array
     {
@@ -303,8 +344,10 @@ final class SocialreinsResults
 
             foreach ($row->results ?? [] as $postId => $result) {
                 $classified = self::classify($result);
-                // Until every expected target has reported, nothing in the group is settled.
-                if (! $complete) {
+                $skipped = (bool) ($result['skipped'] ?? false);
+                // Until every expected target has reported, nothing in the group is settled,
+                // except a platform brain left out: that failed for good at the create.
+                if (! $complete && ! $skipped) {
                     $classified['state'] = $classified['state'] === self::DELETED ? self::DELETED : self::WAITING;
                 }
                 $platforms[$row->language.':'.$result['platform']] = [
@@ -312,6 +355,7 @@ final class SocialreinsResults
                     'post_id' => (string) $postId,
                     'language' => $row->language,
                     'group_id' => $row->group_id,
+                    'skipped' => $skipped,
                 ];
             }
         }
@@ -334,6 +378,10 @@ final class SocialreinsResults
         $postsFinal = true;
         $failedWithoutTargets = false;
         foreach ($row->results ?? [] as $result) {
+            // A skipped platform is not a post of the group and has no targets to wait for.
+            if ($result['skipped'] ?? false) {
+                continue;
+            }
             foreach ($result['targets'] ?? [] as $target) {
                 $final += in_array($target['status'], ['published', 'failed', 'deleted'], true) ? 1 : 0;
             }

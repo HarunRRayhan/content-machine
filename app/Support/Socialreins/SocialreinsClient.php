@@ -22,9 +22,10 @@ class SocialreinsClient
     ) {}
 
     /**
-     * POST /post-groups with the exact JSON body that was frozen for this key.
+     * POST /post-groups with the exact JSON body that was frozen for this key. `skipped`
+     * lists the platforms brain left out as invalid (`on_invalid: skip`).
      *
-     * @return array{group_id: string, posts: array<mixed>, expected_targets: int}
+     * @return array{group_id: string, posts: array<mixed>, expected_targets: int, skipped: array<mixed>}
      */
     public function createGroup(string $key, string $json): array
     {
@@ -33,7 +34,7 @@ class SocialreinsClient
             ->withBody($json, 'application/json')
             ->post($this->url('/post-groups')));
 
-        return $this->groupBody($response);
+        return [...$this->groupBody($response), 'skipped' => (array) $response->json('skipped', [])];
     }
 
     /**

@@ -40,4 +40,17 @@ class SocialreinsResultsTest extends TestCase
         $this->assertArrayNotHasKey('scheduled_at', $result);
         $this->assertArrayNotHasKey('delete_attempt', $result);
     }
+
+    public function test_a_skipped_platform_is_a_failed_result_with_the_first_problems_reason(): void
+    {
+        $results = SocialreinsResults::fromSkipped([
+            ['platform' => 'x', 'ok' => false, 'problems' => [['code' => 'too_long', 'detail' => 'Too long by 20.'], ['code' => 'other']]],
+            ['platform' => 'bluesky', 'ok' => false, 'problems' => [['code' => 'too_many_images']]],
+            'junk',
+        ], 100);
+
+        $this->assertSame(['skipped:twitter', 'skipped:bluesky'], array_keys($results));
+        $this->assertSame(['state' => SocialreinsResults::FAILED, 'detail' => 'Too long by 20.'], SocialreinsResults::classify($results['skipped:twitter']));
+        $this->assertSame('too_many_images', $results['skipped:bluesky']['error']);
+    }
 }

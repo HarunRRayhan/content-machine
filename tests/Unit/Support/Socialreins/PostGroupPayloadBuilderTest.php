@@ -153,6 +153,7 @@ class PostGroupPayloadBuilderTest extends TestCase
         $group = $this->group(['facebook', 'twitter'], ['facebook' => 'a', 'twitter' => 'b']);
 
         $this->assertSame(['x'], $this->builder()->build('english', [$group], false, ['twitter'])['platforms']);
+        $this->assertSame('skip', $this->builder()->build('english', [$group], false)['on_invalid']);
         $this->assertNull($this->builder()->build('english', [$group], false, []));
     }
 }

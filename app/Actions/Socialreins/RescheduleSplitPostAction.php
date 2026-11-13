@@ -177,6 +177,18 @@ class RescheduleSplitPostAction
         return $post;
     }
 
+    /** Whether every platform of `$newer` is one SocialReins left out of `$older`. */
+    private function retriesSkippedOf(SocialreinsGroup $newer, SocialreinsGroup $older): bool
+    {
+        foreach (array_column($newer->results ?? [], 'platform') as $platform) {
+            if (! isset($older->results["skipped:{$platform}"])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
      * Every SocialReins post of the split, read live. Null `live` means it is already at the target.
      *
@@ -184,42 +196,63 @@ class RescheduleSplitPostAction
      */
     private function socialreinsPosts(Post|Video $post, SocialreinsConfig $config, CarbonImmutable $target): array
     {
-        $rows = SocialreinsResults::rowsOf($post);
-        $latest = [];
-        foreach ($rows as $row) {
-            $latest[$row->language] = $row;
+        $byLanguage = [];
+        foreach (SocialreinsResults::rowsOf($post) as $row) {
+            $byLanguage[$row->language][] = $row;
         }
 
-        $todo = [];
-        foreach ($latest as $language => $row) {
-            if ($row->state !== SocialreinsGroup::CREATED) {
+        // Per language: its newest created group, and before it the groups that one retried a
+        // left-out platform of (those still hold the language's other posts).
+        $scope = [];
+        $newest = [];
+        foreach ($byLanguage as $language => $rows) {
+            $created = array_values(array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::CREATED));
+
+            // A refused retry created nothing and is passed over; an unanswered one may have.
+            if ($created === [] || end($rows)->state === SocialreinsGroup::PENDING) {
                 throw new SocialreinsException("SocialReins half ({$language}) is not fully handed over. Settle the publish before rescheduling.");
             }
 
-            foreach (array_keys($row->results ?? []) as $postId) {
-                $postId = (string) $postId;
-                $name = "{$language} ".$row->results[$postId]['platform'];
-
-                try {
-                    $live = (new SocialreinsClient($config, $language))->post($postId);
-                } catch (SocialreinsException $exception) {
-                    throw new SocialreinsException("Nothing was rescheduled: could not read {$name} in SocialReins. {$exception->getMessage()}");
-                }
-
-                $at = is_string($live['scheduled_at'] ?? null) ? CarbonImmutable::parse($live['scheduled_at'])->utc()->setSecond(0) : null;
-                if ($at !== null && $at->equalTo($target) && ($live['status'] ?? null) === 'scheduled') {
-                    $todo[] = [$row, $postId, null, $name];
-
-                    continue;
-                }
-
-                if (($live['status'] ?? null) !== 'scheduled') {
-                    throw new SocialreinsException("Nothing was rescheduled: {$name} is ".($live['status'] ?? 'unknown')
-                        .' in SocialReins, not scheduled. Only a post whose every platform is still scheduled can move.');
-                }
-
-                $todo[] = [$row, $postId, $live, $name];
+            $newest[$language] = $first = array_pop($created);
+            $scope[] = $first;
+            while ($created !== [] && $this->retriesSkippedOf($first, end($created))) {
+                $scope[] = $first = array_pop($created);
             }
+        }
+        usort($scope, fn (SocialreinsGroup $a, SocialreinsGroup $b): int => $a->id <=> $b->id);
+
+        $todo = [];
+        foreach (SocialreinsResults::byPlatform($scope, requireComplete: false) as $key => $platform) {
+            $language = $platform['language'];
+            $postId = $platform['post_id'];
+            $row = collect($scope)->firstWhere('group_id', $platform['group_id']);
+
+            // A left-out platform has no post; an older group's taken-down post has nothing to move.
+            if ($platform['skipped'] || ($row !== $newest[$language] && $platform['state'] === SocialreinsResults::DELETED)) {
+                continue;
+            }
+
+            $name = "{$language} ".explode(':', $key, 2)[1];
+
+            try {
+                $live = (new SocialreinsClient($config, $language))->post($postId);
+            } catch (SocialreinsException $exception) {
+                throw new SocialreinsException("Nothing was rescheduled: could not read {$name} in SocialReins. {$exception->getMessage()}");
+            }
+
+            $at = is_string($live['scheduled_at'] ?? null) ? CarbonImmutable::parse($live['scheduled_at'])->utc()->setSecond(0) : null;
+            if ($at !== null && $at->equalTo($target) && ($live['status'] ?? null) === 'scheduled') {
+                $todo[] = [$row, $postId, null, $name];
+
+                continue;
+            }
+
+            if (($live['status'] ?? null) !== 'scheduled') {
+                throw new SocialreinsException("Nothing was rescheduled: {$name} is ".($live['status'] ?? 'unknown')
+                    .' in SocialReins, not scheduled. Only a post whose every platform is still scheduled can move.');
+            }
+
+            $todo[] = [$row, $postId, $live, $name];
         }
 
         if ($todo === []) {

@@ -179,7 +179,10 @@ class UpdatePostAction
      * A publish-locked post may only gain caption sections (and platforms
      * entries) for platforms no publish group has touched yet, so the
      * append-missing publish flow has a caption to schedule. Every existing
-     * section and every other content field must stay exactly as stored.
+     * section and every other content field must stay exactly as stored,
+     * except the section of a platform SocialReins left out as invalid:
+     * nothing of it exists anywhere, and its caption has to change before a
+     * retry can send it.
      *
      * @param  list<array<string, mixed>>  $groups  the post's PublishGroups
      */
@@ -204,7 +207,19 @@ class UpdatePostAction
             return true;
         }
 
-        $added = $this->addedCaptionPlatforms($post->captions ?? [], $data->captions ?? []);
+        // "language:platform" of every platform SocialReins left out and no later group sent.
+        $skipped = [];
+        foreach ($groups as $group) {
+            if (($group['skipped'] ?? false) === true) {
+                $skipped[] = $group['language'].':'.$group['platforms'][0];
+            }
+        }
+
+        $added = $this->addedCaptionPlatforms(
+            $post->captions ?? [],
+            $data->captions ?? [],
+            array_map(fn (string $key): string => explode(':', $key, 2)[1], $skipped),
+        );
 
         if ($added === null
             || array_diff($added, UpdatePostsyncerSettingsRequest::PLATFORMS) !== []
@@ -213,18 +228,20 @@ class UpdatePostAction
             return false;
         }
 
-        return $this->onlyAddsPlannedPairs($post, $data->captions ?? [], $added);
+        return $this->onlyAddsPlannedPairs($post, $data->captions ?? [], $added, $skipped);
     }
 
     /**
      * Second check through the publish planner's own caption reading: every
      * (language, platform) entry it reads today must read the same after the
      * edit, and any new entry must be one of the raw platforms just added.
+     * Only a "language:platform" in `$skipped` may read differently.
      *
      * @param  array<mixed>  $captions
      * @param  list<string>  $added
+     * @param  list<string>  $skipped
      */
-    private function onlyAddsPlannedPairs(Post $post, array $captions, array $added): bool
+    private function onlyAddsPlannedPairs(Post $post, array $captions, array $added, array $skipped = []): bool
     {
         $planner = $this->planner ?? app(PostPublishPlanner::class);
         $stored = $post->captions ?? [];
@@ -252,7 +269,9 @@ class UpdatePostAction
 
         foreach ($before as $language => $platforms) {
             foreach ($platforms as $platform => $section) {
-                if ($this->canonical($section) !== $this->canonical($after[$language][$platform] ?? null)) {
+                if ($this->canonical($section) !== $this->canonical($after[$language][$platform] ?? null)
+                    // An emptied caption is no longer planned and could never be refilled.
+                    && ! (isset($after[$language][$platform]) && in_array("{$language}:{$platform}", $skipped, true))) {
                     return false;
                 }
             }
@@ -276,12 +295,14 @@ class UpdatePostAction
      * {part: {platform: section}} map may only gain parts or platforms
      * inside a part. The shape test mirrors PostPublishPlanner, so an added
      * entry can never make the planner re-read the stored captions.
+     * A stored section of a platform in `$editable` may change, not disappear.
      *
      * @param  array<mixed>  $old
      * @param  array<mixed>  $new
+     * @param  list<string>  $editable
      * @return list<string>|null
      */
-    private function addedCaptionPlatforms(array $old, array $new): ?array
+    private function addedCaptionPlatforms(array $old, array $new, array $editable = []): ?array
     {
         $flat = $this->isFlatCaptionMap($old);
 
@@ -296,7 +317,8 @@ class UpdatePostAction
                 return null;
             }
 
-            if ($this->canonical($value) === $this->canonical($new[$key])) {
+            if ($this->canonical($value) === $this->canonical($new[$key])
+                || ($flat && $this->isPlatformSection($new[$key]) && in_array(strtolower((string) $key), $editable, true))) {
                 continue;
             }
 
@@ -306,7 +328,8 @@ class UpdatePostAction
 
             foreach ($value as $platform => $section) {
                 if (! array_key_exists($platform, $new[$key])
-                    || $this->canonical($section) !== $this->canonical($new[$key][$platform])
+                    || ($this->canonical($section) !== $this->canonical($new[$key][$platform])
+                        && ! ($this->isPlatformSection($new[$key][$platform]) && in_array(strtolower((string) $platform), $editable, true)))
                 ) {
                     return null;
                 }
