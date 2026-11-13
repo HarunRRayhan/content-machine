@@ -16,7 +16,35 @@ final class PostGroupPayloadBuilder
     /** Platforms brain accepts a video cover on. */
     private const COVER_PLATFORMS = ['instagram', 'facebook', 'youtube'];
 
+    private const BLUESKY_MAX_IMAGES = 4;
+
+    /** Brain's limits: the body's first line is the title, the rest the description. */
+    private const YOUTUBE_MAX_TITLE = 100;
+
+    private const YOUTUBE_MAX_DESCRIPTION_BYTES = 5000;
+
     public function __construct(private readonly SocialreinsConfig $config) {}
+
+    /**
+     * Brain reads a YouTube body as "title line, then description" and refuses the whole
+     * group when either is too long or holds `<` or `>`. A first line that fits is kept as
+     * the title; a longer one is cut for the title and the full caption stays the description.
+     */
+    public static function youtubeBody(string $caption): string
+    {
+        $caption = trim(str_replace(['<', '>'], '', $caption));
+        [$first, $rest] = array_pad(explode("\n", $caption, 2), 2, '');
+        $first = trim($first);
+
+        if (mb_strlen($first) > self::YOUTUBE_MAX_TITLE) {
+            $rest = $caption;
+            $first = rtrim(mb_substr($first, 0, self::YOUTUBE_MAX_TITLE - 1)).'…';
+        }
+
+        $rest = trim(mb_strcut(trim($rest), 0, self::YOUTUBE_MAX_DESCRIPTION_BYTES, 'UTF-8'));
+
+        return $rest === '' ? $first : $first."\n".$rest;
+    }
 
     /** CM names X "twitter"; brain names it "x". The rest match. */
     public static function brainPlatform(string $platform): string
@@ -98,7 +126,12 @@ final class PostGroupPayloadBuilder
             }
         } else {
             $override['body'] = $group->captions[$platform] ?? '';
-            $override['media'] = $media;
+            // Bluesky takes four images; brain refuses the whole group over one platform's count.
+            $override['media'] = $platform === 'bluesky' && ! $video ? array_slice($media, 0, self::BLUESKY_MAX_IMAGES) : $media;
+        }
+
+        if ($platform === 'youtube') {
+            $override['body'] = self::youtubeBody($override['body']);
         }
 
         if ($video && count($group->mediaUrls) > 1 && in_array($platform, self::COVER_PLATFORMS, true)) {

@@ -108,6 +108,37 @@ class PostGroupPayloadBuilderTest extends TestCase
         $this->assertArrayNotHasKey('youtube', $payload['overrides']['facebook']);
     }
 
+    public function test_bluesky_gets_at_most_four_images_and_other_platforms_all_of_them(): void
+    {
+        $payload = $this->builder()->build('english', [
+            $this->group(['bluesky', 'facebook'], ['bluesky' => 'B', 'facebook' => 'F'], ['a', 'b', 'c', 'd', 'e']),
+        ], video: false);
+
+        $this->assertSame(['a', 'b', 'c', 'd'], $payload['overrides']['bluesky']['media']);
+        $this->assertCount(5, $payload['overrides']['facebook']['media']);
+    }
+
+    public function test_a_youtube_first_line_that_fits_is_kept_and_a_long_one_is_cut_for_the_title(): void
+    {
+        $this->assertSame("Title\nMore", PostGroupPayloadBuilder::youtubeBody("Title\nMore"));
+        $this->assertSame('a b', PostGroupPayloadBuilder::youtubeBody('<a> b'));
+
+        $long = str_repeat('é', 150);
+        [$title, $description] = explode("\n", PostGroupPayloadBuilder::youtubeBody($long."\nTail"), 2);
+        $this->assertSame(100, mb_strlen($title));
+        $this->assertSame($long."\nTail", $description);
+
+        [, $description] = explode("\n", PostGroupPayloadBuilder::youtubeBody("T\n".str_repeat('আ', 3000)), 2);
+        $this->assertLessThanOrEqual(5000, strlen($description));
+        $this->assertTrue(mb_check_encoding($description, 'UTF-8'));
+
+        $payload = $this->builder()->build('english', [
+            $this->group(['youtube', 'facebook'], ['youtube' => $long, 'facebook' => $long], ['https://cm.test/v.mp4']),
+        ], video: true);
+        $this->assertSame(100, mb_strlen(explode("\n", $payload['overrides']['youtube']['body'])[0]));
+        $this->assertSame($long, $payload['overrides']['facebook']['body']);
+    }
+
     public function test_schedule_is_utc_and_a_publish_now_time_is_frozen_into_the_body(): void
     {
         $when = CarbonImmutable::parse('2026-11-10 09:00', 'Asia/Dhaka');
