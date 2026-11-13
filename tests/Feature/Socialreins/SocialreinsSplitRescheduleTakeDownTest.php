@@ -11,6 +11,7 @@ use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Socialreins\SocialreinsResults;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -321,6 +322,19 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         $post->refresh();
         $this->assertSame('scheduled', $post->status);
         $this->assertSame('succeeded', $post->publish_state);
+    }
+
+    public function test_reschedule_passes_over_a_platform_socialreins_left_out(): void
+    {
+        $post = $this->socialreinsOnly();
+        SocialreinsGroup::query()->where('subject_id', $post->id)->sole()->mutateResults(
+            fn (array $results): array => $results + SocialreinsResults::fromSkipped([['platform' => 'x', 'problems' => [['code' => 'too_long']]]], time()),
+        );
+
+        $this->reschedule($post)->assertOk();
+
+        $this->assertSame(['p1', 'p2'], $this->brainPuts());
+        Http::assertNotSent(fn (Request $r): bool => str_contains($r->url(), 'skipped'));
     }
 
     public function test_reschedule_moves_a_socialreins_only_video_without_postsyncer(): void

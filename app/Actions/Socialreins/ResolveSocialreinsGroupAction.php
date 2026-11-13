@@ -59,6 +59,7 @@ class ResolveSocialreinsGroupAction
                 'group_id' => $body['group_id'],
                 'posts' => $body['posts'],
                 'expected_targets' => (int) ($body['expected_targets'] ?? 0),
+                'skipped' => is_array($body['skipped'] ?? null) ? $body['skipped'] : [],
             ]);
 
             return self::CREATED;
@@ -76,7 +77,7 @@ class ResolveSocialreinsGroupAction
      * Record the group a create answered (or the lookup found), then read it back so the
      * stored picture has brain's own account count.
      *
-     * @param  array{group_id: string, posts: array<mixed>, expected_targets: int}  $body
+     * @param  array{group_id: string, posts: array<mixed>, expected_targets: int, skipped: array<mixed>}  $body
      */
     public function markCreated(SocialreinsGroup $row, array $body): void
     {
@@ -92,7 +93,7 @@ class ResolveSocialreinsGroupAction
             'state' => SocialreinsGroup::CREATED,
             'group_id' => $body['group_id'],
             'expected_targets' => $body['expected_targets'],
-            'results' => $results,
+            'results' => $results + SocialreinsResults::fromSkipped($body['skipped'], $at),
             'error' => null,
         ])->save();
 

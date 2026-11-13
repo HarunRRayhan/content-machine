@@ -32,6 +32,9 @@ use InvalidArgumentException;
  * - A group with failed targets is never recreated: `POST /post-groups/{id}/retry` re-queues
  *   only its failed targets that are not ambiguous (each attempt has its own key). Targets
  *   brain reports as `outcome_unknown` are left for the user to check on the platform.
+ * - Every create asks for `on_invalid: skip`: a platform brain left out as invalid has no post
+ *   there, so the group retry cannot reach it. The next run plans it again from the subject as
+ *   it is now and sends a new group (new sequence, new key) with only those platforms.
  */
 class PublishToSocialreinsAction
 {
@@ -185,10 +188,10 @@ class PublishToSocialreinsAction
         /** @var list<PublishGroup> $groups */
         $groups = $planner->plan($subject, $config->planningConfig($workspace), $options);
 
-        $live = $this->liveLanguages($rows);
+        [$live, $skipped] = $this->liveLanguages($rows);
         $byLanguage = [];
         foreach ($groups as $group) {
-            if (! in_array($group->language, $live, true)) {
+            if (! in_array($group->language, $live, true) || isset($skipped[$group->language])) {
                 $byLanguage[$group->language][] = $group;
             }
         }
@@ -196,7 +199,9 @@ class PublishToSocialreinsAction
         $builder = new PostGroupPayloadBuilder($config);
         $payloads = [];
         foreach ($byLanguage as $language => $languageGroups) {
-            $payload = $builder->build($language, $languageGroups, $video);
+            // A live language only gets the platforms brain left out; the rest is never sent again.
+            $only = in_array($language, $live, true) ? $skipped[$language] : null;
+            $payload = $builder->build($language, $languageGroups, $video, $only);
             if ($payload !== null) {
                 $payloads[$language] = PostGroupPayloadBuilder::encode($payload);
             }
@@ -236,21 +241,26 @@ class PublishToSocialreinsAction
     }
 
     /**
-     * Languages with a created group that still has posts (not all taken down).
+     * Languages with a created group that still has posts (not all taken down), and per
+     * language the platforms brain left out of the newest group that named them.
      *
      * @param  list<SocialreinsGroup>  $rows
-     * @return list<string>
+     * @return array{0: list<string>, 1: array<string, list<string>>}
      */
     private function liveLanguages(array $rows): array
     {
         $live = [];
+        $skipped = [];
         foreach (SocialreinsResults::byPlatform($rows) as $key => $platform) {
-            if ($platform['state'] !== SocialreinsResults::DELETED) {
-                $live[] = explode(':', $key, 2)[0];
+            [$language, $name] = explode(':', $key, 2);
+            if ($platform['skipped']) {
+                $skipped[$language][] = $name;
+            } elseif ($platform['state'] !== SocialreinsResults::DELETED) {
+                $live[] = $language;
             }
         }
 
-        return array_values(array_unique($live));
+        return [array_values(array_unique($live)), $skipped];
     }
 
     /**
@@ -288,9 +298,15 @@ class PublishToSocialreinsAction
         return $sent;
     }
 
-    /** @param  array<string, array<string, mixed>>  $platforms */
+    /**
+     * A platform brain left out has no post in the group: a new group sends it (createRows()).
+     *
+     * @param  array<string, array<string, mixed>>  $platforms
+     */
     private function hasRetryable(array $platforms): bool
     {
+        $platforms = array_filter($platforms, fn (array $platform): bool => ! $platform['skipped']);
+
         return array_intersect(array_column($platforms, 'state'), [SocialreinsResults::FAILED, SocialreinsResults::PARTIAL]) !== [];
     }
 

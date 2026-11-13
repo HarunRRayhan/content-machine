@@ -60,7 +60,11 @@ class SettleSocialreinsSubjectAction
                 return;
             }
 
-            if (($failed->isNotEmpty() || $partial->isNotEmpty() || $unknown->isNotEmpty()) && $waiting->isEmpty()) {
+            // A platform SocialReins left out as invalid failed for good at the create: it is
+            // reported at once, while the other platforms are still scheduled.
+            $skipped = $failed->contains(fn (array $p): bool => $p['skipped']);
+
+            if (($failed->isNotEmpty() || $partial->isNotEmpty() || $unknown->isNotEmpty()) && ($waiting->isEmpty() || $skipped)) {
                 $message = [];
                 if ($failed->isNotEmpty()) {
                     $message[] = 'SocialReins failed on '.$failed->map(
@@ -73,7 +77,7 @@ class SettleSocialreinsSubjectAction
                 if ($unknown->isNotEmpty()) {
                     $message[] = self::unknownMessage($unknown);
                 }
-                $this->save($locked, $ok->isNotEmpty() || $partial->isNotEmpty() || $unknown->isNotEmpty() ? 'scheduled' : null, 'failed', implode(' ', $message));
+                $this->save($locked, $ok->isNotEmpty() || $waiting->isNotEmpty() || $partial->isNotEmpty() || $unknown->isNotEmpty() ? 'scheduled' : null, 'failed', implode(' ', $message));
 
                 return;
             }

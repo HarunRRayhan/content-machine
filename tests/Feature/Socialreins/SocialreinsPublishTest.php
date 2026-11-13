@@ -873,6 +873,136 @@ class SocialreinsPublishTest extends TestCase
     }
 
     /** @return array<string, mixed> */
+    private const GROUP_2 = 'aaaaaaaa-0000-4000-8000-000000000002';
+
+    /** @var list<mixed> queued answers to POST /post-groups */
+    private array $createReplies = [];
+
+    /** @return array<string, mixed> one element of brain's `skipped` */
+    private function skippedX(string $detail = 'X text is 300 characters, the limit is 280.'): array
+    {
+        return ['platform' => 'x', 'account_ids' => ['acc1'], 'ok' => false, 'problems' => [
+            ['code' => 'too_long', 'field' => 'body', 'limit' => 280, 'actual' => 300, 'detail' => $detail],
+        ]];
+    }
+
+    /** Facebook and X are sent; brain creates Facebook and leaves X out as invalid. */
+    private function groupWithSkippedX(): array
+    {
+        $workspace = $this->workspace();
+        $post = $this->makePost($workspace, ['facebook' => ['caption' => 'FB'], 'twitter' => ['caption' => 'X too long']], ['platforms' => ['facebook', 'twitter']]);
+        $facebook = $this->brainPost(self::FB_POST, 'facebook', 'scheduled');
+        $this->brain = [self::GROUP => [$facebook]];
+        $this->createReplies = [Http::response(['group_id' => self::GROUP, 'expected_targets' => 1, 'posts' => [$facebook], 'skipped' => [$this->skippedX()]], 201)];
+        $this->fakeHttp([
+            self::URL => fn () => array_shift($this->createReplies) ?? Http::response(['error' => 'internal'], 500),
+            'brain.test/v1/post-groups/*/retry' => Http::response(['error' => 'nothing_to_retry'], 409),
+            'brain.test/v1/post-groups/*' => fn (Request $r) => Http::response($this->groupBody(basename(parse_url($r->url(), PHP_URL_PATH)))),
+            'brain.test/v1/posts/*' => Http::response(null, 204),
+        ]);
+
+        return [$workspace, $post, $this->publish($post)];
+    }
+
+    public function test_a_platform_brain_left_out_fails_alone_and_its_record_survives_reconcile_webhooks_and_take_down(): void
+    {
+        [$workspace, $post, $result] = $this->groupWithSkippedX();
+
+        $this->assertSame('skip', $this->creates()[0]['on_invalid']);
+        $this->assertSame('failed', $result->publish_state);
+        $this->assertSame('scheduled', $result->status, 'facebook is scheduled as usual');
+        $this->assertStringContainsString('twitter (X text is 300 characters, the limit is 280.)', $result->publish_error);
+        $this->assertStringNotContainsString('facebook', $result->publish_error);
+
+        $group = SocialreinsGroup::query()->sole();
+        $this->assertSame(['platform' => 'twitter', 'status' => 'failed', 'skipped' => true], array_intersect_key($group->results['skipped:twitter'], array_flip(['platform', 'status', 'skipped'])));
+
+        $shown = collect(SocialreinsResults::presentGroupsForApi($result))->keyBy(fn (array $g): string => $g['platforms'][0]);
+        $this->assertSame('failed', $shown['twitter']['status']);
+        $this->assertNull($shown['twitter']['post_id']);
+        $this->assertSame('Publishing failed. Inspect the dashboard for details.', $shown['twitter']['detail']);
+        $this->assertSame('scheduled', $shown['facebook']['status']);
+
+        // Facebook goes out: the reconcile and the webhook rewrite its result, not the skipped record.
+        $this->brain[self::GROUP] = [$this->brainPost(self::FB_POST, 'facebook', 'published', [$this->brainTarget('t1', 'published', ['remote_id' => 'r1'])])];
+        $this->assertTrue(app(ReconcileSocialreinsGroupsAction::class)->reconcileGroup($group));
+        app(ApplySocialreinsWebhookAction::class)->handle($workspace->id, $this->event('published', self::FB_POST, 'facebook'));
+
+        $this->assertSame('published', $group->fresh()->results[self::FB_POST]['status']);
+        $this->assertTrue($group->fresh()->results['skipped:twitter']['skipped']);
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertStringContainsString('twitter (X text is 300', $post->fresh()->publish_error);
+
+        // Nothing exists at SocialReins for it, so a take down only deletes Facebook.
+        $this->assertSame([], app(TakeDownSocialreinsAction::class)->handle($post->fresh()));
+        $this->assertCount(1, $this->sent('DELETE'));
+    }
+
+    public function test_a_retry_sends_only_the_left_out_platform_in_a_new_group_with_a_new_key(): void
+    {
+        [$workspace, $post] = $this->groupWithSkippedX();
+
+        // Still too long: a group with nothing valid is refused, and the new reason is shown.
+        $this->createReplies = [Http::response(['error' => 'too_long', 'platform' => 'x', 'message' => 'Still too long.'], 422)];
+        $again = $this->publish($post);
+        $this->assertSame('failed', $again->publish_state);
+        $this->assertStringContainsString('Still too long.', $again->publish_error);
+
+        // Fixed: the retry sends the post as it is now.
+        $post->forceFill(['captions' => ['English' => ['facebook' => ['caption' => 'FB'], 'twitter' => ['caption' => 'X short']]]])->save();
+        $x = $this->brainPost(self::X_POST, 'x', 'scheduled');
+        $this->brain[self::GROUP_2] = [$x];
+        $this->createReplies = [Http::response(['group_id' => self::GROUP_2, 'expected_targets' => 1, 'posts' => [$x], 'skipped' => []], 201)];
+        $retried = $this->publish($post);
+
+        $this->assertSame('succeeded', $retried->publish_state);
+        $this->assertNull($retried->publish_error);
+        $creates = $this->creates();
+        $this->assertCount(3, $creates);
+        foreach ([1, 2] as $attempt) {
+            $this->assertSame(['x'], $creates[$attempt]['platforms'], 'facebook is live and never sent again');
+            $this->assertSame(['x'], array_keys($creates[$attempt]['overrides']));
+        }
+        $this->assertSame('X short', $creates[2]['overrides']['x']['body']);
+        $this->assertSame(
+            ["cm:ws{$workspace->id}:post:{$post->id}:english:1", "cm:ws{$workspace->id}:post:{$post->id}:english:2", "cm:ws{$workspace->id}:post:{$post->id}:english:3"],
+            array_map(fn (Request $r): string => $r->header('Idempotency-Key')[0], $creates),
+        );
+        $this->assertSame([], $this->retries(), 'the group retry has no post to act on');
+
+        $platforms = SocialreinsResults::byPlatform(SocialreinsResults::rowsOf($post));
+        $this->assertSame(self::X_POST, $platforms['english:twitter']['post_id']);
+        $this->assertFalse($platforms['english:twitter']['skipped']);
+
+        // Settled and clean now: nothing is sent a second time.
+        try {
+            app(EnqueueSocialreinsPublishAction::class)->handle($post->fresh(), $workspace, []);
+            $this->fail('A clean publish must not be sent again.');
+        } catch (ValidationException) {
+            $this->assertCount(3, $this->creates());
+        }
+    }
+
+    public function test_a_lost_answer_found_by_the_lookup_records_what_brain_left_out(): void
+    {
+        $post = $this->lostAnswer();
+        $key = SocialreinsGroup::query()->first()->idempotency_key;
+        $this->brain = [self::GROUP => [$this->brainPost(self::FB_POST, 'facebook', 'scheduled')]];
+        $skipped = $this->skippedX();
+        unset($skipped['problems'][0]['detail']);
+        $this->lookups[$key] = Http::response([
+            'key' => $key, 'method' => 'POST', 'path' => '/post-groups', 'status' => 'done', 'response_status' => 201,
+            'response_body' => [...$this->groupResponse(['facebook']), 'skipped' => [$skipped]],
+        ]);
+
+        $result = $this->publish($post);
+
+        $this->assertTrue(SocialreinsGroup::query()->sole()->results['skipped:twitter']['skipped']);
+        $this->assertSame('failed', $result->publish_state);
+        $this->assertStringContainsString('twitter (too_long)', $result->publish_error);
+        $this->assertCount(1, $this->creates(), 'the request was not sent again');
+    }
+
     private function event(string $status, string $postId, string $platform, ?string $error = null, string $group = 'aaaaaaaa-0000-4000-8000-000000000001', string $target = 't1'): array
     {
         return [

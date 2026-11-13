@@ -97,6 +97,8 @@ final class PostGroupPayloadBuilder
             // A past time means now in brain, so a frozen "now" is safe to resend days later.
             'scheduled_at' => ($when ?? CarbonImmutable::now())->utc()->format('Y-m-d\TH:i:s\Z'),
             'overrides' => $overrides,
+            // One invalid platform must not hold back the rest: brain leaves it out and says why.
+            'on_invalid' => 'skip',
         ];
     }
 
