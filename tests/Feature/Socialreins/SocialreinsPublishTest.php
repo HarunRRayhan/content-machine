@@ -186,7 +186,7 @@ class SocialreinsPublishTest extends TestCase
     public function test_a_refused_request_gets_a_new_key_on_the_next_attempt(): void
     {
         $this->fakeHttp([self::URL => Http::sequence()
-            ->push(['error' => 'too_long', 'platform' => 'x'], 422)
+            ->push(['error' => 'too_long', 'platform' => 'x', 'detail' => 'part 2 has 300 of 280 characters'], 422)
             ->push($this->groupResponse(['facebook']), 201)]);
         $post = $this->makePost($this->workspace(), ['facebook' => ['caption' => 'Hello']], ['platforms' => ['facebook']]);
 
@@ -194,6 +194,7 @@ class SocialreinsPublishTest extends TestCase
 
         $this->assertSame('failed', $first->publish_state);
         $this->assertStringContainsString('too_long', $first->publish_error);
+        $this->assertStringContainsString('part 2 has 300 of 280 characters', $first->publish_error);
         $this->assertSame('rejected', SocialreinsGroup::query()->first()->state);
 
         $this->publish($post);

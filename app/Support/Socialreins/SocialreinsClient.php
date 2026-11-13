@@ -179,7 +179,9 @@ class SocialreinsClient
             'SocialReins answered '.$response->status()
                 .(is_string($code) ? " {$code}" : '')
                 .(is_string($platform) ? " (platform {$platform})" : '')
-                .(is_string($detail) ? ": {$detail}" : '').'.',
+                .(is_string($detail) ? ": {$detail}" : '')
+                // Brain's 422s say what exactly is wrong (which part, the limit, the actual size).
+                .(is_string($why = $response->json('detail')) && $why !== '' && $why !== $detail ? " ({$why})" : '').'.',
             $response->status(),
             is_string($code) ? $code : null,
             (array) $response->json(),
