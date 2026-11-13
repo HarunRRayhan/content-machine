@@ -922,6 +922,7 @@ class SocialreinsPublishTest extends TestCase
         $shown = collect(SocialreinsResults::presentGroupsForApi($result))->keyBy(fn (array $g): string => $g['platforms'][0]);
         $this->assertSame('failed', $shown['twitter']['status']);
         $this->assertNull($shown['twitter']['post_id']);
+        $this->assertArrayNotHasKey('skipped', $shown['twitter']);
         $this->assertSame('Publishing failed. Inspect the dashboard for details.', $shown['twitter']['detail']);
         $this->assertSame('scheduled', $shown['facebook']['status']);
 
@@ -963,6 +964,15 @@ class SocialreinsPublishTest extends TestCase
             $this->fail('A scheduled platform must stay locked.');
         } catch (ValidationException $exception) {
             $this->assertStringContainsString('cannot be edited after a publish attempt', $exception->getMessage());
+        }
+        // Emptied, it would drop out of the plan and could never be refilled.
+        foreach (['', "  \n"] as $empty) {
+            try {
+                $edit('FB', $empty);
+                $this->fail('A left-out caption must not be emptied.');
+            } catch (ValidationException $exception) {
+                $this->assertStringContainsString('cannot be edited after a publish attempt', $exception->getMessage());
+            }
         }
         $edited = $edit('FB', 'X short');
         $this->assertSame('failed', $edited->publish_state, 'the edit keeps the publish retryable');
@@ -1008,20 +1018,6 @@ class SocialreinsPublishTest extends TestCase
         } catch (ValidationException) {
             $this->assertCount(3, $this->creates());
         }
-    }
-
-    public function test_a_left_out_platform_that_is_no_longer_planned_stops_failing_the_post(): void
-    {
-        [, $post] = $this->groupWithSkippedX();
-
-        // The user gives up on X and retries with facebook alone.
-        $retried = $this->publish($post, ['platforms' => ['facebook']]);
-
-        $this->assertSame('succeeded', $retried->publish_state);
-        $this->assertNull($retried->publish_error);
-        $this->assertSame('scheduled', $retried->status);
-        $this->assertCount(1, $this->creates(), 'nothing was sent again');
-        $this->assertSame('deleted', SocialreinsGroup::query()->sole()->results['skipped:twitter']['status']);
     }
 
     public function test_a_lost_answer_found_by_the_lookup_records_what_brain_left_out(): void

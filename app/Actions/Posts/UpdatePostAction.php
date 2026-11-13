@@ -270,7 +270,8 @@ class UpdatePostAction
         foreach ($before as $language => $platforms) {
             foreach ($platforms as $platform => $section) {
                 if ($this->canonical($section) !== $this->canonical($after[$language][$platform] ?? null)
-                    && ! in_array("{$language}:{$platform}", $skipped, true)) {
+                    // An emptied caption is no longer planned and could never be refilled.
+                    && ! (isset($after[$language][$platform]) && in_array("{$language}:{$platform}", $skipped, true))) {
                     return false;
                 }
             }

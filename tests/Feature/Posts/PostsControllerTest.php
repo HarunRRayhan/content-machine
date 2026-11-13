@@ -404,8 +404,8 @@ class PostsControllerTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('posts/show')
                 ->where('post.socialreins_groups', [
-                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['facebook'], 'language' => 'english', 'post_id' => 'p1', 'detail' => null, 'targets' => []],
-                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['instagram'], 'language' => 'english', 'post_id' => 'p2', 'detail' => null, 'targets' => []],
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['facebook'], 'language' => 'english', 'post_id' => 'p1', 'skipped' => false, 'detail' => null, 'targets' => []],
+                    ['source' => 'socialreins', 'status' => 'scheduled', 'scheduled_at' => '2026-11-12T05:27:00Z', 'platforms' => ['instagram'], 'language' => 'english', 'post_id' => 'p2', 'skipped' => false, 'detail' => null, 'targets' => []],
                 ])
             );
     }

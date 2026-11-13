@@ -67,6 +67,8 @@ final class SocialreinsResults
         $redact = fn (mixed $text): ?string => $text === null ? null : 'Publishing failed. Inspect the dashboard for details.';
 
         return array_map(function (array $group) use ($redact): array {
+            // Internal: the editor reads it to keep a left-out platform's caption editable.
+            unset($group['skipped']);
             $group['detail'] = $redact($group['detail'] ?? null);
             $group['targets'] = array_map(fn (array $target): array => array_merge($target, ['error' => $redact($target['error'] ?? null)]), $group['targets'] ?? []);
 
