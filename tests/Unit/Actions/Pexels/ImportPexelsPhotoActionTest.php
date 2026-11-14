@@ -56,4 +56,31 @@ class ImportPexelsPhotoActionTest extends TestCase
         $this->assertSame('A Photographer', $asset->meta['pexels']['photographer']);
         Storage::disk('scratchpad')->assertExists($asset->path);
     }
+
+    public function test_importing_the_same_photo_twice_returns_the_first_asset(): void
+    {
+        Storage::fake('scratchpad');
+        $workspace = Workspace::factory()->create();
+        $photo = new PexelsPhotoData(
+            id: 123,
+            photographer: 'A Photographer',
+            photographerUrl: 'https://www.pexels.com/@photographer/',
+            pexelsUrl: 'https://www.pexels.com/photo/123/',
+            previewUrl: 'https://images.pexels.com/photos/123/medium.jpg',
+            downloadUrl: 'https://images.pexels.com/photos/123/original.png',
+        );
+        $provider = Mockery::mock(PexelsProvider::class);
+        $provider->shouldReceive('photo')->twice()->with(123)->andReturn($photo);
+        $provider->shouldReceive('download')->twice()->with($photo)->andReturn([
+            'bytes' => base64_decode(self::PNG),
+            'mime' => 'image/png',
+        ]);
+
+        $first = (new ImportPexelsPhotoAction)->handle($workspace, null, new ImportPexelsPhotoData(123), $provider);
+        $second = (new ImportPexelsPhotoAction)->handle($workspace, null, new ImportPexelsPhotoData(123), $provider);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame(1, MediaAsset::query()->where('workspace_id', $workspace->id)->count());
+        $this->assertCount(1, Storage::disk('scratchpad')->allFiles());
+    }
 }
