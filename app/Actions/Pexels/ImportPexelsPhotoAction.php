@@ -32,6 +32,27 @@ class ImportPexelsPhotoAction
             'image/webp' => 'webp',
             default => throw new RuntimeException('Pexels returned an unsupported image.'),
         };
+        $checksum = hash('sha256', $download['bytes']);
+        $attribution = [
+            'id' => $photo->id,
+            'photographer' => $photo->photographer,
+            'photographer_url' => $photo->photographerUrl,
+            'pexels_url' => $photo->pexelsUrl,
+        ];
+
+        // The same bytes can only exist once per workspace (unique checksum index), so a repeat import returns that asset.
+        $existing = MediaAsset::query()
+            ->where('workspace_id', $workspace->id)
+            ->where('checksum_sha256', $checksum)
+            ->first();
+        if ($existing !== null) {
+            if (! isset($existing->meta['pexels'])) {
+                $existing->update(['meta' => [...($existing->meta ?? []), 'pexels' => $attribution]]);
+            }
+
+            return $existing;
+        }
+
         $filename = 'source-pexels-'.$photo->id.'-'.Str::ulid().'.'.$extension;
         $path = (string) $workspace->id.'/'.$filename;
         Storage::disk('scratchpad')->put($path, $download['bytes']);
@@ -44,19 +65,14 @@ class ImportPexelsPhotoAction
                 'path' => $path,
                 'mime' => $download['mime'],
                 'bytes' => strlen($download['bytes']),
-                'checksum_sha256' => hash('sha256', $download['bytes']),
+                'checksum_sha256' => $checksum,
                 'width' => $dimensions[0],
                 'height' => $dimensions[1],
                 'original_filename' => 'source-pexels-'.$photo->id.'.'.$extension,
                 'uploaded_by_user_id' => $user?->id,
                 'meta' => [
                     'source' => 'pexels',
-                    'pexels' => [
-                        'id' => $photo->id,
-                        'photographer' => $photo->photographer,
-                        'photographer_url' => $photo->photographerUrl,
-                        'pexels_url' => $photo->pexelsUrl,
-                    ],
+                    'pexels' => $attribution,
                 ],
             ]);
         } catch (\Throwable $exception) {
