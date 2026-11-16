@@ -25,6 +25,8 @@ class PostsyncerHandleDirectory
         private readonly PostsyncerClient $client,
         private readonly PostsyncerConfig $config,
         private readonly string $cacheKey,
+        // False when PostSyncer is off: only the stored handles, no API call.
+        private readonly bool $live = true,
     ) {}
 
     /**
@@ -73,7 +75,7 @@ class PostsyncerHandleDirectory
      */
     private function accounts(): array
     {
-        if (! $this->config->isConfigured()) {
+        if (! $this->live || ! $this->config->isConfigured()) {
             return [];
         }
 

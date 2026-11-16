@@ -45,6 +45,46 @@ minutes) reads `GET /posts?group_id=` and reaches the same states.
 The post-type matrix (which platforms are on, off or ask per post type) is still read from the
 workspace's PostSyncer post-type settings, or the Script Studio defaults when there are none.
 
+## PostSyncer off
+
+**PostSyncer** on the same page (`settings.postsyncer_enabled`, on by default) switches PostSyncer
+off for the workspace. Changing it is blocked while a publish is queued or running.
+
+- Every new post and video goes through SocialReins, whatever the driver and routed languages
+  say. A (language, platform) pair the language's set does not cover (TikTok, Bangla X) is left
+  out and published nowhere. The item keeps the pairs as `publish_progress.left_out`
+  (`language:platform`) and its page says "Left out, not posted anywhere".
+- An item where every pair is left out is refused with "Nothing to publish: SocialReins does not
+  cover ..., and PostSyncer is off."
+- An item still on PostSyncer is refused, pointing at the move command below.
+- `postsyncer:sync-scheduled` and `postsyncer:dispatch-pending-publishes` skip the workspace, the post
+  preview shows stored handles only, and the PostSyncer settings page does not load accounts.
+  Run `postsyncer:sync-scheduled` once by hand before switching off, so items PostSyncer
+  already published are marked posted.
+- Telegram publishes through the same path, so it follows these rules and never calls PostSyncer
+  itself.
+
+### Moving scheduled items off PostSyncer
+
+`php artisan socialreins:move-off-postsyncer` lists every scheduled post and video with a PostSyncer
+post (id, time, PostSyncer pairs, what goes to SocialReins, what is left out). Nothing changes
+without `--apply`, and `--apply` only acts on workspaces with PostSyncer off. Items due within 15
+minutes (`--min-minutes`), already published on PostSyncer, with a publish in flight, or whose
+PostSyncer posts have different times are skipped and listed.
+
+Per item, with `--apply`:
+
+1. The plan is stored as `publish_progress.move_off_postsyncer`.
+2. Each PostSyncer post is read and deleted only while still scheduled or a draft (a 404 counts as
+   gone). On any problem the item stops: if nothing was deleted the plan is removed and nothing
+   changed; otherwise the item is marked failed naming what is now scheduled nowhere.
+3. Only then its PostSyncer groups move to `postsyncer.cleared_groups` and the covered pairs go to
+   SocialReins at the same time (a split post's SocialReins half stays; the moved platforms get a
+   new group). Left-out pairs are recorded as above.
+
+A move that stopped, or a hand-over that failed, is picked up again by the next `--apply` run;
+the SocialReins publish is idempotent, so nothing is sent twice.
+
 ## How a publish maps
 
 `PostPublishPlanner` and `VideoPublishPlanner` are unchanged. Their `PublishGroup`s of one

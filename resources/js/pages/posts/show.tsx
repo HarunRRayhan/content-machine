@@ -61,6 +61,7 @@ type PostDetail = {
     publish_retryable: boolean;
     publish_progress: {
         state?: string;
+        left_out?: string[];
         split?: {
             socialreins?: { platforms?: string[] };
             postsyncer?: string[];

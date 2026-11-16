@@ -346,6 +346,8 @@ class VideosController extends Controller
                 'socialreins' => $split['socialreins']['platforms'] ?? [],
                 'postsyncer' => $split['postsyncer'] ?? [],
             ] : null,
+            // `language:platform` pairs PostSyncer off left out (SocialReins does not cover them).
+            'publish_left_out' => $video->publish_progress['left_out'] ?? [],
             // Legacy name: "this video's publish driver is ready" (PostSyncer, or SocialReins when routed).
             'postsyncer_ready' => $socialreins
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()

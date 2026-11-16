@@ -24,16 +24,20 @@ class SaveSocialreinsSettingsAction
             // here rolls the write back.
             if ($before !== $this->routing($locked) && $this->hasPublishInFlight($locked)) {
                 throw ValidationException::withMessages([
-                    'publish_driver' => __('Wait for the running publish to finish before changing the publish driver or its languages.'),
+                    'publish_driver' => __('Wait for the running publish to finish before changing the publish driver, its languages or the PostSyncer switch.'),
                 ]);
             }
         });
     }
 
-    /** @return array{0: bool, 1: list<string>} */
+    /** @return array{0: bool, 1: list<string>, 2: bool} */
     private function routing(Workspace $workspace): array
     {
-        return [SocialreinsConfig::usesSocialreins($workspace), SocialreinsConfig::fromWorkspace($workspace)->routedLanguages()];
+        return [
+            SocialreinsConfig::usesSocialreins($workspace),
+            SocialreinsConfig::fromWorkspace($workspace)->routedLanguages(),
+            SocialreinsConfig::postsyncerEnabled($workspace),
+        ];
     }
 
     private function hasPublishInFlight(Workspace $workspace): bool

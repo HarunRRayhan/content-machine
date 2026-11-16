@@ -5,14 +5,10 @@ namespace App\Actions\Socialreins;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
-use App\Support\Postsyncer\PostsyncerClient;
-use App\Support\Postsyncer\PostsyncerConfig;
-use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Socialreins\SocialreinsClient;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsException;
 use App\Support\Socialreins\SocialreinsResults;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Takes a Post or Video down from SocialReins: `DELETE /posts/{id}` for every brain post
@@ -27,13 +23,14 @@ use Illuminate\Support\Facades\DB;
  *   deleted by brain at all: it is reported, not skipped;
  * - a post that failed with nothing live has nothing to take down and is skipped.
  *
- * A split subject's PostSyncer half is taken down too (takeDownPostsyncerHalf()), and the
+ * A split subject's PostSyncer half is taken down too (TakeDownPostsyncerGroupsAction), and the
  * subject resets only once both halves are down.
  */
 class TakeDownSocialreinsAction
 {
     public function __construct(
         private readonly ResolveSocialreinsGroupAction $resolve,
+        private readonly TakeDownPostsyncerGroupsAction $takeDownPostsyncer,
     ) {}
 
     /** @return list<string> what could not be taken down; empty when everything is down */
@@ -46,7 +43,7 @@ class TakeDownSocialreinsAction
             return ['The SocialReins half is still being handed over. Try again when the publish settles.'];
         }
 
-        $problems = $split ? $this->takeDownPostsyncerHalf($subject) : [];
+        $problems = $split ? $this->takeDownPostsyncer->handle($subject) : [];
 
         // A request that got no answer may have created a group CM does not know: ask brain
         // what its key made before anything else.
@@ -105,66 +102,6 @@ class TakeDownSocialreinsAction
         }
 
         return $problems;
-    }
-
-    /**
-     * Deletes each still-scheduled PostSyncer group of a split post or video. A published one is reported:
-     * PostSyncer does not say its delete removes a live post, so the owner removes it there.
-     *
-     * @return list<string> what could not be taken down
-     */
-    private function takeDownPostsyncerHalf(Post|Video $post): array
-    {
-        $client = new PostsyncerClient(PostsyncerConfig::fromWorkspace($post->workspace));
-        $problems = [];
-
-        foreach ($post->postsyncer['groups'] ?? [] as $group) {
-            $postId = (string) ($group['post_id'] ?? '');
-            $name = 'PostSyncer '.implode(', ', (array) ($group['platforms'] ?? []));
-            if ($postId === '' || ($group['status'] ?? null) === 'DELETED') {
-                continue;
-            }
-
-            try {
-                $remote = $client->getPost($postId);
-                $status = strtoupper((string) ((is_array($remote['data'] ?? null) ? $remote['data'] : $remote)['status'] ?? ''));
-
-                if (! in_array($status, ['SCHEDULED', 'DRAFT'], true)) {
-                    $problems[] = "{$name}: {$status} in PostSyncer (post {$postId}), which cannot take a published post off the platform. "
-                        .'Remove it on the platform and delete it in PostSyncer, then take down again.';
-
-                    continue;
-                }
-
-                $client->deletePost($postId);
-            } catch (PostsyncerException $exception) {
-                // Already gone counts as down.
-                if ($exception->getCode() !== 404) {
-                    $problems[] = "{$name}: ".$exception->getMessage();
-
-                    continue;
-                }
-            }
-
-            $this->markPostsyncerGroupDeleted($post, $postId);
-        }
-
-        return $problems;
-    }
-
-    /** Recorded at once, under the row lock, so a retry skips it and nothing done is forgotten. */
-    private function markPostsyncerGroupDeleted(Post|Video $post, string $postId): void
-    {
-        DB::transaction(function () use ($post, $postId): void {
-            $locked = $post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
-            $postsyncer = $locked->postsyncer;
-            foreach ($postsyncer['groups'] ?? [] as $i => $group) {
-                if ((string) ($group['post_id'] ?? '') === $postId) {
-                    $postsyncer['groups'][$i]['status'] = 'DELETED';
-                }
-            }
-            $locked->forceFill(['postsyncer' => $postsyncer])->save();
-        });
     }
 
     /** @param  array<string, mixed>  $result */
