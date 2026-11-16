@@ -86,6 +86,11 @@ class EnqueueSocialreinsPublishAction
 
             // PostSyncer off: what SocialReins does not cover is published nowhere. The publish
             // leaves it out (PublishToSocialreinsAction) and the item says so.
+            // A move that stopped part-way leaves posts on PostSyncer: a publish here could send them twice.
+            if (! SocialreinsConfig::postsyncerEnabled($lockedWorkspace) && SocialreinsConfig::hasPostsyncerPost($locked)) {
+                throw $this->refuse(__('PostSyncer is off and this still has a PostSyncer post. Finish moving it with socialreins:move-off-postsyncer --apply.'));
+            }
+
             $leftOut = [];
             if (! is_array($split) && ! SocialreinsConfig::postsyncerEnabled($lockedWorkspace)) {
                 ['covered' => $covered, 'left_out' => $leftOut] = SocialreinsConfig::coverage($locked, $lockedWorkspace, $options);

@@ -9,6 +9,7 @@ use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PostsyncerPostVerifier;
+use App\Support\Socialreins\SocialreinsConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -31,6 +32,10 @@ final class ReschedulePostAction
     public function handle(Post $post, Workspace $workspace, ReschedulePostData $data): Post
     {
         abort_if($post->workspace_id !== $workspace->id, 404);
+
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            throw new PostsyncerException(SocialreinsConfig::POSTSYNCER_OFF_MESSAGE);
+        }
 
         $post->refresh();
 

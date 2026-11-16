@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * The PostSyncer take down: the half of a split take down, and the first step of a move off
  * PostSyncer. Each group is read first and deleted only while it is still scheduled or a
- * draft; a 404 counts as already gone. Each deletion is recorded at once as `DELETED`.
+ * draft; a 404 counts as already gone once the same run has seen the key work. Each deletion is recorded at once as `DELETED`.
  */
 class TakeDownPostsyncerGroupsAction
 {
@@ -26,6 +26,9 @@ class TakeDownPostsyncerGroupsAction
     {
         $client = new PostsyncerClient(PostsyncerConfig::fromWorkspace($post->workspace));
         $problems = [];
+        // A 404 means "already gone" only once this run has seen the key work: a revoked key or a
+        // cancelled account can answer 404 too, and the post would still go out.
+        $keyWorks = false;
 
         foreach ($post->postsyncer['groups'] ?? [] as $group) {
             $postId = (string) ($group['post_id'] ?? '');
@@ -36,6 +39,7 @@ class TakeDownPostsyncerGroupsAction
 
             try {
                 $remote = $client->getPost($postId);
+                $keyWorks = true;
                 $status = strtoupper((string) ((is_array($remote['data'] ?? null) ? $remote['data'] : $remote)['status'] ?? ''));
 
                 if (! in_array($status, ['SCHEDULED', 'DRAFT'], true)) {
@@ -53,12 +57,30 @@ class TakeDownPostsyncerGroupsAction
 
                     continue;
                 }
+                if (! $keyWorks && ! ($keyWorks = $this->keyWorks($client))) {
+                    $problems[] = "{$name}: PostSyncer answered 404 for post {$postId}, but its API key could not be confirmed, "
+                        .'so the post may still be scheduled. Check the key in Settings > PostSyncer.';
+
+                    continue;
+                }
             }
 
             $this->markPostsyncerGroupDeleted($post, $postId);
         }
 
         return $problems;
+    }
+
+    /** One cheap authenticated call. */
+    private function keyWorks(PostsyncerClient $client): bool
+    {
+        try {
+            $client->listWorkspaces();
+
+            return true;
+        } catch (PostsyncerException) {
+            return false;
+        }
     }
 
     /** Recorded at once, under the row lock, so a retry skips it and nothing done is forgotten. */

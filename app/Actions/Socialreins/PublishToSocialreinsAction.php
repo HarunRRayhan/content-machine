@@ -194,8 +194,9 @@ class PublishToSocialreinsAction
             [$language, $name] = explode(':', $key, 2);
             $present[$language][] = $name;
         }
-        $named = array_map(fn (mixed $platform): string => strtolower((string) $platform), (array) ($options['platforms'] ?? []));
         $leaveOut = ! SocialreinsConfig::postsyncerEnabled($workspace);
+        // Only with PostSyncer off (a move): named platforms a live language has no post for yet.
+        $named = $leaveOut ? array_map(fn (mixed $platform): string => strtolower((string) $platform), (array) ($options['platforms'] ?? [])) : [];
 
         $byLanguage = [];
         foreach ($groups as $group) {
@@ -206,14 +207,14 @@ class PublishToSocialreinsAction
         $payloads = [];
         foreach ($byLanguage as $language => $languageGroups) {
             $planned = array_values(array_unique(array_merge(...array_map(fn (PublishGroup $group): array => $group->platforms, $languageGroups))));
-            // A live language only gets the platforms brain left out, and those the caller named
-            // that it has no post for yet (a move off PostSyncer); the rest is never sent again.
+            // A live language only gets the platforms brain left out (and, PostSyncer off, those the
+            // caller named that it has no post for yet); the rest is never sent again.
             $only = in_array($language, $live, true)
                 ? array_intersect($planned, [...($skipped[$language] ?? []), ...array_diff($named, $present[$language] ?? [])])
                 : $planned;
             // PostSyncer off: a platform this language's set does not cover goes nowhere.
             if ($leaveOut) {
-                $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform));
+                $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform, strict: true));
             }
             if ($only === []) {
                 continue;

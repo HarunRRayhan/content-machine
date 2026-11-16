@@ -348,6 +348,8 @@ class VideosController extends Controller
             ] : null,
             // `language:platform` pairs PostSyncer off left out (SocialReins does not cover them).
             'publish_left_out' => $video->publish_progress['left_out'] ?? [],
+            // Set while socialreins:move-off-postsyncer has not finished with this video.
+            'publish_moving' => $video->publish_progress['move_off_postsyncer']['note'] ?? null,
             // Legacy name: "this video's publish driver is ready" (PostSyncer, or SocialReins when routed).
             'postsyncer_ready' => $socialreins
                 ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()

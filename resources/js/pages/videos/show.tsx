@@ -64,6 +64,7 @@ type VideoDetail = {
     socialreins_groups?: PostsyncerGroup[];
     publish_split?: { socialreins: string[]; postsyncer: string[] } | null;
     publish_left_out?: string[];
+    publish_moving?: string | null;
     postsyncer_ready: boolean;
     video_publish_enabled: boolean;
     needs_confirm_ask: boolean;
@@ -278,6 +279,7 @@ export default function VideoShow({ video }: PageProps) {
                         socialreinsGroups={video.socialreins_groups}
                         publishSplit={video.publish_split}
                         publishLeftOut={video.publish_left_out}
+                        publishMoving={video.publish_moving}
                         series={video.series}
                     />
                 )}

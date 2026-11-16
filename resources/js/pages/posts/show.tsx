@@ -62,6 +62,7 @@ type PostDetail = {
     publish_progress: {
         state?: string;
         left_out?: string[];
+        move_off_postsyncer?: { note?: string | null };
         split?: {
             socialreins?: { platforms?: string[] };
             postsyncer?: string[];

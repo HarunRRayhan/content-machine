@@ -53,6 +53,15 @@ class RescheduleSplitPostAction
         $progress = is_array($post->publish_progress) ? $post->publish_progress : [];
         $split = is_array($progress['split'] ?? null);
 
+        // PostSyncer off: never call it. An item still on it is refused; one whose PostSyncer posts
+        // are all gone only moves its SocialReins posts.
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            if (SocialreinsConfig::hasPostsyncerPost($post)) {
+                throw new PostsyncerException(SocialreinsConfig::POSTSYNCER_OFF_MESSAGE);
+            }
+            $split = false;
+        }
+
         // Published through PostSyncer alone: nothing here to move.
         if (! $split && ($progress['driver'] ?? null) !== SocialreinsConfig::DRIVER) {
             return $post instanceof Video

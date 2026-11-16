@@ -4,7 +4,11 @@ namespace Tests\Feature\Socialreins;
 
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\EnqueueVideoPublishAction;
+use App\Actions\Postsyncer\ReconcileVideoGroupsDeletedAction;
+use App\Actions\Socialreins\MoveOffPostsyncerAction;
 use App\Actions\Socialreins\PublishToSocialreinsAction;
+use App\Actions\Socialreins\RescheduleSplitPostAction;
+use App\Data\Postsyncer\ReschedulePostData;
 use App\Jobs\PublishPostJob;
 use App\Jobs\PublishSocialreinsJob;
 use App\Jobs\PublishVideoJob;
@@ -14,6 +18,7 @@ use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Socialreins\SocialreinsConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -37,12 +42,16 @@ class PostsyncerOffTest extends TestCase
 
     private Workspace $workspace;
 
-    /** Fake PostSyncer post 42. */
+    /** Fake PostSyncer posts by id: their status, the GET answer code, and whether they were deleted. */
     private string $psStatus = 'SCHEDULED';
 
-    private int $psGetStatus = 200;
+    /** @var array<string, int> */
+    private array $psGetStatus = [];
 
-    private bool $psDeleted = false;
+    /** @var array<string, bool> */
+    private array $psDeleted = [];
+
+    private int $psWorkspacesStatus = 200;
 
     /** @var list<array{0: array<string, mixed>, 1: int}> successive brain answers to POST /post-groups */
     private array $brainAnswers = [];
@@ -86,17 +95,22 @@ class PostsyncerOffTest extends TestCase
 
     private function answer(Request $request): mixed
     {
-        if ($request->url() === self::PS_POST) {
-            if ($this->psDeleted) {
+        if ($request->url() === 'https://postsyncer.com/api/v1/workspaces') {
+            return Http::response(['data' => []], $this->psWorkspacesStatus);
+        }
+
+        if (str_starts_with($request->url(), 'https://postsyncer.com/api/v1/posts/')) {
+            $id = basename($request->url());
+            if ($this->psDeleted[$id] ?? false) {
                 return Http::response(['message' => 'Not found'], 404);
             }
             if ($request->method() === 'DELETE') {
-                $this->psDeleted = true;
+                $this->psDeleted[$id] = true;
 
                 return Http::response(['message' => 'Post deleted successfully']);
             }
 
-            return Http::response(['id' => 42, 'status' => $this->psStatus], $this->psGetStatus);
+            return Http::response(['id' => (int) $id, 'status' => $this->psStatus], $this->psGetStatus[$id] ?? 200);
         }
 
         if ($request->method() === 'POST' && $request->url() === self::SR_URL) {
@@ -185,15 +199,17 @@ class PostsyncerOffTest extends TestCase
      * @param  list<string>  $platforms
      * @return array<string, mixed>
      */
-    private function postsyncerOnly(array $platforms, CarbonImmutable $at): array
+    private function postsyncerOnly(array $platforms, CarbonImmutable $at, array $more = []): array
     {
+        $group = fn (string $id, array $platforms): array => [
+            'post_id' => $id, 'status' => 'SCHEDULED', 'scheduled_at' => $at->timezone('Asia/Dhaka')->format('Y-m-d H:i'),
+            'platforms' => $platforms, 'language' => 'english',
+        ];
+
         return [
             'status' => 'scheduled',
             'publish_state' => 'succeeded',
-            'postsyncer' => ['groups' => [[
-                'post_id' => '42', 'status' => 'SCHEDULED', 'scheduled_at' => $at->timezone('Asia/Dhaka')->format('Y-m-d H:i'),
-                'platforms' => $platforms, 'language' => 'english',
-            ]]],
+            'postsyncer' => ['groups' => [$group('42', $platforms), ...array_map(fn (string $id) => $group($id, $more[$id]), array_keys($more))]],
             'publish_progress' => ['version' => 1, 'state' => 'succeeded', 'options' => ['when' => $at->toIso8601String()], 'completed_groups' => []],
         ];
     }
@@ -368,7 +384,7 @@ class PostsyncerOffTest extends TestCase
 
     public function test_a_failed_postsyncer_delete_leaves_the_item_untouched(): void
     {
-        $this->psGetStatus = 500;
+        $this->psGetStatus['42'] = 500;
         $video = $this->makeVideo($this->postsyncerOnly(['facebook', 'tiktok'], $this->at()));
         $before = $video->fresh()->getAttributes();
 
@@ -415,7 +431,7 @@ class PostsyncerOffTest extends TestCase
 
         $video->refresh();
         $this->assertSame('failed', $video->publish_state);
-        $this->assertSame('handed_over', $video->publish_progress['move_off_postsyncer']['stage']);
+        $this->assertSame('done', $video->publish_progress['move_off_postsyncer']['stage']);
         $this->assertSame([], $video->postsyncer['groups']);
 
         Queue::fake();
@@ -430,6 +446,185 @@ class PostsyncerOffTest extends TestCase
         $this->assertSame(1, SocialreinsGroup::query()->where('subject_id', $video->id)->where('state', 'created')->count());
         // GET and DELETE of post 42 on the first run only: PostSyncer is never asked again.
         $this->assertSame(2, Http::recorded()->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'postsyncer.com'))->count());
+    }
+
+    public function test_a_move_part_way_through_resumes_even_when_due_soon_and_the_page_says_so(): void
+    {
+        // As a run that died right after deleting post 42 leaves it.
+        $at = CarbonImmutable::now()->addMinutes(5)->setSecond(0);
+        $attributes = $this->postsyncerOnly(['facebook', 'tiktok'], $at);
+        $attributes['postsyncer']['groups'][0]['status'] = 'DELETED';
+        $attributes['publish_progress']['move_off_postsyncer'] = [
+            'when' => $at->utc()->toIso8601String(), 'stage' => 'moving', 'handed' => [], 'note' => 'Being moved off PostSyncer: not finished yet.',
+            'groups' => [['post_id' => '42', 'postsyncer' => ['english:facebook', 'english:tiktok'], 'move' => ['english:facebook'], 'left_out' => ['english:tiktok']]],
+            'postsyncer' => ['english:facebook', 'english:tiktok'], 'move' => ['english:facebook'], 'left_out' => ['english:tiktok'],
+        ];
+        $video = $this->makeVideo($attributes);
+
+        $this->actingAsOwner();
+        $this->get(route('videos.show', $video))
+            ->assertInertia(fn ($page) => $page->where('video.publish_moving', 'Being moved off PostSyncer: not finished yet.'));
+
+        $this->artisan('socialreins:move-off-postsyncer')->expectsOutputToContain('=> would finish the interrupted move');
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true])->expectsOutputToContain('=> moved: handed to SocialReins');
+        $this->runQueued();
+
+        [$create] = $this->brainCreates();
+        $this->assertSame(['facebook'], $create['platforms']);
+        $this->assertSame('done', $video->fresh()->publish_progress['move_off_postsyncer']['stage']);
+        $this->assertPostsyncerNotCalled();
+    }
+
+    public function test_a_404_counts_as_gone_only_once_the_postsyncer_key_is_proven(): void
+    {
+        $this->psDeleted['42'] = true;
+        $this->psWorkspacesStatus = 401;
+        $video = $this->makeVideo($this->postsyncerOnly(['facebook'], $this->at()));
+        $before = $video->fresh()->getAttributes();
+
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true])
+            ->expectsOutputToContain('BEFORE cancelling the PostSyncer subscription')
+            ->expectsOutputToContain('its API key could not be confirmed');
+
+        $this->assertEquals($before, $video->fresh()->getAttributes());
+        Queue::assertNothingPushed();
+
+        // With the key working, the same 404 means it is already gone.
+        $this->psWorkspacesStatus = 200;
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true])->expectsOutputToContain('=> moved: handed to SocialReins');
+        Queue::assertPushed(PublishSocialreinsJob::class, 1);
+    }
+
+    public function test_a_partial_take_down_hands_over_what_was_deleted_and_names_the_rest(): void
+    {
+        $at = $this->at();
+        $video = $this->makeVideo([
+            ...$this->postsyncerOnly(['facebook'], $at, ['43' => ['linkedin']]),
+            'captions' => ['facebook' => ['caption' => 'EN fb'], 'linkedin' => ['caption' => 'EN li']],
+        ]);
+        $this->psGetStatus['43'] = 500;
+
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true])
+            ->expectsOutputToContain('=> partly moved: Moving off PostSyncer stopped: PostSyncer linkedin');
+        $this->runQueued();
+
+        [$create] = $this->brainCreates();
+        $this->assertSame(['facebook'], $create['platforms']);
+        $video->refresh();
+        $this->assertSame(['43'], array_column($video->postsyncer['groups'], 'post_id'));
+        $this->assertSame('moving', $video->publish_progress['move_off_postsyncer']['stage']);
+        $this->assertStringContainsString('Not moved yet: english:linkedin', $video->publish_progress['move_off_postsyncer']['note']);
+
+        // PostSyncer answers again: the next run deletes 43 and hands linkedin over.
+        Queue::fake();
+        unset($this->psGetStatus['43']);
+        $this->brainAnswers = [[$this->brainGroup(['linkedin'], '2'), 201]];
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true])->expectsOutputToContain('=> moved: handed to SocialReins');
+        $this->runQueued();
+
+        $this->assertSame(['linkedin'], $this->brainCreates()[1]['platforms']);
+        $this->assertSame([], $video->fresh()->postsyncer['groups']);
+        $this->assertSame('done', $video->fresh()->publish_progress['move_off_postsyncer']['stage']);
+    }
+
+    public function test_a_second_run_on_the_same_item_does_nothing(): void
+    {
+        $video = $this->makeVideo($this->postsyncerOnly(['facebook'], $this->at()));
+        $stale = $video->fresh();
+
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true]);
+        // A second run that read the item before the first one claimed it.
+        $result = app(MoveOffPostsyncerAction::class)->handle($stale, true);
+
+        $this->assertSame('skipped: another run is moving it', $result?->outcome);
+        Queue::assertPushed(PublishSocialreinsJob::class, 1);
+        Http::assertSentCount(2); // one GET and one DELETE of post 42
+    }
+
+    public function test_a_language_with_no_saved_platform_list_covers_nothing_when_postsyncer_is_off(): void
+    {
+        $settings = $this->workspace->settings;
+        $settings['socialreins']['languages']['bangla'] = ['set_id' => self::SET];
+        $this->workspace->forceFill(['settings' => $settings])->save();
+        $post = $this->makePost(['facebook'], ['captions' => [
+            'English' => ['facebook' => ['caption' => 'EN fb']],
+            'Bangla' => ['facebook' => ['caption' => 'BN fb']],
+        ]]);
+
+        $this->assertSame(
+            ['covered' => ['english:facebook'], 'left_out' => ['bangla:facebook']],
+            SocialreinsConfig::coverage($post, $this->workspace->fresh()),
+        );
+    }
+
+    public function test_with_postsyncer_on_a_named_platform_is_not_added_to_a_live_language(): void
+    {
+        $settings = $this->workspace->settings;
+        $settings['postsyncer_enabled'] = true;
+        $settings['publish_driver'] = 'socialreins';
+        $this->workspace->forceFill(['settings' => $settings])->save();
+        $post = $this->makePost(['facebook', 'linkedin'], [
+            'publish_state' => 'queued',
+            'publish_progress' => ['driver' => 'socialreins', 'state' => 'failed', 'options' => ['platforms' => ['facebook', 'linkedin']]],
+        ]);
+        SocialreinsGroup::query()->create([
+            'workspace_id' => $this->workspace->id, 'subject_type' => 'post', 'subject_id' => $post->id,
+            'language' => 'english', 'sequence' => 1, 'idempotency_key' => 'k1', 'state' => 'created',
+            'request' => json_encode(['scheduled_at' => $this->at()->utc()->toIso8601String()]),
+            'group_id' => 'aaaaaaaa-0000-4000-8000-000000000009', 'expected_targets' => 1,
+            'results' => ['p1' => ['platform' => 'facebook', 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []]],
+        ]);
+
+        app(PublishToSocialreinsAction::class)->handle($post, ['platforms' => ['facebook', 'linkedin']]);
+
+        // As before this change: a live language only gets platforms brain left out.
+        $this->assertSame([], $this->brainCreates());
+    }
+
+    public function test_reschedule_and_reconcile_refuse_an_item_still_on_postsyncer(): void
+    {
+        $post = $this->makePost(attributes: $this->postsyncerOnly(['facebook'], $this->at()));
+        $video = $this->makeVideo($this->postsyncerOnly(['facebook'], $this->at()));
+        $data = new ReschedulePostData($this->at()->addDay());
+
+        foreach ([
+            fn () => app(RescheduleSplitPostAction::class)->handle($post, $this->workspace, $data),
+            fn () => app(RescheduleSplitPostAction::class)->handle($video, $this->workspace, $data),
+            fn () => app(ReconcileVideoGroupsDeletedAction::class)->handle($video, $this->workspace),
+        ] as $call) {
+            try {
+                $call();
+                $this->fail('Expected a refusal.');
+            } catch (PostsyncerException $exception) {
+                $this->assertStringContainsString('socialreins:move-off-postsyncer', $exception->getMessage());
+            }
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_a_postsyncer_run_that_created_no_post_moves_without_calling_postsyncer(): void
+    {
+        $at = $this->at();
+        $video = $this->makeVideo([
+            'status' => 'scheduled',
+            'publish_state' => 'failed',
+            'publish_progress' => ['version' => 1, 'state' => 'failed', 'current' => null, 'completed_groups' => [],
+                'options' => ['when' => $at->toIso8601String(), 'platforms' => ['facebook', 'tiktok']]],
+        ]);
+        $unsafe = $this->makeVideo([
+            'status' => 'scheduled',
+            'publish_progress' => ['version' => 1, 'state' => 'uncertain', 'current' => ['phase' => 'creating'], 'completed_groups' => [],
+                'options' => ['when' => $at->toIso8601String()]],
+        ]);
+
+        $this->artisan('socialreins:move-off-postsyncer', ['--apply' => true])
+            ->expectsOutputToContain("{$video->human_id}  {$at->utc()->toIso8601String()}  postsyncer: -  to socialreins: english:facebook  left out: english:tiktok  => moved: handed to SocialReins")
+            ->expectsOutputToContain("{$unsafe->human_id}  -  postsyncer: -  to socialreins: english:facebook  left out: english:tiktok  => skipped: a PostSyncer create may have gone out");
+        $this->runQueued();
+
+        $this->assertSame(['facebook'], $this->brainCreates()[0]['platforms']);
+        $this->assertPostsyncerNotCalled();
     }
 
     public function test_the_settings_page_saves_the_switch(): void

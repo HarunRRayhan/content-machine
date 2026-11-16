@@ -20,7 +20,8 @@ class MoveOffPostsyncerCommand extends Command
         $apply = (bool) $this->option('apply');
         $lead = max(0, (int) $this->option('min-minutes'));
 
-        $this->warn('Run postsyncer:sync-scheduled once first (and before switching PostSyncer off), so items PostSyncer already published are marked posted instead of listed here.');
+        $this->warn('Run this BEFORE cancelling the PostSyncer subscription: it deletes the PostSyncer posts with the PostSyncer key. '
+            .'Run postsyncer:sync-scheduled once first (before switching PostSyncer off), so items PostSyncer already published are marked posted, not moved.');
         $this->line($apply ? 'Applying.' : 'Dry run: nothing is changed. Pass --apply to move.');
 
         $listed = 0;

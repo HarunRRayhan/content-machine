@@ -54,6 +54,7 @@ type Props = {
     publishProgress: {
         state?: string;
         left_out?: string[];
+        move_off_postsyncer?: { note?: string | null };
         split?: {
             socialreins?: { platforms?: string[] };
             postsyncer?: string[];
@@ -529,6 +530,11 @@ export default function PostOverview({
                         )}
                     </div>
 
+                    {publishProgress?.move_off_postsyncer?.note && (
+                        <p className="schedule-it-hint">
+                            {publishProgress?.move_off_postsyncer?.note}
+                        </p>
+                    )}
                     {publishProgress?.left_out &&
                         publishProgress?.left_out.length > 0 && (
                             <p className="schedule-it-hint">

@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -23,6 +24,10 @@ final class ReconcileVideoGroupsDeletedAction
     public function handle(Video $video, Workspace $workspace, bool $ownerRemovedPublished = false): Video
     {
         abort_if($video->workspace_id !== $workspace->id, 404);
+
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            throw new PostsyncerException(SocialreinsConfig::POSTSYNCER_OFF_MESSAGE);
+        }
 
         $video->refresh();
 

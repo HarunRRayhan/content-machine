@@ -66,24 +66,36 @@ off for the workspace. Changing it is blocked while a publish is queued or runni
 
 ### Moving scheduled items off PostSyncer
 
+Run it BEFORE cancelling the PostSyncer subscription (it deletes with the PostSyncer key), and run
+`postsyncer:sync-scheduled` first.
+
 `php artisan socialreins:move-off-postsyncer` lists every scheduled post and video with a PostSyncer
-post (id, time, PostSyncer pairs, what goes to SocialReins, what is left out). Nothing changes
-without `--apply`, and `--apply` only acts on workspaces with PostSyncer off. Items due within 15
-minutes (`--min-minutes`), already published on PostSyncer, with a publish in flight, or whose
-PostSyncer posts have different times are skipped and listed.
+part (id, time, PostSyncer pairs, what goes to SocialReins, what is left out). Nothing changes
+without `--apply`, and `--apply` only acts on workspaces with PostSyncer off. A move not started
+yet is skipped when due within 15 minutes (`--min-minutes`), already published on PostSyncer, with
+a publish in flight, or with PostSyncer posts at different times.
 
 Per item, with `--apply`:
 
-1. The plan is stored as `publish_progress.move_off_postsyncer`.
-2. Each PostSyncer post is read and deleted only while still scheduled or a draft (a 404 counts as
-   gone). On any problem the item stops: if nothing was deleted the plan is removed and nothing
-   changed; otherwise the item is marked failed naming what is now scheduled nowhere.
-3. Only then its PostSyncer groups move to `postsyncer.cleared_groups` and the covered pairs go to
-   SocialReins at the same time (a split post's SocialReins half stays; the moved platforms get a
-   new group). Left-out pairs are recorded as above.
+1. The plan is stored as `publish_progress.move_off_postsyncer` (stage `moving`) under the row
+   lock, only if no other run stored one. The item page now says it is being moved, and every
+   later run resumes it whatever its time.
+2. Each PostSyncer post is read and deleted only while still scheduled or a draft. A 404 counts
+   as gone only once the same run has seen the key work (a read, or `GET /workspaces`). If nothing
+   was deleted and something failed, the plan is removed and nothing changed.
+3. The covered pairs of every deleted post go to SocialReins at the same time. A platform still on
+   PostSyncer in any language waits, so nothing goes out twice; the item names what is not moved
+   yet, and the next run continues. Stage `done` once nothing is left on PostSyncer.
 
-A move that stopped, or a hand-over that failed, is picked up again by the next `--apply` run;
-the SocialReins publish is idempotent, so nothing is sent twice.
+A failed hand-over is sent again by the next `--apply` run (the SocialReins publish is
+idempotent). A run that finds another run's hand-over in place does nothing. A PostSyncer run
+that never got a post id moves its covered platforms with nothing to delete, unless its create
+may have gone out (an uncertain create or a completed group): that item is listed to check by hand.
+
+With PostSyncer off, a language with no saved platform list covers nothing. Reschedule and the
+video reset refuse an item that still has a PostSyncer post, and a SocialReins publish of such an
+item is refused too; reschedule of an item with no PostSyncer post left only moves its SocialReins
+posts.
 
 ## How a publish maps
 
