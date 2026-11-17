@@ -144,10 +144,12 @@ class MoveOffPostsyncerAction
 
         foreach ($this->liveGroups($subject) as $group) {
             $entry = ['post_id' => (string) $group['post_id'], 'postsyncer' => [], 'move' => [], 'left_out' => []];
+            // Older records keep the language under `lang`.
+            $language = (string) ($group['language'] ?? $group['lang'] ?? '');
             foreach ((array) ($group['platforms'] ?? []) as $platform) {
-                $pair = $group['language'].':'.$platform;
+                $pair = $language.':'.$platform;
                 $entry['postsyncer'][] = $pair;
-                $entry[$config->covers((string) $group['language'], (string) $platform, strict: true) ? 'move' : 'left_out'][] = $pair;
+                $entry[$config->covers($language, (string) $platform, strict: true) ? 'move' : 'left_out'][] = $pair;
             }
             $groups[] = $entry;
             $times[] = $at($group['scheduled_at'] ?? null);
