@@ -409,6 +409,22 @@ class PostsyncerOffTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_an_old_record_that_keeps_its_language_under_lang_is_read_and_skipped_when_published(): void
+    {
+        $state = $this->postsyncerOnly(['facebook'], $this->at());
+        $state['postsyncer']['groups'][0]['status'] = 'PUBLISHED';
+        $state['postsyncer']['groups'][0]['lang'] = 'english';
+        unset($state['postsyncer']['groups'][0]['language']);
+        $video = $this->makeVideo($state);
+        $before = $video->fresh()->getAttributes();
+
+        $this->artisan('socialreins:move-off-postsyncer')
+            ->expectsOutputToContain('english:facebook')
+            ->expectsOutputToContain('already published');
+
+        $this->assertEquals($before, $video->fresh()->getAttributes());
+    }
+
     public function test_an_item_due_in_ten_minutes_is_skipped(): void
     {
         $video = $this->makeVideo($this->postsyncerOnly(['facebook'], CarbonImmutable::now()->addMinutes(10)));
