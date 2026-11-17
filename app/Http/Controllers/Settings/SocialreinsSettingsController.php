@@ -37,6 +37,7 @@ class SocialreinsSettingsController extends Controller
         // Secrets are write-only: only whether they are set goes to the page.
         return Inertia::render('workspace-settings/socialreins', [
             'driver' => SocialreinsConfig::usesSocialreins($workspace) ? SocialreinsConfig::DRIVER : 'postsyncer',
+            'postsyncerEnabled' => SocialreinsConfig::postsyncerEnabled($workspace),
             'baseUrl' => $config->baseUrl(),
             'webhookUrl' => route('socialreins.webhook', ['workspace' => $workspace->id]),
             'webhookSecretConfigured' => $config->webhookSecret() !== null,

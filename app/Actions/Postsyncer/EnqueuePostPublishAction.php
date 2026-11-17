@@ -43,6 +43,13 @@ class EnqueuePostPublishAction
             return app(EnqueueSocialreinsPublishAction::class)->handle($post, $workspace, $options);
         }
 
+        // Only a post still on PostSyncer gets here once it is off (routesToSocialreins()).
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            throw ValidationException::withMessages([
+                'publish' => __('PostSyncer is off for this workspace and this post still has a PostSyncer publish. Move it with socialreins:move-off-postsyncer.'),
+            ]);
+        }
+
         $config = PostsyncerConfig::fromWorkspace($workspace);
 
         if (! $config->isReadyForPublish()) {

@@ -23,6 +23,8 @@ class SocialreinsConfig
 {
     public const DRIVER = 'socialreins';
 
+    public const POSTSYNCER_OFF_MESSAGE = 'PostSyncer is off for this workspace and this still has a PostSyncer post. Move it with socialreins:move-off-postsyncer first.';
+
     public const DEFAULT_BASE_URL = 'https://brain.socialreins.com/v1';
 
     /** @var list<string> */
@@ -34,6 +36,16 @@ class SocialreinsConfig
     public static function usesSocialreins(Workspace $workspace): bool
     {
         return ($workspace->settings['publish_driver'] ?? null) === self::DRIVER;
+    }
+
+    /**
+     * settings.postsyncer_enabled, true unless saved as off. Off sends every new post and video
+     * through SocialReins whatever the driver and routed languages say, and leaves out the
+     * (language, platform) pairs SocialReins does not cover (see coverage()).
+     */
+    public static function postsyncerEnabled(Workspace $workspace): bool
+    {
+        return ($workspace->settings['postsyncer_enabled'] ?? true) !== false;
     }
 
     /**
@@ -51,6 +63,10 @@ class SocialreinsConfig
             return true;
         }
 
+        if (! self::postsyncerEnabled($workspace)) {
+            return ! self::hasPostsyncerPost($subject);
+        }
+
         $split = self::newSubjectSplit($subject, $workspace, $options);
 
         return $split !== null && $split['postsyncer'] === [];
@@ -66,7 +82,7 @@ class SocialreinsConfig
      */
     public static function splitOf(Post|Video $subject, Workspace $workspace, array $options = []): ?array
     {
-        if (self::isOnSocialreins($subject)) {
+        if (self::isOnSocialreins($subject) || ! self::postsyncerEnabled($workspace)) {
             return null;
         }
 
@@ -126,14 +142,80 @@ class SocialreinsConfig
 
         $covered = [];
         foreach ($pairs as [$language, $platform]) {
-            $list = $this->coveredPlatforms($language);
-            $covered[$platform] = ($covered[$platform] ?? true) && ($list === null || in_array($platform, $list, true));
+            $covered[$platform] = ($covered[$platform] ?? true) && $this->covers($language, $platform);
         }
 
         return [
             'socialreins' => array_keys(array_filter($covered)),
             'postsyncer' => array_keys(array_diff_key($covered, array_filter($covered))),
         ];
+    }
+
+    /**
+     * The (language, platform) pairs a publish would send, as `language:platform`, split by
+     * whether that language's set covers the platform (strictly: see covers()). With PostSyncer
+     * off the left-out pairs are published nowhere.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{covered: list<string>, left_out: list<string>}
+     */
+    public static function coverage(Post|Video $subject, Workspace $workspace, array $options = []): array
+    {
+        $config = self::fromWorkspace($workspace);
+        $pairs = $subject instanceof Video
+            ? app(VideoPublishPlanner::class)->candidatePairs($subject, $config->planningConfig($workspace), $options)
+            : app(PostPublishPlanner::class)->candidatePairs($subject, $options);
+
+        $coverage = ['covered' => [], 'left_out' => []];
+        foreach ($pairs as [$language, $platform]) {
+            $coverage[$config->covers($language, $platform, strict: true) ? 'covered' : 'left_out'][] = "{$language}:{$platform}";
+        }
+
+        return $coverage;
+    }
+
+    /**
+     * No saved list for the language means it covers every platform, except when strict (PostSyncer
+     * off): then only a saved list covers anything, so nothing is sent to an account that may not exist.
+     */
+    public function covers(string $language, string $platform, bool $strict = false): bool
+    {
+        $list = $this->coveredPlatforms($language);
+
+        return $list === null ? ! $strict : in_array($platform, $list, true);
+    }
+
+    /**
+     * PostSyncer holds, or may hold, a post for this subject: a group with a post id that was not
+     * deleted, or a PostSyncer run (progress without a driver) that may have created one.
+     */
+    public static function hasPostsyncerPost(Post|Video $subject): bool
+    {
+        foreach ($subject->postsyncer['groups'] ?? [] as $group) {
+            if (is_array($group) && filled($group['post_id'] ?? null) && ($group['status'] ?? null) !== 'DELETED') {
+                return true;
+            }
+        }
+
+        $progress = $subject->publish_progress;
+
+        return is_array($progress) && ! isset($progress['driver']) && ! self::runCreatedNothing($progress);
+    }
+
+    /**
+     * A PostSyncer run that provably created no post: no create with an unknown outcome (the same
+     * test the PostSyncer retry uses) and no completed group.
+     *
+     * @param  array<string, mixed>  $progress
+     */
+    public static function runCreatedNothing(array $progress): bool
+    {
+        $current = $progress['current'] ?? null;
+
+        return ($progress['state'] ?? null) !== 'uncertain'
+            && ($current === null || (is_array($current) && ($current['phase'] ?? null) === 'retryable'))
+            && ($progress['completed_groups'] ?? []) === []
+            && ($progress['base_groups'] ?? []) === [];
     }
 
     /** A SocialReins run started and was not fully taken down, or a group may exist there. */
@@ -291,6 +373,10 @@ class SocialreinsConfig
 
         if (array_key_exists('publish_driver', $input)) {
             $settings['publish_driver'] = $input['publish_driver'] === self::DRIVER ? self::DRIVER : 'postsyncer';
+        }
+
+        if (array_key_exists('postsyncer_enabled', $input) && $input['postsyncer_enabled'] !== null) {
+            $settings['postsyncer_enabled'] = filter_var($input['postsyncer_enabled'], FILTER_VALIDATE_BOOLEAN);
         }
 
         // Tokens and the webhook secret belong to the host they were issued for: pointing the

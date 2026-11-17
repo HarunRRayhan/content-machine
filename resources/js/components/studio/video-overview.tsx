@@ -126,6 +126,8 @@ type Props = {
     socialreinsGroups?: PostsyncerGroup[];
     /** Set when PostSyncer takes some platforms and SocialReins the rest. */
     publishSplit?: { socialreins: string[]; postsyncer: string[] } | null;
+    publishLeftOut?: string[];
+    publishMoving?: string | null;
     series?: VideoSeriesInfo | null;
 };
 
@@ -259,6 +261,8 @@ export default function VideoOverview({
     postsyncer,
     socialreinsGroups,
     publishSplit,
+    publishLeftOut,
+    publishMoving,
     series = null,
 }: Props) {
     const [checks, setChecks] = useState<Set<number>>(() =>
@@ -883,6 +887,17 @@ export default function VideoOverview({
                             </>
                         )}
                     </div>
+
+                    {publishMoving && (
+                        <p className="schedule-it-hint">{publishMoving}</p>
+                    )}
+                    {publishLeftOut && publishLeftOut.length > 0 && (
+                        <p className="schedule-it-hint">
+                            Left out, not posted anywhere (SocialReins does not
+                            cover them and PostSyncer is off):{' '}
+                            {publishLeftOut.join(', ')}.
+                        </p>
+                    )}
 
                     {publishSplit && (
                         <p className="schedule-it-hint">

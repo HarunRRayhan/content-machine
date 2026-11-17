@@ -17,6 +17,7 @@ type Language = {
 
 type PageProps = {
     driver: 'postsyncer' | 'socialreins';
+    postsyncerEnabled: boolean;
     baseUrl: string;
     webhookUrl: string;
     webhookSecretConfigured: boolean;
@@ -33,6 +34,7 @@ const selectClass =
 
 export default function SocialreinsSettings({
     driver,
+    postsyncerEnabled,
     baseUrl,
     webhookUrl,
     webhookSecretConfigured,
@@ -55,12 +57,16 @@ export default function SocialreinsSettings({
                 <div className="max-w-3xl space-y-6">
                     <Badge
                         variant={
-                            driver === 'socialreins' ? 'default' : 'outline'
+                            driver === 'socialreins' || !postsyncerEnabled
+                                ? 'default'
+                                : 'outline'
                         }
                     >
-                        {driver === 'socialreins'
-                            ? `Publishing ${routedLanguages.length > 0 ? `${routedLanguages.join(' and ')} ` : ''}through SocialReins`
-                            : 'Publishing through PostSyncer'}
+                        {!postsyncerEnabled
+                            ? 'PostSyncer off: everything through SocialReins'
+                            : driver === 'socialreins'
+                              ? `Publishing ${routedLanguages.length > 0 ? `${routedLanguages.join(' and ')} ` : ''}through SocialReins`
+                              : 'Publishing through PostSyncer'}
                     </Badge>
                     <Form
                         action="/settings/socialreins"
@@ -89,6 +95,35 @@ export default function SocialreinsSettings({
                                     <InputError
                                         message={errors.publish_driver}
                                     />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="postsyncer_enabled">
+                                        PostSyncer
+                                    </Label>
+                                    <select
+                                        id="postsyncer_enabled"
+                                        name="postsyncer_enabled"
+                                        defaultValue={
+                                            postsyncerEnabled ? '1' : '0'
+                                        }
+                                        className={selectClass}
+                                    >
+                                        <option value="1">On (default)</option>
+                                        <option value="0">Off</option>
+                                    </select>
+                                    <InputError
+                                        message={errors.postsyncer_enabled}
+                                    />
+                                    <p className="text-sm text-muted-foreground">
+                                        Off: nothing calls PostSyncer. Every new
+                                        post and video goes through SocialReins,
+                                        whatever the driver and routed languages
+                                        say, and a platform its set does not
+                                        cover (TikTok, Bangla X) is left out and
+                                        not posted anywhere. Move posts already
+                                        scheduled on PostSyncer with
+                                        socialreins:move-off-postsyncer.
+                                    </p>
                                 </div>
                                 <div className="grid gap-2">
                                     <Label htmlFor="base_url">

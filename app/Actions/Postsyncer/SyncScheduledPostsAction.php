@@ -7,6 +7,7 @@ use App\Models\Video;
 use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Socialreins\SocialreinsConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
@@ -64,7 +65,10 @@ class SyncScheduledPostsAction
         $clients = [];
         $checked = [];
 
-        foreach ($this->checksForThisRun($records) as $check) {
+        // PostSyncer off: never ask it. Owners run this once by hand before switching it off.
+        $askable = array_values(array_filter($records, fn (Post|Video $record): bool => SocialreinsConfig::postsyncerEnabled($record->workspace)));
+
+        foreach ($this->checksForThisRun($askable) as $check) {
             $record = $check['record'];
             $client = $clients[$record->workspace_id] ??= new PostsyncerClient(
                 PostsyncerConfig::fromWorkspace($record->workspace),

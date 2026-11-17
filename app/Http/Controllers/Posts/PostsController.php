@@ -352,6 +352,7 @@ class PostsController extends Controller
                 new PostsyncerClient($postsyncerConfig),
                 $postsyncerConfig,
                 (string) $workspace->id,
+                SocialreinsConfig::postsyncerEnabled($workspace),
             ))->forPreview();
         }
 

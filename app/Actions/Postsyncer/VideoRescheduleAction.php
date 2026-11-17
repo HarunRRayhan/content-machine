@@ -9,6 +9,7 @@ use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\PostsyncerPostVerifier;
+use App\Support\Socialreins\SocialreinsConfig;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -33,6 +34,10 @@ final class VideoRescheduleAction
     public function handle(Video $video, Workspace $workspace, ReschedulePostData $data): Video
     {
         abort_if($video->workspace_id !== $workspace->id, 404);
+
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            throw new PostsyncerException(SocialreinsConfig::POSTSYNCER_OFF_MESSAGE);
+        }
 
         $video->refresh();
         $when = $data->when;

@@ -30,6 +30,13 @@ class EnqueueVideoPublishAction
             return app(EnqueueSocialreinsPublishAction::class)->handle($video, $workspace, $options);
         }
 
+        // Only a video still on PostSyncer gets here once it is off (routesToSocialreins()).
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            throw ValidationException::withMessages([
+                'publish' => __('PostSyncer is off for this workspace and this video still has a PostSyncer publish. Move it with socialreins:move-off-postsyncer.'),
+            ]);
+        }
+
         $config = PostsyncerConfig::fromWorkspace($workspace);
 
         if (! $config->videoPublishEnabled()) {

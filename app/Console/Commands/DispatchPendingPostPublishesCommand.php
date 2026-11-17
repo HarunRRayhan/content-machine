@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Jobs\PublishPostJob;
 use App\Models\Post;
 use App\Models\Workspace;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -28,14 +29,17 @@ class DispatchPendingPostPublishesCommand extends Command
 
             // Publish and cancellation paths lock workspace before post. Keep
             // the same order while transferring a stale row to recovery.
-            Workspace::query()
+            $workspaces = Workspace::query()
                 ->orderBy('id')
                 ->lockForUpdate()
-                ->get(['id']);
+                ->get(['id', 'settings']);
+            $postsyncerOff = $workspaces->reject(fn (Workspace $workspace): bool => SocialreinsConfig::postsyncerEnabled($workspace))->modelKeys();
 
             Post::query()
                 // SocialReins publishes run their own job; never hand them to PostSyncer's.
                 ->whereRaw("coalesce(publish_progress->>'driver', '') <> 'socialreins'")
+                // PostSyncer off: its publishes are not sent.
+                ->whereNotIn('workspace_id', $postsyncerOff)
                 ->where(function ($query) use ($staleAt): void {
                     $query->where(function ($query) use ($staleAt): void {
                         $query->where('publish_state', 'queued')

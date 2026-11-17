@@ -84,6 +84,23 @@ class EnqueueSocialreinsPublishAction
                 $options = $split['socialreins'];
             }
 
+            // PostSyncer off: what SocialReins does not cover is published nowhere. The publish
+            // leaves it out (PublishToSocialreinsAction) and the item says so.
+            // A move that stopped part-way leaves posts on PostSyncer: a publish here could send them twice.
+            if (! SocialreinsConfig::postsyncerEnabled($lockedWorkspace) && SocialreinsConfig::hasPostsyncerPost($locked)) {
+                throw $this->refuse(__('PostSyncer is off and this still has a PostSyncer post. Finish moving it with socialreins:move-off-postsyncer --apply.'));
+            }
+
+            $leftOut = [];
+            if (! is_array($split) && ! SocialreinsConfig::postsyncerEnabled($lockedWorkspace)) {
+                ['covered' => $covered, 'left_out' => $leftOut] = SocialreinsConfig::coverage($locked, $lockedWorkspace, $options);
+                if ($covered === [] && $leftOut !== []) {
+                    throw $this->refuse(__('Nothing to publish: SocialReins does not cover :pairs, and PostSyncer is off.', [
+                        'pairs' => implode(', ', $leftOut),
+                    ]));
+                }
+            }
+
             // A publish that names its request gets the PostSyncer enqueue's admission: the
             // request must be approved (or failed, on a retry). The run that closes a request
             // keeps its id in the stored options. Only posts have Telegram requests.
@@ -125,6 +142,7 @@ class EnqueueSocialreinsPublishAction
                     'driver' => SocialreinsConfig::DRIVER,
                     'state' => 'failed',
                     'options' => $options,
+                    ...($leftOut !== [] ? ['left_out' => $leftOut] : []),
                     // A split post also keeps its PostSyncer reschedule checkpoint.
                     ...(is_array($split) ? ['split' => $split] + array_intersect_key($locked->publish_progress, ['reschedule' => true]) : []),
                 ],

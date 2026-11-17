@@ -53,6 +53,8 @@ type Props = {
     publishRetryable: boolean;
     publishProgress: {
         state?: string;
+        left_out?: string[];
+        move_off_postsyncer?: { note?: string | null };
         split?: {
             socialreins?: { platforms?: string[] };
             postsyncer?: string[];
@@ -527,6 +529,20 @@ export default function PostOverview({
                             </span>
                         )}
                     </div>
+
+                    {publishProgress?.move_off_postsyncer?.note && (
+                        <p className="schedule-it-hint">
+                            {publishProgress?.move_off_postsyncer?.note}
+                        </p>
+                    )}
+                    {publishProgress?.left_out &&
+                        publishProgress?.left_out.length > 0 && (
+                            <p className="schedule-it-hint">
+                                Left out, not posted anywhere (SocialReins does
+                                not cover them and PostSyncer is off):{' '}
+                                {publishProgress?.left_out.join(', ')}.
+                            </p>
+                        )}
 
                     {split && (
                         <p className="schedule-it-hint">

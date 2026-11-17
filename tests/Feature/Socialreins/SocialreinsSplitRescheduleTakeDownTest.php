@@ -96,6 +96,11 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         $method = $request->method();
         $url = $request->url();
 
+        // The take down proves the key works before it reads a 404 as "already gone".
+        if ($url === 'https://postsyncer.com/api/v1/workspaces') {
+            return Http::response(['data' => []]);
+        }
+
         if ($url === 'https://postsyncer.com/api/v1/posts/42') {
             if ($this->psDeleted) {
                 return Http::response(['message' => 'Not found'], 404);
@@ -537,6 +542,7 @@ class SocialreinsSplitRescheduleTakeDownTest extends TestCase
         // The owner removed it in PostSyncer: the retry finds it gone and resets the post.
         $this->psDeleted = true;
         $this->withToken($this->token)->postJson("/api/v1/posts/{$post->human_id}/take-down")->assertOk();
+        Http::assertSent(fn (Request $r): bool => $r->url() === 'https://postsyncer.com/api/v1/workspaces');
         $this->assertSame('ready', $post->refresh()->status);
     }
 

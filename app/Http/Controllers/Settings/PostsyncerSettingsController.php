@@ -11,6 +11,7 @@ use App\Support\Postsyncer\PostsyncerClient;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Postsyncer\ScriptStudioPostTypes;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,6 +22,8 @@ use Inertia\Response;
 class PostsyncerSettingsController extends Controller
 {
     use AuthorizesWorkspaceSettings;
+
+    private const OFF_MESSAGE = 'PostSyncer is off (Settings > SocialReins), so its accounts are not loaded.';
 
     public function edit(Request $request): Response
     {
@@ -89,6 +92,10 @@ class PostsyncerSettingsController extends Controller
             ], 422);
         }
 
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            return response()->json(['message' => self::OFF_MESSAGE], 422);
+        }
+
         try {
             $accounts = (new PostsyncerClient($config))->listAccounts($workspaceId);
         } catch (PostsyncerException $e) {
@@ -118,7 +125,9 @@ class PostsyncerSettingsController extends Controller
         $availableWorkspaces = [];
         $workspacesLoadError = null;
 
-        if ($config->isConfigured()) {
+        if (! SocialreinsConfig::postsyncerEnabled($workspace)) {
+            $workspacesLoadError = self::OFF_MESSAGE;
+        } elseif ($config->isConfigured()) {
             try {
                 $availableWorkspaces = (new PostsyncerClient($config))->listWorkspaces();
             } catch (PostsyncerException $e) {

@@ -33,6 +33,7 @@ class UpdateSocialreinsSettingsRequest extends FormRequest
     {
         $rules = [
             'publish_driver' => ['required', Rule::in(['postsyncer', SocialreinsConfig::DRIVER])],
+            'postsyncer_enabled' => ['sometimes', 'boolean'],
             'base_url' => ['required', 'string', 'max:255', function (string $attribute, mixed $value, \Closure $fail): void {
                 try {
                     (new SocialreinsBaseUrl)->resolve((string) $value);

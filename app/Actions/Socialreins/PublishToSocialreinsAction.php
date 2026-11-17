@@ -189,19 +189,37 @@ class PublishToSocialreinsAction
         $groups = $planner->plan($subject, $config->planningConfig($workspace), $options);
 
         [$live, $skipped] = $this->liveLanguages($rows);
+        $present = [];
+        foreach (array_keys(SocialreinsResults::byPlatform($rows, requireComplete: false)) as $key) {
+            [$language, $name] = explode(':', $key, 2);
+            $present[$language][] = $name;
+        }
+        $leaveOut = ! SocialreinsConfig::postsyncerEnabled($workspace);
+        // Only with PostSyncer off (a move): named platforms a live language has no post for yet.
+        $named = $leaveOut ? array_map(fn (mixed $platform): string => strtolower((string) $platform), (array) ($options['platforms'] ?? [])) : [];
+
         $byLanguage = [];
         foreach ($groups as $group) {
-            if (! in_array($group->language, $live, true) || isset($skipped[$group->language])) {
-                $byLanguage[$group->language][] = $group;
-            }
+            $byLanguage[$group->language][] = $group;
         }
 
         $builder = new PostGroupPayloadBuilder($config);
         $payloads = [];
         foreach ($byLanguage as $language => $languageGroups) {
-            // A live language only gets the platforms brain left out; the rest is never sent again.
-            $only = in_array($language, $live, true) ? $skipped[$language] : null;
-            $payload = $builder->build($language, $languageGroups, $video, $only);
+            $planned = array_values(array_unique(array_merge(...array_map(fn (PublishGroup $group): array => $group->platforms, $languageGroups))));
+            // A live language only gets the platforms brain left out (and, PostSyncer off, those the
+            // caller named that it has no post for yet); the rest is never sent again.
+            $only = in_array($language, $live, true)
+                ? array_intersect($planned, [...($skipped[$language] ?? []), ...array_diff($named, $present[$language] ?? [])])
+                : $planned;
+            // PostSyncer off: a platform this language's set does not cover goes nowhere.
+            if ($leaveOut) {
+                $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform, strict: true));
+            }
+            if ($only === []) {
+                continue;
+            }
+            $payload = $builder->build($language, $languageGroups, $video, array_values($only));
             if ($payload !== null) {
                 $payloads[$language] = PostGroupPayloadBuilder::encode($payload);
             }
