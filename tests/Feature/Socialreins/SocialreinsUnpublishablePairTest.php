@@ -2,17 +2,32 @@
 
 namespace Tests\Feature\Socialreins;
 
+use App\Actions\Postsyncer\EnqueuePostPublishAction;
+use App\Actions\Socialreins\PublishToSocialreinsAction;
+use App\Jobs\PublishPostJob;
+use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\Workspace;
 use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
 /** A (language, platform) pair no driver can publish does not pull that platform onto PostSyncer for the other languages. */
 class SocialreinsUnpublishablePairTest extends TestCase
 {
-    use RefreshDatabase;
+    use FakesPublicDns, RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->resolveHostsTo();
+        Queue::fake();
+    }
 
     private function workspace(bool $banglaXOnPostsyncer): Workspace
     {
@@ -80,5 +95,28 @@ class SocialreinsUnpublishablePairTest extends TestCase
             ['socialreins' => ['facebook'], 'postsyncer' => ['twitter']],
             SocialreinsConfig::splitOf($this->makePost($workspace), $workspace),
         );
+    }
+
+    public function test_the_bangla_set_is_not_sent_x_and_english_x_goes_to_socialreins(): void
+    {
+        $group = fn (string $n): array => ['group_id' => "aaaaaaaa-0000-4000-8000-00000000000{$n}", 'expected_targets' => 1, 'posts' => [[
+            'id' => "bbbbbbbb-0000-4000-8000-00000000000{$n}", 'platform' => 'facebook', 'status' => 'scheduled', 'error' => null, 'targets' => [],
+        ]]];
+        $this->fakeHttp(['https://brain.test/v1/post-groups' => Http::sequence()->push($group('1'), 201)->push($group('2'), 201)]);
+        $workspace = $this->workspace(banglaXOnPostsyncer: false);
+
+        app(EnqueuePostPublishAction::class)->handle($this->makePost($workspace), $workspace, []);
+        Queue::assertNotPushed(PublishPostJob::class);
+        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job): bool {
+            $job->handle(app(PublishToSocialreinsAction::class));
+
+            return true;
+        });
+
+        $sent = Http::recorded()->map(fn (array $pair): Request => $pair[0])
+            ->filter(fn (Request $r): bool => $r->method() === 'POST' && $r->url() === 'https://brain.test/v1/post-groups')
+            ->mapWithKeys(fn (Request $r): array => [$r->header('Authorization')[0] => $r['platforms']])->all();
+        ksort($sent);
+        $this->assertSame(['Bearer sr_bn' => ['facebook'], 'Bearer sr_en' => ['facebook', 'x']], $sent);
     }
 }

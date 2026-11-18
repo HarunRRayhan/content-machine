@@ -212,10 +212,8 @@ class PublishToSocialreinsAction
             $only = in_array($language, $live, true)
                 ? array_intersect($planned, [...($skipped[$language] ?? []), ...array_diff($named, $present[$language] ?? [])])
                 : $planned;
-            // PostSyncer off: a platform this language's set does not cover goes nowhere.
-            if ($leaveOut) {
-                $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform, strict: true));
-            }
+            // A platform this language's set does not cover goes nowhere: PostSyncer took it (split) or no driver can (see platformSplit()).
+            $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform, strict: $leaveOut));
             if ($only === []) {
                 continue;
             }
