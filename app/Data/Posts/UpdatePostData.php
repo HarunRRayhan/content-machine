@@ -16,6 +16,7 @@ final readonly class UpdatePostData
      * @param  array<string, mixed>|null  $captions
      * @param  array<string, mixed>|null  $platforms
      * @param  array<int, string>|null  $imageDriveUrls
+     * @param  array<string, mixed>|null  $postsyncer
      */
     public function __construct(
         public string $title,
@@ -27,12 +28,14 @@ final readonly class UpdatePostData
         public ?array $platforms = null,
         public ?array $imageDriveUrls = null,
         public ?string $status = null,
+        public ?array $postsyncer = null,
         public ?string $publishState = null,
         public ?string $publishError = null,
         public bool $replaceExtended = false,
         public bool $hasBody = true,
         public bool $hasCaptions = false,
         public bool $hasImageDriveUrls = false,
+        public bool $hasPostsyncer = false,
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
         public bool $hasTemplate = false,
@@ -124,6 +127,9 @@ final readonly class UpdatePostData
             imageDriveUrls: array_key_exists('image_drive_urls', $payload)
                 ? self::parseDriveUrls($payload['image_drive_urls'])
                 : null,
+            postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
+                ? $payload['postsyncer']
+                : null,
             publishState: array_key_exists('publish_state', $payload)
                 ? ($payload['publish_state'] !== null ? (string) $payload['publish_state'] : null)
                 : null,
@@ -134,6 +140,7 @@ final readonly class UpdatePostData
             hasBody: true,
             hasCaptions: array_key_exists('captions', $payload),
             hasImageDriveUrls: array_key_exists('image_drive_urls', $payload),
+            hasPostsyncer: array_key_exists('postsyncer', $payload),
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
             hasTemplate: array_key_exists('template', $payload),

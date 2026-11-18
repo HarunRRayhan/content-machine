@@ -30,6 +30,8 @@ class RequeueLegacyMediaJobsCommand extends Command
             'App\\Jobs\\ProcessTelegramUpdateJob' => 'scratchpad',
             'App\\Jobs\\TranscribeVoiceNoteJob' => 'scratchpad',
             'App\\Jobs\\GenerateTelegramPostJob' => 'scratchpad',
+            'App\\Jobs\\PublishPostJob' => (string) config('queue.connections.postsyncer.queue', 'postsyncer'),
+            'App\\Jobs\\PublishVideoJob' => (string) config('queue.connections.postsyncer.queue', 'postsyncer'),
         ];
         $requeued = 0;
         $expiredAt = time() - (int) config('queue.connections.database.retry_after', 960);

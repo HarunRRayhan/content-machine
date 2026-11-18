@@ -2,9 +2,6 @@
 
 namespace Tests;
 
-use App\Models\Workspace;
-use App\Support\Publishing\PlanningConfig;
-use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Http\Request;
@@ -57,28 +54,5 @@ abstract class TestCase extends BaseTestCase
     protected function requestAs(?Authenticatable $user, string $uri = '/'): Request
     {
         return Request::create($uri)->setUserResolver(fn () => $user);
-    }
-
-    /**
-     * A workspace ready to publish through SocialReins, both languages covering every platform.
-     * The post-type matrix goes where the planner still reads it: settings.postsyncer.post_types.
-     *
-     * @param  array<string, mixed>  $postTypes
-     */
-    protected function configureSocialreins(Workspace $workspace, array $postTypes = []): void
-    {
-        if ($postTypes !== []) {
-            $workspace->forceFill(['settings' => ['postsyncer' => ['post_types' => $postTypes]] + ($workspace->settings ?? [])])->save();
-        }
-
-        SocialreinsConfig::write($workspace, [
-            'base_url' => 'https://brain.test/v1',
-            'default_language' => 'english',
-            'tiktok_privacy_level' => 'SELF_ONLY',
-            'languages' => [
-                'english' => ['set_id' => '11111111-1111-4111-8111-111111111111', 'token' => 'sr_set_live_english', 'platforms' => PlanningConfig::PLATFORMS],
-                'bangla' => ['set_id' => '22222222-2222-4222-8222-222222222222', 'token' => 'sr_set_live_bangla', 'platforms' => PlanningConfig::PLATFORMS],
-            ],
-        ]);
     }
 }

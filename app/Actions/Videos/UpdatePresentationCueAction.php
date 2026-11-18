@@ -26,7 +26,7 @@ final class UpdatePresentationCueAction
 
             if ($video->isPublishInProgress() || $video->hasUncertainPublish()) {
                 throw new InvalidArgumentException(
-                    'A video cannot be edited while its publish is queued, running, or uncertain.',
+                    'A video cannot be edited while its PostSyncer publish is queued, running, or uncertain.',
                 );
             }
 

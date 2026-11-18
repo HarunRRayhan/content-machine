@@ -1,6 +1,7 @@
 import { Form, Head } from '@inertiajs/react';
 import Heading from '@/components/heading';
 import InputError from '@/components/input-error';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,12 +16,15 @@ type Language = {
 };
 
 type PageProps = {
+    driver: 'postsyncer' | 'socialreins';
+    postsyncerEnabled: boolean;
     baseUrl: string;
     webhookUrl: string;
     webhookSecretConfigured: boolean;
     tiktokPrivacyLevel: string | null;
     privacyLevels: string[];
     defaultLanguage: string;
+    routedLanguages: string[];
     languages: Record<string, Language>;
     platforms: string[];
 };
@@ -29,12 +33,15 @@ const selectClass =
     'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-xs';
 
 export default function SocialreinsSettings({
+    driver,
+    postsyncerEnabled,
     baseUrl,
     webhookUrl,
     webhookSecretConfigured,
     tiktokPrivacyLevel,
     privacyLevels,
     defaultLanguage,
+    routedLanguages,
     languages,
     platforms,
 }: PageProps) {
@@ -45,9 +52,22 @@ export default function SocialreinsSettings({
                 <Heading
                     variant="small"
                     title="SocialReins"
-                    description="Every post and video in this workspace publishes through SocialReins."
+                    description="Publish this workspace's posts and videos through SocialReins instead of PostSyncer. PostSyncer stays the default."
                 />
                 <div className="max-w-3xl space-y-6">
+                    <Badge
+                        variant={
+                            driver === 'socialreins' || !postsyncerEnabled
+                                ? 'default'
+                                : 'outline'
+                        }
+                    >
+                        {!postsyncerEnabled
+                            ? 'PostSyncer off: everything through SocialReins'
+                            : driver === 'socialreins'
+                              ? `Publishing ${routedLanguages.length > 0 ? `${routedLanguages.join(' and ')} ` : ''}through SocialReins`
+                              : 'Publishing through PostSyncer'}
+                    </Badge>
                     <Form
                         action="/settings/socialreins"
                         method="put"
@@ -55,6 +75,56 @@ export default function SocialreinsSettings({
                     >
                         {({ processing, errors }) => (
                             <>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="publish_driver">
+                                        Publish driver
+                                    </Label>
+                                    <select
+                                        id="publish_driver"
+                                        name="publish_driver"
+                                        defaultValue={driver}
+                                        className={selectClass}
+                                    >
+                                        <option value="postsyncer">
+                                            PostSyncer (default)
+                                        </option>
+                                        <option value="socialreins">
+                                            SocialReins
+                                        </option>
+                                    </select>
+                                    <InputError
+                                        message={errors.publish_driver}
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="postsyncer_enabled">
+                                        PostSyncer
+                                    </Label>
+                                    <select
+                                        id="postsyncer_enabled"
+                                        name="postsyncer_enabled"
+                                        defaultValue={
+                                            postsyncerEnabled ? '1' : '0'
+                                        }
+                                        className={selectClass}
+                                    >
+                                        <option value="1">On (default)</option>
+                                        <option value="0">Off</option>
+                                    </select>
+                                    <InputError
+                                        message={errors.postsyncer_enabled}
+                                    />
+                                    <p className="text-sm text-muted-foreground">
+                                        Off: nothing calls PostSyncer. Every new
+                                        post and video goes through SocialReins,
+                                        whatever the driver and routed languages
+                                        say, and a platform its set does not
+                                        cover (TikTok, Bangla X) is left out and
+                                        not posted anywhere. Move posts already
+                                        scheduled on PostSyncer with
+                                        socialreins:move-off-postsyncer.
+                                    </p>
+                                </div>
                                 <div className="grid gap-2">
                                     <Label htmlFor="base_url">
                                         API base URL
@@ -94,6 +164,41 @@ export default function SocialreinsSettings({
                                     <InputError
                                         message={errors.default_language}
                                     />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label>Languages through SocialReins</Label>
+                                    <input
+                                        type="hidden"
+                                        name="routed_languages[]"
+                                        value=""
+                                    />
+                                    {Object.keys(languages).map((language) => (
+                                        <label
+                                            key={language}
+                                            className="flex items-center gap-2 text-sm capitalize"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                name="routed_languages[]"
+                                                value={language}
+                                                defaultChecked={routedLanguages.includes(
+                                                    language,
+                                                )}
+                                                className="size-4 rounded border-input"
+                                            />
+                                            {language}
+                                        </label>
+                                    ))}
+                                    <InputError
+                                        message={errors.routed_languages}
+                                    />
+                                    <p className="text-sm text-muted-foreground">
+                                        Tick none to send every language. With
+                                        some ticked, a post or video goes
+                                        through SocialReins only if all its
+                                        languages are ticked. Anything else
+                                        stays on PostSyncer.
+                                    </p>
                                 </div>
                                 {Object.entries(languages).map(
                                     ([language, values]) => (
@@ -198,9 +303,10 @@ export default function SocialreinsSettings({
                                                     }
                                                 />
                                                 <p className="text-sm text-muted-foreground">
-                                                    A platform left unticked is
-                                                    not posted anywhere for this
-                                                    language.
+                                                    A new post or video
+                                                    publishes ticked platforms
+                                                    through SocialReins and the
+                                                    rest through PostSyncer.
                                                 </p>
                                             </div>
                                         </fieldset>

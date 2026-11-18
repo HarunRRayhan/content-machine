@@ -3,6 +3,7 @@
 use App\Http\Controllers\Posts\ApprovePostController;
 use App\Http\Controllers\Posts\PostsController;
 use App\Http\Controllers\Posts\PublishPostController;
+use App\Http\Controllers\Posts\ReconcilePostPublishController;
 use App\Http\Middleware\SetCurrentWorkspace;
 use Illuminate\Support\Facades\Route;
 
@@ -14,4 +15,5 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::patch('posts/{post}', [PostsController::class, 'update'])->name('posts.update');
         Route::post('posts/{post}/approve', ApprovePostController::class)->name('posts.approve');
         Route::post('posts/{post}/publish', PublishPostController::class)->name('posts.publish');
+        Route::post('posts/{post}/reconcile', ReconcilePostPublishController::class)->name('posts.reconcile');
     });

@@ -5,15 +5,15 @@ namespace App\Support\Telegram;
 use App\Models\Post;
 use App\Models\TelegramBotConfig;
 use App\Models\TelegramPostRequest;
-use App\Support\Publishing\PublishException;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 /**
  * The Telegram request a publish was started for (`telegram_request_id` in the publish
- * options), admitted, locked and closed the same way by the enqueue, the publish job and the
- * settle. Every method expects the caller to hold the post's row lock: the lock order is
- * Post, TelegramBotConfig, TelegramPostRequest.
+ * options), shared by the PostSyncer and SocialReins publish paths so both admit, lock and
+ * close it the same way. Every method expects the caller to hold the post's row lock:
+ * the lock order is Post, TelegramBotConfig, TelegramPostRequest.
  */
 class TelegramPublishRequests
 {
@@ -120,7 +120,7 @@ class TelegramPublishRequests
      * Worker time: lock the bot config and the request. The caller decides what a cancelled
      * or published request means; any other state than approved or failed is refused.
      *
-     * @throws PublishException
+     * @throws PostsyncerException
      */
     public static function lock(Post $post, ?int $requestId): ?TelegramPostRequest
     {
@@ -133,7 +133,7 @@ class TelegramPublishRequests
         if ($request === null
             || $request->workspace_id !== $post->workspace_id
             || $request->post_id !== $post->id) {
-            throw new PublishException('The Telegram publish request does not belong to this post.');
+            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
         }
 
         $config = TelegramBotConfig::query()
@@ -146,7 +146,7 @@ class TelegramPublishRequests
             || ($request->webhook_generation !== null
                 && $request->webhook_generation !== $config->webhook_generation)
         ) {
-            throw new PublishException(
+            throw new PostsyncerException(
                 'The Telegram bot connection changed before this publish could run.',
             );
         }
@@ -161,7 +161,7 @@ class TelegramPublishRequests
             || $request->post_id !== $post->id
             || ($request->webhook_generation !== null
                 && $request->webhook_generation !== $config->webhook_generation)) {
-            throw new PublishException('The Telegram publish request does not belong to this post.');
+            throw new PostsyncerException('The Telegram publish request does not belong to this post.');
         }
 
         if ($request->webhook_generation === null && $config->webhook_generation !== null) {
@@ -176,7 +176,7 @@ class TelegramPublishRequests
             TelegramPostRequest::CANCELLED,
             TelegramPostRequest::PUBLISHED,
         ], true)) {
-            throw new PublishException('The Telegram draft is not ready to publish.');
+            throw new PostsyncerException('The Telegram draft is not ready to publish.');
         }
 
         return $request;

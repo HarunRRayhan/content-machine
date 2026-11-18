@@ -33,20 +33,20 @@ type PublishDialogProps = {
 function publishStatusLabel(
     publishState: string,
     contentStatus?: string | null,
-    via = 'SocialReins',
+    via = 'PostSyncer',
 ): string {
     const lifecycle = (contentStatus || '').toLowerCase();
 
     if (publishState === 'queued') {
-        return 'Queuing on SocialReins…';
+        return 'Queuing on PostSyncer…';
     }
 
     if (publishState === 'running') {
-        return 'Sending to SocialReins…';
+        return 'Sending to PostSyncer…';
     }
 
     if (publishState === 'failed') {
-        return 'SocialReins publish failed';
+        return 'PostSyncer job failed';
     }
 
     if (publishState === 'succeeded') {
@@ -58,10 +58,10 @@ function publishStatusLabel(
             return `Published on ${via}.`;
         }
 
-        return 'SocialReins publish succeeded.';
+        return 'PostSyncer job succeeded.';
     }
 
-    return `SocialReins publish: ${publishState}`;
+    return `PostSyncer job: ${publishState}`;
 }
 
 export function PublishStatusBanner({
@@ -140,7 +140,7 @@ export default function PublishDialog({
 
             {!disabledReason && !publishBusy && (
                 <p className="text-sm text-muted-foreground">
-                    Queue {entityLabel} through SocialReins.
+                    Queue {entityLabel} through PostSyncer.
                 </p>
             )}
 
@@ -192,10 +192,10 @@ export default function PublishDialog({
                         </DialogTitle>
                         <DialogDescription>
                             {mode === 'retry'
-                                ? 'Resume the failed publish without changing its original options.'
+                                ? 'Resume the failed PostSyncer publish without changing its original options.'
                                 : mode === 'now'
-                                  ? 'SocialReins will publish as soon as the job runs.'
-                                  : 'Choose when SocialReins should publish.'}
+                                  ? 'PostSyncer will publish as soon as the job runs.'
+                                  : 'Choose when PostSyncer should publish.'}
                         </DialogDescription>
                     </DialogHeader>
 

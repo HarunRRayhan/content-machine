@@ -3,10 +3,10 @@
 namespace App\Actions\Posts;
 
 use App\Data\Posts\UpdatePostData;
+use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Models\Post;
 use App\Support\Content\PublishGroups;
-use App\Support\Publishing\PlanningConfig;
-use App\Support\Publishing\PostPublishPlanner;
+use App\Support\Postsyncer\PostPublishPlanner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -26,7 +26,7 @@ class UpdatePostAction
 
             $contentChanged = $this->contentChanged($post, $data);
             $checkpointedPublish = $this->hasCheckpointedPublishAttempt($post);
-            // Read once: PostSyncer history and SocialReins posts both lock a published post.
+            // Both drivers, read once: a post handed to SocialReins is locked like one handed to PostSyncer.
             $groups = PublishGroups::of($post);
             $hasPublishedGroups = $this->hasPublishedGroups($groups);
             $statusChanged = $data->status !== null && $data->status !== $post->status;
@@ -41,6 +41,7 @@ class UpdatePostAction
             if (in_array($post->publish_state, ['queued', 'running'], true)
                 && ($contentChanged
                     || $statusChanged
+                    || $data->hasPostsyncer
                     || $data->hasPublishState
                     || $data->hasPublishError)
             ) {
@@ -60,7 +61,7 @@ class UpdatePostAction
 
             if ($publishLocked && $this->changesPublishMetadata($post, $data)) {
                 throw ValidationException::withMessages([
-                    'post' => __('Publish metadata is managed by the publish workflow.'),
+                    'post' => __('PostSyncer publish metadata is managed by the publish workflow.'),
                 ]);
             }
 
@@ -78,6 +79,10 @@ class UpdatePostAction
 
             if ($data->hasImageDriveUrls) {
                 $attributes['image_drive_urls'] = $data->imageDriveUrls;
+            }
+
+            if ($data->hasPostsyncer) {
+                $attributes['postsyncer'] = $data->postsyncer;
             }
 
             if ($data->hasPublishState) {
@@ -217,7 +222,7 @@ class UpdatePostAction
         );
 
         if ($added === null
-            || array_diff($added, PlanningConfig::PLATFORMS) !== []
+            || array_diff($added, UpdatePostsyncerSettingsRequest::PLATFORMS) !== []
             || array_intersect($added, $this->groupPlatforms($post, $groups)) !== []
         ) {
             return false;
@@ -416,7 +421,8 @@ class UpdatePostAction
 
     private function changesPublishMetadata(Post $post, UpdatePostData $data): bool
     {
-        return ($data->hasPublishState && $data->publishState !== $post->publish_state)
+        return ($data->hasPostsyncer && $data->postsyncer !== $post->postsyncer)
+            || ($data->hasPublishState && $data->publishState !== $post->publish_state)
             || ($data->hasPublishError && $data->publishError !== $post->publish_error);
     }
 

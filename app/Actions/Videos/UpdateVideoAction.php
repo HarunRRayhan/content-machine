@@ -19,7 +19,7 @@ class UpdateVideoAction
 
             if ($lockedVideo->isPublishInProgress() || $lockedVideo->hasUncertainPublish()) {
                 throw ValidationException::withMessages([
-                    'publish' => __('A video cannot be edited while its publish is queued, running, or uncertain.'),
+                    'publish' => __('A video cannot be edited while its PostSyncer publish is queued, running, or uncertain.'),
                 ]);
             }
 
@@ -39,6 +39,10 @@ class UpdateVideoAction
 
             if ($data->hasCoverDriveUrl) {
                 $attributes['cover_drive_url'] = $data->coverDriveUrl;
+            }
+
+            if ($data->hasPostsyncer) {
+                $attributes['postsyncer'] = $data->postsyncer;
             }
 
             if ($data->hasPublishState) {

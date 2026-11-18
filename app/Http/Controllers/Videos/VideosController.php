@@ -16,7 +16,8 @@ use App\Support\Content\ParseVideoScript;
 use App\Support\Content\PresenceFlags;
 use App\Support\Content\PresentationManifest;
 use App\Support\GoogleDrive\GoogleDriveConfig;
-use App\Support\Publishing\VideoPublishPlanner;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\VideoPublishPlanner;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsResults;
 use App\Support\Videos\VideoScriptSeries;
@@ -302,7 +303,7 @@ class VideosController extends Controller
             $video->script_markdown ?? '',
             $video->language ?? 'bn',
         );
-        $socialreinsConfig = SocialreinsConfig::fromWorkspace($workspace);
+        $postsyncerConfig = PostsyncerConfig::fromWorkspace($workspace);
         $googleDriveConfig = GoogleDriveConfig::fromWorkspace($workspace);
         $publishOptions = is_array($video->publish_progress)
             && is_array($video->publish_progress['options'] ?? null)
@@ -310,9 +311,11 @@ class VideosController extends Controller
             : [];
         $needsConfirmAsk = app(VideoPublishPlanner::class)->needsConfirmAsk(
             $video,
-            $socialreinsConfig->planningConfig($workspace),
+            $postsyncerConfig,
             $publishOptions,
         ) && ! (bool) ($publishOptions['confirm_ask'] ?? false);
+        $socialreins = SocialreinsConfig::routesToSocialreins($video, $workspace);
+        $split = $video->publish_progress['split'] ?? null;
 
         return [
             'id' => $video->id,
@@ -337,12 +340,21 @@ class VideosController extends Controller
             'publish_state' => $video->publish_state,
             'publish_error' => $video->publish_error,
             'publish_retryable' => $video->canRetryPublish(),
-            // PostSyncer groups of a video published before PostSyncer was removed, read-only.
             'postsyncer' => $video->postsyncer,
             'socialreins_groups' => SocialreinsResults::presentGroups($video),
-            // `language:platform` pairs left out because SocialReins does not cover them.
+            'publish_split' => is_array($split) ? [
+                'socialreins' => $split['socialreins']['platforms'] ?? [],
+                'postsyncer' => $split['postsyncer'] ?? [],
+            ] : null,
+            // `language:platform` pairs PostSyncer off left out (SocialReins does not cover them).
             'publish_left_out' => $video->publish_progress['left_out'] ?? [],
-            'publish_ready' => $socialreinsConfig->isReadyForPublish(),
+            // Set while socialreins:move-off-postsyncer has not finished with this video.
+            'publish_moving' => $video->publish_progress['move_off_postsyncer']['note'] ?? null,
+            // Legacy name: "this video's publish driver is ready" (PostSyncer, or SocialReins when routed).
+            'postsyncer_ready' => $socialreins
+                ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
+                : $postsyncerConfig->isReadyForPublish(),
+            'video_publish_enabled' => $socialreins || $postsyncerConfig->videoPublishEnabled(),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $video->idea_id,
             'series' => VideoScriptSeries::forVideo($video),

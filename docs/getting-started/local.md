@@ -28,7 +28,7 @@ key without replacing an existing one, migrates the database, creates
 `ADMIN_EMAIL` if configured, and builds the frontend.
 
 `composer run dev` starts the Laravel server, Vite, logs when supported, the
-default queue worker, scratchpad and publish workers, and scheduler. Open
+default queue worker, scratchpad and PostSyncer workers, and scheduler. Open
 the URL printed by Laravel, usually `http://localhost:8000`.
 
 ## First login and background workers
@@ -132,5 +132,5 @@ also does this). Then run `npm run lint:check`, `npm run format:check`, and
 ## Optional integrations
 
 The dashboard starts without external integrations. Configure Telegram, AI
-providers, SocialReins, and Google Drive from workspace Settings when you need
-them. See [the API guide](../guides/api.md) and [the SocialReins guide](../guides/socialreins.md).
+providers, PostSyncer, and Google Drive from workspace Settings when you need
+them. See [the API guide](../guides/api.md) and [the PostSyncer guide](../guides/postsyncer.md).

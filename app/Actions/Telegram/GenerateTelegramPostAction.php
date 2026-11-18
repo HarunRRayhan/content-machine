@@ -14,7 +14,7 @@ use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiVisionCompletionClientContract;
-use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -23,7 +23,7 @@ use Throwable;
 
 /**
  * Turns a Telegram source capture into a draft Post. Generation is deliberately
- * separate from approval: this action never queues a publish and never makes
+ * separate from approval: this action never queues PostSyncer and never makes
  * a generated draft publishable without a later human approval.
  */
 class GenerateTelegramPostAction
@@ -491,7 +491,7 @@ class GenerateTelegramPostAction
             return [$requested];
         }
 
-        $configured = SocialreinsConfig::fromWorkspace($request->workspace)->planningConfig($request->workspace)->enabledLanguages();
+        $configured = PostsyncerConfig::fromWorkspace($request->workspace)->enabledLanguages();
         $languages = array_values(array_filter(
             array_map(
                 static fn (string $language): ?string => match ($language) {

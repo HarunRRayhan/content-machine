@@ -1,7 +1,7 @@
 # Content Machine
 
 Content Machine is a self-hosted, multi-workspace dashboard and API for capturing
-ideas and managing posts and videos. It publishes through SocialReins. It also
+ideas and managing posts and videos. It publishes through PostSyncer. It also
 has Telegram capture, AI-assisted triage, Google Drive access, and a presentation
 player for video decks.
 
@@ -16,13 +16,14 @@ player for video decks.
 - Scratch Pad capture from the dashboard and Telegram. Link resolution and voice
   transcription run in the queue.
 - Ideas, posts, and videos stored in PostgreSQL. Posts and videos can be
-  scheduled or published through workspace-configured SocialReins sets.
-- Queued publishing with idempotent retries through SocialReins.
+  scheduled or published through workspace-configured PostSyncer accounts.
+- Queued publishing with checkpoints and explicit recovery for uncertain
+  PostSyncer operations.
 - Google Drive integration for video exports and a presentation player for video
   decks.
 
 See [the architecture overview](docs/architecture/overview.md), [the API
-guide](docs/guides/api.md), and [the SocialReins guide](docs/guides/socialreins.md).
+guide](docs/guides/api.md), and [the PostSyncer guide](docs/guides/postsyncer.md).
 
 ## Setup and usage
 
@@ -117,13 +118,13 @@ if you already used that account.
 ### 3. Start development services
 
 `composer run dev` starts the Laravel server, Vite, logs when supported, the
-default queue worker, the scratchpad worker, the publish worker, and the
+default queue worker, the scratchpad worker, the PostSyncer worker, and the
 scheduler together. Keep it running while using the app; no extra worker
 terminals are needed for local development. Restart it after changing worker
 code or configuration.
 
 The scratchpad worker handles Telegram media, transcription, and AI post
-generation. The publish worker handles post and video publishing. The
+generation. The PostSyncer worker handles post and video publishing. The
 scheduler recovers pending work and refreshes published status. The database
 queue is enough to start; Redis is not required.
 
@@ -140,7 +141,7 @@ signed in as its owner.
 |---|---|---|
 | AI Providers | Open `/settings/ai-providers`. Add an enabled provider with its API key, then add a model under Models > Default. Add a suitable model under Vision for photo input. | AI post drafts, summaries, and triage suggestions. Saving a key alone does not add a model to the generation chain. |
 | Telegram | Open `/settings/telegram`. Connect a bot token, get a link code, and send `/link CODE` to that bot from your Telegram account. | Capture and the draft > approve > publish workflow. Each member links their own Telegram account. |
-| SocialReins | Connect your social accounts in SocialReins, one set per language. In `/settings/socialreins`, save each set id and token, tick the platforms each set covers, and set the webhook secret. | Scheduling and delivery to the configured social accounts. |
+| PostSyncer | Connect your social accounts in PostSyncer. In `/settings/postsyncer`, save its API key. In `/settings/postsyncer/workspaces`, select language workspaces and activate the desired accounts. Enable publishing when ready. | Scheduling and delivery to the configured social accounts. |
 | Google Drive (optional) | Configure Google OAuth in `.env`, then connect through `/settings/google-drive` and select an export folder. | Browse and select finished video files and covers from Drive. Public Drive links can also be pasted directly. |
 
 AI providers support OpenAI and Anthropic request formats, including compatible
@@ -149,16 +150,16 @@ custom base URLs. Voice transcription additionally needs a compatible
 
 Telegram needs a publicly reachable HTTPS webhook. A bot cannot deliver updates
 to `127.0.0.1`; for local testing, expose the app through an HTTPS tunnel and set
-`APP_URL` to that public URL before connecting the bot. SocialReins also needs to
+`APP_URL` to that public URL before connecting the bot. PostSyncer also needs to
 fetch the app's signed attachment URLs, so local uploaded-media publishing needs
 public reachability too. Clear cached configuration after changing `APP_URL`.
 
 See the [Telegram guide](docs/guides/telegram-bot.md) and
-[SocialReins guide](docs/guides/socialreins.md) for detailed setup.
+[PostSyncer/Google Drive guide](docs/guides/postsyncer.md) for detailed setup.
 
 ### 5. Generate and publish your first post
 
-With an AI model, linked Telegram account, and SocialReins configured, send this
+With an AI model, linked Telegram account, and PostSyncer configured, send this
 to your bot:
 
 ```text
@@ -195,11 +196,10 @@ audio file. Request English or Bangla explicitly; configured language workspaces
 can also drive bilingual generation. Use `/cancel` to cancel an active request.
 
 You can also open the post in the dashboard and select **Schedule** or
-**Publish now**. Available platforms depend on the post's platforms, the
-platforms each SocialReins set covers, and post-type rules. Instagram needs
-suitable media; text-only publishing is available only where the configured
-platform rules allow it. Every caption language needs its own configured
-SocialReins set.
+**Publish now**. Available platforms depend on the post's platforms, active
+PostSyncer accounts, and post-type rules. Instagram needs suitable media;
+text-only publishing is available only where the configured platform rules
+allow it. Every caption language needs its own configured PostSyncer workspace.
 
 ### 6. Work through the dashboard or publish videos
 
@@ -241,9 +241,9 @@ For API/MCP publishing, omitting `when` means publish immediately; always pass
 | `/register` returns 403 | Set `DISABLE_REGISTRATION=false` and clear cached configuration, or create an owner through `cm:ensure-admin`. |
 | AI draft generation fails | Enable a provider and add a model to the Default or Vision chain, as appropriate. Check that the scratchpad process in `composer run dev` is running. |
 | Telegram does not respond | Check public HTTPS reachability, bot connection, your account link, and both the default and scratchpad workers. |
-| Schedule/Publish is unavailable | Check the SocialReins set and token per language, covered platforms, approval, platform rules, and required media. |
+| Schedule/Publish is unavailable | Check the PostSyncer key, language workspaces, active accounts, publish toggle, approval, platform rules, and required media. |
 | A publish remains queued | Keep `composer run dev` running locally; in production, supervise `composer run worker:publish`. |
-| A publish failed | Retry it: SocialReins retries are idempotent. Targets shown as "Check the platform" need a look at the account first. See the [SocialReins guide](docs/guides/socialreins.md). |
+| A publish has an uncertain outcome | Follow [PostSyncer recovery](docs/guides/postsyncer.md) before retrying; do not create a second copy blindly. |
 
 ## Production setup
 
@@ -311,7 +311,7 @@ To update, run `git pull`, then the `up` command again. Back up `.env` and the
 | `composer run setup:production` | Install and prepare a production release with a preconfigured environment and key. |
 | `composer run worker:default` | Run the default queue worker. |
 | `composer run worker:scratchpad` | Run media, transcription, and generation jobs. |
-| `composer run worker:publish` | Run publishing jobs. |
+| `composer run worker:publish` | Run PostSyncer publishing jobs. |
 | `composer run scheduler` | Run the Laravel scheduler. |
 
 ## Contributing

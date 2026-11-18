@@ -5,7 +5,7 @@
 **Repo:** content-machine  
 **Related:** `docs/architecture/posts-videos-api.md`, personal-content `docs/postsyncer-setup.md`, `web/publish_postsyncer.py`
 
-> Historical design snapshot, not a current specification. Implementation has since added publish recovery, video publishing, rescheduling, and scheduled-status synchronization. The original non-goal below about polling was superseded by `postsyncer:sync-scheduled`. See the [current architecture](../../architecture/overview.md), [API guide](../../guides/api.md), and [SocialReins guide](../../guides/socialreins.md) (PostSyncer was removed in 2026-11). The API guide lists the verified remaining API gaps as of baseline `fafde1e` (2026-09-24).
+> Historical design snapshot, not a current specification. Implementation has since added publish recovery, video publishing, rescheduling, and scheduled-status synchronization. The original non-goal below about polling was superseded by `postsyncer:sync-scheduled`. See the [current architecture](../../architecture/overview.md), [API guide](../../guides/api.md), and [PostSyncer operations guide](../../guides/postsyncer.md). The API guide lists the verified remaining API gaps as of baseline `fafde1e` (2026-09-24).
 
 ## Goal
 

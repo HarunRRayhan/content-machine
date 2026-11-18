@@ -4,12 +4,13 @@ namespace App\Support\Mcp;
 
 use App\Actions\Ideas\UpdateIdeaAction;
 use App\Actions\Posts\UpdatePostAction;
+use App\Actions\Postsyncer\EnqueuePostPublishAction;
+use App\Actions\Postsyncer\EnqueueVideoPublishAction;
 use App\Actions\Scratchpad\CaptureScratchpadLinkAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteScratchpadEntryAction;
 use App\Actions\Scratchpad\TriageScratchpadEntryAction;
 use App\Actions\Scratchpad\UpdateScratchpadEntryAction;
-use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Actions\Videos\UpdateVideoAction;
 use App\Data\Ideas\UpdateIdeaData;
 use App\Data\Posts\UpdatePostData;
@@ -52,7 +53,8 @@ final class McpToolDispatcher
         private readonly UpdateIdeaAction $updateIdeaAction,
         private readonly UpdateVideoAction $updateVideoAction,
         private readonly UpdatePostAction $updatePostAction,
-        private readonly EnqueueSocialreinsPublishAction $enqueuePublishAction,
+        private readonly EnqueuePostPublishAction $enqueuePostPublishAction,
+        private readonly EnqueueVideoPublishAction $enqueueVideoPublishAction,
     ) {}
 
     /**
@@ -410,7 +412,7 @@ final class McpToolDispatcher
             $options['confirm_ask'] = (bool) $arguments['confirm_ask'];
         }
 
-        $this->enqueuePublishAction->handle($video, $workspace, $options);
+        $this->enqueueVideoPublishAction->handle($video, $workspace, $options);
 
         return $this->presentVideo($video->fresh() ?? $video);
     }
@@ -538,7 +540,7 @@ final class McpToolDispatcher
             $options['confirm_ask'] = (bool) $arguments['confirm_ask'];
         }
 
-        $this->enqueuePublishAction->handle($post, $workspace, $options);
+        $this->enqueuePostPublishAction->handle($post, $workspace, $options);
 
         return $this->presentPost($post->fresh(['attachments.mediaAsset']) ?? $post);
     }

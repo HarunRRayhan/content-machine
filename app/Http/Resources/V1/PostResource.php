@@ -75,7 +75,7 @@ class PostResource extends JsonResource
             'publish_progress' => $this->publish_progress,
             'approval_state' => $this->approval_state ?? 'approved',
             'postsyncer' => $this->postsyncer,
-            // The SocialReins posts, as the dashboard shows them (one query, so opt-in on lists).
+            // The SocialReins half of a split publish, as the dashboard shows it (one query, so opt-in on lists).
             'socialreins' => $this->when(
                 $include->wants('socialreins'),
                 fn (): array => SocialreinsResults::presentGroupsForApi($this->resource),

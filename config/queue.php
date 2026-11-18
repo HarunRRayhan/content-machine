@@ -54,9 +54,8 @@ return [
             // Queue names are isolated because the database driver does not
             // persist a connection name on each job row.
             'queue' => env('POSTSYNCER_QUEUE', 'postsyncer'),
-            // The publish worker (PublishSocialreinsJob) runs with a 900-second timeout.
-            // Leave a margin before the database makes a reserved job visible again.
-            // The name is from the first publish driver; renaming it moves the worker's queue.
+            // PublishPostJob has a 900-second timeout. Leave a margin before
+            // the database makes a reserved job visible again.
             'retry_after' => (int) env('POSTSYNCER_QUEUE_RETRY_AFTER', 960),
             'after_commit' => false,
         ],

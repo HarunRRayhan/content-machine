@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The human approval gate for generated drafts. The publish confirm_ask
+ * The human approval gate for generated drafts. PostSyncer's confirm_ask
  * option is a platform capability check, not this content approval.
  */
 class ApprovePostAction

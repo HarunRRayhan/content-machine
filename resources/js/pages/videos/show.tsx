@@ -7,7 +7,7 @@ import ScriptPanel from '@/components/studio/script-panel';
 import TalkingPointsPanel from '@/components/studio/talking-points-panel';
 import VideoCaptionsPanel from '@/components/studio/video-captions-panel';
 import VideoOverview from '@/components/studio/video-overview';
-import type { PublishGroup } from '@/components/studio/video-overview';
+import type { PostsyncerGroup } from '@/components/studio/video-overview';
 import { useStudioTab } from '@/hooks/use-studio-tab';
 import { home } from '@/routes/dashboard';
 import { show as showIdea } from '@/routes/dashboard/ideas';
@@ -61,9 +61,12 @@ type VideoDetail = {
     publish_error: string | null;
     publish_retryable: boolean;
     postsyncer: Record<string, unknown> | null;
-    socialreins_groups?: PublishGroup[];
+    socialreins_groups?: PostsyncerGroup[];
+    publish_split?: { socialreins: string[]; postsyncer: string[] } | null;
     publish_left_out?: string[];
-    publish_ready: boolean;
+    publish_moving?: string | null;
+    postsyncer_ready: boolean;
+    video_publish_enabled: boolean;
     needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
@@ -183,11 +186,9 @@ export default function VideoShow({ video }: PageProps) {
                     publishError={video.publish_error}
                     contentStatus={video.status}
                     via={
-                        (video.socialreins_groups ?? []).length === 0 &&
-                        Array.isArray(video.postsyncer?.groups) &&
-                        video.postsyncer.groups.length > 0
-                            ? 'PostSyncer'
-                            : 'SocialReins'
+                        (video.socialreins_groups ?? []).length > 0
+                            ? 'SocialReins'
+                            : 'PostSyncer'
                     }
                 />
 
@@ -269,13 +270,16 @@ export default function VideoShow({ video }: PageProps) {
                         googleDriveFolderId={video.google_drive_folder_id}
                         googleDriveCanBrowse={video.google_drive_can_browse}
                         publishUrl={`/videos/${video.id}/publish`}
-                        publishReady={video.publish_ready}
+                        postsyncerReady={video.postsyncer_ready}
+                        videoPublishingEnabled={video.video_publish_enabled}
                         publishState={video.publish_state}
                         publishRetryable={video.publish_retryable}
                         needsConfirmAsk={video.needs_confirm_ask}
                         postsyncer={video.postsyncer}
                         socialreinsGroups={video.socialreins_groups}
+                        publishSplit={video.publish_split}
                         publishLeftOut={video.publish_left_out}
+                        publishMoving={video.publish_moving}
                         series={video.series}
                     />
                 )}

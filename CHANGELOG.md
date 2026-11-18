@@ -8,9 +8,6 @@ once it reaches 1.0.
 
 ## [Unreleased]
 
-### Removed
-- PostSyncer. Every post and video publishes, reschedules, retries and is taken down through SocialReins only. Gone: the PostSyncer client, its publish jobs and recovery commands (`postsyncer:*`, `socialreins:move-off-postsyncer`), its scheduled sync, the PostSyncer settings pages, the publish driver, routed languages and PostSyncer switch, and the PostSyncer reconcile API endpoints. Old records keep their PostSyncer data in the database; it is shown read-only and such an item is never published again.
-
 ### Changed
 - PostSyncer status sync makes at most 20 requests a run, never re-checks a published group, checks future and long-overdue groups once a day (a group that failed in the last day every run), and stops on a 429 or when the remaining allowance is low, so it no longer starves publishes of PostSyncer's 60 requests a minute.
 - A PostSyncer throttle 429 (`Too Many Attempts`) during a publish is waited out and retried on every call (media upload, create, lookups; a create once at most); one that outlasts the 120-second budget is a plain failure that can be retried, no longer an "uncertain" outcome that needs reconciling. Any other 429 is never resent and keeps its unknown outcome.

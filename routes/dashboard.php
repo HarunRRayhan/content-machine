@@ -49,7 +49,7 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::permanentRedirect('scratchpad/{entry}', '/scratchpad/{entry}');
 
         // AI Models and Telegram live under /settings now. Keep the old
-        // dashboard bookmarks working.
+        // dashboard bookmarks working the same way PostSyncer does.
         Route::permanentRedirect('ai-providers', '/settings/ai-providers');
         Route::permanentRedirect('telegram', '/settings/telegram');
 
@@ -68,4 +68,6 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
             ->name('user-password.update');
 
         Route::inertia('settings/appearance', 'settings/appearance')->name('appearance.edit');
+
+        Route::permanentRedirect('settings/postsyncer', '/settings/postsyncer');
     });

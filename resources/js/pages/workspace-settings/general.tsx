@@ -14,12 +14,12 @@ export default function GeneralSettings() {
                 <Heading
                     variant="small"
                     title="General"
-                    description="Workspace-wide settings."
+                    description="Workspace-wide settings that are not PostSyncer."
                 />
                 <div className="max-w-3xl space-y-4">
                     <p className="text-sm text-muted-foreground">
                         General workspace settings will land here. Use
-                        SocialReins for publishing.
+                        PostSyncer for publishing.
                     </p>
                 </div>
             </SettingsShell>

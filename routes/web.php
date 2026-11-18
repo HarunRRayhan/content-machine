@@ -26,7 +26,7 @@ Route::post('socialreins/webhook/{workspace}', SocialreinsWebhookController::cla
     ->whereNumber('workspace')
     ->name('socialreins.webhook');
 
-// SocialReins fetches these; the signature, checked in the controller, replaces bearer auth.
+// PostSyncer and SocialReins fetch these; the signature, checked in the controller, replaces bearer auth.
 Route::get('publish-media/posts/{post:id}/{mediaAsset}', [PublishMediaController::class, 'post'])
     ->name('publish-media.post');
 

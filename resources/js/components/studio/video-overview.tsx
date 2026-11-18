@@ -9,8 +9,8 @@ type TalkingPoint = {
     text: string;
 };
 
-export type PublishGroup = {
-    /** Set on a SocialReins post; unset on a stored PostSyncer group. */
+export type PostsyncerGroup = {
+    /** Set on a SocialReins post shown in the PostSyncer group shape. */
     source?: 'socialreins';
     post_id?: string;
     status?: string;
@@ -117,19 +117,23 @@ type Props = {
     googleDriveFolderId: string | null;
     googleDriveCanBrowse: boolean;
     publishUrl: string;
-    publishReady: boolean;
+    postsyncerReady: boolean;
+    videoPublishingEnabled: boolean;
     publishState: string;
     publishRetryable: boolean;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
-    socialreinsGroups?: PublishGroup[];
+    socialreinsGroups?: PostsyncerGroup[];
+    /** Set when PostSyncer takes some platforms and SocialReins the rest. */
+    publishSplit?: { socialreins: string[]; postsyncer: string[] } | null;
     publishLeftOut?: string[];
+    publishMoving?: string | null;
     series?: VideoSeriesInfo | null;
 };
 
 function publishGroups(
     postsyncer: Record<string, unknown> | null,
-): PublishGroup[] {
+): PostsyncerGroup[] {
     const groups = postsyncer?.groups;
 
     if (!Array.isArray(groups)) {
@@ -137,12 +141,12 @@ function publishGroups(
     }
 
     return groups.filter(
-        (group): group is PublishGroup =>
+        (group): group is PostsyncerGroup =>
             group !== null && typeof group === 'object',
     );
 }
 
-function groupWhen(group: PublishGroup): string | null {
+function groupWhen(group: PostsyncerGroup): string | null {
     return group.published_at ?? group.scheduled_at ?? null;
 }
 
@@ -164,7 +168,7 @@ function formatWhen(value: string | null | undefined): string | null {
     }).format(date);
 }
 
-function earliestWhen(groups: PublishGroup[]): string | null {
+function earliestWhen(groups: PostsyncerGroup[]): string | null {
     let best: Date | null = null;
     let bestRaw: string | null = null;
 
@@ -249,13 +253,16 @@ export default function VideoOverview({
     googleDriveFolderId,
     googleDriveCanBrowse,
     publishUrl,
-    publishReady,
+    postsyncerReady,
+    videoPublishingEnabled,
     publishState,
     publishRetryable,
     needsConfirmAsk,
     postsyncer,
     socialreinsGroups,
+    publishSplit,
     publishLeftOut,
+    publishMoving,
     series = null,
 }: Props) {
     const [checks, setChecks] = useState<Set<number>>(() =>
@@ -339,7 +346,7 @@ export default function VideoOverview({
 
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
-    // SocialReins posts are listed too; PostSyncer groups are history and block a new publish.
+    // SocialReins posts are listed too; publish controls still key off PostSyncer groups.
     const shownGroups = [...groups, ...(socialreinsGroups ?? [])];
     const fakeScheduled = studioStatus === 'scheduled' && !hasGroups;
     const publishBusy = ['queued', 'running'].includes(publishState);
@@ -349,20 +356,30 @@ export default function VideoOverview({
         studioStatus !== 'posted' &&
         !publishFailed &&
         (studioStatus === 'recorded' || fakeScheduled);
+    // A split video keeps its PostSyncer groups while its SocialReins half is retried.
     const showRetryForm =
-        !archived && publishFailed && studioStatus !== 'posted' && !hasGroups;
+        !archived &&
+        publishFailed &&
+        (publishSplit
+            ? publishRetryable
+            : studioStatus !== 'posted' && !hasGroups);
     const hasVideoDriveUrl = Boolean(videoDriveValue.trim());
     const missingVideoDriveUrl =
         !hasVideoDriveUrl && studioStatus === 'recorded';
     const canSchedule =
-        publishReady &&
+        videoPublishingEnabled &&
+        postsyncerReady &&
         !publishBusy &&
         hasVideoDriveUrl &&
         (studioStatus === 'recorded' || fakeScheduled);
     const scheduleDisabled =
         !canSchedule || (needsConfirmAsk && !confirmAskChecked);
     const canRetry =
-        publishReady && !publishBusy && hasVideoDriveUrl && publishRetryable;
+        videoPublishingEnabled &&
+        postsyncerReady &&
+        !publishBusy &&
+        hasVideoDriveUrl &&
+        publishRetryable;
     const retryDisabled = !canRetry || (needsConfirmAsk && !confirmAskChecked);
     const scheduledAt = earliestWhen(shownGroups);
 
@@ -461,7 +478,7 @@ export default function VideoOverview({
                                 <p className="drive-urls-hint">
                                     Paste a live Google Drive file link, or pick
                                     one from the connected Drive. Picked files
-                                    are made public so SocialReins can fetch
+                                    are made public so PostSyncer can fetch
                                     them.
                                 </p>
                                 <div className="drive-urls-row">
@@ -734,10 +751,19 @@ export default function VideoOverview({
                                                     {errors.publish}
                                                 </p>
                                             )}
-                                            {!publishReady && (
+                                            {!postsyncerReady && (
                                                 <p className="schedule-it-hint">
-                                                    Configure SocialReins in
+                                                    Configure PostSyncer in
                                                     Settings before scheduling.
+                                                </p>
+                                            )}
+                                            {!videoPublishingEnabled && (
+                                                <p className="schedule-it-hint">
+                                                    Video publishing is
+                                                    temporarily disabled while
+                                                    safe retry and
+                                                    reconciliation support is
+                                                    being completed.
                                                 </p>
                                             )}
                                             {missingVideoDriveUrl && (
@@ -809,15 +835,17 @@ export default function VideoOverview({
                                                 {errors.publish}
                                             </p>
                                         )}
-                                        {!publishReady && (
+                                        {!postsyncerReady && (
                                             <p className="schedule-it-hint">
-                                                Configure SocialReins in
-                                                Settings before retrying.
+                                                Configure PostSyncer in Settings
+                                                before retrying.
                                             </p>
                                         )}
                                         {!publishRetryable && (
                                             <p className="schedule-it-hint">
-                                                This publish cannot be retried.
+                                                Reconcile the uncertain
+                                                PostSyncer create before
+                                                retrying.
                                             </p>
                                         )}
                                     </>
@@ -860,10 +888,22 @@ export default function VideoOverview({
                         )}
                     </div>
 
+                    {publishMoving && (
+                        <p className="schedule-it-hint">{publishMoving}</p>
+                    )}
                     {publishLeftOut && publishLeftOut.length > 0 && (
                         <p className="schedule-it-hint">
                             Left out, not posted anywhere (SocialReins does not
-                            cover them): {publishLeftOut.join(', ')}.
+                            cover them and PostSyncer is off):{' '}
+                            {publishLeftOut.join(', ')}.
+                        </p>
+                    )}
+
+                    {publishSplit && (
+                        <p className="schedule-it-hint">
+                            Through SocialReins:{' '}
+                            {publishSplit.socialreins.join(', ')}. Through
+                            PostSyncer: {publishSplit.postsyncer.join(', ')}.
                         </p>
                     )}
 
@@ -905,7 +945,7 @@ export default function VideoOverview({
                                 Scheduled posts
                             </div>
                             <p className="schedule-log-empty">
-                                No SocialReins schedule yet
+                                No PostSyncer schedule yet
                             </p>
                         </div>
                     ) : null}
