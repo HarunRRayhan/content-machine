@@ -31,6 +31,8 @@ class PostsApiTest extends TestCase
 
     private Workspace $workspace;
 
+    private User $tokenUser;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -38,7 +40,7 @@ class PostsApiTest extends TestCase
         $this->workspace = Workspace::factory()->create();
         $this->token = (new CreateWorkspaceApiTokenAction)->handle(
             $this->workspace,
-            User::factory()->create(),
+            $this->tokenUser = User::factory()->create(),
             new CreateWorkspaceApiTokenData('test client'),
         )['plaintext'];
     }
@@ -1520,12 +1522,28 @@ class PostsApiTest extends TestCase
             ],
         ])->save();
 
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/repair-account-mapping', [
+        $payload = [
             'language' => 'english',
             'platform' => 'instagram',
             'from_account_id' => 7364,
             'to_account_id' => 7541,
-        ])
+        ];
+        $url = '/api/v1/posts/'.$post->human_id.'/repair-account-mapping';
+        $team = $this->workspace->team;
+
+        // A token whose creator is not an owner or admin cannot rewrite the mapping.
+        $this->acting()->postJson($url, $payload)->assertForbidden();
+        $team->members()->attach($this->tokenUser->id, ['role' => 'member']);
+        $this->acting()->postJson($url, $payload)->assertForbidden();
+        $this->workspace->refresh();
+        $this->assertSame(
+            '7364',
+            (string) PostsyncerConfig::fromWorkspace($this->workspace)
+                ->language('english')['platforms']['instagram']['account_id'],
+        );
+
+        $team->members()->updateExistingPivot($this->tokenUser->id, ['role' => 'admin']);
+        $this->acting()->postJson($url, $payload)
             ->assertOk()
             ->assertJsonPath('data.publish_state', 'failed')
             ->assertJsonPath('data.publish_progress.account_mapping_repair.to_account_id', '7541')
