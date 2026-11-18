@@ -22,28 +22,17 @@ use App\Support\Socialreins\SocialreinsResults;
  * - a post that failed after part of it went out (another account, thread parts) cannot be
  *   deleted by brain at all: it is reported, not skipped;
  * - a post that failed with nothing live has nothing to take down and is skipped.
- *
- * A split subject's PostSyncer half is taken down too (TakeDownPostsyncerGroupsAction), and the
- * subject resets only once both halves are down.
  */
 class TakeDownSocialreinsAction
 {
     public function __construct(
         private readonly ResolveSocialreinsGroupAction $resolve,
-        private readonly TakeDownPostsyncerGroupsAction $takeDownPostsyncer,
     ) {}
 
     /** @return list<string> what could not be taken down; empty when everything is down */
     public function handle(Post|Video $subject): array
     {
-        $split = is_array($subject->publish_progress['split'] ?? null);
-
-        // A hand-over still running could create SocialReins posts after this returns.
-        if ($split && (SocialreinsResults::rowsOf($subject) === [] || in_array($subject->publish_state, ['queued', 'running'], true))) {
-            return ['The SocialReins half is still being handed over. Try again when the publish settles.'];
-        }
-
-        $problems = $split ? $this->takeDownPostsyncer->handle($subject) : [];
+        $problems = [];
 
         // A request that got no answer may have created a group CM does not know: ask brain
         // what its key made before anything else.
@@ -84,19 +73,12 @@ class TakeDownSocialreinsAction
         }
 
         if ($problems === [] && $rows !== []) {
-            $postsyncer = $split ? $subject->fresh()?->postsyncer : null;
             // A query, not the held model: its copy of publish_state may be stale.
             $subject::query()->whereKey($subject->getKey())->update([
                 'status' => $subject instanceof Video ? 'recorded' : 'ready',
                 'publish_state' => 'idle',
                 'publish_error' => null,
                 'publish_progress' => null,
-                // A split subject's PostSyncer half is gone too: keep its groups for audit only, so the
-                // post can be published again (as ReconcileVideoGroupsDeletedAction does).
-                ...($split ? ['postsyncer' => json_encode(['groups' => [], 'cleared_groups' => [
-                    ...($postsyncer['cleared_groups'] ?? []),
-                    ...($postsyncer['groups'] ?? []),
-                ]])] : []),
                 'updated_at' => now(),
             ]);
         }

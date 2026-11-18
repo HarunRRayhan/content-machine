@@ -3,7 +3,7 @@
 namespace Tests\Unit\Support\Socialreins;
 
 use App\Models\Workspace;
-use App\Support\Postsyncer\PublishGroup;
+use App\Support\Publishing\PublishGroup;
 use App\Support\Socialreins\PostGroupPayloadBuilder;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsException;

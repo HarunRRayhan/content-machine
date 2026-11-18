@@ -32,8 +32,8 @@ class SocialreinsTakeDownController extends Controller
 
     private function run(Post|Video $subject, Workspace $workspace, TakeDownSocialreinsAction $action): JsonResponse
     {
-        if (! SocialreinsConfig::routesToSocialreins($subject, $workspace)) {
-            throw ValidationException::withMessages(['take_down' => __('This post or video is not published through SocialReins.')]);
+        if (SocialreinsConfig::hasPostsyncerPost($subject)) {
+            throw ValidationException::withMessages(['take_down' => __(SocialreinsConfig::POSTSYNCER_HISTORY_MESSAGE)]);
         }
 
         $problems = $action->handle($subject);

@@ -77,9 +77,9 @@ final class SocialreinsResults
     }
 
     /**
-     * The SocialReins posts of a post or video in the PostSyncer group shape (one per language and
-     * platform, the newest group winning), so the page lists both halves of a split the same way.
-     * The API returns the same list as `socialreins`, so a client can verify that half too.
+     * The SocialReins posts of a post or video in the group shape the page lists (one per language and
+     * platform, the newest group winning), the same shape as stored PostSyncer groups.
+     * The API returns the same list as `socialreins`, so a client can verify them too.
      *
      * @param  list<SocialreinsGroup>|null  $rows  the subject's rows when the caller already loaded them
      * @return list<array<string, mixed>>

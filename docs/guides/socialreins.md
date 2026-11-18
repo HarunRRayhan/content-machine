@@ -1,40 +1,15 @@
-# SocialReins publish driver
+# SocialReins publishing
 
-A workspace publishes through PostSyncer (the default) or through SocialReins. The
-driver is chosen per workspace in **Settings > SocialReins**; the PostSyncer settings,
-jobs and tests are not touched by it. Changing the driver or its routed languages is
-blocked while a publish is queued or running.
-
-## Language routing
-
-**Languages through SocialReins** limits the driver to some languages, for a staged run
-(tick only Bangla to leave everything with English on PostSyncer). Nothing ticked means
-every language, as before.
-
-- A post or video goes through SocialReins only if the driver is SocialReins and every
-  language it carries is ticked. Otherwise it goes through PostSyncer whole. Languages never
-  split one subject across the two (platforms can, see the split below).
-- A post carries every language it has captions for, as `PostPublishPlanner` reads them. A
-  video carries its one `language`. Publish options (`platforms`) do not change the answer,
-  so publishing a mixed post to one platform still goes through PostSyncer.
-- A language that is only the planners' fallback (an empty or `both` language with untagged
-  captions) is not known, so that subject goes through PostSyncer.
-- A Telegram publish request follows the same rules as any other publish, with or without ticked languages. The SocialReins run keeps the request id in its stored options and closes the request when it settles: published once the post is handed over (scheduled counts, as on PostSyncer, so `/cancel` no longer applies), failed when the run fails. A retry reopens a failed request. A late webhook or reconcile never closes a request that an edit moved back to awaiting approval. A dashboard retry names no request: it adopts the post's one failed request when the bot is still connected, and otherwise publishes without it. Once the PostSyncer half of a split is live, a bot disconnect does not stop the SocialReins half.
-- A subject already on a driver stays there for retry, take down, reconcile and status,
-  whatever the settings say later. SocialReins: `publish_progress.driver`, or
-  `socialreins_groups` with a pending or live group. PostSyncer: `postsyncer.groups` with a
-  post id, or a `publish_progress` without a driver. A subject fully taken down from
-  SocialReins follows the settings again.
-- With languages ticked, one ticked language with a set and token makes SocialReins ready,
-  so the default language may have no set. A subject in a ticked language with no set fails
-  with a clear error.
+Every post and video publishes through SocialReins: publish, schedule, retry, reschedule, take
+down and status. Content Machine no longer talks to PostSyncer (removed 2026-11). Configure it in
+**Settings > SocialReins**.
 
 | Field | Purpose |
 |---|---|
-| **Publish driver** | `postsyncer` (default) or `socialreins`. Stored as `settings.publish_driver`. |
 | **API base URL** | Default `https://brain.socialreins.com/v1`. Public HTTPS only (no userinfo, query or fragment, no private or loopback address). Every call re-checks DNS and pins the checked addresses, and redirects are never followed, so the tokens go only to that host. Changing it clears the saved tokens and webhook secret. |
-| **Languages through SocialReins** | Stored as `settings.socialreins.routed_languages`. See [Language routing](#language-routing). |
+| **Default language** | The language that must have a set and token before anything publishes. |
 | **Set id + token, per language** | One SocialReins set per language (English, Bangla) and its set-limited API token (`sr_set_live_...`). Encrypted, write-only. |
+| **Platforms this set covers, per language** | Only ticked platforms are published for that language. A language with no saved list covers nothing. |
 | **TikTok visibility** | One of `SELF_ONLY`, `FOLLOWER_OF_CREATOR`, `MUTUAL_FOLLOW_FRIENDS`, `PUBLIC_TO_EVERYONE`. Required for TikTok: with none chosen a TikTok publish is refused, never defaulted to public. |
 | **Webhook secret** | The `whsec_...` secret of the SocialReins team webhook. |
 
@@ -42,64 +17,39 @@ Set the SocialReins team webhook URL to `https://<cm host>/socialreins/webhook/<
 (Settings > SocialReins shows it). Without a webhook, `socialreins:reconcile` (every five
 minutes) reads `GET /posts?group_id=` and reaches the same states.
 
-The post-type matrix (which platforms are on, off or ask per post type) is still read from the
-workspace's PostSyncer post-type settings, or the Script Studio defaults when there are none.
+The post-type matrix (which platforms are on, off or ask per post type) is read from the matrix
+saved under `settings.postsyncer.post_types` before PostSyncer was removed, or the Script Studio
+defaults when there is none. There is no editor for it any more.
 
-## PostSyncer off
+## Coverage
 
-**PostSyncer** on the same page (`settings.postsyncer_enabled`, on by default) switches PostSyncer
-off for the workspace. Changing it is blocked while a publish is queued or running.
-
-- Every new post and video goes through SocialReins, whatever the driver and routed languages
-  say. A (language, platform) pair the language's set does not cover (TikTok, Bangla X) is left
-  out and published nowhere. The item keeps the pairs as `publish_progress.left_out`
-  (`language:platform`) and its page says "Left out, not posted anywhere".
+- A (language, platform) pair the language's set does not cover (TikTok, Bangla X) is left out and
+  published nowhere. The item keeps the pairs as `publish_progress.left_out` (`language:platform`)
+  and its page says "Left out, not posted anywhere".
 - An item where every pair is left out is refused with "Nothing to publish: SocialReins does not
-  cover ..., and PostSyncer is off."
-- An item still on PostSyncer is refused, pointing at the move command below.
-- `postsyncer:sync-scheduled` and `postsyncer:dispatch-pending-publishes` skip the workspace, the post
-  preview shows stored handles only, and the PostSyncer settings page does not load accounts.
-  Run `postsyncer:sync-scheduled` once by hand before switching off, so items PostSyncer
-  already published are marked posted.
-- Telegram publishes through the same path, so it follows these rules and never calls PostSyncer
-  itself.
+  cover ...".
 
-### Moving scheduled items off PostSyncer
+## Telegram publish requests
 
-Run it BEFORE cancelling the PostSyncer subscription (it deletes with the PostSyncer key), and run
-`postsyncer:sync-scheduled` first.
+A Telegram publish goes through the same path. The SocialReins run keeps the request id in its
+stored options and closes the request when it settles: published once the post is handed over
+(scheduled counts, so `/cancel` no longer applies), failed when the run fails. A retry reopens a
+failed request. A late webhook or reconcile never closes a request that an edit moved back to
+awaiting approval. A dashboard retry names no request: it adopts the post's one failed request when
+the bot is still connected, and otherwise publishes without it.
 
-`php artisan socialreins:move-off-postsyncer` lists every scheduled post and video with a PostSyncer
-part (id, time, PostSyncer pairs, what goes to SocialReins, what is left out). Nothing changes
-without `--apply`, and `--apply` only acts on workspaces with PostSyncer off. A move not started
-yet is skipped when due within 15 minutes (`--min-minutes`), already published on PostSyncer, with
-a publish in flight, or with PostSyncer posts at different times.
+## PostSyncer history
 
-Per item, with `--apply`:
-
-1. The plan is stored as `publish_progress.move_off_postsyncer` (stage `moving`) under the row
-   lock, only if no other run stored one. The item page now says it is being moved, and every
-   later run resumes it whatever its time.
-2. Each PostSyncer post is read and deleted only while still scheduled or a draft. A 404 counts
-   as gone only once the same run has seen the key work (a read, or `GET /workspaces`). If nothing
-   was deleted and something failed, the plan is removed and nothing changed.
-3. The covered pairs of every deleted post go to SocialReins at the same time. A platform still on
-   PostSyncer in any language waits, so nothing goes out twice; the item names what is not moved
-   yet, and the next run continues. Stage `done` once nothing is left on PostSyncer.
-
-A failed hand-over is sent again by the next `--apply` run (the SocialReins publish is
-idempotent). A run that finds another run's hand-over in place does nothing. A PostSyncer run
-that never got a post id moves its covered platforms with nothing to delete, unless its create
-may have gone out (an uncertain create or a completed group): that item is listed to check by hand.
-
-With PostSyncer off, a language with no saved platform list covers nothing. Reschedule and the
-video reset refuse an item that still has a PostSyncer post, and a SocialReins publish of such an
-item is refused too; reschedule of an item with no PostSyncer post left only moves its SocialReins
-posts.
+Old posts and videos may still carry PostSyncer data (`postsyncer.groups`, a `publish_progress`
+without a `driver`). It stays in the database and is shown read-only on the calendar, the dashboard
+and the post or video page. Such an item is history: publish, reschedule and take down refuse it
+with "This was published through PostSyncer, which Content Machine no longer uses." Change it on
+the platforms directly. A PostSyncer run that provably created nothing (no completed group and no
+uncertain create) does not count and publishes through SocialReins like a new item.
 
 ## How a publish maps
 
-`PostPublishPlanner` and `VideoPublishPlanner` are unchanged. Their `PublishGroup`s of one
+`PostPublishPlanner` and `VideoPublishPlanner` plan the publish. Their `PublishGroup`s of one
 language become **one** `POST /v1/post-groups`: the language's set, the union of the
 groups' platforms, and one override per platform with its caption, media, thread parts,
 first comment, cover and TikTok settings. CM `twitter` is brain `x`.
@@ -140,25 +90,11 @@ group is taken down like any other), a post still publishing and a partly
 published failed post (brain cannot delete a failed post) are reported; a post that failed with
 nothing live is skipped. Brain cannot delete on TikTok; that platform is reported as a problem.
 
-A split post or video (PostSyncer half plus SocialReins half: a new subject whose platforms the
-set covers only in part, see the per-language platform list) is handled whole. PostSyncer
-publishes its platforms first, then the rest go to SocialReins. A Telegram publish splits too: its
-request stays approved through the PostSyncer half and closes when the SocialReins half settles.
-A platform goes to SocialReins only if every language the subject uses covers it.
-
-- Take down also deletes each still-scheduled PostSyncer group (`DELETE /posts/{id}` on
-  PostSyncer, recorded at once as `DELETED`). A PostSyncer group that is already published is
-  reported, because PostSyncer does not say its delete removes a live post: remove it on the
-  platform and in PostSyncer, then take down again. The post resets only when both halves are
-  down, and its PostSyncer groups move to `postsyncer.cleared_groups`.
-- Reschedule (`POST /api/v1/posts|videos/{human_id}/reschedule`) first reads every SocialReins post and
-  refuses, changing nothing, unless each is still `scheduled`. Then the PostSyncer groups move
-  (the normal PostSyncer reschedule), then each SocialReins post with `PUT /posts/{id}` and the
-  new `scheduled_at`, recorded on its stored result. An error names the half that failed;
-  retrying with the same time finishes, since a post already at that time is skipped.
-- Reschedule needs the PostSyncer half's verified payloads, which the split keeps from this
-  change on (`publish_progress.split.completed_groups`). A split post published earlier cannot
-  be rescheduled from CM.
+Reschedule (`POST /api/v1/posts|videos/{human_id}/reschedule`) first reads every SocialReins post
+and refuses, changing nothing, unless each is still `scheduled`. Then each SocialReins post moves
+with `PUT /posts/{id}` and the new `scheduled_at`, recorded on its stored result. Retrying with the
+same time finishes a partial run, since a post already at that time is skipped. Only a post or
+video published through SocialReins can be rescheduled.
 
 ## Status
 
@@ -173,5 +109,5 @@ and never move a target backwards, so an older snapshot cannot overwrite a newer
 An event for a group CM does not know answers 404 so brain retries it.
 The API returns these results as `socialreins` on a post or video ([api.md](api.md)).
 
-Not supported through this driver: PostSyncer-style reconcile commands (not needed, the key
-replay covers them). Videos have no Telegram publish requests on either driver.
+There are no manual reconcile commands: the key replay covers them. Videos have no Telegram
+publish requests.

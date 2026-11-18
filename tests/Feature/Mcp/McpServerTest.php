@@ -4,7 +4,7 @@ namespace Tests\Feature\Mcp;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
-use App\Jobs\PublishPostJob;
+use App\Jobs\PublishSocialreinsJob;
 use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
@@ -12,7 +12,6 @@ use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\GoogleDrive\GoogleDriveConfig;
-use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Config;
@@ -501,13 +500,7 @@ class McpServerTest extends TestCase
     public function test_publish_post_queues_the_job(): void
     {
         Queue::fake();
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'english' => ['workspace_id' => '853', 'platforms' => []],
-            ],
-        ]);
+        $this->configureSocialreins($this->workspace);
 
         $post = Post::factory()->for($this->workspace)->create([
             'human_id' => 'CM-TEST-4',
@@ -531,8 +524,8 @@ class McpServerTest extends TestCase
 
         $this->assertSame('queued', $post->fresh()->publish_state);
 
-        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
-            return $job->post->is($post)
+        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job) use ($post) {
+            return $job->subject->is($post)
                 && $job->options['when'] === '2026-08-28T22:00:00+06:00'
                 && $job->options['platforms'] === ['facebook'];
         });

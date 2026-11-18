@@ -46,7 +46,7 @@ const PLATFORM_MOCKUP: Record<
     youtube: {
         label: 'YouTube',
         reactions: '👍 Like   💬 Comment   ↪ Share',
-        tip: 'Image and carousel posts on YouTube are ask-gated: each publish needs explicit confirmation. PostSyncer support is unverified.',
+        tip: 'Image and carousel posts on YouTube are ask-gated: each publish needs explicit confirmation.',
     },
     twitter: {
         label: 'Twitter / X',

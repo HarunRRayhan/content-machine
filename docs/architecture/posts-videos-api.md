@@ -20,15 +20,14 @@ and endpoint behavior.
 
 ## Publishing
 
-Dashboard and API publish requests enter the same enqueue Actions and jobs.
-PostSyncer settings belong to a workspace. Publish jobs build groups by
-language, platform, and media set. They checkpoint progress and call PostSyncer
-only through Content Machine. Public publish results are written only after all
-groups finish. Reconcile uncertain media uploads or post creates before retrying.
+Dashboard, API, MCP and Telegram publish requests enter the same enqueue Action
+and job. SocialReins settings belong to a workspace. The publish job builds groups
+by language, platform, and media set and sends one idempotent SocialReins request
+per language.
 
-The [PostSyncer guide](../guides/postsyncer.md) documents scheduled status
-synchronization and operational recovery. Do not create or modify PostSyncer
-records outside Content Machine's supported publish and recovery paths.
+The [SocialReins guide](../guides/socialreins.md) documents status, retries,
+reschedule and take down. Old records may still carry PostSyncer groups; they are
+history, shown read-only, and are never published again.
 
 ## Remaining API gaps
 

@@ -10,7 +10,7 @@ import {
     bucketsFromGroups,
 } from '@/components/studio/workspace-schedule';
 import type {
-    PostsyncerGroup,
+    PublishGroup,
     WorkspaceBucket,
 } from '@/components/studio/workspace-schedule';
 import { studioPostStatus } from '@/lib/platform-meta';
@@ -48,29 +48,18 @@ type Props = {
     } | null;
     workspaces?: WorkspaceBucket[];
     publishUrl: string;
-    postsyncerReady: boolean;
+    publishReady: boolean;
     publishState: string;
     publishRetryable: boolean;
     publishProgress: {
         state?: string;
         left_out?: string[];
-        move_off_postsyncer?: { note?: string | null };
-        split?: {
-            socialreins?: { platforms?: string[] };
-            postsyncer?: string[];
-        };
-        current?: {
-            index?: number;
-            group_key?: string;
-            phase?: string;
-        } | null;
     } | null;
-    reconcileUrl: string;
     approvalState: string;
     timezone: string;
     needsConfirmAsk: boolean;
     postsyncer: Record<string, unknown> | null;
-    socialreinsGroups?: PostsyncerGroup[];
+    socialreinsGroups?: PublishGroup[];
     handles?: HandleDirectory;
 };
 
@@ -86,7 +75,7 @@ function mapStudioStatus(status: string): string {
 
 function publishGroups(
     postsyncer: Record<string, unknown> | null,
-): PostsyncerGroup[] {
+): PublishGroup[] {
     const groups = postsyncer?.groups;
 
     if (!Array.isArray(groups)) {
@@ -94,12 +83,12 @@ function publishGroups(
     }
 
     return groups.filter(
-        (group): group is PostsyncerGroup =>
+        (group): group is PublishGroup =>
             group !== null && typeof group === 'object',
     );
 }
 
-function groupWhen(group: PostsyncerGroup): string | null {
+function groupWhen(group: PublishGroup): string | null {
     return group.published_at ?? group.scheduled_at ?? null;
 }
 
@@ -199,10 +188,7 @@ function formatWhen(
     }).format(date);
 }
 
-function earliestWhen(
-    groups: PostsyncerGroup[],
-    timezone: string,
-): string | null {
+function earliestWhen(groups: PublishGroup[], timezone: string): string | null {
     let best: Date | null = null;
     let bestRaw: string | null = null;
 
@@ -239,11 +225,10 @@ export default function PostOverview({
     templateMeta,
     workspaces,
     publishUrl,
-    postsyncerReady,
+    publishReady,
     publishState,
     publishRetryable,
     publishProgress,
-    reconcileUrl,
     approvalState,
     timezone,
     needsConfirmAsk,
@@ -263,7 +248,7 @@ export default function PostOverview({
     const [busy, setBusy] = useState(false);
     const groups = publishGroups(postsyncer);
     const hasGroups = groups.length > 0;
-    // Both halves of a split are listed; publish controls still key off PostSyncer groups.
+    // PostSyncer groups are history: a post that has them is not published again.
     const shownGroups = [...groups, ...(socialreinsGroups ?? [])];
     const workspaceBuckets =
         shownGroups.length > 0
@@ -278,7 +263,7 @@ export default function PostOverview({
         !hasGroups &&
         (studioStatus === 'draft' || publishState === 'failed');
     const canPublish =
-        postsyncerReady &&
+        publishReady &&
         !publishBusy &&
         !hasGroups &&
         (studioStatus === 'draft' ||
@@ -286,22 +271,10 @@ export default function PostOverview({
     const publishDisabledReason = publishBusy
         ? 'A publish job is already queued or running.'
         : publishState === 'failed' && !publishRetryable
-          ? 'Reconcile the uncertain PostSyncer create before retrying.'
-          : !postsyncerReady
-            ? 'Configure PostSyncer in Settings before publishing.'
+          ? 'This publish cannot be retried.'
+          : !publishReady
+            ? 'Configure SocialReins in Settings before publishing.'
             : null;
-    const split = publishProgress?.split;
-    // A split post keeps its PostSyncer groups while its SocialReins half is retried.
-    const splitRetry = Boolean(
-        split && publishState === 'failed' && publishRetryable && !archived,
-    );
-    const publishUncertain = Boolean(
-        publishState === 'failed' &&
-        publishProgress?.state === 'uncertain' &&
-        publishProgress.current !== null &&
-        publishProgress.current !== undefined &&
-        publishProgress.current.phase !== 'uploading',
-    );
     const awaitingApproval = approvalState === 'pending';
     const scheduledAt = earliestWhen(shownGroups, effectiveTimezone);
 
@@ -412,59 +385,7 @@ export default function PostOverview({
                     </div>
 
                     <div className="act">
-                        {publishUncertain ? (
-                            <Form
-                                action={reconcileUrl}
-                                method="post"
-                                className="schedule-it"
-                            >
-                                {({ processing, errors }) => (
-                                    <>
-                                        <label className="schedule-it-label">
-                                            <span className="schedule-it-label-row">
-                                                Reconcile PostSyncer create
-                                            </span>
-                                            <input
-                                                name="postsyncer_id"
-                                                type="text"
-                                                inputMode="numeric"
-                                                required
-                                                placeholder="PostSyncer post ID"
-                                                disabled={processing}
-                                            />
-                                        </label>
-                                        <button
-                                            type="submit"
-                                            className="advance"
-                                            disabled={processing}
-                                        >
-                                            Verify and reconcile
-                                        </button>
-                                        {errors.postsyncer_id && (
-                                            <p className="schedule-it-error">
-                                                {errors.postsyncer_id}
-                                            </p>
-                                        )}
-                                        <p className="schedule-it-hint">
-                                            Find the created post in PostSyncer,
-                                            verify its content, then enter its
-                                            ID.
-                                        </p>
-                                    </>
-                                )}
-                            </Form>
-                        ) : splitRetry ? (
-                            <PublishDialog
-                                disabled={!postsyncerReady}
-                                disabledReason={publishDisabledReason}
-                                publishState={publishState}
-                                publishUrl={publishUrl}
-                                entityLabel="post"
-                                needsConfirmAsk={false}
-                                retryOnly
-                                showStatus={false}
-                            />
-                        ) : archived ? (
+                        {archived ? (
                             <>
                                 <span className="badge archived">
                                     🗄️ Archived
@@ -530,28 +451,14 @@ export default function PostOverview({
                         )}
                     </div>
 
-                    {publishProgress?.move_off_postsyncer?.note && (
-                        <p className="schedule-it-hint">
-                            {publishProgress?.move_off_postsyncer?.note}
-                        </p>
-                    )}
                     {publishProgress?.left_out &&
                         publishProgress?.left_out.length > 0 && (
                             <p className="schedule-it-hint">
                                 Left out, not posted anywhere (SocialReins does
-                                not cover them and PostSyncer is off):{' '}
+                                not cover them):{' '}
                                 {publishProgress?.left_out.join(', ')}.
                             </p>
                         )}
-
-                    {split && (
-                        <p className="schedule-it-hint">
-                            Through SocialReins:{' '}
-                            {(split.socialreins?.platforms ?? []).join(', ')}.
-                            Through PostSyncer:{' '}
-                            {(split.postsyncer ?? []).join(', ')}.
-                        </p>
-                    )}
 
                     <WorkspaceScheduleLog
                         buckets={workspaceBuckets}
@@ -568,7 +475,7 @@ export default function PostOverview({
                         empty={
                             studioStatus === 'scheduled' &&
                             shownGroups.length === 0
-                                ? 'Marked scheduled, but Content Machine has no PostSyncer ids for this post yet.'
+                                ? 'Marked scheduled, but Content Machine has no SocialReins posts for this post yet.'
                                 : undefined
                         }
                     />

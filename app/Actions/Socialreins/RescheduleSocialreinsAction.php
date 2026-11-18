@@ -1,0 +1,234 @@
+<?php
+
+namespace App\Actions\Socialreins;
+
+use App\Data\Socialreins\ReschedulePostData;
+use App\Models\Post;
+use App\Models\SocialreinsGroup;
+use App\Models\Video;
+use App\Models\Workspace;
+use App\Support\Publishing\PublishException;
+use App\Support\Socialreins\SocialreinsClient;
+use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Socialreins\SocialreinsException;
+use App\Support\Socialreins\SocialreinsResults;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Moves a post or video published through SocialReins to a new time: each SocialReins post
+ * with `PUT /posts/{id}`.
+ *
+ * Every SocialReins post is read first and must still be scheduled, so a post that already went
+ * out stops the reschedule before anything moves. A post already at the target time is skipped,
+ * so retrying with the same time finishes a partial run. Each moved post records its new
+ * `scheduled_at` in its stored result.
+ *
+ * One reschedule runs at a time per post or video (see claim()).
+ */
+class RescheduleSocialreinsAction
+{
+    /** Key of the reschedule lease in `publish_progress`. */
+    private const LEASE = 'socialreins_reschedule';
+
+    /** Longer than any reschedule takes. */
+    private const LEASE_MINUTES = 15;
+
+    public function handle(Post|Video $post, Workspace $workspace, ReschedulePostData $data): Post|Video
+    {
+        abort_if($post->workspace_id !== $workspace->id, 404);
+
+        $post->refresh();
+
+        if (SocialreinsConfig::hasPostsyncerPost($post)) {
+            throw new PublishException(SocialreinsConfig::POSTSYNCER_HISTORY_MESSAGE);
+        }
+
+        if (($post->publish_progress['driver'] ?? null) !== SocialreinsConfig::DRIVER) {
+            throw new SocialreinsException('Only a '.($post instanceof Video ? 'video' : 'post').' published through SocialReins can be rescheduled.');
+        }
+
+        $target = $data->when->setSecond(0)->utc();
+
+        $this->claim($post, $target);
+
+        try {
+            $post = $this->move($post, $workspace, $target);
+        } finally {
+            $this->release($post);
+        }
+
+        return $post->refresh();
+    }
+
+    /**
+     * Admits one reschedule at a time: a lease in `publish_progress`, written under the row lock
+     * the publish path takes, so two calls cannot interleave their PUTs. It expires, so a crashed
+     * call does not lock the post for good. The reschedule rules are checked under the same lock.
+     */
+    private function claim(Post|Video $post, CarbonImmutable $target): void
+    {
+        DB::transaction(function () use ($post, $target): void {
+            $locked = $post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
+            $noun = $locked instanceof Video ? 'video' : 'post';
+
+            if ($locked->status !== 'scheduled') {
+                throw new SocialreinsException("Only scheduled {$noun}s can be rescheduled.");
+            }
+            if (in_array($locked->publish_state, ['queued', 'running'], true)) {
+                throw new SocialreinsException('A publish is already in progress.');
+            }
+            if ($locked instanceof Video && ($locked->publish_state !== 'succeeded' || $locked->hasUncertainPublish())) {
+                throw new SocialreinsException('The video has a publish in progress or an uncertain publish. Reconcile it first.');
+            }
+            if ($target->lessThanOrEqualTo(CarbonImmutable::now())) {
+                throw new SocialreinsException('The new schedule must be in the future.');
+            }
+
+            $progress = is_array($locked->publish_progress) ? $locked->publish_progress : [];
+            $startedAt = $progress[self::LEASE]['started_at'] ?? null;
+            if (is_string($startedAt) && CarbonImmutable::parse($startedAt)->addMinutes(self::LEASE_MINUTES)->isFuture()) {
+                throw new SocialreinsException("Another reschedule is already running for this {$noun}.");
+            }
+
+            $progress[self::LEASE] = ['started_at' => CarbonImmutable::now()->toIso8601String()];
+            $locked->forceFill(['publish_progress' => $progress])->save();
+        });
+    }
+
+    private function release(Post|Video $post): void
+    {
+        DB::transaction(function () use ($post): void {
+            $locked = $post::query()->whereKey($post->getKey())->lockForUpdate()->first();
+            $progress = $locked?->publish_progress;
+
+            if ($locked !== null && is_array($progress) && isset($progress[self::LEASE])) {
+                unset($progress[self::LEASE]);
+                $locked->forceFill(['publish_progress' => $progress])->save();
+            }
+        });
+    }
+
+    private function move(Post|Video $post, Workspace $workspace, CarbonImmutable $target): Post|Video
+    {
+        $config = SocialreinsConfig::fromWorkspace($workspace);
+        $todo = $this->socialreinsPosts($post, $config, $target);
+
+        $moved = [];
+        foreach ($todo as [$row, $postId, $live, $name]) {
+            if ($live !== null) {
+                try {
+                    (new SocialreinsClient($config, $row->language))->updatePost($postId, [
+                        ...array_intersect_key($live, array_flip(['social_set_id', 'platform', 'body', 'media', 'thread', 'first_comment', 'cover', 'tiktok', 'youtube'])),
+                        'scheduled_at' => $target->format('Y-m-d\TH:i:s\Z'),
+                    ]);
+                } catch (SocialreinsException $exception) {
+                    throw new SocialreinsException(
+                        'The SocialReins reschedule did not finish. '
+                            .($moved === [] ? '' : 'Moved: '.implode(', ', $moved).'. ')
+                            ."{$name} failed: {$exception->getMessage()} Retry with the same time to finish.",
+                        $exception->status,
+                        $exception->errorCode,
+                    );
+                }
+            }
+
+            $row->mutateResults(function (array $results) use ($postId, $target): ?array {
+                if (! isset($results[$postId])) {
+                    return null;
+                }
+                $results[$postId]['scheduled_at'] = $target->format('Y-m-d\TH:i:s\Z');
+
+                return $results;
+            });
+            $moved[] = $name;
+        }
+
+        return $post;
+    }
+
+    /** Whether every platform of `$newer` is one SocialReins left out of `$older`. */
+    private function retriesSkippedOf(SocialreinsGroup $newer, SocialreinsGroup $older): bool
+    {
+        foreach (array_column($newer->results ?? [], 'platform') as $platform) {
+            if (! isset($older->results["skipped:{$platform}"])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Every SocialReins post of the subject, read live. Null `live` means it is already at the target.
+     *
+     * @return list<array{0: SocialreinsGroup, 1: string, 2: array<string, mixed>|null, 3: string}>
+     */
+    private function socialreinsPosts(Post|Video $post, SocialreinsConfig $config, CarbonImmutable $target): array
+    {
+        $byLanguage = [];
+        foreach (SocialreinsResults::rowsOf($post) as $row) {
+            $byLanguage[$row->language][] = $row;
+        }
+
+        // Per language: its newest created group, and before it the groups that one retried a
+        // left-out platform of (those still hold the language's other posts).
+        $scope = [];
+        $newest = [];
+        foreach ($byLanguage as $language => $rows) {
+            $created = array_values(array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::CREATED));
+
+            // A refused retry created nothing and is passed over; an unanswered one may have.
+            if ($created === [] || end($rows)->state === SocialreinsGroup::PENDING) {
+                throw new SocialreinsException("SocialReins ({$language}) is not fully handed over. Settle the publish before rescheduling.");
+            }
+
+            $newest[$language] = $first = array_pop($created);
+            $scope[] = $first;
+            while ($created !== [] && $this->retriesSkippedOf($first, end($created))) {
+                $scope[] = $first = array_pop($created);
+            }
+        }
+        usort($scope, fn (SocialreinsGroup $a, SocialreinsGroup $b): int => $a->id <=> $b->id);
+
+        $todo = [];
+        foreach (SocialreinsResults::byPlatform($scope, requireComplete: false) as $key => $platform) {
+            $language = $platform['language'];
+            $postId = $platform['post_id'];
+            $row = collect($scope)->firstWhere('group_id', $platform['group_id']);
+
+            // A left-out platform has no post; an older group's taken-down post has nothing to move.
+            if ($platform['skipped'] || ($row !== $newest[$language] && $platform['state'] === SocialreinsResults::DELETED)) {
+                continue;
+            }
+
+            $name = "{$language} ".explode(':', $key, 2)[1];
+
+            try {
+                $live = (new SocialreinsClient($config, $language))->post($postId);
+            } catch (SocialreinsException $exception) {
+                throw new SocialreinsException("Nothing was rescheduled: could not read {$name} in SocialReins. {$exception->getMessage()}");
+            }
+
+            $at = is_string($live['scheduled_at'] ?? null) ? CarbonImmutable::parse($live['scheduled_at'])->utc()->setSecond(0) : null;
+            if ($at !== null && $at->equalTo($target) && ($live['status'] ?? null) === 'scheduled') {
+                $todo[] = [$row, $postId, null, $name];
+
+                continue;
+            }
+
+            if (($live['status'] ?? null) !== 'scheduled') {
+                throw new SocialreinsException("Nothing was rescheduled: {$name} is ".($live['status'] ?? 'unknown')
+                    .' in SocialReins, not scheduled. Only a post whose every platform is still scheduled can move.');
+            }
+
+            $todo[] = [$row, $postId, $live, $name];
+        }
+
+        if ($todo === []) {
+            throw new SocialreinsException('This post has no SocialReins posts to reschedule.');
+        }
+
+        return $todo;
+    }
+}

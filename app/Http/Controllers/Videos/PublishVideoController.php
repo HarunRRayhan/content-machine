@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Videos;
 
-use App\Actions\Postsyncer\EnqueueVideoPublishAction;
+use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Videos\PublishVideoRequest;
 use App\Models\Video;
@@ -13,7 +13,7 @@ use Inertia\Inertia;
 
 class PublishVideoController extends Controller
 {
-    public function __invoke(PublishVideoRequest $request, Video $video, EnqueueVideoPublishAction $action): RedirectResponse
+    public function __invoke(PublishVideoRequest $request, Video $video, EnqueueSocialreinsPublishAction $action): RedirectResponse
     {
         $workspace = $this->currentWorkspace($request);
 

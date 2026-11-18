@@ -13,10 +13,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 /**
- * When and where a post or video is scheduled or published, across both drivers: its PostSyncer
- * groups followed by its SocialReins posts in the same shape (`post_id`, `status`,
- * `scheduled_at`, `published_at`, `platforms`, `language`). Readers that only care about the
- * schedule (calendar, dashboard, the published lock) use this instead of `postsyncer.groups`.
+ * When and where a post or video is scheduled or published: its stored PostSyncer groups
+ * (history from before PostSyncer was removed) followed by its SocialReins posts in the same
+ * shape (`post_id`, `status`, `scheduled_at`, `published_at`, `platforms`, `language`). Readers
+ * that only care about the schedule (calendar, dashboard, the published lock) use this.
  */
 final class PublishGroups
 {

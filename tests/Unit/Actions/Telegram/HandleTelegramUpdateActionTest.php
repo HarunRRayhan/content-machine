@@ -16,7 +16,7 @@ use App\Actions\Telegram\LinkTelegramAccountAction;
 use App\Actions\Telegram\ResolveTelegramIntentAction;
 use App\Actions\Telegram\ResolveTelegramWorkspaceActionAction;
 use App\Jobs\GenerateTelegramPostJob;
-use App\Jobs\PublishPostJob;
+use App\Jobs\PublishSocialreinsJob;
 use App\Jobs\ResolveScratchpadLinkJob;
 use App\Models\AiProviderCredential;
 use App\Models\Idea;
@@ -32,7 +32,6 @@ use App\Models\Video;
 use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
-use App\Support\Postsyncer\PostsyncerConfig;
 use App\Support\Telegram\TelegramClientContract;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -1089,21 +1088,13 @@ class HandleTelegramUpdateActionTest extends TestCase
             'telegram_chat_id' => 555,
             'state' => TelegramPostRequest::APPROVED,
         ]);
-        PostsyncerConfig::write($config->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-key',
-            'languages' => [
-                'english' => ['workspace_id' => '123', 'platforms' => []],
-                'bangla' => ['workspace_id' => '123', 'platforms' => []],
-            ],
-            'post_types' => ['platforms' => ['facebook' => ['text' => 'on']]],
-        ]);
+        $this->configureSocialreins($config->workspace, ['platforms' => ['facebook' => ['text' => 'on']]]);
 
         $this->action()->handle($config, $this->update(1, '/post_now'));
 
         $this->assertSame('queued', $post->refresh()->publish_state, $this->lastReply());
         $this->assertStringContainsString('queued', $this->lastReply());
-        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+        Queue::assertPushed(PublishSocialreinsJob::class, fn (PublishSocialreinsJob $job): bool => $job->options['telegram_request_id'] === $request->id);
     }
 
     public function test_post_now_can_retry_a_failed_telegram_publish(): void
@@ -1132,21 +1123,13 @@ class HandleTelegramUpdateActionTest extends TestCase
             'telegram_chat_id' => 555,
             'state' => TelegramPostRequest::FAILED,
         ]);
-        PostsyncerConfig::write($config->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-key',
-            'languages' => [
-                'english' => ['workspace_id' => '123', 'platforms' => []],
-                'bangla' => ['workspace_id' => '123', 'platforms' => []],
-            ],
-            'post_types' => ['platforms' => ['facebook' => ['text' => 'on']]],
-        ]);
+        $this->configureSocialreins($config->workspace, ['platforms' => ['facebook' => ['text' => 'on']]]);
 
         $this->action()->handle($config, $this->update(1, '/post_now '.$post->human_id));
 
         $this->assertSame('queued', $post->refresh()->publish_state);
         $this->assertSame(TelegramPostRequest::APPROVED, $request->refresh()->state);
-        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->options['telegram_request_id'] === $request->id);
+        Queue::assertPushed(PublishSocialreinsJob::class, fn (PublishSocialreinsJob $job): bool => $job->options['telegram_request_id'] === $request->id);
     }
 
     public function test_post_link_waits_for_link_resolution_before_generation(): void
@@ -1193,20 +1176,12 @@ class HandleTelegramUpdateActionTest extends TestCase
             'telegram_chat_id' => 555,
             'state' => TelegramPostRequest::APPROVED,
         ]);
-        PostsyncerConfig::write($config->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-key',
-            'languages' => [
-                'english' => ['workspace_id' => '123', 'platforms' => []],
-                'bangla' => ['workspace_id' => '123', 'platforms' => []],
-            ],
-            'post_types' => ['platforms' => ['facebook' => ['text' => 'on']]],
-        ]);
+        $this->configureSocialreins($config->workspace, ['platforms' => ['facebook' => ['text' => 'on']]]);
 
         $this->action()->handle($config, $this->update(1, '/schedule P-'.$post->number.' 2099-09-03 09:00'));
 
         $this->assertSame('queued', $post->refresh()->publish_state);
-        Queue::assertPushed(PublishPostJob::class, fn (PublishPostJob $job): bool => $job->post->is($post)
+        Queue::assertPushed(PublishSocialreinsJob::class, fn (PublishSocialreinsJob $job): bool => $job->subject->is($post)
             && $job->options['when'] === '2099-09-03T09:00:00+06:00');
         $this->assertStringContainsString('queued', $this->lastReply());
     }

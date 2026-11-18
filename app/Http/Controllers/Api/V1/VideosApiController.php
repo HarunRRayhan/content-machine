@@ -2,13 +2,11 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Actions\Postsyncer\EnqueueVideoPublishAction;
-use App\Actions\Postsyncer\PublishVideoAction;
-use App\Actions\Postsyncer\ReconcileVideoGroupsDeletedAction;
-use App\Actions\Socialreins\RescheduleSplitPostAction;
+use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
+use App\Actions\Socialreins\RescheduleSocialreinsAction;
 use App\Actions\Videos\CreateVideoAction;
 use App\Actions\Videos\UpdateVideoAction;
-use App\Data\Postsyncer\ReschedulePostData;
+use App\Data\Socialreins\ReschedulePostData;
 use App\Data\Videos\UpdateVideoData;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\V1\VideoResource;
@@ -18,7 +16,7 @@ use App\Rules\AccessibleDriveUrl;
 use App\Rules\RenderablePresentationManifest;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
-use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Publishing\PublishException;
 use App\Support\Socialreins\SocialreinsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -140,7 +138,7 @@ class VideosApiController extends Controller
         return new VideoResource($video->fresh());
     }
 
-    public function publish(Request $request, string $humanId, EnqueueVideoPublishAction $action): VideoResource
+    public function publish(Request $request, string $humanId, EnqueueSocialreinsPublishAction $action): VideoResource
     {
         $video = $this->resolveVideo($humanId);
 
@@ -164,72 +162,10 @@ class VideosApiController extends Controller
         return new VideoResource($video);
     }
 
-    public function reconcile(Request $request, string $humanId, PublishVideoAction $action): VideoResource
-    {
-        $video = $this->resolveVideo($humanId);
-
-        $payload = $request->validate([
-            'postsyncer_id' => ['required', 'string', 'max:255'],
-            'confirm_failed' => ['nullable', 'boolean'],
-        ]);
-
-        try {
-            $action->reconcile(
-                $video,
-                $payload['postsyncer_id'],
-                (bool) ($payload['confirm_failed'] ?? false),
-            );
-        } catch (PostsyncerException $exception) {
-            throw ValidationException::withMessages([
-                'postsyncer_id' => $exception->getMessage(),
-            ]);
-        }
-
-        return new VideoResource($video->fresh());
-    }
-
-    public function reconcileCreateAbsent(Request $request, string $humanId, PublishVideoAction $action): VideoResource
-    {
-        $video = $this->resolveVideo($humanId);
-
-        $request->validate([
-            'confirmed_absent' => ['required', 'accepted'],
-        ]);
-
-        try {
-            $action->reconcileCreateAbsent($video);
-        } catch (PostsyncerException $exception) {
-            throw ValidationException::withMessages([
-                'confirmed_absent' => $exception->getMessage(),
-            ]);
-        }
-
-        return new VideoResource($video->fresh());
-    }
-
-    public function reconcileMediaAbsent(Request $request, string $humanId, PublishVideoAction $action): VideoResource
-    {
-        $video = $this->resolveVideo($humanId);
-
-        $request->validate([
-            'confirmed_absent' => ['required', 'accepted'],
-        ]);
-
-        try {
-            $action->reconcileMediaAbsent($video);
-        } catch (PostsyncerException $exception) {
-            throw ValidationException::withMessages([
-                'confirmed_absent' => $exception->getMessage(),
-            ]);
-        }
-
-        return new VideoResource($video->fresh());
-    }
-
     public function reschedule(
         Request $request,
         string $humanId,
-        RescheduleSplitPostAction $action,
+        RescheduleSocialreinsAction $action,
     ): VideoResource {
         $video = $this->resolveVideo($humanId);
 
@@ -238,42 +174,14 @@ class VideosApiController extends Controller
         ]);
 
         try {
-            // Moves the PostSyncer groups, the SocialReins posts, or both halves of a split.
             $video = $action->handle(
                 $video,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),
             );
-        } catch (InvalidArgumentException|PostsyncerException|SocialreinsException $exception) {
+        } catch (InvalidArgumentException|PublishException|SocialreinsException $exception) {
             throw ValidationException::withMessages([
                 'when' => $exception->getMessage(),
-            ]);
-        }
-
-        return new VideoResource($video);
-    }
-
-    public function reconcileGroupsDeleted(
-        Request $request,
-        string $humanId,
-        ReconcileVideoGroupsDeletedAction $action,
-    ): VideoResource {
-        $video = $this->resolveVideo($humanId);
-
-        $request->validate([
-            'confirmed_deleted' => ['required', 'accepted'],
-            'owner_removed_published' => ['sometimes', 'boolean'],
-        ]);
-
-        try {
-            $video = $action->handle(
-                $video,
-                $this->currentWorkspace(),
-                $request->boolean('owner_removed_published'),
-            );
-        } catch (PostsyncerException $exception) {
-            throw ValidationException::withMessages([
-                'confirmed_deleted' => $exception->getMessage(),
             ]);
         }
 

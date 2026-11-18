@@ -14,9 +14,9 @@ use Illuminate\Queue\SerializesModels;
 use Throwable;
 
 /**
- * Sends a Post's or Video's SocialReins post groups. It runs on the same worker as the
- * PostSyncer jobs because the planner builds signed URLs for attachments that live on the
- * volume only that worker sees. One try: the action itself resends frozen requests with
+ * Sends a Post's or Video's SocialReins post groups. It runs on the publish worker (the
+ * `postsyncer` queue connection, named for its first user) because the planner builds signed
+ * URLs for attachments that live on the volume only that worker sees. One try: the action itself resends frozen requests with
  * the same Idempotency-Key when asked to retry, so a queue retry would add nothing.
  */
 class PublishSocialreinsJob implements ShouldQueue

@@ -3,7 +3,6 @@
 namespace Tests\Feature\Socialreins;
 
 use App\Actions\Posts\UpdatePostAction;
-use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Socialreins\ApplySocialreinsWebhookAction;
 use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Actions\Socialreins\PublishToSocialreinsAction;
@@ -11,13 +10,11 @@ use App\Actions\Socialreins\ReconcileSocialreinsGroupsAction;
 use App\Actions\Socialreins\SettleSocialreinsSubjectAction;
 use App\Actions\Socialreins\TakeDownSocialreinsAction;
 use App\Data\Posts\UpdatePostData;
-use App\Jobs\PublishPostJob;
-use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
 use App\Models\Workspace;
-use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Publishing\PlanningConfig;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsResults;
 use GuzzleHttp\Promise\PromiseInterface;
@@ -45,10 +42,10 @@ class SocialreinsPublishTest extends TestCase
         $this->resolveHostsTo();
     }
 
-    private function workspace(bool $socialreins = true, ?string $tiktok = 'SELF_ONLY'): Workspace
+    private function workspace(?string $tiktok = 'SELF_ONLY'): Workspace
     {
-        $workspace = Workspace::factory()->create();
-        PostsyncerConfig::write($workspace, ['post_types' => [
+        // The post-type matrix saved under settings.postsyncer is still what the planner reads.
+        $workspace = Workspace::factory()->create(['settings' => ['postsyncer' => ['post_types' => [
             'platforms' => [
                 'facebook' => ['text' => 'on', 'photo' => 'on', 'reel' => 'on'],
                 'linkedin' => ['text' => 'on', 'photo' => 'on'],
@@ -57,16 +54,15 @@ class SocialreinsPublishTest extends TestCase
                 'youtube' => ['reel' => 'on'],
                 'instagram' => ['photo' => 'on', 'reel' => 'on'],
             ],
-        ]]);
+        ]]]]);
         SocialreinsConfig::write($workspace, [
-            'publish_driver' => $socialreins ? 'socialreins' : 'postsyncer',
             'base_url' => 'https://brain.test/v1',
             'webhook_secret' => 'whsec_test',
             'tiktok_privacy_level' => $tiktok,
             'default_language' => 'english',
             'languages' => [
-                'english' => ['set_id' => self::EN_SET, 'token' => 'sr_set_live_english'],
-                'bangla' => ['set_id' => self::BN_SET, 'token' => 'sr_set_live_bangla'],
+                'english' => ['set_id' => self::EN_SET, 'token' => 'sr_set_live_english', 'platforms' => PlanningConfig::PLATFORMS],
+                'bangla' => ['set_id' => self::BN_SET, 'token' => 'sr_set_live_bangla', 'platforms' => PlanningConfig::PLATFORMS],
             ],
         ]);
 
@@ -342,28 +338,6 @@ class SocialreinsPublishTest extends TestCase
         $this->assertSame('failed', $this->publish($retry)->publish_state);
 
         Http::assertSentCount($before);
-    }
-
-    public function test_the_driver_is_chosen_per_workspace_and_postsyncer_stays_the_default(): void
-    {
-        Queue::fake();
-        $postsyncer = $this->workspace(socialreins: false);
-        PostsyncerConfig::write($postsyncer, [
-            'publish_enabled' => true,
-            'api_key' => 'k',
-            'default_language' => 'english',
-            'languages' => ['english' => ['workspace_id' => '853', 'platforms' => []]],
-        ]);
-        $psPost = $this->makePost($postsyncer->fresh(), ['facebook' => ['caption' => 'x']]);
-        (new EnqueuePostPublishAction)->handle($psPost, $postsyncer->fresh(), ['platforms' => ['facebook']]);
-
-        $sr = $this->workspace();
-        $srPost = $this->makePost($sr, ['facebook' => ['caption' => 'x']]);
-        (new EnqueuePostPublishAction)->handle($srPost, $sr, ['platforms' => ['facebook']]);
-
-        Queue::assertPushed(PublishPostJob::class, 1);
-        Queue::assertPushed(PublishSocialreinsJob::class, 1);
-        $this->assertSame('socialreins', $srPost->fresh()->publish_progress['driver']);
     }
 
     public function test_a_published_post_cannot_be_published_twice(): void

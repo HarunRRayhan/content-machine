@@ -15,10 +15,6 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('postsyncer:sync-scheduled')
-    ->everyFiveMinutes()
-    ->withoutOverlapping(10);
-
 Schedule::command('telegram:dispatch-pending-updates')
     ->everyMinute()
     ->withoutOverlapping(2);
@@ -42,7 +38,3 @@ Schedule::command('cm:requeue-legacy-media-jobs')
 Schedule::command('socialreins:reconcile')
     ->everyFiveMinutes()
     ->withoutOverlapping(10);
-
-Schedule::command('postsyncer:dispatch-pending-publishes')
-    ->everyMinute()
-    ->withoutOverlapping(2);

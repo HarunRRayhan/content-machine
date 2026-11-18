@@ -6,14 +6,14 @@ use App\Data\Calendar\CalendarEventData;
 use Carbon\CarbonImmutable;
 
 /**
- * Turns PostSyncer groups on a post or video into a single calendar occurrence.
- * One post or video is always one chip: every PostSyncer group (platform,
+ * Turns the publish groups of a post or video (PublishGroups::of) into a single calendar
+ * occurrence. One post or video is always one chip: every group (platform,
  * language, or retry) collapses to one event. Published wins over scheduled.
  */
 final class CollectCalendarOccurrences
 {
     /**
-     * @param  array<string, mixed>|null  $postsyncer
+     * @param  array<string, mixed>|null  $publish
      * @return list<CalendarEventData>
      */
     public function fromRecord(
@@ -21,11 +21,11 @@ final class CollectCalendarOccurrences
         int $id,
         string $humanId,
         string $title,
-        ?array $postsyncer,
+        ?array $publish,
         string $timezone,
         string $category = '',
     ): array {
-        $groups = $postsyncer['groups'] ?? null;
+        $groups = $publish['groups'] ?? null;
 
         if (! is_array($groups)) {
             return [];
