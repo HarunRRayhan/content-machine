@@ -9,14 +9,17 @@ use App\Actions\Posts\AttachPostImageAction;
 use App\Actions\Posts\AttachPostMotionAction;
 use App\Actions\Posts\CreatePostAction;
 use App\Actions\Posts\UpdatePostAction;
-use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
-use App\Actions\Socialreins\RescheduleSocialreinsAction;
+use App\Actions\Postsyncer\EnqueuePostPublishAction;
+use App\Actions\Postsyncer\PublishPostAction;
+use App\Actions\Socialreins\RescheduleSplitPostAction;
 use App\Data\Posts\AttachPostDocumentData;
 use App\Data\Posts\AttachPostImageData;
 use App\Data\Posts\AttachPostMotionData;
 use App\Data\Posts\UpdatePostData;
-use App\Data\Socialreins\ReschedulePostData;
+use App\Data\Postsyncer\RepairPostAccountMappingData;
+use App\Data\Postsyncer\ReschedulePostData;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Posts\RepairPostAccountMappingRequest;
 use App\Http\Requests\Posts\StorePostDocumentRequest;
 use App\Http\Requests\Posts\StorePostImageRequest;
 use App\Http\Requests\Posts\StorePostMotionRequest;
@@ -29,7 +32,7 @@ use App\Rules\AccessibleDriveUrl;
 use App\Support\Api\IncludeFields;
 use App\Support\Content\PresenceFlags;
 use App\Support\Media\PostDesignTemplate;
-use App\Support\Publishing\PublishException;
+use App\Support\Postsyncer\PostsyncerException;
 use App\Support\Socialreins\SocialreinsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -230,7 +233,7 @@ class PostsApiController extends Controller
             ->setStatusCode($created ? 201 : 200);
     }
 
-    public function publish(Request $request, string $humanId, EnqueueSocialreinsPublishAction $action): PostResource
+    public function publish(Request $request, string $humanId, EnqueuePostPublishAction $action): PostResource
     {
         $post = $this->resolvePost($humanId);
 
@@ -248,6 +251,13 @@ class PostsApiController extends Controller
                 ? (bool) $payload['confirm_ask']
                 : null,
         ], fn ($value) => $value !== null);
+
+        // Explicit platforms on an already-scheduled post mean "add these".
+        // The action enforces append-only rules and ignores this flag when
+        // the post has no PostSyncer groups yet.
+        if (is_array($options['platforms'] ?? null) && $options['platforms'] !== []) {
+            $options['append_missing'] = true;
+        }
 
         $post = $action->handle($post, $this->currentWorkspace(), $options);
 
@@ -269,7 +279,7 @@ class PostsApiController extends Controller
     public function reschedule(
         Request $request,
         string $humanId,
-        RescheduleSocialreinsAction $action,
+        RescheduleSplitPostAction $action,
     ): PostResource {
         $post = $this->resolvePost($humanId);
 
@@ -278,18 +288,186 @@ class PostsApiController extends Controller
         ]);
 
         try {
+            // Moves the PostSyncer groups, the SocialReins posts, or both halves of a split.
             $post = $action->handle(
                 $post,
                 $this->currentWorkspace(),
                 ReschedulePostData::fromApiPayload($payload),
             );
-        } catch (InvalidArgumentException|PublishException|SocialreinsException $exception) {
+        } catch (InvalidArgumentException|PostsyncerException|SocialreinsException $exception) {
             throw ValidationException::withMessages([
                 'when' => $exception->getMessage(),
             ]);
         }
 
         return new PostResource($post->load(['attachments.mediaAsset']));
+    }
+
+    public function reconcile(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'postsyncer_id' => ['required', 'string', 'max:255'],
+            'confirm_failed' => ['nullable', 'boolean'],
+            'supplemental_groups' => ['nullable', 'array', 'max:10'],
+            'supplemental_groups.*.postsyncer_id' => ['required', 'string', 'max:255'],
+            'supplemental_groups.*.platforms' => ['required', 'array', 'min:1', 'max:11'],
+            'supplemental_groups.*.platforms.*' => ['string', 'max:64'],
+            'supplemental_groups.*.media_ids' => ['required', 'array', 'min:1'],
+            'supplemental_groups.*.media_ids.*' => ['required', 'integer', 'min:1'],
+        ]);
+
+        try {
+            $action->reconcile(
+                $post,
+                $payload['postsyncer_id'],
+                (bool) ($payload['confirm_failed'] ?? false),
+                $payload['supplemental_groups'] ?? [],
+            );
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'postsyncer_id' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function recoverPartialFailure(
+        Request $request,
+        string $humanId,
+        PublishPostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'postsyncer_id' => ['required', 'string', 'max:255'],
+        ]);
+
+        try {
+            $action->recoverPartialFailure($post, $payload['postsyncer_id']);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'postsyncer_id' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reconcileMedia(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'media_ids' => ['required', 'array', 'min:1'],
+            'media_ids.*' => ['required', 'integer', 'min:1'],
+        ]);
+
+        try {
+            $action->reconcileMedia($post, $payload['media_ids']);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'media_ids' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reconcileMediaAbsent(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileMediaAbsent($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function reconcileCreateAbsent(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->reconcileCreateAbsent($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'confirmed_absent' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function abandonRetry(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $request->validate([
+            'confirmed_absent' => ['required', 'accepted'],
+        ]);
+
+        try {
+            $action->abandonRetry($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'publish' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function rebaseRetryToPublishNow(string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        try {
+            $action->rebaseRetryToPublishNow($post);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'publish' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
+    public function repairAccountMapping(
+        RepairPostAccountMappingRequest $request,
+        string $humanId,
+        PublishPostAction $action,
+    ): PostResource {
+        $post = $this->resolvePost($humanId);
+
+        try {
+            $action->repairAccountMapping(
+                $post,
+                $this->currentWorkspace(),
+                RepairPostAccountMappingData::fromRequest($request),
+            );
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'to_account_id' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
     /**

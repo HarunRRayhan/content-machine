@@ -80,7 +80,7 @@ class VideoResource extends JsonResource
                 ? null
                 : 'Publishing failed. Inspect the dashboard for details.',
             'postsyncer' => $this->postsyncer,
-            // The SocialReins posts, as the dashboard shows them (one query, so opt-in on lists).
+            // The SocialReins half of a split publish, as the dashboard shows it (one query, so opt-in on lists).
             'socialreins' => $this->when(
                 $include->wants('socialreins'),
                 fn (): array => SocialreinsResults::presentGroupsForApi($this->resource),

@@ -2,11 +2,11 @@
 
 namespace Tests\Feature\Posts;
 
-use App\Jobs\PublishSocialreinsJob;
+use App\Jobs\PublishPostJob;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -30,15 +30,23 @@ class PublishPostControllerTest extends TestCase
         return [$user, $workspace];
     }
 
-    private function configureForPublish(Workspace $workspace): void
+    private function configurePostsyncer(Workspace $workspace, ?array $postTypes = null): void
     {
-        $this->configureSocialreins($workspace, [
-            'platforms' => [
-                'threads' => ['text' => 'on', 'photo' => 'ask'],
+        PostsyncerConfig::write($workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
+                'english' => ['workspace_id' => '853', 'platforms' => []],
             ],
-            'overrides' => [
-                'english' => [
-                    'threads' => ['photo' => 'ask'],
+            'post_types' => $postTypes ?? [
+                'platforms' => [
+                    'threads' => ['text' => 'on', 'photo' => 'ask'],
+                ],
+                'overrides' => [
+                    'english' => [
+                        'threads' => ['photo' => 'ask'],
+                    ],
                 ],
             ],
         ]);
@@ -57,7 +65,7 @@ class PublishPostControllerTest extends TestCase
         Queue::fake();
 
         [, $workspace] = $this->actingAsWorkspaceMember();
-        $this->configureForPublish($workspace);
+        $this->configurePostsyncer($workspace);
 
         $post = Post::factory()->for($workspace)->create([
             'publish_state' => 'idle',
@@ -73,11 +81,11 @@ class PublishPostControllerTest extends TestCase
         $this->assertSame('queued', $post->fresh()->publish_state);
         $this->assertNull($post->fresh()->publish_error);
 
-        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job) use ($post) {
-            return $job->subject->is($post)
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
+            return $job->post->is($post)
                 && $job->options['when'] === '2026-08-26T10:00:00+06:00'
                 && $job->options['confirm_ask'] === true
-                && $post->fresh()->publish_progress['driver'] === 'socialreins';
+                && $job->runToken === $post->fresh()->publish_progress['run_token'];
         });
     }
 
@@ -86,7 +94,7 @@ class PublishPostControllerTest extends TestCase
         Queue::fake();
 
         [, $workspace] = $this->actingAsWorkspaceMember();
-        $this->configureForPublish($workspace);
+        $this->configurePostsyncer($workspace);
 
         $post = Post::factory()->for($workspace)->create([
             'language' => 'en',
@@ -104,8 +112,8 @@ class PublishPostControllerTest extends TestCase
 
         $this->assertSame('queued', $post->fresh()->publish_state);
 
-        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job) use ($post) {
-            return $job->subject->is($post)
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
+            return $job->post->is($post)
                 && ($job->options['when'] ?? null) === null
                 && $job->options['confirm_ask'] === true;
         });
@@ -116,7 +124,7 @@ class PublishPostControllerTest extends TestCase
         Queue::fake();
 
         [, $workspace] = $this->actingAsWorkspaceMember();
-        $this->configureForPublish($workspace);
+        $this->configurePostsyncer($workspace);
 
         $post = Post::factory()->for($workspace)->create();
 
@@ -124,8 +132,8 @@ class PublishPostControllerTest extends TestCase
             'when' => null,
         ])->assertRedirect(route('posts.show', $post));
 
-        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job) use ($post) {
-            return $job->subject->is($post)
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
+            return $job->post->is($post)
                 && ($job->options['when'] ?? null) === null;
         });
     }
@@ -143,7 +151,7 @@ class PublishPostControllerTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_publish_rejects_when_socialreins_is_not_ready(): void
+    public function test_publish_rejects_when_postsyncer_not_ready(): void
     {
         Queue::fake();
 
@@ -163,7 +171,7 @@ class PublishPostControllerTest extends TestCase
         Queue::fake();
 
         [, $workspace] = $this->actingAsWorkspaceMember();
-        $this->configureForPublish($workspace);
+        $this->configurePostsyncer($workspace);
 
         $post = Post::factory()->for($workspace)->create([
             'publish_state' => 'queued',
@@ -176,12 +184,12 @@ class PublishPostControllerTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_publish_rejects_a_post_published_through_postsyncer(): void
+    public function test_publish_rejects_when_postsyncer_groups_already_exist(): void
     {
         Queue::fake();
 
         [, $workspace] = $this->actingAsWorkspaceMember();
-        $this->configureForPublish($workspace);
+        $this->configurePostsyncer($workspace);
 
         $post = Post::factory()->for($workspace)->create([
             'status' => 'posted',
@@ -198,11 +206,201 @@ class PublishPostControllerTest extends TestCase
 
         $this->post(route('posts.publish', $post))
             ->assertRedirect()
-            ->assertSessionHasErrors(['publish' => SocialreinsConfig::POSTSYNCER_HISTORY_MESSAGE]);
+            ->assertSessionHasErrors('publish');
 
         Queue::assertNothingPushed();
         $post->refresh();
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertNull($post->publish_error);
+    }
+
+    public function test_publish_allows_a_failed_partial_publish_to_resume(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => [
+                    'when' => '2026-08-26T10:00:00+06:00',
+                    'confirm_ask' => false,
+                ],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'post_id' => '133111',
+                    'status' => 'SCHEDULED',
+                    'scheduled_at' => '2026-08-26T10:00:00+06:00',
+                    'platforms' => ['facebook'],
+                    'language' => 'bangla',
+                ]],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->post(route('posts.publish', $post))
+            ->assertRedirect(route('posts.show', $post));
+
+        $this->assertSame('queued', $post->fresh()->publish_state);
+        $this->assertNotSame('run-1', $post->fresh()->publish_progress['run_token']);
+        $this->assertSame('queued', $post->fresh()->publish_progress['state']);
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post): bool {
+            return $job->post->is($post)
+                && $job->options['when'] === '2026-08-26T10:00:00+06:00'
+                && $job->runToken === $post->fresh()->publish_progress['run_token'];
+        });
+    }
+
+    public function test_retry_can_add_ask_platform_confirmation_before_any_group_runs(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['threads'],
+            'captions' => ['threads' => 'English photo caption'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/photo/view'],
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['confirm_ask' => false],
+                'plan_hash' => null,
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->post(route('posts.publish', $post), [
+            'confirm_ask' => true,
+        ])->assertRedirect(route('posts.show', $post));
+
+        $this->assertTrue($post->fresh()->publish_progress['options']['confirm_ask']);
+        $this->assertNotSame('run-1', $post->fresh()->publish_progress['run_token']);
+        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post): bool {
+            return $job->post->is($post)
+                && $job->options['confirm_ask'] === true;
+        });
+    }
+
+    public function test_retry_cannot_change_confirmation_after_a_group_completed(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => ['confirm_ask' => false],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [[
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                ]],
+                'completed_groups' => [[
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'post_id' => '133111',
+                ]],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->post(route('posts.publish', $post), ['confirm_ask' => true])
+            ->assertRedirect()
+            ->assertSessionHasErrors('publish');
+
+        Queue::assertNothingPushed();
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame('run-1', $post->fresh()->publish_progress['run_token']);
+    }
+
+    public function test_retry_to_a_saved_schedule_uses_a_scheduled_toast(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'run_token' => 'run-1',
+                'options' => [
+                    'when' => '2026-08-26T10:00:00+06:00',
+                    'confirm_ask' => false,
+                ],
+                'plan_hash' => null,
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => null,
+                'state' => 'failed',
+            ],
+        ]);
+
+        $this->post(route('posts.publish', $post))
+            ->assertRedirect(route('posts.show', $post))
+            ->assertInertiaFlash('toast.message', 'Post scheduled for publishing.');
+    }
+
+    public function test_publish_rejects_retry_when_create_outcome_is_uncertain(): void
+    {
+        Queue::fake();
+
+        [, $workspace] = $this->actingAsWorkspaceMember();
+        $this->configurePostsyncer($workspace);
+
+        $post = Post::factory()->for($workspace)->create([
+            'publish_state' => 'failed',
+            'publish_progress' => [
+                'version' => 1,
+                'operation_id' => 'operation-1',
+                'options' => ['when' => '2026-08-26T10:00:00+06:00'],
+                'plan_hash' => 'plan-1',
+                'planned_groups' => [],
+                'completed_groups' => [],
+                'current' => [
+                    'index' => 0,
+                    'group_key' => 'group-1',
+                    'phase' => 'creating',
+                    'idempotency_key' => 'request-1',
+                    'media_ids' => [],
+                ],
+                'state' => 'uncertain',
+            ],
+        ]);
+
+        $this->post(route('posts.publish', $post))
+            ->assertRedirect()
+            ->assertSessionHasErrors('publish');
+
+        Queue::assertNothingPushed();
+        $this->assertSame('failed', $post->fresh()->publish_state);
     }
 }

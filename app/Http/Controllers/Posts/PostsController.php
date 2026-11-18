@@ -17,9 +17,11 @@ use App\Support\Content\PostWorkspaceBuckets;
 use App\Support\Content\PresenceFlags;
 use App\Support\Content\PublishGroups;
 use App\Support\Media\PostDesignTemplate;
-use App\Support\Publishing\PostPublishPlanner;
-use App\Support\Publishing\PublishException;
-use App\Support\Publishing\StudioWorkspaceHandles;
+use App\Support\Postsyncer\PostPublishPlanner;
+use App\Support\Postsyncer\PostsyncerClient;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Postsyncer\PostsyncerHandleDirectory;
 use App\Support\Socialreins\SocialreinsConfig;
 use App\Support\Socialreins\SocialreinsResults;
 use Illuminate\Http\RedirectResponse;
@@ -259,7 +261,7 @@ class PostsController extends Controller
      */
     private function presentSummary(Post $post, array $rows): array
     {
-        // PostSyncer history and SocialReins posts. The chips list each language's platforms once.
+        // Both drivers. The chips list each language's platforms once, so a split post is one row of chips.
         $groups = PublishGroups::of($post, $rows);
 
         return [
@@ -341,11 +343,18 @@ class PostsController extends Controller
         }
 
         $workspace = Workspace::current();
-        $socialreinsConfig = $workspace !== null ? SocialreinsConfig::fromWorkspace($workspace) : null;
-        $handles = $workspace === null ? ['bn' => [], 'en' => []] : array_map(
-            fn (array $platforms): array => array_map(fn (string $handle): array => ['handle' => $handle, 'name' => 'Harun R. Rayhan'], $platforms),
-            StudioWorkspaceHandles::handles(),
-        );
+        if ($workspace === null) {
+            $postsyncerConfig = null;
+            $handles = ['bn' => [], 'en' => []];
+        } else {
+            $postsyncerConfig = PostsyncerConfig::fromWorkspace($workspace);
+            $handles = (new PostsyncerHandleDirectory(
+                new PostsyncerClient($postsyncerConfig),
+                $postsyncerConfig,
+                (string) $workspace->id,
+                SocialreinsConfig::postsyncerEnabled($workspace),
+            ))->forPreview();
+        }
 
         $timezone = $workspace !== null && trim($workspace->timezone) !== ''
             ? $workspace->timezone
@@ -356,14 +365,14 @@ class PostsController extends Controller
             ? $post->publish_progress['options']
             : [];
         $needsConfirmAsk = false;
-        if ($workspace !== null && $socialreinsConfig !== null) {
+        if ($postsyncerConfig !== null) {
             try {
                 $needsConfirmAsk = app(PostPublishPlanner::class)->needsConfirmAsk(
                     $post,
-                    $socialreinsConfig->planningConfig($workspace),
+                    $postsyncerConfig,
                     $publishOptions,
                 ) && ! (bool) ($publishOptions['confirm_ask'] ?? false);
-            } catch (PublishException) {
+            } catch (PostsyncerException) {
                 // Captions name images with no attachment yet (P-57). The page
                 // must still render; PostPublishPlanner::plan() keeps refusing.
                 $needsConfirmAsk = false;
@@ -398,10 +407,12 @@ class PostsController extends Controller
             'publish_progress' => $post->publish_progress,
             'approval_state' => $post->approval_state ?? 'approved',
             'timezone' => $timezone,
-            // PostSyncer groups of a post published before PostSyncer was removed, read-only.
             'postsyncer' => $post->postsyncer,
             'socialreins_groups' => SocialreinsResults::presentGroups($post),
-            'publish_ready' => $socialreinsConfig?->isReadyForPublish() ?? false,
+            // Legacy name: "this post's publish driver is ready" (PostSyncer, or SocialReins when routed).
+            'postsyncer_ready' => $workspace !== null && SocialreinsConfig::routesToSocialreins($post, $workspace)
+                ? SocialreinsConfig::fromWorkspace($workspace)->isReadyForPublish()
+                : ($postsyncerConfig?->isReadyForPublish() ?? false),
             'needs_confirm_ask' => $needsConfirmAsk,
             'idea_id' => $post->idea_id,
             'created_at' => $post->created_at?->toIso8601String(),

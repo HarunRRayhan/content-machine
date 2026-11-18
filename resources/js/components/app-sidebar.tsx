@@ -46,6 +46,7 @@ import { index as seriesIndex } from '@/routes/series';
 import { index as settingsIndex } from '@/routes/settings';
 import { index as aiProvidersIndex } from '@/routes/settings/ai-providers';
 import { edit as editGeneral } from '@/routes/settings/general';
+import { edit as editPostsyncer } from '@/routes/settings/postsyncer';
 import { edit as telegramEdit } from '@/routes/settings/telegram';
 import { index as videosIndex } from '@/routes/videos';
 import type { NavItem } from '@/types';
@@ -136,6 +137,11 @@ const mainNavItems: NavItem[] = [
             {
                 title: 'General',
                 href: editGeneral(),
+            },
+            {
+                title: 'PostSyncer',
+                href: editPostsyncer(),
+                matchPrefix: true,
             },
             {
                 title: 'Google Drive',

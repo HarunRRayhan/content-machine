@@ -5,6 +5,7 @@ use App\Http\Controllers\AiProviders\AiProviderCredentialsController;
 use App\Http\Controllers\Settings\GeneralSettingsController;
 use App\Http\Controllers\Settings\GoogleDriveController;
 use App\Http\Controllers\Settings\PexelsSettingsController;
+use App\Http\Controllers\Settings\PostsyncerSettingsController;
 use App\Http\Controllers\Settings\SocialreinsSettingsController;
 use App\Http\Controllers\Telegram\TelegramBotConfigController;
 use App\Http\Controllers\Telegram\TelegramBotLinkController;
@@ -29,6 +30,15 @@ Route::middleware(['auth', 'verified', SetCurrentWorkspace::class])
         Route::get('google-drive/files', [GoogleDriveController::class, 'files'])->name('google-drive.files');
         Route::post('google-drive/folder', [GoogleDriveController::class, 'setFolder'])->name('google-drive.folder');
         Route::post('google-drive/make-public', [GoogleDriveController::class, 'makePublic'])->name('google-drive.make-public');
+
+        Route::get('postsyncer', [PostsyncerSettingsController::class, 'edit'])->name('postsyncer.edit');
+        Route::get('postsyncer/workspaces', [PostsyncerSettingsController::class, 'workspaces'])->name('postsyncer.workspaces');
+        Route::put('postsyncer', [PostsyncerSettingsController::class, 'update'])->name('postsyncer.update');
+        Route::post('postsyncer/refresh-accounts', [PostsyncerSettingsController::class, 'refreshAccounts'])->name('postsyncer.refresh-accounts');
+
+        Route::permanentRedirect('postsyncer/connecting', '/settings/postsyncer');
+        Route::permanentRedirect('postsyncer/bangla', '/settings/postsyncer/workspaces');
+        Route::permanentRedirect('postsyncer/english', '/settings/postsyncer/workspaces');
 
         Route::get('socialreins', [SocialreinsSettingsController::class, 'edit'])->name('socialreins.edit');
         Route::put('socialreins', [SocialreinsSettingsController::class, 'update'])->name('socialreins.update');

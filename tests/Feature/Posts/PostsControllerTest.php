@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Posts;
 
+use App\Actions\Postsyncer\PublishPostAction;
 use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
@@ -9,12 +10,13 @@ use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Support\Publishing\PostPublishPlanner;
-use App\Support\Publishing\PublishException;
-use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Postsyncer\PostPublishPlanner;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
@@ -87,7 +89,7 @@ class PostsControllerTest extends TestCase
             return count(DB::getQueryLog());
         };
 
-        // PostSyncer history (Facebook) beside LinkedIn through SocialReins.
+        // A split post: Facebook through PostSyncer, LinkedIn through SocialReins.
         $split = Post::factory()->for($workspace)->create([
             'status' => 'scheduled', 'language' => 'bn', 'platforms' => ['facebook', 'linkedin'],
             'postsyncer' => ['groups' => [['post_id' => '42', 'status' => 'SCHEDULED', 'language' => 'bangla', 'platforms' => ['facebook']]]],
@@ -319,7 +321,7 @@ class PostsControllerTest extends TestCase
         [, $workspace] = $this->actingAsWorkspaceMember();
 
         $captions = json_decode(
-            file_get_contents(base_path('tests/Fixtures/publishing/p48_captions.json')),
+            file_get_contents(base_path('tests/Fixtures/postsyncer/p48_captions.json')),
             true,
         );
 
@@ -373,20 +375,20 @@ class PostsControllerTest extends TestCase
                 ->where('post.timezone', 'America/New_York')
                 ->where('post.publish_state', $post->publish_state)
                 ->where('post.publish_retryable', false)
-                ->where('post.publish_ready', false)
+                ->where('post.postsyncer_ready', false)
                 ->has('post.needs_confirm_ask')
                 ->has('post.postsyncer')
             );
     }
 
-    public function test_show_lists_the_socialreins_posts_of_a_post(): void
+    public function test_show_lists_the_socialreins_half_of_a_split_post(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
 
         $post = Post::factory()->for($workspace)->create([
             'status' => 'scheduled',
             'publish_state' => 'succeeded',
-            'publish_progress' => ['driver' => 'socialreins', 'state' => 'succeeded'],
+            'publish_progress' => ['state' => 'failed', 'split' => ['socialreins' => ['platforms' => ['facebook', 'instagram']], 'postsyncer' => ['x']]],
             'postsyncer' => ['groups' => [['post_id' => 174141, 'status' => 'scheduled', 'platforms' => ['x'], 'language' => 'english']]],
         ]);
         $result = fn (string $platform): array => ['platform' => $platform, 'status' => 'scheduled', 'error' => null, 'at' => 0, 'targets' => []];
@@ -412,12 +414,22 @@ class PostsControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         Cache::flush();
-        $this->configureSocialreins($workspace, [
-            'platforms' => [
-                'facebook' => ['photo' => 'on'],
-                'threads' => ['photo' => 'ask'],
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
             ],
-            'overrides' => [],
+            'post_types' => [
+                'platforms' => [
+                    'facebook' => ['photo' => 'on'],
+                    'threads' => ['photo' => 'ask'],
+                ],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
         ]);
 
         $post = Post::factory()->for($workspace)->create([
@@ -450,20 +462,25 @@ class PostsControllerTest extends TestCase
                 ->component('posts/show')
                 ->where('post.needs_confirm_ask', false)
             );
-
-        // Without the saved platforms, the ask-gated Threads photo needs a confirmation.
-        $post->forceFill(['publish_progress' => null, 'publish_state' => 'idle'])->save();
-        $this->get(route('posts.show', $post))
-            ->assertInertia(fn (Assert $page) => $page->where('post.needs_confirm_ask', true));
     }
 
     public function test_show_renders_when_captions_name_images_with_no_attachment(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         Cache::flush();
-        $this->configureSocialreins($workspace, [
-            'platforms' => ['facebook' => ['photo' => 'on']],
-            'overrides' => [],
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['photo' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
         ]);
 
         $post = Post::factory()->for($workspace)->create([
@@ -487,10 +504,10 @@ class PostsControllerTest extends TestCase
             );
 
         // The publish path must still refuse (P-57).
-        $this->expectException(PublishException::class);
+        $this->expectException(PostsyncerException::class);
         app(PostPublishPlanner::class)->plan(
             $post,
-            SocialreinsConfig::fromWorkspace($workspace->refresh())->planningConfig($workspace),
+            PostsyncerConfig::fromWorkspace($workspace->refresh()),
             ['confirm_ask' => false],
         );
     }
@@ -499,9 +516,19 @@ class PostsControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         Cache::flush();
-        $this->configureSocialreins($workspace, [
-            'platforms' => ['threads' => ['photo' => 'ask']],
-            'overrides' => [],
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'publish_enabled' => true,
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+            'post_types' => [
+                'platforms' => ['threads' => ['photo' => 'ask']],
+                'overrides' => [],
+            ],
+        ]);
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([], 200),
         ]);
 
         $post = Post::factory()->for($workspace)->create([
@@ -548,9 +575,63 @@ class PostsControllerTest extends TestCase
             );
     }
 
-    public function test_show_exposes_the_studio_handles_of_both_languages(): void
+    public function test_show_exposes_handles_from_both_postsyncer_workspaces(): void
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
+        Cache::flush();
+
+        PostsyncerConfig::write($workspace, [
+            'api_key' => 'test-api-key',
+            'api_base' => 'https://postsyncer.com/api/v1',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => [
+                        'facebook' => ['handle' => 'HarunRRayhan', 'account_id' => 7017],
+                    ],
+                ],
+                'english' => [
+                    'workspace_id' => '853',
+                    'platforms' => [
+                        'twitter' => ['handle' => 'old-english-twitter', 'account_id' => 1205],
+                    ],
+                ],
+            ],
+        ]);
+        $workspace->refresh();
+
+        Http::fake([
+            'postsyncer.com/api/v1/accounts' => Http::response([
+                [
+                    'id' => 7017,
+                    'workspace_id' => 15211,
+                    'platform' => 'facebook',
+                    'username' => null,
+                    'name' => 'Harun R.',
+                ],
+                [
+                    'id' => 7368,
+                    'workspace_id' => 15211,
+                    'platform' => 'twitter',
+                    'username' => 'HarunRRayhan',
+                    'name' => 'Harun R. Rayhan',
+                ],
+                [
+                    'id' => 1205,
+                    'workspace_id' => 853,
+                    'platform' => 'twitter',
+                    'username' => 'harundotdev',
+                    'name' => 'Harun R.',
+                ],
+                [
+                    'id' => 4936,
+                    'workspace_id' => 42761,
+                    'platform' => 'instagram',
+                    'username' => 'armansedits',
+                    'name' => 'Arman',
+                ],
+            ], 200),
+        ]);
 
         $post = Post::factory()->for($workspace)->create(['title' => 'Handle post']);
 
@@ -1040,5 +1121,63 @@ class PostsControllerTest extends TestCase
                 ->where('post.status', 'scheduled')
                 ->where('post.postsyncer.groups.0.post_id', '132531')
             );
+    }
+
+    public function test_reconcile_route_verifies_and_checkpoints_an_uncertain_post(): void
+    {
+        [, $workspace] = $this->actingAsWorkspaceMember();
+
+        PostsyncerConfig::write($workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['text' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $post = Post::factory()->for($workspace)->create([
+            'status' => 'ready',
+            'language' => 'bn',
+            'platforms' => ['facebook'],
+            'captions' => ['facebook' => 'Reconcile this post'],
+        ]);
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
+        ]);
+
+        try {
+            app(PublishPostAction::class)->handle($post, [
+                'when' => '2099-09-03T09:00:00+06:00',
+            ]);
+        } catch (\Throwable) {
+            // The route repairs the uncertain state left by this attempt.
+        }
+
+        Http::fake([
+            'postsyncer.com/api/v1/posts/99' => Http::response([
+                'id' => 99,
+                'workspace_id' => 15211,
+                'content' => [['text' => 'Reconcile this post', 'media' => []]],
+                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
+                    'post_type' => 'POST',
+                    'caption' => 'Reconcile this post',
+                ]]],
+                'status' => 'SCHEDULED',
+                'scheduled_at' => '2099-09-03T09:00:00+06:00',
+            ], 200),
+        ]);
+
+        $this->post(route('posts.reconcile', $post), ['postsyncer_id' => '99'])
+            ->assertRedirect(route('posts.show', $post));
+
+        $this->assertSame('99', $post->refresh()->publish_progress['completed_groups'][0]['post_id']);
     }
 }

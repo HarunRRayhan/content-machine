@@ -6,10 +6,10 @@ use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\TelegramPostRequest;
 use App\Models\Video;
-use App\Support\Publishing\PostPublishPlanner;
-use App\Support\Publishing\PublishException;
-use App\Support\Publishing\PublishGroup;
-use App\Support\Publishing\VideoPublishPlanner;
+use App\Support\Postsyncer\PostPublishPlanner;
+use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Postsyncer\PublishGroup;
+use App\Support\Postsyncer\VideoPublishPlanner;
 use App\Support\Socialreins\PostGroupPayloadBuilder;
 use App\Support\Socialreins\SocialreinsClient;
 use App\Support\Socialreins\SocialreinsConfig;
@@ -49,7 +49,7 @@ class PublishToSocialreinsAction
     {
         try {
             $subject = $this->claim($subject, $options);
-        } catch (PublishException|InvalidArgumentException $exception) {
+        } catch (PostsyncerException|InvalidArgumentException $exception) {
             // The approval, the Telegram request or its bot connection changed: nothing was sent.
             $this->markFailed($subject, $exception->getMessage());
 
@@ -82,7 +82,7 @@ class PublishToSocialreinsAction
                     $this->send($row);
                 }
             }
-        } catch (SocialreinsException|PublishException|InvalidArgumentException $exception) {
+        } catch (SocialreinsException|PostsyncerException|InvalidArgumentException $exception) {
             $this->markFailed($subject, $exception->getMessage());
 
             return;
@@ -116,7 +116,7 @@ class PublishToSocialreinsAction
     /**
      * @param  array<string, mixed>  $options
      *
-     * @throws PublishException|InvalidArgumentException
+     * @throws PostsyncerException|InvalidArgumentException
      */
     private function claim(Post|Video $subject, array $options): Post|Video|null
     {
@@ -128,18 +128,31 @@ class PublishToSocialreinsAction
                 return null;
             }
 
-            // An edit since the enqueue needs a new approval.
+            // As on the PostSyncer claim: an edit since the enqueue needs a new approval.
             if ($locked instanceof Post && ($locked->approval_state ?? 'approved') !== 'approved') {
-                throw new PublishException('This post needs human approval before it can be published.');
+                throw new PostsyncerException('This post needs human approval before it can be published.');
             }
 
-            $request = $locked instanceof Post
-                ? TelegramPublishRequests::lock($locked, TelegramPublishRequests::idFrom($options))
-                : null;
+            // A split post whose PostSyncer half is live must finish: the user approved the
+            // post, so a request that can no longer be locked (bot disconnected or rotated) or
+            // that was closed is left as it is, and the settle closes it if it still can.
+            $halfLive = is_array($locked->publish_progress['split'] ?? null)
+                && ($locked->postsyncer['groups'] ?? []) !== [];
 
-            // A request cancelled or already published in the meantime stops the run before
-            // anything is sent.
-            if ($request !== null
+            try {
+                $request = $locked instanceof Post
+                    ? TelegramPublishRequests::lock($locked, TelegramPublishRequests::idFrom($options))
+                    : null;
+            } catch (PostsyncerException|InvalidArgumentException $exception) {
+                if (! $halfLive) {
+                    throw $exception;
+                }
+                $request = null;
+            }
+
+            // As on the PostSyncer claim: a request cancelled or already published in the
+            // meantime stops the run before anything is sent.
+            if ($request !== null && ! $halfLive
                 && in_array($request->state, [TelegramPostRequest::CANCELLED, TelegramPostRequest::PUBLISHED], true)) {
                 $locked->forceFill(['publish_state' => 'idle', 'publish_error' => null])->save();
 
@@ -181,8 +194,9 @@ class PublishToSocialreinsAction
             [$language, $name] = explode(':', $key, 2);
             $present[$language][] = $name;
         }
-        // Named platforms a live language has no post for yet.
-        $named = array_map(fn (mixed $platform): string => strtolower((string) $platform), (array) ($options['platforms'] ?? []));
+        $leaveOut = ! SocialreinsConfig::postsyncerEnabled($workspace);
+        // Only with PostSyncer off (a move): named platforms a live language has no post for yet.
+        $named = $leaveOut ? array_map(fn (mixed $platform): string => strtolower((string) $platform), (array) ($options['platforms'] ?? [])) : [];
 
         $byLanguage = [];
         foreach ($groups as $group) {
@@ -193,13 +207,15 @@ class PublishToSocialreinsAction
         $payloads = [];
         foreach ($byLanguage as $language => $languageGroups) {
             $planned = array_values(array_unique(array_merge(...array_map(fn (PublishGroup $group): array => $group->platforms, $languageGroups))));
-            // A live language only gets the platforms brain left out and those the caller named
-            // that it has no post for yet; the rest is never sent again.
+            // A live language only gets the platforms brain left out (and, PostSyncer off, those the
+            // caller named that it has no post for yet); the rest is never sent again.
             $only = in_array($language, $live, true)
                 ? array_intersect($planned, [...($skipped[$language] ?? []), ...array_diff($named, $present[$language] ?? [])])
                 : $planned;
-            // A platform this language's set does not cover goes nowhere.
-            $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform));
+            // PostSyncer off: a platform this language's set does not cover goes nowhere.
+            if ($leaveOut) {
+                $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform, strict: true));
+            }
             if ($only === []) {
                 continue;
             }

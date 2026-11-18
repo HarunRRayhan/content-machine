@@ -23,14 +23,16 @@ class RequeueLegacyMediaJobsCommandTest extends TestCase
         ]);
 
         $scratchpadJob = $insert('App\\Jobs\\TranscribeVoiceNoteJob', 'default');
+        $postsyncerJob = $insert('App\\Jobs\\PublishPostJob', 'default');
         $reservedJob = $insert('App\\Jobs\\GenerateTelegramPostJob', 'default', $timestamp);
         $unrelatedJob = $insert('App\\Jobs\\SendTelegramOutboundMessageJob', 'default');
 
         $this->artisan('cm:requeue-legacy-media-jobs')
             ->assertSuccessful()
-            ->expectsOutput('Requeued 1 legacy media job(s).');
+            ->expectsOutput('Requeued 2 legacy media job(s).');
 
         $this->assertDatabaseHas('jobs', ['id' => $scratchpadJob, 'queue' => 'scratchpad']);
+        $this->assertDatabaseHas('jobs', ['id' => $postsyncerJob, 'queue' => 'postsyncer']);
         $this->assertDatabaseHas('jobs', ['id' => $reservedJob, 'queue' => 'default']);
         $this->assertDatabaseHas('jobs', ['id' => $unrelatedJob, 'queue' => 'default']);
     }

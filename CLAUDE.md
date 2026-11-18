@@ -89,7 +89,7 @@ race migrations when they share a schema. See `docs/getting-started/local.md` fo
 - `routes/web.php` — public routes only (landing page, invite-accept flow)
 - `routes/dashboard.php` — everything behind `auth`+`verified`+`SetCurrentWorkspace`, prefixed
   `/dashboard`
-- `routes/settings.php` — workspace Settings, first-class at `/settings`
+- `routes/settings.php` — workspace Settings (PostSyncer first), first-class at `/settings`
 - `docs/adr/` — architecture decisions and why
 - `.secrets/<service>.env` — operational/infra credentials (Railway tokens, etc.), gitignored,
   separate from the app's own `.env`. See `.secrets/README.md`. Never put an infra token in the
@@ -104,7 +104,7 @@ as they apply):
 2. Wait until CI is green.
 3. Self-review the PR diff.
 4. **Paste the PR URL in Harun's chat and wait for his go before squash-merge** when the
-   change touches publishing (SocialReins), media resolution, queues, or anything that can put
+   change touches PostSyncer publish, media resolution, queues, or anything that can put
    wrong content live. Ordinary UI/docs nits can still follow the usual self-review + merge
    once he has said that class of change is fine to ship without a gate. Railway deploys
    `main`.

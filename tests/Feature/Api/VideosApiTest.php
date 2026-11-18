@@ -3,15 +3,18 @@
 namespace Tests\Feature\Api;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
+use App\Actions\Postsyncer\PublishVideoAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
-use App\Jobs\PublishSocialreinsJob;
+use App\Jobs\PublishVideoJob;
 use App\Models\Idea;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
 use App\Support\LinkResolution\PublicUrlGuard;
-use App\Support\Socialreins\SocialreinsConfig;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\PostsyncerException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -423,7 +426,14 @@ class VideosApiTest extends TestCase
     public function test_publish_dispatches_job_and_returns_queued_state(): void
     {
         Queue::fake();
-        $this->configureSocialreins($this->workspace);
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
 
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-90',
@@ -443,15 +453,15 @@ class VideosApiTest extends TestCase
 
         $video = Video::query()->where('human_id', 'BV-90')->sole();
 
-        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job) use ($video) {
-            return $job->subject->is($video)
+        Queue::assertPushed(PublishVideoJob::class, function (PublishVideoJob $job) use ($video) {
+            return $job->video->is($video)
                 && $job->options['when'] === '2026-08-29T21:30:00+06:00'
                 && $job->options['platforms'] === ['facebook']
                 && $job->options['confirm_ask'] === true;
         });
     }
 
-    public function test_publish_rejects_when_socialreins_is_not_ready(): void
+    public function test_publish_rejects_when_postsyncer_is_not_ready(): void
     {
         Queue::fake();
 
@@ -469,10 +479,16 @@ class VideosApiTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_publish_rejects_a_video_published_through_postsyncer(): void
+    public function test_publish_rejects_when_postsyncer_groups_already_exist(): void
     {
         Queue::fake();
-        $this->configureSocialreins($this->workspace);
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'english' => ['workspace_id' => '853', 'platforms' => []],
+            ],
+        ]);
 
         Video::factory()->for($this->workspace)->create([
             'human_id' => 'BV-92',
@@ -493,11 +509,249 @@ class VideosApiTest extends TestCase
             'when' => '2026-08-29T21:30:00+06:00',
         ])
             ->assertUnprocessable()
-            ->assertJsonPath('errors.publish.0', SocialreinsConfig::POSTSYNCER_HISTORY_MESSAGE);
+            ->assertJsonValidationErrors('publish');
 
         Queue::assertNothingPushed();
         $video = Video::query()->where('human_id', 'BV-92')->sole();
         $this->assertSame('succeeded', $video->publish_state);
         $this->assertNull($video->publish_error);
+    }
+
+    public function test_reconcile_requires_a_post_id_and_an_uncertain_create(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-RC',
+            'number' => 202,
+            'publish_state' => 'failed',
+            'publish_progress' => null,
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-RC/reconcile', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer_id');
+
+        $this->acting()->postJson('/api/v1/videos/BV-RC/reconcile', [
+            'postsyncer_id' => '170695',
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('postsyncer_id');
+    }
+
+    public function test_reconcile_endpoint_passes_the_post_id_to_the_action(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-RD',
+            'number' => 203,
+            'publish_state' => 'failed',
+        ]);
+
+        $this->mock(PublishVideoAction::class)
+            ->shouldReceive('reconcile')
+            ->once()
+            ->withArgs(fn (Video $video, string $id, bool $confirmFailed): bool => $video->human_id === 'BV-RD'
+                && $id === '170695'
+                && $confirmFailed === false);
+
+        $this->acting()->postJson('/api/v1/videos/BV-RD/reconcile', [
+            'postsyncer_id' => '170695',
+        ])->assertOk();
+    }
+
+    public function test_reconcile_forwards_confirm_failed(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-RF',
+            'number' => 204,
+            'publish_state' => 'failed',
+        ]);
+
+        $this->mock(PublishVideoAction::class)
+            ->shouldReceive('reconcile')
+            ->once()
+            ->withArgs(fn (Video $video, string $id, bool $confirmFailed): bool => $confirmFailed === true);
+
+        $this->acting()->postJson('/api/v1/videos/BV-RF/reconcile', [
+            'postsyncer_id' => '170695',
+            'confirm_failed' => true,
+        ])->assertOk();
+    }
+
+    public function test_reconcile_requires_write_ability(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-RR',
+            'number' => 205,
+            'publish_state' => 'failed',
+        ]);
+        $readToken = (new CreateWorkspaceApiTokenAction)->handle(
+            $this->workspace,
+            User::factory()->create(),
+            new CreateWorkspaceApiTokenData('read client', ['videos:read']),
+        )['plaintext'];
+
+        $this->withToken($readToken)->postJson('/api/v1/videos/BV-RR/reconcile', [
+            'postsyncer_id' => '170695',
+        ])->assertForbidden();
+    }
+
+    public function test_reconcile_cannot_reach_another_workspace(): void
+    {
+        Video::factory()->for(Workspace::factory())->create([
+            'human_id' => 'BV-RW',
+            'number' => 206,
+            'publish_state' => 'failed',
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-RW/reconcile', [
+            'postsyncer_id' => '170695',
+        ])->assertNotFound();
+    }
+
+    public function test_reconcile_create_absent_requires_confirmation_and_an_uncertain_create(): void
+    {
+        Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-CA',
+            'number' => 201,
+            'publish_state' => 'failed',
+            'publish_progress' => null,
+        ]);
+
+        $this->acting()->postJson('/api/v1/videos/BV-CA/reconcile-create-absent', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('confirmed_absent');
+
+        $this->acting()->postJson('/api/v1/videos/BV-CA/reconcile-create-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('confirmed_absent');
+    }
+
+    public function test_reconcile_create_absent_endpoint_makes_verified_empty_create_retryable(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['reel' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $video = Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-CREATE-ABSENT-API',
+            'number' => 202,
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'media' => ['id' => 915],
+            ], 200),
+            'postsyncer.com/api/v1/posts' => Http::response([
+                'message' => 'temporary outage',
+            ], 500),
+        ]);
+
+        app(PublishVideoAction::class)->handle($video, [
+            'platforms' => ['facebook'],
+            'when' => '2099-09-03T09:00:00+06:00',
+            'confirm_ask' => false,
+        ]);
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('creating', $video->publish_progress['current']['phase']);
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-create-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed');
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertSame('retryable', $video->publish_progress['current']['phase']);
+        $this->assertSame(['915'], $video->publish_progress['current']['media_ids']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $video->publish_progress['create_recovery']['mode'],
+        );
+        $this->assertTrue($video->canRetryPublish());
+    }
+
+    public function test_reconcile_media_absent_endpoint_resets_verified_empty_upload(): void
+    {
+        PostsyncerConfig::write($this->workspace, [
+            'publish_enabled' => true,
+            'video_publish_enabled' => true,
+            'api_key' => 'test-api-key',
+            'languages' => [
+                'bangla' => [
+                    'workspace_id' => '15211',
+                    'platforms' => ['facebook' => ['account_id' => 100]],
+                ],
+            ],
+            'post_types' => [
+                'platforms' => ['facebook' => ['reel' => 'on']],
+                'overrides' => [],
+            ],
+        ]);
+
+        $video = Video::factory()->for($this->workspace)->create([
+            'human_id' => 'BV-MEDIA-ABSENT-API',
+            'number' => 203,
+            'status' => 'recorded',
+            'language' => 'bn',
+            'video_drive_url' => 'https://drive.google.com/file/d/video/view',
+            'captions' => ['facebook' => 'Reel caption'],
+        ]);
+
+        Http::fake([
+            'drive.usercontent.google.com/*' => fn () => Http::response('fake-media-bytes', 200),
+            'upload.postsyncer.com/api/v1/media/upload/file' => Http::response([
+                'message' => 'temporary outage',
+            ], 503),
+        ]);
+
+        try {
+            app(PublishVideoAction::class)->handle($video, [
+                'platforms' => ['facebook'],
+                'when' => '2099-09-03T09:00:00+06:00',
+                'confirm_ask' => false,
+            ]);
+        } catch (PostsyncerException) {
+            // The uncertain upload is checkpointed before the exception surfaces.
+        }
+
+        $video->refresh();
+        $this->assertSame('uncertain', $video->publish_progress['state']);
+        $this->assertSame('uploading', $video->publish_progress['current']['phase']);
+
+        $this->acting()->postJson('/api/v1/videos/'.$video->human_id.'/reconcile-media-absent', [
+            'confirmed_absent' => true,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.publish_state', 'failed');
+
+        $video->refresh();
+        $this->assertSame('failed', $video->publish_progress['state']);
+        $this->assertNull($video->publish_progress['current']);
+        $this->assertSame(
+            'operator_confirmed_absent',
+            $video->publish_progress['media_upload_recovery']['mode'],
+        );
+        $this->assertTrue($video->canRetryPublish());
     }
 }

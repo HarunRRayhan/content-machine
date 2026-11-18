@@ -36,6 +36,7 @@ class SocialreinsSettingsControllerTest extends TestCase
     private function payload(array $overrides = []): array
     {
         return [
+            'publish_driver' => 'socialreins',
             'base_url' => 'https://brain.socialreins.com/v1',
             'default_language' => 'english',
             'tiktok_privacy_level' => 'SELF_ONLY',
@@ -45,7 +46,7 @@ class SocialreinsSettingsControllerTest extends TestCase
         ];
     }
 
-    public function test_admin_saves_set_and_encrypted_secrets_and_the_page_never_returns_them(): void
+    public function test_admin_saves_driver_set_and_encrypted_secrets_and_the_page_never_returns_them(): void
     {
         $workspace = Workspace::factory()->create();
         $this->memberOf($workspace, 'owner');
@@ -54,12 +55,14 @@ class SocialreinsSettingsControllerTest extends TestCase
 
         $workspace->refresh();
         $stored = $workspace->settings['socialreins'];
+        $this->assertSame('socialreins', $workspace->settings['publish_driver']);
         $this->assertNotSame('sr_set_live_secret', $stored['languages']['english']['token']);
         $this->assertSame('sr_set_live_secret', Crypt::decryptString($stored['languages']['english']['token']));
         $this->assertSame('whsec_abc', SocialreinsConfig::fromWorkspace($workspace)->webhookSecret());
 
         $this->get(route('settings.socialreins.edit'))->assertOk()->assertInertia(fn ($page) => $page
             ->component('workspace-settings/socialreins')
+            ->where('driver', 'socialreins')
             ->where('webhookSecretConfigured', true)
             ->where('languages.english.token_configured', true)
             ->where('webhookUrl', route('socialreins.webhook', ['workspace' => $workspace->id]))
@@ -76,12 +79,14 @@ class SocialreinsSettingsControllerTest extends TestCase
         $this->put('/settings/socialreins', $this->payload([
             'webhook_secret' => '',
             'languages' => ['english' => ['set_id' => self::SET, 'token' => '']],
+            'publish_driver' => 'postsyncer',
         ]))->assertRedirect();
 
         $workspace->refresh();
         $config = SocialreinsConfig::fromWorkspace($workspace);
         $this->assertSame('sr_set_live_secret', $config->token('english'));
         $this->assertSame('whsec_abc', $config->webhookSecret());
+        $this->assertFalse(SocialreinsConfig::usesSocialreins($workspace));
         $this->assertSame(['api_key' => 'enc', 'publish_enabled' => true], $workspace->settings['postsyncer']);
     }
 
@@ -112,7 +117,7 @@ class SocialreinsSettingsControllerTest extends TestCase
         $this->memberOf($workspace, 'owner');
         $this->put('/settings/socialreins', $this->payload())->assertRedirect();
 
-        // Never saved: nothing is covered yet, and the page shows every platform ticked so a save covers them all.
+        // Never saved: every platform is covered, and the page shows them all ticked.
         $this->assertNull(SocialreinsConfig::fromWorkspace($workspace->fresh())->coveredPlatforms('english'));
         $this->get(route('settings.socialreins.edit'))->assertInertia(fn ($page) => $page
             ->where('languages.english.platforms', fn ($platforms): bool => count($platforms) === 8));
@@ -134,12 +139,49 @@ class SocialreinsSettingsControllerTest extends TestCase
         ]))->assertSessionHasErrors('languages.english.platforms.0');
     }
 
-    public function test_settings_save_while_a_publish_is_in_flight(): void
+    public function test_routed_languages_are_saved_cleared_and_validated(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+
+        // The form always sends an empty hidden entry so that unticking everything clears the list.
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['', 'bangla']]))->assertRedirect();
+        $this->assertSame(['bangla'], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+        $this->get(route('settings.socialreins.edit'))
+            ->assertInertia(fn ($page) => $page->where('routedLanguages', ['bangla']));
+
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['']]))->assertRedirect();
+        $this->assertSame([], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['french']]))
+            ->assertSessionHasErrors('routed_languages.0');
+    }
+
+    public function test_a_save_without_routed_languages_keeps_them(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $this->memberOf($workspace, 'owner');
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['bangla']]))->assertRedirect();
+
+        $this->put('/settings/socialreins', $this->payload())->assertRedirect();
+
+        $this->assertSame(['bangla'], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+    }
+
+    public function test_routing_cannot_change_while_a_publish_is_in_flight_but_other_settings_can(): void
     {
         $workspace = Workspace::factory()->create();
         $this->memberOf($workspace, 'owner');
         $this->put('/settings/socialreins', $this->payload())->assertRedirect();
         Post::factory()->for($workspace)->create(['publish_state' => 'queued']);
+
+        $this->put('/settings/socialreins', $this->payload(['routed_languages' => ['bangla']]))
+            ->assertSessionHasErrors('publish_driver');
+        $this->assertSame([], SocialreinsConfig::fromWorkspace($workspace->fresh())->routedLanguages());
+
+        $this->put('/settings/socialreins', $this->payload(['publish_driver' => 'postsyncer']))
+            ->assertSessionHasErrors('publish_driver');
+        $this->assertTrue(SocialreinsConfig::usesSocialreins($workspace->fresh()));
 
         $this->put('/settings/socialreins', $this->payload(['tiktok_privacy_level' => 'PUBLIC_TO_EVERYONE']))
             ->assertSessionHasNoErrors();

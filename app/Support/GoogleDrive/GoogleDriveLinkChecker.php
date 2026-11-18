@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Http;
 use Throwable;
 
 /**
- * Probe a Drive file the same way a publish fetch will: unauthenticated GET of
+ * Probe a Drive file the same way PostSyncer will: unauthenticated GET of
  * the constructed download URL. Never fetches the user-supplied URL itself,
  * so a paste cannot point the server at an internal host.
  */

@@ -4,7 +4,7 @@ namespace App\Support\GoogleDrive;
 
 /**
  * Parse a pasted Google Drive URL and turn it into the two forms we need:
- * a human share link for the dashboard, and a fetch URL SocialReins can
+ * a human share link for the dashboard, and a fetch URL PostSyncer can
  * download without a Google login.
  */
 final readonly class GoogleDriveLink

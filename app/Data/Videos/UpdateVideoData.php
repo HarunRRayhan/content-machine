@@ -14,6 +14,7 @@ final readonly class UpdateVideoData
     /**
      * @param  array<string, mixed>|null  $captions
      * @param  array<string, mixed>|null  $deckManifest
+     * @param  array<string, mixed>|null  $postsyncer
      */
     public function __construct(
         public string $title,
@@ -26,11 +27,13 @@ final readonly class UpdateVideoData
         public ?string $videoDriveUrl = null,
         public ?string $coverDriveUrl = null,
         public ?string $status = null,
+        public ?array $postsyncer = null,
         public ?string $publishState = null,
         public ?string $publishError = null,
         public bool $replaceExtended = false,
         public bool $hasVideoDriveUrl = false,
         public bool $hasCoverDriveUrl = false,
+        public bool $hasPostsyncer = false,
         public bool $hasPublishState = false,
         public bool $hasPublishError = false,
         public bool $hasTitle = true,
@@ -74,6 +77,9 @@ final readonly class UpdateVideoData
             videoDriveUrl: array_key_exists('video_drive_url', $payload) ? ($payload['video_drive_url'] !== null ? (string) $payload['video_drive_url'] : null) : null,
             coverDriveUrl: array_key_exists('cover_drive_url', $payload) ? ($payload['cover_drive_url'] !== null ? (string) $payload['cover_drive_url'] : null) : null,
             status: array_key_exists('status', $payload) ? (string) $payload['status'] : $current->status,
+            postsyncer: array_key_exists('postsyncer', $payload) && is_array($payload['postsyncer'])
+                ? $payload['postsyncer']
+                : null,
             publishState: array_key_exists('publish_state', $payload)
                 ? ($payload['publish_state'] !== null ? (string) $payload['publish_state'] : null)
                 : null,
@@ -91,6 +97,7 @@ final readonly class UpdateVideoData
             hasStatus: array_key_exists('status', $payload),
             hasVideoDriveUrl: array_key_exists('video_drive_url', $payload),
             hasCoverDriveUrl: array_key_exists('cover_drive_url', $payload),
+            hasPostsyncer: array_key_exists('postsyncer', $payload),
             hasPublishState: array_key_exists('publish_state', $payload),
             hasPublishError: array_key_exists('publish_error', $payload),
         );

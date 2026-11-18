@@ -3,9 +3,9 @@
 namespace App\Actions\Telegram;
 
 use App\Actions\Posts\ApprovePostAction;
+use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Scratchpad\CaptureTextNoteAction;
 use App\Actions\Scratchpad\DeleteRecentScratchpadEntriesAction;
-use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Data\Scratchpad\CaptureTextNoteData;
 use App\Models\Post;
 use App\Models\ScratchpadEntry;
@@ -107,7 +107,7 @@ class HandleTelegramUpdateAction
         private readonly TelegramClientContract $client,
         private readonly ?StartTelegramPostAction $startTelegramPostAction = null,
         private readonly ?ApprovePostAction $approvePostAction = null,
-        private readonly ?EnqueueSocialreinsPublishAction $enqueuePostPublishAction = null,
+        private readonly ?EnqueuePostPublishAction $enqueuePostPublishAction = null,
         private readonly ?CancelTelegramPostRequestAction $cancelTelegramPostRequestAction = null,
         private readonly ?QueueTelegramMessageAction $queueTelegramMessageAction = null,
         private readonly ?ResolveTelegramWorkspaceActionAction $resolveWorkspaceAction = null,
@@ -1150,9 +1150,9 @@ class HandleTelegramUpdateAction
         return $this->approvePostAction ?? app(ApprovePostAction::class);
     }
 
-    private function enqueuePostPublishAction(): EnqueueSocialreinsPublishAction
+    private function enqueuePostPublishAction(): EnqueuePostPublishAction
     {
-        return $this->enqueuePostPublishAction ?? app(EnqueueSocialreinsPublishAction::class);
+        return $this->enqueuePostPublishAction ?? app(EnqueuePostPublishAction::class);
     }
 
     private function cancelPostRequestAction(): CancelTelegramPostRequestAction

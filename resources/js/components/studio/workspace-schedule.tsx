@@ -19,8 +19,8 @@ import { formatPlatformHandle } from '@/lib/post-caption-mock';
 import type { HandleDirectory } from '@/lib/studio-workspaces';
 import { STUDIO_HANDLES } from '@/lib/studio-workspaces';
 
-export type PublishGroup = {
-    /** Set on a SocialReins post; unset on a stored PostSyncer group. */
+export type PostsyncerGroup = {
+    /** Set on a SocialReins post shown in the PostSyncer group shape. */
     source?: 'socialreins';
     post_id?: string | number;
     status?: string;
@@ -35,13 +35,13 @@ export type WorkspaceKey = LangCode | 'unk';
 
 export type WorkspaceBucket = {
     key: WorkspaceKey;
-    groups?: PublishGroup[];
+    groups?: PostsyncerGroup[];
     platforms: string[];
 };
 
 const WORKSPACE_ORDER: WorkspaceKey[] = ['en', 'bn', 'unk'];
 
-export function groupLanguage(group: PublishGroup): WorkspaceKey {
+export function groupLanguage(group: PostsyncerGroup): WorkspaceKey {
     const raw = (group.lang ?? group.language ?? '').trim().toLowerCase();
 
     if (
@@ -60,8 +60,10 @@ export function groupLanguage(group: PublishGroup): WorkspaceKey {
     return 'unk';
 }
 
-export function bucketsFromGroups(groups: PublishGroup[]): WorkspaceBucket[] {
-    const byKey: Record<WorkspaceKey, PublishGroup[]> = {
+export function bucketsFromGroups(
+    groups: PostsyncerGroup[],
+): WorkspaceBucket[] {
+    const byKey: Record<WorkspaceKey, PostsyncerGroup[]> = {
         bn: [],
         en: [],
         unk: [],
@@ -80,7 +82,7 @@ export function bucketsFromGroups(groups: PublishGroup[]): WorkspaceBucket[] {
     );
 }
 
-function uniquePlatforms(groups: PublishGroup[]): string[] {
+function uniquePlatforms(groups: PostsyncerGroup[]): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
 
@@ -134,7 +136,7 @@ export function defaultWorkspaceTab(buckets: WorkspaceBucket[]): WorkspaceKey {
     return buckets[0]?.key ?? 'en';
 }
 
-/** Draft posts expose workspace chips before they have publish groups. */
+/** Draft posts expose workspace chips without PostSyncer groups yet. */
 function withGroups(bucket: WorkspaceBucket): WorkspaceBucket {
     return {
         ...bucket,
@@ -143,7 +145,7 @@ function withGroups(bucket: WorkspaceBucket): WorkspaceBucket {
 }
 
 export function workspacesForIndex(
-    groups: PublishGroup[],
+    groups: PostsyncerGroup[],
     language: string | null | undefined,
     platforms: string[],
 ): WorkspaceBucket[] {
@@ -373,7 +375,7 @@ export function IndexWorkspaceChips({
     platforms,
 }: {
     workspaces?: WorkspaceBucket[];
-    groups: PublishGroup[];
+    groups: PostsyncerGroup[];
     language: string | null | undefined;
     platforms: string[];
 }) {

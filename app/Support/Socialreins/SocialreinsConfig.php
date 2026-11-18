@@ -2,25 +2,28 @@
 
 namespace App\Support\Socialreins;
 
+use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Models\Post;
+use App\Models\SocialreinsGroup;
 use App\Models\Video;
 use App\Models\Workspace;
-use App\Support\Publishing\PlanningConfig;
-use App\Support\Publishing\PostPublishPlanner;
-use App\Support\Publishing\ScriptStudioPostTypes;
-use App\Support\Publishing\VideoPublishPlanner;
+use App\Support\Postsyncer\PostPublishPlanner;
+use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Postsyncer\ScriptStudioPostTypes;
+use App\Support\Postsyncer\VideoPublishPlanner;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Crypt;
 
 /**
- * Workspace SocialReins settings under settings.socialreins. Every post and video publishes
- * through SocialReins.
+ * Workspace SocialReins settings under settings.socialreins, plus the per-workspace
+ * driver switch at settings.publish_driver ('postsyncer' by default) and, under
+ * settings.socialreins.routed_languages, the languages that switch applies to.
  */
 class SocialreinsConfig
 {
     public const DRIVER = 'socialreins';
 
-    public const POSTSYNCER_HISTORY_MESSAGE = 'This was published through PostSyncer, which Content Machine no longer uses. Change or take it down on the platforms directly.';
+    public const POSTSYNCER_OFF_MESSAGE = 'PostSyncer is off for this workspace and this still has a PostSyncer post. Move it with socialreins:move-off-postsyncer first.';
 
     public const DEFAULT_BASE_URL = 'https://brain.socialreins.com/v1';
 
@@ -30,10 +33,128 @@ class SocialreinsConfig
     /** @param array<string, mixed> $data */
     private function __construct(private readonly array $data) {}
 
+    public static function usesSocialreins(Workspace $workspace): bool
+    {
+        return ($workspace->settings['publish_driver'] ?? null) === self::DRIVER;
+    }
+
+    /**
+     * settings.postsyncer_enabled, true unless saved as off. Off sends every new post and video
+     * through SocialReins whatever the driver and routed languages say, and leaves out the
+     * (language, platform) pairs SocialReins does not cover (see coverage()).
+     */
+    public static function postsyncerEnabled(Workspace $workspace): bool
+    {
+        return ($workspace->settings['postsyncer_enabled'] ?? true) !== false;
+    }
+
+    /**
+     * The driver one subject publishes through. A subject already on a driver stays there
+     * whatever the settings say now; a new one follows the workspace driver, limited to
+     * subjects whose every language is routed (no routed list means every language) and
+     * whose every platform SocialReins covers. A post or video covered only in part splits
+     * (see splitOf()) and starts on PostSyncer.
+     *
+     * @param  array<string, mixed>  $options  the publish options, when deciding a publish
+     */
+    public static function routesToSocialreins(Post|Video $subject, Workspace $workspace, array $options = []): bool
+    {
+        if (self::isOnSocialreins($subject)) {
+            return true;
+        }
+
+        if (! self::postsyncerEnabled($workspace)) {
+            return ! self::hasPostsyncerPost($subject);
+        }
+
+        $split = self::newSubjectSplit($subject, $workspace, $options);
+
+        return $split !== null && $split['postsyncer'] === [];
+    }
+
+    /**
+     * A new post or video whose platforms SocialReins covers only in part: PostSyncer publishes
+     * the `postsyncer` platforms first, then the `socialreins` ones go through SocialReins
+     * (ContinueSplitOnSocialreinsAction). Null when it goes whole to one driver.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{socialreins: list<string>, postsyncer: list<string>}|null
+     */
+    public static function splitOf(Post|Video $subject, Workspace $workspace, array $options = []): ?array
+    {
+        if (self::isOnSocialreins($subject) || ! self::postsyncerEnabled($workspace)) {
+            return null;
+        }
+
+        $split = self::newSubjectSplit($subject, $workspace, $options);
+
+        return $split !== null && $split['socialreins'] !== [] && $split['postsyncer'] !== [] ? $split : null;
+    }
+
+    /**
+     * Null when a subject not yet on SocialReins stays on PostSyncer for a reason other than
+     * its platforms; otherwise which of its platforms SocialReins covers.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{socialreins: list<string>, postsyncer: list<string>}|null
+     */
+    private static function newSubjectSplit(Post|Video $subject, Workspace $workspace, array $options): ?array
+    {
+        if (self::isOnPostsyncer($subject) || ! self::usesSocialreins($workspace)) {
+            return null;
+        }
+
+        $config = self::fromWorkspace($workspace);
+        $routed = $config->routedLanguages();
+
+        if ($routed !== []) {
+            $languages = $subject instanceof Video
+                ? app(VideoPublishPlanner::class)->knownLanguages($subject)
+                : app(PostPublishPlanner::class)->knownLanguages($subject);
+
+            if ($languages === [] || array_diff($languages, $routed) !== []) {
+                return null;
+            }
+        }
+
+        return $config->platformSplit($subject, $workspace, $options);
+    }
+
+    /**
+     * Splits the (language, platform) pairs a subject would publish. A platform goes to
+     * SocialReins only when every language it is published in covers it, because one set of
+     * publish options picks the platforms for all languages.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{socialreins: list<string>, postsyncer: list<string>}
+     */
+    private function platformSplit(Post|Video $subject, Workspace $workspace, array $options): array
+    {
+        // No language lists its platforms: SocialReins takes everything, as before the list existed.
+        $lists = array_map(fn (string $language): ?array => $this->coveredPlatforms($language), PostsyncerConfig::LANGUAGES);
+        if (array_filter($lists, fn (?array $list): bool => $list !== null) === []) {
+            return ['socialreins' => [], 'postsyncer' => []];
+        }
+
+        $pairs = $subject instanceof Video
+            ? app(VideoPublishPlanner::class)->candidatePairs($subject, $this->planningConfig($workspace), $options)
+            : app(PostPublishPlanner::class)->candidatePairs($subject, $options);
+
+        $covered = [];
+        foreach ($pairs as [$language, $platform]) {
+            $covered[$platform] = ($covered[$platform] ?? true) && $this->covers($language, $platform);
+        }
+
+        return [
+            'socialreins' => array_keys(array_filter($covered)),
+            'postsyncer' => array_keys(array_diff_key($covered, array_filter($covered))),
+        ];
+    }
+
     /**
      * The (language, platform) pairs a publish would send, as `language:platform`, split by
-     * whether that language's set covers the platform (see covers()). The left-out pairs are
-     * published nowhere.
+     * whether that language's set covers the platform (strictly: see covers()). With PostSyncer
+     * off the left-out pairs are published nowhere.
      *
      * @param  array<string, mixed>  $options
      * @return array{covered: list<string>, left_out: list<string>}
@@ -47,22 +168,26 @@ class SocialreinsConfig
 
         $coverage = ['covered' => [], 'left_out' => []];
         foreach ($pairs as [$language, $platform]) {
-            $coverage[$config->covers($language, $platform) ? 'covered' : 'left_out'][] = "{$language}:{$platform}";
+            $coverage[$config->covers($language, $platform, strict: true) ? 'covered' : 'left_out'][] = "{$language}:{$platform}";
         }
 
         return $coverage;
     }
 
-    /** Only a saved list covers anything, so nothing is sent to an account that may not exist. */
-    public function covers(string $language, string $platform): bool
+    /**
+     * No saved list for the language means it covers every platform, except when strict (PostSyncer
+     * off): then only a saved list covers anything, so nothing is sent to an account that may not exist.
+     */
+    public function covers(string $language, string $platform, bool $strict = false): bool
     {
-        return in_array($platform, $this->coveredPlatforms($language) ?? [], true);
+        $list = $this->coveredPlatforms($language);
+
+        return $list === null ? ! $strict : in_array($platform, $list, true);
     }
 
     /**
      * PostSyncer holds, or may hold, a post for this subject: a group with a post id that was not
-     * deleted, or a PostSyncer run (progress without a driver) that may have created one. Such a
-     * subject is history: CM no longer publishes, moves or takes it down.
+     * deleted, or a PostSyncer run (progress without a driver) that may have created one.
      */
     public static function hasPostsyncerPost(Post|Video $subject): bool
     {
@@ -78,12 +203,12 @@ class SocialreinsConfig
     }
 
     /**
-     * A PostSyncer run that provably created no post: no create with an unknown outcome and no
-     * completed group.
+     * A PostSyncer run that provably created no post: no create with an unknown outcome (the same
+     * test the PostSyncer retry uses) and no completed group.
      *
      * @param  array<string, mixed>  $progress
      */
-    private static function runCreatedNothing(array $progress): bool
+    public static function runCreatedNothing(array $progress): bool
     {
         $current = $progress['current'] ?? null;
 
@@ -91,6 +216,32 @@ class SocialreinsConfig
             && ($current === null || (is_array($current) && ($current['phase'] ?? null) === 'retryable'))
             && ($progress['completed_groups'] ?? []) === []
             && ($progress['base_groups'] ?? []) === [];
+    }
+
+    /** A SocialReins run started and was not fully taken down, or a group may exist there. */
+    private static function isOnSocialreins(Post|Video $subject): bool
+    {
+        if (($subject->publish_progress['driver'] ?? null) === self::DRIVER) {
+            return true;
+        }
+
+        $rows = SocialreinsResults::rowsOf($subject);
+        $states = array_column(SocialreinsResults::byPlatform($rows, requireComplete: false), 'state');
+
+        return array_diff($states, [SocialreinsResults::DELETED]) !== []
+            || array_filter($rows, fn (SocialreinsGroup $row): bool => $row->state === SocialreinsGroup::PENDING) !== [];
+    }
+
+    /** PostSyncer has groups for it, or a PostSyncer run wrote its progress (no `driver` key). */
+    private static function isOnPostsyncer(Post|Video $subject): bool
+    {
+        foreach ($subject->postsyncer['groups'] ?? [] as $group) {
+            if (is_array($group) && filled($group['post_id'] ?? null)) {
+                return true;
+            }
+        }
+
+        return is_array($subject->publish_progress);
     }
 
     public static function fromWorkspace(Workspace $workspace): self
@@ -125,7 +276,8 @@ class SocialreinsConfig
     }
 
     /**
-     * The CM platforms this language's set has accounts for. Null when never saved.
+     * The CM platforms this language's set has accounts for. Null (never saved) means every
+     * platform, which keeps workspaces from before the list on SocialReins for everything.
      *
      * @return list<string>|null
      */
@@ -133,7 +285,7 @@ class SocialreinsConfig
     {
         $platforms = $this->languageData($language)['platforms'] ?? null;
 
-        return is_array($platforms) ? array_values(array_intersect(PlanningConfig::PLATFORMS, $platforms)) : null;
+        return is_array($platforms) ? array_values(array_intersect(UpdatePostsyncerSettingsRequest::PLATFORMS, $platforms)) : null;
     }
 
     /** The TikTok visibility this workspace chose; null means TikTok posts are refused. */
@@ -148,47 +300,59 @@ class SocialreinsConfig
     {
         $language = $this->data['default_language'] ?? null;
 
-        return is_string($language) && in_array($language, PlanningConfig::LANGUAGES, true)
+        return is_string($language) && in_array($language, PostsyncerConfig::LANGUAGES, true)
             ? $language
-            : PlanningConfig::DEFAULT_LANGUAGE;
+            : PostsyncerConfig::DEFAULT_LANGUAGE;
     }
 
     /** @return list<string> languages with both a set id and a token */
     public function configuredLanguages(): array
     {
         return array_values(array_filter(
-            PlanningConfig::LANGUAGES,
+            PostsyncerConfig::LANGUAGES,
             fn (string $language): bool => $this->setId($language) !== null && $this->token($language) !== null,
         ));
     }
 
+    /** @return list<string> languages limited to SocialReins; empty means every language */
+    public function routedLanguages(): array
+    {
+        $languages = $this->data['routed_languages'] ?? [];
+
+        return is_array($languages) ? array_values(array_intersect(PostsyncerConfig::LANGUAGES, $languages)) : [];
+    }
+
+    /** With a routed list, one routed language with a set is enough: the others may have none yet. */
     public function isReadyForPublish(): bool
     {
-        return in_array($this->defaultLanguage(), $this->configuredLanguages(), true);
+        $routed = $this->routedLanguages();
+
+        return $routed === []
+            ? in_array($this->defaultLanguage(), $this->configuredLanguages(), true)
+            : array_intersect($routed, $this->configuredLanguages()) !== [];
     }
 
     /**
-     * The shape the CM planners read: a language's set id stands in for the planner's
-     * workspace id, and the post-type matrix is the workspace's own (SocialReins), else the one
-     * saved under settings.postsyncer before PostSyncer was removed, else the Script Studio defaults.
+     * The shape the CM planners read: a language's set id stands in for the PostSyncer
+     * workspace id, and the post-type matrix is the workspace's own (SocialReins) or its
+     * PostSyncer one, else the Script Studio defaults. No PostSyncer key is needed.
      */
-    public function planningConfig(Workspace $workspace): PlanningConfig
+    public function planningConfig(Workspace $workspace): PostsyncerConfig
     {
         $languages = [];
         foreach ($this->configuredLanguages() as $language) {
-            $languages[$language] = ['workspace_id' => $this->setId($language)];
+            $languages[$language] = ['workspace_id' => $this->setId($language), 'platforms' => []];
         }
 
         $postTypes = $this->data['post_types'] ?? null;
         if (! is_array($postTypes) || ScriptStudioPostTypes::isEmpty($postTypes)) {
-            $saved = $workspace->settings['postsyncer']['post_types'] ?? null;
-            $postTypes = PlanningConfig::fromArray(['post_types' => is_array($saved) ? $saved : []])->postTypes();
+            $postTypes = PostsyncerConfig::fromWorkspace($workspace)->postTypes();
         }
         if (ScriptStudioPostTypes::isEmpty($postTypes)) {
             $postTypes = ScriptStudioPostTypes::defaults();
         }
 
-        return PlanningConfig::fromArray([
+        return PostsyncerConfig::fromArray([
             'languages' => $languages,
             'enabled_languages' => array_keys($languages),
             'default_language' => $this->defaultLanguage(),
@@ -197,7 +361,8 @@ class SocialreinsConfig
     }
 
     /**
-     * Blank secrets keep the stored value.
+     * Blank secrets keep the stored value; `publish_driver` is stored beside the
+     * socialreins block so switching it never rewrites the PostSyncer settings.
      *
      * @param  array<string, mixed>  $input
      */
@@ -205,6 +370,14 @@ class SocialreinsConfig
     {
         $settings = $workspace->settings ?? [];
         $current = is_array($settings['socialreins'] ?? null) ? $settings['socialreins'] : [];
+
+        if (array_key_exists('publish_driver', $input)) {
+            $settings['publish_driver'] = $input['publish_driver'] === self::DRIVER ? self::DRIVER : 'postsyncer';
+        }
+
+        if (array_key_exists('postsyncer_enabled', $input) && $input['postsyncer_enabled'] !== null) {
+            $settings['postsyncer_enabled'] = filter_var($input['postsyncer_enabled'], FILTER_VALIDATE_BOOLEAN);
+        }
 
         // Tokens and the webhook secret belong to the host they were issued for: pointing the
         // workspace somewhere else must not send them there, so they are entered again.
@@ -226,12 +399,16 @@ class SocialreinsConfig
             }
         }
 
+        if (array_key_exists('routed_languages', $input)) {
+            $current['routed_languages'] = array_values(array_intersect(PostsyncerConfig::LANGUAGES, (array) $input['routed_languages']));
+        }
+
         if (is_string($input['webhook_secret'] ?? null) && trim($input['webhook_secret']) !== '') {
             $current['webhook_secret'] = Crypt::encryptString(trim($input['webhook_secret']));
         }
 
         foreach ((array) ($input['languages'] ?? []) as $language => $values) {
-            if (! in_array($language, PlanningConfig::LANGUAGES, true) || ! is_array($values)) {
+            if (! in_array($language, PostsyncerConfig::LANGUAGES, true) || ! is_array($values)) {
                 continue;
             }
 
@@ -240,7 +417,7 @@ class SocialreinsConfig
                 $entry['set_id'] = $values['set_id'];
             }
             if (is_array($values['platforms'] ?? null)) {
-                $entry['platforms'] = array_values(array_intersect(PlanningConfig::PLATFORMS, $values['platforms']));
+                $entry['platforms'] = array_values(array_intersect(UpdatePostsyncerSettingsRequest::PLATFORMS, $values['platforms']));
             }
             if (is_string($values['token'] ?? null) && trim($values['token']) !== '') {
                 $entry['token'] = Crypt::encryptString(trim($values['token']));

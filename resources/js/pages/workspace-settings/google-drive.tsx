@@ -146,7 +146,7 @@ export default function GoogleDriveSettings({
                                     <div className="text-sm text-muted-foreground">
                                         Content Machine will list files and can
                                         make a selected publishing file public
-                                        for SocialReins.
+                                        for PostSyncer.
                                     </div>
                                 </div>
                             </div>

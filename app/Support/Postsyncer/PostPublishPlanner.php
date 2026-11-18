@@ -1,0 +1,624 @@
+<?php
+
+namespace App\Support\Postsyncer;
+
+use App\Models\Post;
+use App\Support\Content\NormalizeCaptions;
+use Carbon\CarbonImmutable;
+use InvalidArgumentException;
+
+/**
+ * Builds PostSyncer publish groups for a post: language workspaces, Twitter thread
+ * isolation, and media-set / first-comment splits.
+ */
+class PostPublishPlanner
+{
+    /** X allows at most four images in one tweet. */
+    private const X_MAX_IMAGES = 4;
+
+    public function __construct(
+        private readonly MediaUrlResolver $mediaUrlResolver,
+    ) {}
+
+    /**
+     * Whether any selected platform in the publish set is `ask` for its resolved post type.
+     *
+     * @param  array{platforms?: list<string>}  $options
+     */
+    public function needsConfirmAsk(Post $post, PostsyncerConfig $config, array $options = []): bool
+    {
+        $selected = $this->selectedPlatforms($post, $options);
+        $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
+        $byLanguage = $this->captionsByLanguage($post);
+
+        foreach ($byLanguage as $language => $platformCaptions) {
+            foreach ($selected as $platform) {
+                if (! array_key_exists($platform, $platformCaptions)) {
+                    continue;
+                }
+
+                $mediaUrls = $this->resolveMediaUrls($post, $platformCaptions[$platform], $defaultMediaUrls);
+                $postType = $mediaUrls !== [] ? 'photo' : 'text';
+                $state = $this->platformState($config, $platform, $postType, $language);
+
+                if ($state === 'ask') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * (language, platform) pairs already covered by a PostSyncer group on the
+     * post, keyed "language\0platform". A group without a language or platforms
+     * cannot be placed, so append-only planning fails closed on it.
+     *
+     * @return array<string, true>
+     */
+    public function existingPairs(Post $post): array
+    {
+        $pairs = [];
+
+        foreach ($post->postsyncer['groups'] ?? [] as $group) {
+            if (! is_array($group)) {
+                continue;
+            }
+
+            $language = $group['language'] ?? null;
+            $platforms = $group['platforms'] ?? null;
+
+            if (! is_string($language) || $language === '' || ! is_array($platforms) || $platforms === []) {
+                throw new PostsyncerException(
+                    'An existing PostSyncer group has no language or platforms; cannot safely add platforms.'
+                );
+            }
+
+            foreach ($platforms as $platform) {
+                $pairs[$language."\0".strtolower((string) $platform)] = true;
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * (language, platform) pairs that have a caption for the selected platforms.
+     *
+     * @param  array{platforms?: list<string>}  $options
+     * @return list<array{0: string, 1: string}>
+     */
+    public function candidatePairs(Post $post, array $options): array
+    {
+        $selected = $this->selectedPlatforms($post, $options);
+        $pairs = [];
+
+        foreach ($this->captionsByLanguage($post) as $language => $platformCaptions) {
+            foreach ($selected as $platform) {
+                if (array_key_exists($platform, $platformCaptions)) {
+                    $pairs[] = [$language, $platform];
+                }
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool}  $options
+     * @return list<PublishGroup>
+     */
+    public function plan(Post $post, PostsyncerConfig $config, array $options): array
+    {
+        $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($post));
+        $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
+        $selected = $this->selectedPlatforms($post, $options);
+        $this->mediaUrlResolver->publishingAt($when);
+        $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
+        $byLanguage = $this->captionsByLanguage($post);
+
+        // Append-only mode: never plan a pair that already has a PostSyncer group.
+        $existing = ($options['append_missing'] ?? false) === true
+            ? $this->existingPairs($post)
+            : [];
+
+        $groups = [];
+        foreach ($byLanguage as $language => $platformCaptions) {
+            $langConfig = $config->language($language);
+            $workspaceId = $langConfig['workspace_id'] ?? null;
+
+            if ($workspaceId === null || $workspaceId === '') {
+                throw new PostsyncerException(
+                    "No PostSyncer workspace is configured for {$language}."
+                );
+            }
+
+            $included = [];
+            foreach ($selected as $platform) {
+                if (! array_key_exists($platform, $platformCaptions)) {
+                    continue;
+                }
+
+                if (isset($existing[$language."\0".$platform])) {
+                    continue;
+                }
+
+                if (! $config->isPlatformEnabled($language, $platform)) {
+                    continue;
+                }
+
+                $mediaUrls = $this->resolveMediaUrls($post, $platformCaptions[$platform], $defaultMediaUrls);
+                $postType = $mediaUrls !== [] ? 'photo' : 'text';
+                $state = $this->platformState($config, $platform, $postType, $language);
+
+                if ($state === null) {
+                    continue;
+                }
+
+                // Matrix "off" is opt-in: skip unless confirm_ask (explicit publish approval).
+                // P-59: Bangla Twitter stayed dropped even with confirm_ask=True because off
+                // used to share the hard-continue with unsupported/null.
+                if ($state === 'off' && ! $confirmAsk) {
+                    continue;
+                }
+
+                if ($state === 'ask' && ! $confirmAsk) {
+                    throw new PostsyncerException(
+                        "Platform {$platform} requires explicit confirmation (confirm_ask)."
+                    );
+                }
+
+                $included[$platform] = $platformCaptions[$platform];
+            }
+
+            if ($included === []) {
+                continue;
+            }
+
+            $groups = array_merge(
+                $groups,
+                $this->splitLanguageGroups($post, $language, $workspaceId, $included, $defaultMediaUrls, $when),
+            );
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param  array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>  $platformCaptions
+     * @param  list<string>  $defaultMediaUrls
+     * @return list<PublishGroup>
+     */
+    private function splitLanguageGroups(
+        Post $post,
+        string $language,
+        int|string $workspaceId,
+        array $platformCaptions,
+        array $defaultMediaUrls,
+        ?CarbonImmutable $when,
+    ): array {
+        $remaining = $platformCaptions;
+        $groups = [];
+
+        // LinkedIn document carousel must never share a media set with Instagram/TikTok
+        // PNGs (P-59: CM bundled LinkedIn into the EN IG/TikTok group with seven images).
+        if (isset($remaining['linkedin'])) {
+            $linkedin = $remaining['linkedin'];
+            unset($remaining['linkedin']);
+
+            $groups[] = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: ['linkedin'],
+                mediaUrls: $this->resolveLinkedInMediaUrls($post, $linkedin, $defaultMediaUrls),
+                captions: ['linkedin' => $linkedin['caption']],
+                when: $when,
+                publishNow: $when === null,
+                firstComment: PublishGroup::supportsFirstComment('linkedin')
+                    && $linkedin['first_comment'] !== ''
+                    ? $linkedin['first_comment']
+                    : null,
+            );
+        }
+
+        // YouTube's image set goes last. Groups are created in order and a 4xx stops the loop,
+        // so a rejected YouTube create must not block the Facebook/Instagram/TikTok groups.
+        $youtubeGroup = null;
+        if (isset($remaining['youtube'])) {
+            $youtube = $remaining['youtube'];
+            unset($remaining['youtube']);
+
+            $youtubeGroup = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: ['youtube'],
+                mediaUrls: $this->resolveMediaUrls($post, $youtube, $defaultMediaUrls),
+                captions: ['youtube' => $youtube['caption']],
+                when: $when,
+                publishNow: $when === null,
+                firstComment: PublishGroup::supportsFirstComment('youtube')
+                    && $youtube['first_comment'] !== ''
+                    ? $youtube['first_comment']
+                    : null,
+            );
+        }
+
+        // Twitter and Threads each get their own connected-thread PostSyncer call when
+        // the caption block has Tweet N segments. Media is distributed one image per
+        // tweet at publish time. Bluesky stays out: its API has no thread surface.
+        foreach (['twitter', 'threads'] as $threadPlatform) {
+            if (! isset($remaining[$threadPlatform]) || $remaining[$threadPlatform]['thread'] === []) {
+                continue;
+            }
+
+            $threaded = $remaining[$threadPlatform];
+            unset($remaining[$threadPlatform]);
+
+            $threadTweets = array_values(array_filter(
+                [$threaded['caption'], ...$threaded['thread']],
+                fn (string $segment): bool => trim($segment) !== '',
+            ));
+
+            $groups[] = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: [$threadPlatform],
+                mediaUrls: $this->resolveMediaUrls($post, $threaded, $defaultMediaUrls),
+                captions: [$threadPlatform => $threaded['caption']],
+                when: $when,
+                publishNow: $when === null,
+                threadTweets: $threadTweets,
+            );
+        }
+
+        // X caps a tweet at four images: a longer set becomes a thread of four-image
+        // tweets (caption first, then "2/N" markers). Same rule for every language.
+        if (isset($remaining['twitter'])) {
+            $mediaUrls = $this->resolveMediaUrls($post, $remaining['twitter'], $defaultMediaUrls);
+
+            if (count($mediaUrls) > self::X_MAX_IMAGES) {
+                $twitter = $remaining['twitter'];
+                unset($remaining['twitter']);
+
+                $tweetCount = (int) ceil(count($mediaUrls) / self::X_MAX_IMAGES);
+                $tweets = [$twitter['caption']];
+                for ($n = 2; $n <= $tweetCount; $n++) {
+                    $tweets[] = "{$n}/{$tweetCount}";
+                }
+
+                $groups[] = new PublishGroup(
+                    language: $language,
+                    workspaceId: $workspaceId,
+                    platforms: ['twitter'],
+                    mediaUrls: $mediaUrls,
+                    captions: ['twitter' => $twitter['caption']],
+                    when: $when,
+                    publishNow: $when === null,
+                    threadTweets: $tweets,
+                    mediaPerTweet: self::X_MAX_IMAGES,
+                );
+            }
+        }
+
+        $buckets = [];
+        foreach ($remaining as $platform => $data) {
+            $mediaUrls = $this->resolveMediaUrls($post, $data, $defaultMediaUrls);
+            // Only first-comment-capable platforms contribute FC text to the
+            // bucket key. That keeps Facebook/Instagram with a real first
+            // comment out of the same PostSyncer call as Threads/Bluesky,
+            // which would otherwise treat the extra content item as a thread.
+            $firstComment = PublishGroup::supportsFirstComment($platform)
+                && $data['first_comment'] !== ''
+                ? $data['first_comment']
+                : null;
+            $key = implode("\0", $mediaUrls).'|'.($firstComment ?? '');
+            $buckets[$key]['mediaUrls'] = $mediaUrls;
+            $buckets[$key]['platforms'][$platform] = $data['caption'];
+            if ($firstComment !== null) {
+                $buckets[$key]['firstComment'] = $firstComment;
+            }
+        }
+
+        foreach ($buckets as $bucket) {
+            $platforms = array_keys($bucket['platforms']);
+            sort($platforms);
+
+            $groups[] = new PublishGroup(
+                language: $language,
+                workspaceId: $workspaceId,
+                platforms: $platforms,
+                mediaUrls: $bucket['mediaUrls'],
+                captions: $bucket['platforms'],
+                when: $when,
+                publishNow: $when === null,
+                firstComment: $bucket['firstComment'] ?? null,
+            );
+        }
+
+        if ($youtubeGroup !== null) {
+            $groups[] = $youtubeGroup;
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param  array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}  $platformData
+     * @param  list<string>  $defaultMediaUrls
+     * @return list<string>
+     */
+    private function resolveMediaUrls(Post $post, array $platformData, array $defaultMediaUrls): array
+    {
+        if (array_key_exists('images', $platformData)) {
+            $images = array_values(array_filter(
+                array_map(
+                    static fn (mixed $image): string => trim((string) $image),
+                    $platformData['images'],
+                ),
+                static fn (string $image): bool => $image !== '',
+            ));
+
+            if ($images === []) {
+                return [];
+            }
+
+            $urls = $this->mediaUrlResolver->resolveNamedImages($post, $images);
+
+            // Named covers that fail to resolve used to fall through as a
+            // text publish (P-57). Refuse so the queue surfaces the miss.
+            if (count($urls) !== count($images)) {
+                throw new PostsyncerException(
+                    'Could not resolve publish images: '.implode(', ', $images)
+                    .'. Refusing to publish without the named covers.'
+                );
+            }
+
+            return $urls;
+        }
+
+        return $defaultMediaUrls;
+    }
+
+    /**
+     * Publishable captions keyed by language then platform, exactly as the
+     * planner reads them. Public so edits to a publish-locked post can be
+     * checked against the same reading.
+     *
+     * @return array<string, array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>>
+     */
+    public function captionsByLanguage(Post $post): array
+    {
+        $captions = $post->captions;
+
+        if ($captions === null || $captions === []) {
+            return [];
+        }
+
+        if ($this->isFlatCaptionMap($captions)) {
+            $language = $this->resolveLanguage($post);
+            $out = [];
+            foreach ($captions as $platform => $value) {
+                $normalized = $this->normalizePlatformFields(is_array($value) ? $value : ['caption' => $value]);
+                if ($normalized['caption'] !== '') {
+                    $out[strtolower($platform)] = $normalized;
+                }
+            }
+
+            return $out === [] ? [] : [$language => $out];
+        }
+
+        $byLanguage = [];
+        foreach (NormalizeCaptions::forDashboard($captions) as $group) {
+            $language = $this->languageFromPart($group['part']) ?? $this->resolveLanguage($post);
+            foreach ($group['platforms'] as $platform) {
+                $name = strtolower($platform['name']);
+                $normalized = $this->normalizePlatformFields($platform, fromNormalizedCaptions: true);
+                if ($normalized['caption'] !== '') {
+                    $byLanguage[$language][$name] = $normalized;
+                }
+            }
+        }
+
+        return $byLanguage;
+    }
+
+    /**
+     * Every language this post has captions for, before publish options narrow anything.
+     * Empty when one of them is only resolveLanguage()'s fallback, which turns an empty or
+     * "both" post language into bangla: then the language is not actually known.
+     *
+     * @return list<string>
+     */
+    public function knownLanguages(Post $post): array
+    {
+        if ($this->languageFromPart($post->language) !== $this->resolveLanguage($post)) {
+            $captions = $post->captions ?? [];
+
+            if ($this->isFlatCaptionMap($captions)) {
+                return [];
+            }
+
+            foreach (NormalizeCaptions::forDashboard($captions) as $group) {
+                if ($this->languageFromPart($group['part']) === null) {
+                    return [];
+                }
+            }
+        }
+
+        return array_keys($this->captionsByLanguage($post));
+    }
+
+    /**
+     * @param  array<mixed>  $fields
+     * @return array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}
+     */
+    private function normalizePlatformFields(array $fields, bool $fromNormalizedCaptions = false): array
+    {
+        $caption = trim((string) ($fields['caption'] ?? ''));
+
+        if ($caption === '' && ! array_key_exists('caption', $fields) && count($fields) === 1) {
+            $caption = trim((string) reset($fields));
+        }
+
+        $thread = $fields['thread'] ?? [];
+        if (! is_array($thread)) {
+            $thread = [];
+        }
+
+        $normalized = [
+            'caption' => $caption,
+            'first_comment' => trim((string) ($fields['first_comment'] ?? '')),
+            'thread' => array_values(array_map(
+                fn (mixed $segment): string => is_string($segment) ? trim($segment) : '',
+                $thread,
+            )),
+        ];
+
+        if (array_key_exists('images', $fields)) {
+            $raw = $fields['images'];
+            $images = is_array($raw) ? array_values(array_map('strval', $raw)) : [];
+            // Always keep an explicit images key, including []. Dropping empty lists
+            // (fromNormalizedCaptions) made **Images:** none inherit every attachment,
+            // so English Twitter was classified as photo and skipped (P-59).
+            $normalized['images'] = $images;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Prefer the attached LinkedIn carousel PDF (`role=document`); fall back to named
+     * images / defaults only when no document is attached.
+     *
+     * @param  array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}  $platformData
+     * @param  list<string>  $defaultMediaUrls
+     * @return list<string>
+     */
+    private function resolveLinkedInMediaUrls(Post $post, array $platformData, array $defaultMediaUrls): array
+    {
+        $documentUrl = $this->mediaUrlResolver->linkedinDocumentUrl($post);
+        if ($documentUrl !== null) {
+            return [$documentUrl];
+        }
+
+        return $this->resolveMediaUrls($post, $platformData, $defaultMediaUrls);
+    }
+
+    /** The language a nested captions part resolves to, as captionsByLanguage reads it. */
+    public function partLanguage(Post $post, string $part): string
+    {
+        return $this->languageFromPart($part) ?? $this->resolveLanguage($post);
+    }
+
+    private function languageFromPart(?string $part): ?string
+    {
+        if ($part === null || trim($part) === '') {
+            return null;
+        }
+
+        $p = strtolower(trim($part));
+        if (str_contains($p, 'bangla') || str_contains($p, 'bengali') || $p === 'bn' || $p === 'বাংলা') {
+            return 'bangla';
+        }
+
+        if (str_contains($p, 'english') || $p === 'en' || $p === 'ইংরেজি') {
+            return 'english';
+        }
+
+        return null;
+    }
+
+    private function resolveLanguage(Post $post): string
+    {
+        $lang = strtolower((string) $post->language);
+
+        if (in_array($lang, ['en', 'english'], true)) {
+            return 'english';
+        }
+
+        return 'bangla';
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return list<string>
+     */
+    private function selectedPlatforms(Post $post, array $options): array
+    {
+        $platforms = $options['platforms'] ?? $post->platforms ?? [];
+
+        if (! is_array($platforms)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            fn (mixed $platform): string => strtolower((string) $platform),
+            $platforms,
+        ));
+    }
+
+    private function platformState(
+        PostsyncerConfig $config,
+        string $platform,
+        string $postType,
+        string $language,
+    ): ?string {
+        $matrix = $config->postTypes();
+        $platforms = is_array($matrix['platforms'] ?? null) ? $matrix['platforms'] : [];
+        $base = is_array($platforms[$platform] ?? null) ? $platforms[$platform] : [];
+        $state = $base[$postType] ?? null;
+
+        $overrides = is_array($matrix['overrides'] ?? null) ? $matrix['overrides'] : [];
+        $langOverrides = is_array($overrides[$language] ?? null) ? $overrides[$language] : [];
+        $platformOverrides = is_array($langOverrides[$platform] ?? null) ? $langOverrides[$platform] : [];
+
+        if (array_key_exists($postType, $platformOverrides)) {
+            $state = $platformOverrides[$postType];
+        }
+
+        return is_string($state) ? $state : null;
+    }
+
+    /**
+     * @param  array<mixed>  $captions
+     */
+    private function isFlatCaptionMap(array $captions): bool
+    {
+        foreach ($captions as $key => $value) {
+            if (is_int($key)) {
+                return false;
+            }
+
+            if (is_array($value) && (array_key_exists('caption', $value) || array_key_exists('title', $value))) {
+                return true;
+            }
+
+            if (is_string($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function workspaceTimezone(Post $post): string
+    {
+        $timezone = $post->workspace?->timezone;
+
+        return is_string($timezone) && trim($timezone) !== '' ? $timezone : 'Asia/Dhaka';
+    }
+
+    private function resolveWhen(mixed $when, string $timezone): ?CarbonImmutable
+    {
+        if (! is_string($when) || trim($when) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($when, $timezone)->timezone($timezone);
+        } catch (\Throwable) {
+            throw new InvalidArgumentException('The publish time is invalid.');
+        }
+    }
+}
