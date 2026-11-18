@@ -140,9 +140,15 @@ class SocialreinsConfig
             ? app(VideoPublishPlanner::class)->candidatePairs($subject, $this->planningConfig($workspace), $options)
             : app(PostPublishPlanner::class)->candidatePairs($subject, $options);
 
+        $postsyncer = PostsyncerConfig::fromWorkspace($workspace);
         $covered = [];
         foreach ($pairs as [$language, $platform]) {
-            $covered[$platform] = ($covered[$platform] ?? true) && $this->covers($language, $platform);
+            $here = $this->covers($language, $platform);
+            // A pair neither driver can publish (Bangla X: no account on either) must not pull the platform off SocialReins for the other languages.
+            if (! $here && ! $postsyncer->isPlatformEnabled($language, $platform)) {
+                continue;
+            }
+            $covered[$platform] = ($covered[$platform] ?? true) && $here;
         }
 
         return [
