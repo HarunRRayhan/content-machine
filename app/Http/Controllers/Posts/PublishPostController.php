@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers\Posts;
 
-use App\Actions\Postsyncer\EnqueuePostPublishAction;
+use App\Actions\Socialreins\EnqueueSocialreinsPublishAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Posts\PublishPostRequest;
 use App\Models\Post;
@@ -13,7 +13,7 @@ use Inertia\Inertia;
 
 class PublishPostController extends Controller
 {
-    public function __invoke(PublishPostRequest $request, Post $post, EnqueuePostPublishAction $action): RedirectResponse
+    public function __invoke(PublishPostRequest $request, Post $post, EnqueueSocialreinsPublishAction $action): RedirectResponse
     {
         $workspace = $this->currentWorkspace($request);
 

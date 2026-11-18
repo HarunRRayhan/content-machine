@@ -2,7 +2,7 @@ import { Head, Link, router } from '@inertiajs/react';
 import TemplatePreview from '@/components/media/template-preview';
 import { IndexWorkspaceChips } from '@/components/studio/workspace-schedule';
 import type {
-    PostsyncerGroup,
+    PublishGroup,
     WorkspaceBucket,
 } from '@/components/studio/workspace-schedule';
 import { postShowUrl } from '@/lib/content-urls';
@@ -40,7 +40,7 @@ type PostRow = {
     publish_state: string;
     language: string | null;
     platforms: string[];
-    groups?: PostsyncerGroup[];
+    groups?: PublishGroup[];
     workspaces?: WorkspaceBucket[];
     has_captions: boolean;
     has_body: boolean;

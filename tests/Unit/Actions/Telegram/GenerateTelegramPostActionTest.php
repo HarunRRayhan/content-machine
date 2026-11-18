@@ -21,7 +21,6 @@ use App\Support\AiProviders\AiCompletionClientContract;
 use App\Support\AiProviders\AiCompletionResult;
 use App\Support\AiProviders\AiProviderCredentialResolver;
 use App\Support\AiProviders\AiVisionCompletionClientContract;
-use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -144,9 +143,7 @@ class GenerateTelegramPostActionTest extends TestCase
         Queue::fake();
 
         $workspace = Workspace::factory()->create();
-        PostsyncerConfig::write($workspace, [
-            'enabled_languages' => ['english', 'bangla'],
-        ]);
+        $this->configureSocialreins($workspace);
         $config = TelegramBotConfig::factory()->connected()->create(['workspace_id' => $workspace->id]);
         AiProviderCredential::factory()->withModel()->create(['workspace_id' => $workspace->id]);
         $entry = ScratchpadEntry::factory()->create([

@@ -5,7 +5,7 @@ namespace App\Support\Posts;
 use Carbon\CarbonImmutable;
 
 /**
- * Guesses a post's category from its earliest PostSyncer scheduled_at, in the
+ * Guesses a post's category from its earliest scheduled_at in its stored PostSyncer groups, in the
  * workspace timezone: 09:00-11:59 is a morning post, 20:00-22:59 an evening
  * carousel, anything else (or no schedule) the default.
  */

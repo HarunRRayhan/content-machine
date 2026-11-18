@@ -3,9 +3,8 @@
 namespace Tests\Feature\Api;
 
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
-use App\Actions\Postsyncer\PublishPostAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
-use App\Jobs\PublishPostJob;
+use App\Jobs\PublishSocialreinsJob;
 use App\Models\Attachment;
 use App\Models\Idea;
 use App\Models\MediaAsset;
@@ -13,14 +12,11 @@ use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Support\Postsyncer\PostsyncerConfig;
-use App\Support\Postsyncer\PostsyncerException;
+use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 class PostsApiTest extends TestCase
@@ -182,7 +178,7 @@ class PostsApiTest extends TestCase
         $this->acting()->getJson("/api/v1/posts/{$old->id}")->assertNotFound();
     }
 
-    public function test_show_returns_the_socialreins_half_of_a_split_post(): void
+    public function test_show_returns_the_socialreins_posts_of_a_post(): void
     {
         $post = Post::factory()->create(['workspace_id' => $this->workspace->id, 'number' => 324, 'human_id' => 'P-324']);
 
@@ -832,7 +828,7 @@ class PostsApiTest extends TestCase
     public function test_publish_dispatches_job_and_returns_queued_state(): void
     {
         Queue::fake();
-        $this->configurePostsyncer();
+        $this->configureSocialreins($this->workspace);
 
         $this->acting()->postJson('/api/v1/posts', [
             'human_id' => 'P-1',
@@ -853,18 +849,18 @@ class PostsApiTest extends TestCase
 
         $post = Post::query()->where('human_id', 'P-1')->sole();
 
-        Queue::assertPushed(PublishPostJob::class, function (PublishPostJob $job) use ($post) {
-            return $job->post->is($post)
+        Queue::assertPushed(PublishSocialreinsJob::class, function (PublishSocialreinsJob $job) use ($post) {
+            return $job->subject->is($post)
                 && $job->options['when'] === '2026-08-28T22:00:00+06:00'
                 && $job->options['platforms'] === ['facebook']
                 && $job->options['confirm_ask'] === true;
         });
     }
 
-    public function test_publish_on_a_scheduled_post_only_appends_when_platforms_are_explicit(): void
+    public function test_publish_refuses_a_post_published_through_postsyncer(): void
     {
         Queue::fake();
-        $this->configurePostsyncer();
+        $this->configureSocialreins($this->workspace);
 
         $group = [
             'post_id' => '500',
@@ -883,27 +879,12 @@ class PostsApiTest extends TestCase
             'postsyncer' => ['groups' => [$group]],
         ]);
 
-        // No explicit platforms: legacy refusal is unchanged.
         $this->acting()->postJson('/api/v1/posts/P-144/publish', [
             'when' => '2026-10-10T09:00:00+06:00',
-        ])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('publish');
-
-        // Already-scheduled platform is refused and named.
-        $this->acting()->postJson('/api/v1/posts/P-144/publish', [
-            'when' => '2026-10-10T09:00:00+06:00',
-            'platforms' => ['facebook'],
-        ])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('platforms');
-
-        // Missing `when` is refused.
-        $this->acting()->postJson('/api/v1/posts/P-144/publish', [
             'platforms' => ['linkedin'],
         ])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('when');
+            ->assertJsonPath('errors.publish.0', SocialreinsConfig::POSTSYNCER_HISTORY_MESSAGE);
 
         Queue::assertNothingPushed();
         $this->assertEquals([$group], $post->fresh()->postsyncer['groups']);
@@ -929,7 +910,7 @@ class PostsApiTest extends TestCase
         ]);
     }
 
-    public function test_publish_rejects_when_postsyncer_is_not_ready(): void
+    public function test_publish_rejects_when_socialreins_is_not_ready(): void
     {
         Queue::fake();
 
@@ -952,7 +933,7 @@ class PostsApiTest extends TestCase
     public function test_publish_rejects_when_already_queued(): void
     {
         Queue::fake();
-        $this->configurePostsyncer();
+        $this->configureSocialreins($this->workspace);
 
         Post::factory()->for($this->workspace)->create([
             'human_id' => 'P-3',
@@ -1001,554 +982,5 @@ class PostsApiTest extends TestCase
             ->assertJsonValidationErrors('publish_state');
 
         $this->assertSame('failed', $post->refresh()->publish_state);
-    }
-
-    public function test_reconcile_endpoint_checkpoints_a_verified_postsyncer_post(): void
-    {
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'bangla' => [
-                    'workspace_id' => '15211',
-                    'platforms' => ['facebook' => ['account_id' => 100]],
-                ],
-            ],
-            'post_types' => [
-                'platforms' => ['facebook' => ['text' => 'on']],
-                'overrides' => [],
-            ],
-        ]);
-
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => 'P-61',
-            'number' => 61,
-            'language' => 'bn',
-            'platforms' => ['facebook'],
-            'captions' => ['facebook' => 'Reconcile this caption'],
-            'status' => 'ready',
-        ]);
-
-        Http::fake([
-            'postsyncer.com/api/v1/posts' => Http::response(['message' => 'gateway timeout'], 500),
-        ]);
-
-        try {
-            app(PublishPostAction::class)->handle($post, [
-                'when' => '2099-09-03T09:00:00+06:00',
-                'confirm_ask' => false,
-            ]);
-        } catch (PostsyncerException) {
-            // The failed create is the state this endpoint repairs.
-        }
-
-        Http::fake([
-            'postsyncer.com/api/v1/posts/99' => Http::response([
-                'id' => 99,
-                'workspace_id' => 15211,
-                'content' => [[
-                    'text' => 'Reconcile this caption',
-                    'media' => [],
-                ]],
-                'platforms' => [['platform' => 'facebook', 'account_id' => 100, 'settings' => [
-                    'post_type' => 'POST',
-                    'caption' => 'Reconcile this caption',
-                ]]],
-                'status' => 'SCHEDULED',
-                'scheduled_at' => '2099-09-03T09:00:00+06:00',
-            ], 200),
-        ]);
-
-        $this->acting()->postJson('/api/v1/posts/P-61/reconcile', [
-            'postsyncer_id' => '99',
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '99');
-    }
-
-    public function test_reconcile_media_endpoint_checkpoints_verified_media_ids(): void
-    {
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => 'P-MEDIA-API-RECONCILE',
-            'number' => 62,
-            'publish_state' => 'failed',
-            'publish_progress' => [
-                'version' => 1,
-                'operation_id' => 'operation-media-api',
-                'run_token' => 'run-media-api',
-                'options' => ['when' => null, 'confirm_ask' => false],
-                'plan_hash' => 'plan-media-api',
-                'planned_groups' => [],
-                'completed_groups' => [],
-                'current' => [
-                    'index' => 0,
-                    'group_key' => 'group-media-api',
-                    'phase' => 'uploading',
-                    'idempotency_key' => 'idempotency-media-api',
-                    'media_ids' => [],
-                    'media_urls' => ['https://example.com/image.png'],
-                ],
-                'state' => 'uncertain',
-            ],
-        ]);
-
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/reconcile-media', [
-            'media_ids' => [915],
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
-            ->assertJsonPath('data.publish_progress.current.media_ids.0', '915');
-    }
-
-    public function test_reconcile_media_absent_endpoint_resets_verified_empty_upload(): void
-    {
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'bangla' => [
-                    'workspace_id' => '15211',
-                    'platforms' => ['facebook' => ['account_id' => 100]],
-                ],
-            ],
-            'post_types' => [
-                'platforms' => ['facebook' => ['photo' => 'on']],
-                'overrides' => [],
-            ],
-        ]);
-
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => 'P-MEDIA-ABSENT-API',
-            'number' => 63,
-            'status' => 'ready',
-            'language' => 'bn',
-            'platforms' => ['facebook'],
-            'captions' => ['facebook' => 'Caption'],
-            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
-        ]);
-
-        Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'message' => 'temporary outage',
-            ], 503),
-        ]);
-
-        try {
-            app(PublishPostAction::class)->handle($post, [
-                'when' => '2099-09-03T09:00:00+06:00',
-                'confirm_ask' => false,
-            ]);
-        } catch (PostsyncerException) {
-            // The failed upload creates the uncertain checkpoint this endpoint repairs.
-        }
-
-        $post->refresh();
-        $this->assertSame('uncertain', $post->publish_progress['state']);
-        $this->assertSame('uploading', $post->publish_progress['current']['phase']);
-
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/reconcile-media-absent', [
-            'confirmed_absent' => true,
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.state', 'failed')
-            ->assertJsonPath('data.publish_progress.current', null)
-            ->assertJsonPath(
-                'data.publish_progress.media_upload_recovery.mode',
-                'operator_confirmed_absent',
-            );
-    }
-
-    public function test_reconcile_create_absent_endpoint_makes_verified_empty_create_retryable(): void
-    {
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'bangla' => [
-                    'workspace_id' => '15211',
-                    'platforms' => ['facebook' => ['account_id' => 100]],
-                ],
-            ],
-            'post_types' => [
-                'platforms' => ['facebook' => ['photo' => 'on']],
-                'overrides' => [],
-            ],
-        ]);
-
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => 'P-CREATE-ABSENT-API',
-            'number' => 64,
-            'status' => 'ready',
-            'language' => 'bn',
-            'platforms' => ['facebook'],
-            'captions' => ['facebook' => 'Caption'],
-            'image_drive_urls' => ['https://drive.google.com/file/d/abc/view'],
-        ]);
-
-        Http::fake([
-            'postsyncer.com/api/v1/media/upload/url' => Http::response([
-                'media' => [['id' => 915]],
-                'count_stored' => 1,
-            ], 200),
-            'postsyncer.com/api/v1/posts' => Http::response([
-                'message' => 'temporary outage',
-            ], 500),
-        ]);
-
-        app(PublishPostAction::class)->handle($post, [
-            'when' => '2099-09-03T09:00:00+06:00',
-            'confirm_ask' => false,
-        ]);
-
-        $post->refresh();
-        $this->assertSame('uncertain', $post->publish_progress['state']);
-        $this->assertSame('creating', $post->publish_progress['current']['phase']);
-
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/reconcile-create-absent', [
-            'confirmed_absent' => true,
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.state', 'failed')
-            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
-            ->assertJsonPath('data.publish_progress.current.media_ids.0', '915')
-            ->assertJsonPath(
-                'data.publish_progress.create_recovery.mode',
-                'operator_confirmed_absent',
-            );
-    }
-
-    public function test_rebase_retry_to_publish_now_preserves_unfinished_media_ids(): void
-    {
-        $this->rebaseAfterCompletedGroupStatus('P-REBASE-NOW-API', 'PUBLISHED')
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.options.when', null)
-            ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'PUBLISHED')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.scheduled_at', null)
-            ->assertJsonMissingPath('data.publish_progress.completed_groups.0.operator_confirmed')
-            ->assertJsonPath('data.publish_progress.current.phase', 'retryable')
-            ->assertJsonPath('data.publish_progress.current.media_ids.0', '9001');
-    }
-
-    public function test_rebase_retry_to_publish_now_accepts_a_remotely_failed_completed_group(): void
-    {
-        $this->rebaseAfterCompletedGroupStatus('P-REBASE-NOW-FAILED', 'FAILED')
-            ->assertOk()
-            ->assertJsonPath('data.publish_progress.schedule_recovery.mode', 'past_schedule_to_publish_now')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '1001')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.status', 'FAILED')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.operator_confirmed', true)
-            ->assertJsonPath('data.publish_progress.current.index', 1)
-            ->assertJsonPath('data.publish_progress.current.phase', 'retryable');
-    }
-
-    public function test_rebase_retry_to_publish_now_rejects_a_still_scheduled_completed_group(): void
-    {
-        $this->rebaseAfterCompletedGroupStatus('P-REBASE-NOW-SCHED', 'SCHEDULED')
-            ->assertStatus(422)
-            ->assertJsonPath('errors.publish.0', 'Every completed group must be PUBLISHED or FAILED before a schedule can be rebased to publish-now.');
-    }
-
-    private function rebaseAfterCompletedGroupStatus(string $humanId, string $remoteStatus): TestResponse
-    {
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'bangla' => [
-                    'workspace_id' => '15211',
-                    'platforms' => [
-                        'twitter' => ['account_id' => 100],
-                        'facebook' => ['account_id' => 101],
-                    ],
-                ],
-            ],
-            'post_types' => [
-                'platforms' => [
-                    'twitter' => ['text' => 'on'],
-                    'facebook' => ['photo' => 'on'],
-                ],
-                'overrides' => [],
-            ],
-        ]);
-
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => $humanId,
-            'number' => 66,
-            'status' => 'ready',
-            'approval_state' => 'approved',
-            'language' => 'bn',
-            'platforms' => ['twitter', 'facebook'],
-            'captions' => [
-                'twitter' => [
-                    'caption' => 'A short thread',
-                    'thread' => ['A follow-up'],
-                    'images' => [],
-                ],
-                'facebook' => ['caption' => 'A photo post'],
-            ],
-            'image_drive_urls' => ['https://drive.google.com/file/d/example/view'],
-        ]);
-
-        $createdRemote = null;
-        $createCount = 0;
-        $getStatus = 'PUBLISHED';
-        Http::fake(function ($request) use (&$createdRemote, &$createCount, &$getStatus) {
-            $url = $request->url();
-
-            if (str_ends_with($url, '/media/upload/url')) {
-                return Http::response([
-                    'media' => [['id' => 9001]],
-                    'count_stored' => 1,
-                ], 200);
-            }
-
-            if (str_ends_with($url, '/posts') && $request->method() === 'POST') {
-                $createCount++;
-                if ($createCount === 1) {
-                    $body = $request->data();
-                    $account = $body['accounts'][0];
-                    $createdRemote = [
-                        'id' => 1001,
-                        'workspace_id' => '15211',
-                        'status' => 'PUBLISHED',
-                        'scheduled_at' => '2020-01-01 00:00',
-                        'content' => $body['content'],
-                        'platforms' => [[
-                            'platform' => 'twitter',
-                            'account_id' => $account['id'],
-                            'settings' => $account['settings'],
-                        ]],
-                    ];
-
-                    return Http::response($createdRemote, 200);
-                }
-
-                return Http::response(['message' => 'temporary outage'], 500);
-            }
-
-            if (str_ends_with($url, '/posts/1001') && $request->method() === 'GET') {
-                return Http::response(array_merge($createdRemote, ['status' => $getStatus]), 200);
-            }
-
-            return Http::response(['message' => 'unexpected request'], 404);
-        });
-
-        $action = app(PublishPostAction::class);
-        $action->handle($post, [
-            'when' => '2020-01-01T00:00:00+06:00',
-            'confirm_ask' => false,
-        ]);
-
-        $post->refresh();
-        $this->assertSame('uncertain', $post->publish_progress['state']);
-        $this->assertSame(['9001'], array_map('strval', $post->publish_progress['current']['media_ids']));
-
-        $action->reconcileCreateAbsent($post);
-
-        // The remote status changes only after the original schedule run, as on a real past slot.
-        $getStatus = $remoteStatus;
-
-        return $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/rebase-retry-publish-now');
-    }
-
-    public function test_abandon_retry_endpoint_drops_a_retryable_checkpoint_and_keeps_completed_groups(): void
-    {
-        $post = $this->failedPostWithCheckpoint('P-ABANDON-RETRY', 'retryable', 'failed');
-
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/abandon-retry', [
-            'confirmed_absent' => true,
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.current', null)
-            ->assertJsonPath('data.publish_progress.abandoned.0.group_key', 'group-retry')
-            ->assertJsonPath('data.publish_progress.abandoned.0.media_ids.0', '915')
-            ->assertJsonPath('data.publish_progress.completed_groups.0.post_id', '135500');
-    }
-
-    public function test_abandon_retry_endpoint_refuses_an_uncertain_checkpoint(): void
-    {
-        $post = $this->failedPostWithCheckpoint('P-ABANDON-UNCERTAIN', 'creating', 'uncertain');
-
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/abandon-retry', [
-            'confirmed_absent' => true,
-        ])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('publish');
-
-        $this->assertSame('creating', $post->fresh()->publish_progress['current']['phase']);
-    }
-
-    private function failedPostWithCheckpoint(string $humanId, string $phase, string $state): Post
-    {
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => $humanId,
-            'number' => random_int(1000, 99999),
-            'status' => 'ready',
-            'language' => 'en',
-            'platforms' => ['facebook', 'youtube'],
-        ]);
-
-        $post->forceFill([
-            'publish_state' => 'failed',
-            'publish_progress' => [
-                'version' => 1,
-                'operation_id' => 'operation-'.$humanId,
-                'run_token' => 'run-'.$humanId,
-                'options' => ['when' => '2099-01-01T09:00:00+06:00', 'confirm_ask' => false],
-                'plan_hash' => 'plan-'.$humanId,
-                'planned_groups' => [
-                    ['index' => 0, 'group_key' => 'group-done'],
-                    ['index' => 1, 'group_key' => 'group-retry'],
-                ],
-                'completed_groups' => [[
-                    'index' => 0,
-                    'group_key' => 'group-done',
-                    'post_id' => '135500',
-                    'status' => 'PUBLISHED',
-                    'platforms' => ['facebook'],
-                ]],
-                'current' => [
-                    'index' => 1,
-                    'group_key' => 'group-retry',
-                    'phase' => $phase,
-                    'idempotency_key' => 'key-'.$humanId,
-                    'media_ids' => [915],
-                    'media_urls' => ['https://example.com/media.png'],
-                ],
-                'state' => $state,
-            ],
-        ])->save();
-
-        return $post;
-    }
-
-    public function test_repair_account_mapping_endpoint_rebases_a_partial_publish(): void
-    {
-        Http::fake([
-            'postsyncer.com/api/v1/accounts' => Http::response([
-                'data' => [[
-                    'id' => 7541,
-                    'workspace_id' => 853,
-                    'platform' => 'instagram',
-                    'username' => 'harundotdev',
-                    'has_expired' => false,
-                ]],
-            ], 200),
-        ]);
-
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'bangla' => [
-                    'workspace_id' => '15211',
-                    'platforms' => ['facebook' => ['account_id' => 100]],
-                ],
-                'english' => [
-                    'workspace_id' => '853',
-                    'platforms' => [
-                        'facebook' => ['account_id' => 200],
-                        'instagram' => ['account_id' => 7364],
-                    ],
-                ],
-            ],
-            'post_types' => [
-                'platforms' => [
-                    'facebook' => ['text' => 'on'],
-                    'instagram' => ['text' => 'on'],
-                ],
-                'overrides' => [],
-            ],
-        ]);
-
-        $post = Post::factory()->for($this->workspace)->create([
-            'human_id' => 'P-API-ACCOUNT-REPAIR',
-            'number' => 63,
-            'status' => 'ready',
-            'language' => 'bn',
-            'platforms' => ['facebook', 'instagram'],
-            'captions' => [
-                'Bangla' => ['facebook' => ['caption' => 'Bangla caption']],
-                'English' => [
-                    'facebook' => ['caption' => 'English Facebook caption'],
-                    'instagram' => ['caption' => 'English Instagram caption'],
-                ],
-            ],
-        ]);
-        $options = [
-            'when' => '2026-09-04T09:23:00+06:00',
-            'platforms' => ['facebook', 'instagram'],
-            'confirm_ask' => false,
-        ];
-        $action = app(PublishPostAction::class);
-        $plan = $action->freezePlan($post, PostsyncerConfig::fromWorkspace($this->workspace), $options);
-        $currentKey = $plan['groups'][1]['group_key'];
-
-        $post->forceFill([
-            'publish_state' => 'failed',
-            'publish_progress' => [
-                'version' => 1,
-                'operation_id' => 'operation-api-repair',
-                'run_token' => 'run-api-repair',
-                'options' => $plan['options'],
-                'plan_hash' => $plan['hash'],
-                'planned_groups' => $plan['groups'],
-                'completed_groups' => [[
-                    'index' => 0,
-                    'group_key' => $plan['groups'][0]['group_key'],
-                    'post_id' => '135500',
-                    'status' => 'SCHEDULED',
-                    'scheduled_at' => '2026-09-04 09:23',
-                    'platforms' => ['facebook'],
-                    'language' => 'bangla',
-                ]],
-                'current' => [
-                    'index' => 1,
-                    'group_key' => $currentKey,
-                    'phase' => 'retryable',
-                    'idempotency_key' => 'old-api-repair-key',
-                    'media_ids' => [],
-                    'media_urls' => [],
-                ],
-                'state' => 'failed',
-            ],
-        ])->save();
-
-        $this->acting()->postJson('/api/v1/posts/'.$post->human_id.'/repair-account-mapping', [
-            'language' => 'english',
-            'platform' => 'instagram',
-            'from_account_id' => 7364,
-            'to_account_id' => 7541,
-        ])
-            ->assertOk()
-            ->assertJsonPath('data.publish_state', 'failed')
-            ->assertJsonPath('data.publish_progress.account_mapping_repair.to_account_id', '7541')
-            ->assertJsonPath('data.publish_progress.current.phase', 'retryable');
-
-        $this->workspace->refresh();
-        $this->assertSame(
-            '7541',
-            (string) PostsyncerConfig::fromWorkspace($this->workspace)
-                ->language('english')['platforms']['instagram']['account_id'],
-        );
-        Http::assertSentCount(1);
-    }
-
-    private function configurePostsyncer(): void
-    {
-        PostsyncerConfig::write($this->workspace, [
-            'publish_enabled' => true,
-            'api_key' => 'test-api-key',
-            'languages' => [
-                'bangla' => ['workspace_id' => '15211', 'platforms' => []],
-                'english' => ['workspace_id' => '853', 'platforms' => []],
-            ],
-        ]);
     }
 }

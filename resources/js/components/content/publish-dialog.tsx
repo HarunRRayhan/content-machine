@@ -33,20 +33,20 @@ type PublishDialogProps = {
 function publishStatusLabel(
     publishState: string,
     contentStatus?: string | null,
-    via = 'PostSyncer',
+    via = 'SocialReins',
 ): string {
     const lifecycle = (contentStatus || '').toLowerCase();
 
     if (publishState === 'queued') {
-        return 'Queuing on PostSyncer…';
+        return 'Queuing on SocialReins…';
     }
 
     if (publishState === 'running') {
-        return 'Sending to PostSyncer…';
+        return 'Sending to SocialReins…';
     }
 
     if (publishState === 'failed') {
-        return 'PostSyncer job failed';
+        return 'SocialReins publish failed';
     }
 
     if (publishState === 'succeeded') {
@@ -58,10 +58,10 @@ function publishStatusLabel(
             return `Published on ${via}.`;
         }
 
-        return 'PostSyncer job succeeded.';
+        return 'SocialReins publish succeeded.';
     }
 
-    return `PostSyncer job: ${publishState}`;
+    return `SocialReins publish: ${publishState}`;
 }
 
 export function PublishStatusBanner({
@@ -140,7 +140,7 @@ export default function PublishDialog({
 
             {!disabledReason && !publishBusy && (
                 <p className="text-sm text-muted-foreground">
-                    Queue {entityLabel} through PostSyncer.
+                    Queue {entityLabel} through SocialReins.
                 </p>
             )}
 
@@ -192,10 +192,10 @@ export default function PublishDialog({
                         </DialogTitle>
                         <DialogDescription>
                             {mode === 'retry'
-                                ? 'Resume the failed PostSyncer publish without changing its original options.'
+                                ? 'Resume the failed publish without changing its original options.'
                                 : mode === 'now'
-                                  ? 'PostSyncer will publish as soon as the job runs.'
-                                  : 'Choose when PostSyncer should publish.'}
+                                  ? 'SocialReins will publish as soon as the job runs.'
+                                  : 'Choose when SocialReins should publish.'}
                         </DialogDescription>
                     </DialogHeader>
 

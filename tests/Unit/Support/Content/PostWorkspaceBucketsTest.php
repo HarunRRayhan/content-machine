@@ -16,7 +16,7 @@ class PostWorkspaceBucketsTest extends TestCase
     {
         $workspace = Workspace::factory()->create();
         $captions = json_decode(
-            file_get_contents(base_path('tests/Fixtures/postsyncer/p48_captions.json')),
+            file_get_contents(base_path('tests/Fixtures/publishing/p48_captions.json')),
             true,
         );
 

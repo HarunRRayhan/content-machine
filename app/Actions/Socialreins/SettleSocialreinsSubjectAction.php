@@ -2,7 +2,6 @@
 
 namespace App\Actions\Socialreins;
 
-use App\Actions\Postsyncer\SyncScheduledPostsAction;
 use App\Jobs\PublishSocialreinsJob;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
@@ -113,33 +112,12 @@ class SettleSocialreinsSubjectAction
             .'if it is not there, retry from SocialReins.';
     }
 
-    private function hasPendingPostsyncerGroups(Post|Video $subject): bool
-    {
-        if (! is_array($subject->publish_progress['split'] ?? null)) {
-            return false;
-        }
-
-        foreach ($subject->postsyncer['groups'] ?? [] as $group) {
-            if (is_array($group) && ! in_array($group['status'] ?? null, SyncScheduledPostsAction::TERMINAL_GROUP_STATUSES, true)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private function save(Post|Video $subject, ?string $status, string $state, ?string $error): void
     {
         $values = [
             'publish_state' => $state,
             'publish_error' => $error,
         ];
-
-        // A split post stays scheduled while PostSyncer groups are still pending, so the
-        // PostSyncer sync keeps checking them and marks it posted later.
-        if ($status === 'posted' && $this->hasPendingPostsyncerGroups($subject)) {
-            $status = 'scheduled';
-        }
 
         if ($status !== null) {
             $values['status'] = $status;
@@ -164,9 +142,8 @@ class SettleSocialreinsSubjectAction
 
     /**
      * Close the Telegram request this run was queued for (its id is in the stored options, so
-     * a webhook or the reconcile can find it). As on PostSyncer, a post handed over counts as
-     * published whether it went out now or is scheduled: /cancel can no longer cancel it. A
-     * split post only gets here after its PostSyncer half succeeded. Call under the post's lock.
+     * a webhook or the reconcile can find it). A post handed over counts as published whether
+     * it went out now or is scheduled: /cancel can no longer cancel it. Call under the post's lock.
      *
      * A late settle (webhook, reconcile) of a run that already closed its request finds the
      * post no longer in flight: it may still turn a failed request into a published one, but

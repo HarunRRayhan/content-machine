@@ -5,7 +5,7 @@ import PostCaptionsPanel from '@/components/studio/post-captions-panel';
 import PostDraftEditor from '@/components/studio/post-draft-editor';
 import PostOverview from '@/components/studio/post-overview';
 import type {
-    PostsyncerGroup,
+    PublishGroup,
     WorkspaceBucket,
 } from '@/components/studio/workspace-schedule';
 import { useStudioTab } from '@/hooks/use-studio-tab';
@@ -62,22 +62,12 @@ type PostDetail = {
     publish_progress: {
         state?: string;
         left_out?: string[];
-        move_off_postsyncer?: { note?: string | null };
-        split?: {
-            socialreins?: { platforms?: string[] };
-            postsyncer?: string[];
-        };
-        current?: {
-            index?: number;
-            group_key?: string;
-            phase?: string;
-        } | null;
     } | null;
     approval_state: string;
     timezone: string;
     postsyncer: Record<string, unknown> | null;
-    socialreins_groups?: PostsyncerGroup[];
-    postsyncer_ready: boolean;
+    socialreins_groups?: PublishGroup[];
+    publish_ready: boolean;
     needs_confirm_ask: boolean;
     idea_id: number | null;
     created_at: string | null;
@@ -115,12 +105,12 @@ export default function PostShow({ post }: PageProps) {
     const onPostsyncer =
         Array.isArray(postsyncerGroups) && postsyncerGroups.length > 0;
     const onSocialreins = (post.socialreins_groups ?? []).length > 0;
-    const via =
-        onPostsyncer && onSocialreins
-            ? 'PostSyncer and SocialReins'
-            : onSocialreins
-              ? 'SocialReins'
-              : 'PostSyncer';
+    // PostSyncer groups are history from before PostSyncer was removed.
+    const via = !onPostsyncer
+        ? 'SocialReins'
+        : onSocialreins
+          ? 'PostSyncer and SocialReins'
+          : 'PostSyncer';
     const editable =
         ['draft', 'ready'].includes(post.status) &&
         !['queued', 'running'].includes(post.publish_state);
@@ -190,11 +180,10 @@ export default function PostShow({ post }: PageProps) {
                         templateMeta={post.template_meta}
                         workspaces={post.workspaces}
                         publishUrl={`/posts/${post.human_id}/publish`}
-                        postsyncerReady={post.postsyncer_ready}
+                        publishReady={post.publish_ready}
                         publishState={post.publish_state}
                         publishRetryable={post.publish_retryable}
                         publishProgress={post.publish_progress}
-                        reconcileUrl={`/posts/${post.human_id}/reconcile`}
                         approvalState={post.approval_state}
                         timezone={post.timezone}
                         needsConfirmAsk={post.needs_confirm_ask}

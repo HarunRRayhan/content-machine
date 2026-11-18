@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Signed, unauthenticated media URLs for PostSyncer link-upload and SocialReins publish.
+ * Signed, unauthenticated media URLs SocialReins fetches when it publishes.
  */
 class PublishMediaController extends Controller
 {

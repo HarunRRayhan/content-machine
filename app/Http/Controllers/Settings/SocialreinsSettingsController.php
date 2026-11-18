@@ -5,9 +5,8 @@ namespace App\Http\Controllers\Settings;
 use App\Actions\Socialreins\SaveSocialreinsSettingsAction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Settings\Concerns\AuthorizesWorkspaceSettings;
-use App\Http\Requests\Settings\UpdatePostsyncerSettingsRequest;
 use App\Http\Requests\Settings\UpdateSocialreinsSettingsRequest;
-use App\Support\Postsyncer\PostsyncerConfig;
+use App\Support\Publishing\PlanningConfig;
 use App\Support\Socialreins\SocialreinsConfig;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,27 +25,24 @@ class SocialreinsSettingsController extends Controller
         $config = SocialreinsConfig::fromWorkspace($workspace);
 
         $languages = [];
-        foreach (PostsyncerConfig::LANGUAGES as $language) {
+        foreach (PlanningConfig::LANGUAGES as $language) {
             $languages[$language] = [
                 'set_id' => $config->setId($language),
                 'token_configured' => $config->token($language) !== null,
-                'platforms' => $config->coveredPlatforms($language) ?? UpdatePostsyncerSettingsRequest::PLATFORMS,
+                'platforms' => $config->coveredPlatforms($language) ?? PlanningConfig::PLATFORMS,
             ];
         }
 
         // Secrets are write-only: only whether they are set goes to the page.
         return Inertia::render('workspace-settings/socialreins', [
-            'driver' => SocialreinsConfig::usesSocialreins($workspace) ? SocialreinsConfig::DRIVER : 'postsyncer',
-            'postsyncerEnabled' => SocialreinsConfig::postsyncerEnabled($workspace),
             'baseUrl' => $config->baseUrl(),
             'webhookUrl' => route('socialreins.webhook', ['workspace' => $workspace->id]),
             'webhookSecretConfigured' => $config->webhookSecret() !== null,
             'tiktokPrivacyLevel' => $config->tiktokPrivacy(),
             'privacyLevels' => SocialreinsConfig::PRIVACY_LEVELS,
             'defaultLanguage' => $config->defaultLanguage(),
-            'routedLanguages' => $config->routedLanguages(),
             'languages' => $languages,
-            'platforms' => UpdatePostsyncerSettingsRequest::PLATFORMS,
+            'platforms' => PlanningConfig::PLATFORMS,
         ]);
     }
 

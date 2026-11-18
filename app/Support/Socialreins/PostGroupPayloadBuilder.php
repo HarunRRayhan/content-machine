@@ -2,14 +2,14 @@
 
 namespace App\Support\Socialreins;
 
-use App\Support\Postsyncer\PublishGroup;
+use App\Support\Publishing\PublishGroup;
 use Carbon\CarbonImmutable;
 
 /**
  * Turns the planner's PublishGroups of one language into ONE brain `POST /post-groups` body:
  * the language's set, the platforms of every PublishGroup, and one override per platform
- * (caption, media, thread parts, first comment, cover, TikTok settings). A PublishGroup was
- * one PostSyncer call per media set; SocialReins takes the whole language in one call.
+ * (caption, media, thread parts, first comment, cover, TikTok settings). A PublishGroup is
+ * one media set; SocialReins takes the whole language in one call.
  */
 final class PostGroupPayloadBuilder
 {
@@ -120,7 +120,7 @@ final class PostGroupPayloadBuilder
         $media = $video ? array_slice($group->mediaUrls, 0, 1) : $group->mediaUrls;
 
         if ($tweets !== []) {
-            // Same split PostSyncer got: tweet N carries its slice of the images.
+            // Same split the planner made: tweet N carries its slice of the images.
             $per = max(1, $group->mediaPerTweet);
             $override['body'] = $tweets[0];
             $override['media'] = array_slice($media, 0, $per);
@@ -157,7 +157,7 @@ final class PostGroupPayloadBuilder
             $override['tiktok'] = ['privacy_level' => $privacy];
         }
 
-        // SocialReins uploads to YouTube as private unless told otherwise; CM's videos go out public, as on PostSyncer.
+        // SocialReins uploads to YouTube as private unless told otherwise; CM's videos go out public.
         if ($platform === 'youtube') {
             $override['youtube'] = ['privacy' => 'public'];
         }

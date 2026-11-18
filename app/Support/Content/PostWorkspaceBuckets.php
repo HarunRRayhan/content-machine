@@ -5,8 +5,8 @@ namespace App\Support\Content;
 use App\Models\Post;
 
 /**
- * Derives Bangla/English PostSyncer workspace chips for the posts index and
- * overview when postsyncer.groups is not populated yet (draft/ready posts).
+ * Derives Bangla/English workspace chips for the posts index and overview, from the
+ * post's publish groups, else (draft/ready posts) its captions.
  */
 final class PostWorkspaceBuckets
 {
@@ -16,7 +16,7 @@ final class PostWorkspaceBuckets
      */
     public function forPost(Post $post, ?array $groups = null): array
     {
-        $fromGroups = $this->fromPostsyncerGroups($groups ?? PublishGroups::of($post));
+        $fromGroups = $this->fromGroups($groups ?? PublishGroups::of($post));
 
         if ($fromGroups !== []) {
             return $fromGroups;
@@ -32,12 +32,12 @@ final class PostWorkspaceBuckets
     }
 
     /**
-     * Groups of both drivers: a post scheduled through SocialReins has no PostSyncer groups.
+     * SocialReins posts and stored PostSyncer groups (PublishGroups::of).
      *
      * @param  list<array<string, mixed>>  $groups
      * @return list<array{key: string, platforms: list<string>}>
      */
-    private function fromPostsyncerGroups(array $groups): array
+    private function fromGroups(array $groups): array
     {
         if ($groups === []) {
             return [];

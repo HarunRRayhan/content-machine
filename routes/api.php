@@ -152,18 +152,6 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.publish');
 
-    Route::post('videos/{human_id}/reconcile', [VideosApiController::class, 'reconcile'])
-        ->middleware('auth.workspace-token:videos:write')
-        ->name('videos.reconcile');
-
-    Route::post('videos/{human_id}/reconcile-create-absent', [VideosApiController::class, 'reconcileCreateAbsent'])
-        ->middleware('auth.workspace-token:videos:write')
-        ->name('videos.reconcile-create-absent');
-
-    Route::post('videos/{human_id}/reconcile-media-absent', [VideosApiController::class, 'reconcileMediaAbsent'])
-        ->middleware('auth.workspace-token:videos:write')
-        ->name('videos.reconcile-media-absent');
-
     Route::post('posts/{human_id}/take-down', [SocialreinsTakeDownController::class, 'post'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.take-down');
@@ -175,10 +163,6 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('videos/{human_id}/reschedule', [VideosApiController::class, 'reschedule'])
         ->middleware('auth.workspace-token:videos:write')
         ->name('videos.reschedule');
-
-    Route::post('videos/{human_id}/reconcile-groups-deleted', [VideosApiController::class, 'reconcileGroupsDeleted'])
-        ->middleware('auth.workspace-token:videos:write')
-        ->name('videos.reconcile-groups-deleted');
 
     Route::get('posts', [PostsApiController::class, 'index'])
         ->middleware('auth.workspace-token:posts:read')
@@ -219,38 +203,6 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
     Route::post('posts/{human_id}/reschedule', [PostsApiController::class, 'reschedule'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.reschedule');
-
-    Route::post('posts/{human_id}/reconcile', [PostsApiController::class, 'reconcile'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.reconcile');
-
-    Route::post('posts/{human_id}/reconcile-partial-failure', [PostsApiController::class, 'recoverPartialFailure'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.reconcile-partial-failure');
-
-    Route::post('posts/{human_id}/reconcile-media', [PostsApiController::class, 'reconcileMedia'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.reconcile-media');
-
-    Route::post('posts/{human_id}/reconcile-media-absent', [PostsApiController::class, 'reconcileMediaAbsent'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.reconcile-media-absent');
-
-    Route::post('posts/{human_id}/reconcile-create-absent', [PostsApiController::class, 'reconcileCreateAbsent'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.reconcile-create-absent');
-
-    Route::post('posts/{human_id}/abandon-retry', [PostsApiController::class, 'abandonRetry'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.abandon-retry');
-
-    Route::post('posts/{human_id}/rebase-retry-publish-now', [PostsApiController::class, 'rebaseRetryToPublishNow'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.rebase-retry-publish-now');
-
-    Route::post('posts/{human_id}/repair-account-mapping', [PostsApiController::class, 'repairAccountMapping'])
-        ->middleware('auth.workspace-token:posts:write')
-        ->name('posts.repair-account-mapping');
 
     Route::get('posts/{human_id}/media/{mediaAsset}', [PostsApiController::class, 'media'])
         ->middleware('auth.workspace-token:posts:read')

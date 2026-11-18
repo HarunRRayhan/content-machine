@@ -231,7 +231,7 @@ final class McpToolCatalog
             ],
             [
                 'name' => 'publish_post',
-                'description' => 'Queue a post for PostSyncer. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately. Optional platforms list and confirm_ask for ask-gated photo platforms.',
+                'description' => 'Queue a post for publishing through SocialReins. Always pass when (ISO datetime) to schedule. Omitting when publishes immediately. Optional platforms list and confirm_ask for ask-gated photo platforms.',
                 'ability' => 'posts:write',
                 'inputSchema' => self::schema([
                     'human_id' => ['type' => 'string', 'description' => 'The post id, e.g. P-50 or BP-7.'],

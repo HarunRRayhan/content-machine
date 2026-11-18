@@ -9,7 +9,6 @@ use App\Models\SocialreinsGroup;
 use App\Models\User;
 use App\Models\Video;
 use App\Models\Workspace;
-use App\Support\Postsyncer\PostsyncerConfig;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -371,7 +370,7 @@ class VideosControllerTest extends TestCase
                 ->where('video.title', 'Hello video')
                 ->where('video.publish_state', $video->publish_state)
                 ->where('video.publish_retryable', false)
-                ->where('video.postsyncer_ready', false)
+                ->where('video.publish_ready', false)
                 ->has('video.needs_confirm_ask')
                 ->has('video.postsyncer')
             );
@@ -408,18 +407,11 @@ class VideosControllerTest extends TestCase
     {
         [, $workspace] = $this->actingAsWorkspaceMember();
         Cache::flush();
-        PostsyncerConfig::write($workspace, [
-            'api_key' => 'test-api-key',
-            'publish_enabled' => true,
-            'languages' => [
-                'english' => ['workspace_id' => '853', 'platforms' => []],
+        $this->configureSocialreins($workspace, [
+            'platforms' => [
+                'instagram' => ['reel' => 'ask'],
             ],
-            'post_types' => [
-                'platforms' => [
-                    'instagram' => ['reel' => 'ask'],
-                ],
-                'overrides' => [],
-            ],
+            'overrides' => [],
         ]);
 
         $video = Video::factory()->for($workspace)->create([

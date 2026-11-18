@@ -15,8 +15,8 @@ use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 /**
- * Queue a SocialReins publish for a Post or Video that routes to SocialReins.
- * EnqueuePostPublishAction and EnqueueVideoPublishAction hand over to this.
+ * Queue a SocialReins publish for a Post or Video. Every publish, retry and Telegram or MCP
+ * publish comes through here.
  */
 class EnqueueSocialreinsPublishAction
 {
@@ -35,7 +35,6 @@ class EnqueueSocialreinsPublishAction
             throw $this->refuse(__('SocialReins is not configured for publishing: set the base URL, a set id and a token in Settings.'));
         }
 
-        $requested = $options;
         $options = array_intersect_key(
             array_filter($options, fn (mixed $value): bool => $value !== null),
             array_flip(['when', 'platforms', 'confirm_ask', 'telegram_request_id']),
@@ -48,14 +47,14 @@ class EnqueueSocialreinsPublishAction
         }
 
         /** @var T $queued */
-        $queued = DB::transaction(function () use ($subject, $workspace, $requested, $options, $requestId): Post|Video {
-            // Same lock order as the PostSyncer path and the settings save: workspace, then subject.
+        $queued = DB::transaction(function () use ($subject, $workspace, $options, $requestId): Post|Video {
+            // Same lock order as the settings save: workspace, then subject.
             $lockedWorkspace = Workspace::query()->whereKey($workspace->getKey())->lockForUpdate()->firstOrFail();
             $locked = $subject::query()->whereKey($subject->getKey())->lockForUpdate()->firstOrFail();
 
-            // The route was read before this lock: never start on the other driver's subject.
-            if (! SocialreinsConfig::routesToSocialreins($locked, $lockedWorkspace, $requested)) {
-                throw $this->refuse(__('The publish route changed. Try again.'));
+            // A post PostSyncer published is history: publishing it here could send it twice.
+            if (SocialreinsConfig::hasPostsyncerPost($locked)) {
+                throw $this->refuse(__(SocialreinsConfig::POSTSYNCER_HISTORY_MESSAGE));
             }
 
             if ($locked instanceof Post) {
@@ -77,32 +76,17 @@ class EnqueueSocialreinsPublishAction
                 throw $this->refuse(__('This is already published through SocialReins. Take it down first to publish again.'));
             }
 
-            // The SocialReins half of a split post keeps its own options: other platforms
-            // went through PostSyncer and must never be sent here as well.
-            $split = $locked->publish_progress['split'] ?? null;
-            if (is_array($split) && is_array($split['socialreins'] ?? null)) {
-                $options = $split['socialreins'];
+            // What SocialReins does not cover is published nowhere. The publish leaves it out
+            // (PublishToSocialreinsAction) and the item says so.
+            ['covered' => $covered, 'left_out' => $leftOut] = SocialreinsConfig::coverage($locked, $lockedWorkspace, $options);
+            if ($covered === [] && $leftOut !== []) {
+                throw $this->refuse(__('Nothing to publish: SocialReins does not cover :pairs.', [
+                    'pairs' => implode(', ', $leftOut),
+                ]));
             }
 
-            // PostSyncer off: what SocialReins does not cover is published nowhere. The publish
-            // leaves it out (PublishToSocialreinsAction) and the item says so.
-            // A move that stopped part-way leaves posts on PostSyncer: a publish here could send them twice.
-            if (! SocialreinsConfig::postsyncerEnabled($lockedWorkspace) && SocialreinsConfig::hasPostsyncerPost($locked)) {
-                throw $this->refuse(__('PostSyncer is off and this still has a PostSyncer post. Finish moving it with socialreins:move-off-postsyncer --apply.'));
-            }
-
-            $leftOut = [];
-            if (! is_array($split) && ! SocialreinsConfig::postsyncerEnabled($lockedWorkspace)) {
-                ['covered' => $covered, 'left_out' => $leftOut] = SocialreinsConfig::coverage($locked, $lockedWorkspace, $options);
-                if ($covered === [] && $leftOut !== []) {
-                    throw $this->refuse(__('Nothing to publish: SocialReins does not cover :pairs, and PostSyncer is off.', [
-                        'pairs' => implode(', ', $leftOut),
-                    ]));
-                }
-            }
-
-            // A publish that names its request gets the PostSyncer enqueue's admission: the
-            // request must be approved (or failed, on a retry). The run that closes a request
+            // A publish that names its request is admitted only when the request is approved
+            // (or failed, on a retry). The run that closes a request
             // keeps its id in the stored options. Only posts have Telegram requests.
             unset($options['telegram_request_id']);
             $telegramRequest = null;
@@ -135,7 +119,7 @@ class EnqueueSocialreinsPublishAction
             $locked->forceFill([
                 'publish_state' => 'queued',
                 'publish_error' => null,
-                // `driver` keeps the PostSyncer recovery sweep away from the row. `state` is
+                // `driver` marks a SocialReins run (a PostSyncer run had none). `state` is
                 // read only once publish_state is failed, and makes canRetryPublish() true:
                 // a SocialReins retry is always safe (frozen request, same Idempotency-Key).
                 'publish_progress' => [
@@ -143,8 +127,6 @@ class EnqueueSocialreinsPublishAction
                     'state' => 'failed',
                     'options' => $options,
                     ...($leftOut !== [] ? ['left_out' => $leftOut] : []),
-                    // A split post also keeps its PostSyncer reschedule checkpoint.
-                    ...(is_array($split) ? ['split' => $split] + array_intersect_key($locked->publish_progress, ['reschedule' => true]) : []),
                 ],
             ])->save();
 

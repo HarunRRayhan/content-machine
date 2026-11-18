@@ -38,16 +38,12 @@ Resources define serialized records.
 ## Background work and publishing
 
 Laravel's database queue backs asynchronous capture, transcription, and
-publishing. Posts and videos use `PublishPostJob` and `PublishVideoJob`. The
-publish actions plan PostSyncer groups, register media by URL, and checkpoint
-progress before external creates. Retries skip completed groups. An operator
-must reconcile uncertain external results before retrying. The [PostSyncer
-guide](../guides/postsyncer.md) documents queue deployment, recovery, and
-scheduling.
-
-The scheduled `postsyncer:sync-scheduled` command refreshes eligible records from
-PostSyncer. It is separate from publish-job recovery and does not call PostSyncer
-from dashboard requests.
+publishing. Posts and videos publish through SocialReins with
+`PublishSocialreinsJob`. The planners build groups by language, platform and media
+set, and each language's request is frozen with an Idempotency-Key before it is sent,
+so a retry never sends a second copy. Webhooks and the scheduled
+`socialreins:reconcile` command bring back each post's status. The [SocialReins
+guide](../guides/socialreins.md) documents setup, retries, reschedule and take down.
 
 ## Main code locations
 

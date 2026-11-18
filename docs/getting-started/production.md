@@ -63,7 +63,7 @@ php artisan key:generate --force
 Store that key securely and reuse it on every release and every process. For
 environment-variable deployments, provision the key through the host's secret
 settings. Do not regenerate it on later deployments; saved provider, Telegram,
-and PostSyncer credentials are encrypted with it.
+and SocialReins credentials are encrypted with it.
 
 ## Prepare the release
 
@@ -108,12 +108,16 @@ composer run scheduler
 These are four separate long-running processes, not a sequence to run in one
 terminal. Configure automatic restarts and allow at least 960 seconds for
 workers to finish during shutdown. Workers use a 900-second job timeout, and
-the dedicated PostSyncer queue visibility window must exceed that timeout.
+the publish queue visibility window (`POSTSYNCER_QUEUE_RETRY_AFTER`, 960 seconds
+by default) must exceed that timeout. The publish queue is still named
+`postsyncer` after the first publish driver; it runs SocialReins publishes.
 
 The scratchpad and publishing workers must be able to read the same persistent
 uploads as the web process. For the existing Railway layout, these workers run
 inside the web container, while the default worker and scheduler run in the
-worker service. See the [PostSyncer deployment guide](../guides/postsyncer.md#queue-and-worker-railway).
+worker service: the web container runs the s6 services `scratchpad-queue` and
+`postsyncer-queue` (the publish worker; `SCRATCHPAD_QUEUE_WORKER=0` disables both),
+and the worker service runs `queue:work --queue=default` and the scheduler.
 
 Run a single scheduler per deployment. If your host already schedules
 `php artisan schedule:run` every minute, use that instead of `composer run scheduler`.
@@ -123,7 +127,7 @@ Use `composer run dev` only for local development.
 
 Sign in, then follow the [integration setup](../../README.md#4-configure-integrations)
 and [first-post workflow](../../README.md#5-generate-and-publish-your-first-post).
-Telegram requires a public HTTPS webhook, and PostSyncer must be able to fetch
+Telegram requires a public HTTPS webhook, and SocialReins must be able to fetch
 signed media URLs generated from `APP_URL`. Google Drive publishing files must
 be publicly fetchable.
 

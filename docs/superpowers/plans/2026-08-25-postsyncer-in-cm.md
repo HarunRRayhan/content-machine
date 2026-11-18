@@ -2,7 +2,7 @@
 
 > Historical snapshot from 2026-08-25. This plan's checkboxes were not maintained as work shipped. They do not identify completed work or current backlog items. The implementation is present in the codebase at baseline `fafde1e` (2026-09-24).
 >
-> Current references: [architecture overview](../../architecture/overview.md), [posts and videos](../../architecture/posts-videos-api.md), [API guide](../../guides/api.md), and [PostSyncer guide](../../guides/postsyncer.md). The API guide lists the verified remaining API gaps: deck-package upload endpoints, idea promotion over the API, and rate limiting beyond the default throttle. Verify code and docs before reviving any task from this plan.
+> Current references: [architecture overview](../../architecture/overview.md), [posts and videos](../../architecture/posts-videos-api.md), [API guide](../../guides/api.md), and [SocialReins guide](../../guides/socialreins.md) (PostSyncer was removed in 2026-11). The API guide lists the verified remaining API gaps: deck-package upload endpoints, idea promotion over the API, and rate limiting beyond the default throttle. Verify code and docs before reviving any task from this plan.
 
 **Goal:** Configure PostSyncer per workspace in Content Machine and schedule/publish posts and videos from the dashboard via queued jobs (Drive/attachment URL link-upload), with Studio-like status tabs including Ideation.
 
