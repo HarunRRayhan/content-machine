@@ -152,7 +152,7 @@ export default function VideoShow({ video }: PageProps) {
                         ← All videos
                     </Link>
                     <div className="vhead-t">
-                        <span className="no">Video #{video.number}</span>
+                        <span className="no">{video.human_id}</span>
                         <h2>{video.title}</h2>
                     </div>
                     {video.series && (
