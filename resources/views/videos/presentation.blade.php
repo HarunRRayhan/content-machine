@@ -98,7 +98,7 @@
     <div class="pres-shell" id="presShell">
         <div class="pres-left-col">
             <div class="pres-left" id="presLeft">
-                <div class="pres-stage" id="presStage">
+                <div class="pres-stage pres-stage-reveal" id="presStage">
                     <iframe
                         class="pres-frame"
                         id="presFrame"
