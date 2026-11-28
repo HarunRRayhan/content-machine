@@ -66,8 +66,8 @@
            edge to edge in the deck's own colour, no margin and no rounded corners. */
         #presShell.is-fullscreen{padding:0; gap:0; align-items:stretch; justify-content:flex-start}
         #presShell.is-fullscreen .pres-left-col{flex:1 1 0; min-width:0; height:100vh; align-items:center; justify-content:center;
-            background:var(--deck-bg, var(--cm-bg))}
-        #presShell.is-fullscreen .pres-notes{flex:0 0 min(640px, 34vw); max-width:none; align-self:center; padding:3vh 3vw}
+            background:var(--deck-bg, #ffffff)}
+        #presShell.is-fullscreen .pres-notes{flex:0 0 min(640px, 34vw); align-self:center; padding:3vh 3vw}
         #presShell.is-fullscreen .pres-notes{max-width:640px; font-size:1.15em; color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-cue{background:var(--cm-muted); border-color:var(--cm-border); color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-fs-btn{background:var(--cm-muted); color:var(--cm-fg); border-color:var(--cm-border)}
