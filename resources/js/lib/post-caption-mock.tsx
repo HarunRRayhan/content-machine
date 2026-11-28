@@ -286,7 +286,8 @@ export type MotionSlide = {
 // Muted, looping MP4 thumbnails in the same grid as the still images. The whole
 // thumbnail is the button that opens the pop-up; the video ignores pointer events.
 // Each one plays only while it is at least 60% on screen. While the pop-up is
-// open (suspended) they stay paused.
+// open (suspended) they stay paused. A shimmer shows until the first frame is
+// ready; a failed load shows a short message and a retry.
 function MockMotionSlide({
     slide,
     suspended,
@@ -299,6 +300,20 @@ function MockMotionSlide({
     buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
     const ref = useRef<HTMLVideoElement>(null);
+    const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
+        'loading',
+    );
+
+    // The load events can fire before React attaches its handlers (SSR hydration, cache).
+    useEffect(() => {
+        const video = ref.current;
+
+        if (video?.error) {
+            setStatus('error');
+        } else if (video && video.readyState >= 2) {
+            setStatus('ready');
+        }
+    }, []);
 
     useEffect(() => {
         const video = ref.current;
@@ -326,26 +341,55 @@ function MockMotionSlide({
         observer.observe(video);
 
         return () => observer.disconnect();
-    }, [suspended]);
+    }, [suspended, status]); // status: a retried video restarts paused, so re-observe
+
+    // #t=0.001 makes the browser decode and paint the first frame without autoplay.
+    const src = slide.url.includes('#') ? slide.url : `${slide.url}#t=0.001`;
 
     return (
-        <button
-            ref={buttonRef}
-            type="button"
-            className="mock-img-open mock-motion-open"
-            aria-label={`Open ${slide.filename}`}
-            onClick={onOpen}
-        >
-            <video
-                ref={ref}
-                src={slide.url}
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                aria-hidden="true"
-            />
-        </button>
+        <div className="mock-motion-tile">
+            <button
+                ref={buttonRef}
+                type="button"
+                className="mock-img-open mock-motion-open"
+                aria-label={`Open ${slide.filename}`}
+                aria-busy={status === 'loading'}
+                tabIndex={status === 'error' ? -1 : undefined}
+                onClick={onOpen}
+            >
+                <video
+                    ref={ref}
+                    src={src}
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    aria-hidden="true"
+                    onLoadedData={() => setStatus('ready')}
+                    onError={() => setStatus('error')}
+                />
+                <span
+                    className="mock-motion-shimmer"
+                    data-hidden={status === 'ready'}
+                    aria-hidden="true"
+                />
+            </button>
+            {status === 'error' && (
+                <div className="mock-motion-error" role="alert">
+                    <span>Video could not load</span>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setStatus('loading');
+                            ref.current?.load();
+                            ref.current?.parentElement?.focus();
+                        }}
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
+        </div>
     );
 }
 
