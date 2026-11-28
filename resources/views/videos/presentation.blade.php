@@ -76,7 +76,7 @@
         body.embed .pres-left-col, #presShell.is-fullscreen .pres-left-col{flex:1 1 0; min-width:0; height:100vh;
             position:relative; overflow:hidden; display:block; background:var(--deck-bg, #ffffff)}
         body.embed #presLeft, #presShell.is-fullscreen #presLeft{position:absolute; top:0; left:50%; transform:translateX(-50%)}
-        body.embed .pres-notes{flex:0 0 min(520px, 34vw); align-self:center; padding:16px 24px}
+        body.embed .pres-notes{flex:0 0 min(520px, 34vw); align-self:safe center; max-height:100vh; overflow-y:auto; padding:16px 24px}
         .pres-vidno{font-family:var(--font-cue); font-size:15px; font-weight:800; color:var(--cm-fg);
             text-align:center; margin:0 0 2px; letter-spacing:.02em}
         .pres-stepno{font-family:monospace; font-size:12px; color:var(--cm-muted-fg); text-align:center; margin:0 0 8px}
@@ -294,7 +294,7 @@
                     side = box.width >= box.height
                         ? Math.min(box.width, box.height / 0.85)
                         : Math.min(box.height, box.width / 0.92);
-                    side = Math.max(260, side);
+                    side = Math.round(Math.max(260, side));
                 } else {
                     side = Math.max(260, Math.min(window.innerHeight - left.getBoundingClientRect().top - 16, window.innerWidth - 360));
                 }
