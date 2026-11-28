@@ -341,7 +341,7 @@ function MockMotionSlide({
         observer.observe(video);
 
         return () => observer.disconnect();
-    }, [suspended]);
+    }, [suspended, status]); // status: a retried video restarts paused, so re-observe
 
     // #t=0.001 makes the browser decode and paint the first frame without autoplay.
     const src = slide.url.includes('#') ? slide.url : `${slide.url}#t=0.001`;
@@ -354,6 +354,7 @@ function MockMotionSlide({
                 className="mock-img-open mock-motion-open"
                 aria-label={`Open ${slide.filename}`}
                 aria-busy={status === 'loading'}
+                tabIndex={status === 'error' ? -1 : undefined}
                 onClick={onOpen}
             >
                 <video
@@ -374,13 +375,14 @@ function MockMotionSlide({
                 />
             </button>
             {status === 'error' && (
-                <div className="mock-motion-error" role="status">
+                <div className="mock-motion-error" role="alert">
                     <span>Video could not load</span>
                     <button
                         type="button"
                         onClick={() => {
                             setStatus('loading');
                             ref.current?.load();
+                            ref.current?.parentElement?.focus();
                         }}
                     >
                         Retry
