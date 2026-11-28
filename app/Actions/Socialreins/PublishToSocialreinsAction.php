@@ -217,6 +217,10 @@ class PublishToSocialreinsAction
             if ($only === []) {
                 continue;
             }
+            // A bad motion list only matters when this language's Instagram is actually sent now.
+            if ($planner instanceof PostPublishPlanner && in_array('instagram', $only, true) && ($error = $planner->motionError($language)) !== null) {
+                throw new PostsyncerException($error);
+            }
             $payload = $builder->build($language, $languageGroups, $video, array_values($only));
             if ($payload !== null) {
                 $payloads[$language] = PostGroupPayloadBuilder::encode($payload);

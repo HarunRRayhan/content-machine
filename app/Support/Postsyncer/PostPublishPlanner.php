@@ -21,6 +21,9 @@ class PostPublishPlanner
 
     private const MOTION_MAX_SLIDES = 20;
 
+    /** @var array<string, string> language => reason, set by the last plan() with `motion`. */
+    private array $motionErrors = [];
+
     public function __construct(
         private readonly MediaUrlResolver $mediaUrlResolver,
     ) {}
@@ -123,6 +126,7 @@ class PostPublishPlanner
         $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($post));
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
         $selected = $this->selectedPlatforms($post, $options);
+        $this->motionErrors = [];
         $this->mediaUrlResolver->publishingAt($when);
         $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
         $byLanguage = $this->captionsByLanguage($post);
@@ -400,8 +404,10 @@ class PostPublishPlanner
     /**
      * A section with a non-empty `motion` list publishes those MP4s as its media. An empty or
      * absent list leaves the section on its images. A listed file that is not uploaded, or fewer
-     * than two slides, fails the publish: a Motion Carousel is 2 to 20 slides and a lone video
-     * would go out as a Reel, so silently falling back to images would post something unapproved.
+     * than two slides, is not planned and not thrown here: the caller may not send this
+     * language's Instagram at all (not covered, already live). It reads motionError() once it
+     * knows and fails the publish then. A Motion Carousel is 2 to 20 slides and a lone video
+     * would go out as a Reel, so falling back to images would post something unapproved.
      *
      * @param  array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}  $data
      * @return array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}
@@ -419,23 +425,25 @@ class PostPublishPlanner
 
         $urls = $this->mediaUrlResolver->resolveMotionSlides($post, $language === 'english' ? 'en' : 'bn', $names);
 
-        if (count($urls) !== count($names)) {
-            throw new PostsyncerException(
-                'Could not resolve Instagram motion slides: '.implode(', ', $names)
-                .'. Upload every listed MP4 (role motion) before publishing; refusing to fall back to images.'
-            );
-        }
-
         if (count($names) < self::MOTION_MIN_SLIDES || count($names) > self::MOTION_MAX_SLIDES) {
-            throw new PostsyncerException(
-                'An Instagram Motion Carousel takes '.self::MOTION_MIN_SLIDES.' to '.self::MOTION_MAX_SLIDES
-                .' slides, but the motion list names '.count($names).'.'
-            );
+            $this->motionErrors[$language] = 'An Instagram Motion Carousel takes '.self::MOTION_MIN_SLIDES.' to '.self::MOTION_MAX_SLIDES
+                .' slides, but the '.$language.' motion list names '.count($names).'.';
+        } elseif (count($urls) !== count($names)) {
+            // Names are matched by filename; report the ones with no readable upload.
+            $missing = array_values(array_filter($names, fn (string $name): bool => $this->mediaUrlResolver->resolveMotionSlides($post, $language === 'english' ? 'en' : 'bn', [$name]) === []));
+            $this->motionErrors[$language] = 'Could not resolve Instagram motion slides: '.implode(', ', $missing)
+                .'. Upload them (role motion, '.$language.') before publishing; refusing to fall back to images.';
+        } else {
+            $data['motion_urls'] = $urls;
         }
-
-        $data['motion_urls'] = $urls;
 
         return $data;
+    }
+
+    /** Why this language's Instagram motion list cannot be published, from the last plan(); null when it can. */
+    public function motionError(string $language): ?string
+    {
+        return $this->motionErrors[$language] ?? null;
     }
 
     /**

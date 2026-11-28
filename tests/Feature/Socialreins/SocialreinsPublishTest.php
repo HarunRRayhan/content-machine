@@ -277,6 +277,18 @@ class SocialreinsPublishTest extends TestCase
         $this->assertSame(0, SocialreinsGroup::query()->count());
     }
 
+    public function test_a_bad_motion_list_is_ignored_when_that_languages_instagram_is_not_sent(): void
+    {
+        $this->fakeHttp([self::URL => Http::response($this->groupResponse(['facebook']), 201)]);
+        $post = $this->makePost($this->workspace(), [
+            'facebook' => ['caption' => 'FB'],
+            'instagram' => ['caption' => 'IG', 'motion' => ['one.mp4', 'gone.mp4']],
+        ], ['platforms' => ['facebook']]);
+        $this->attachMotion($post, ['one.mp4']);
+
+        $this->assertSame('succeeded', $this->publish($post)->publish_state);
+    }
+
     public function test_tiktok_gets_the_workspace_privacy_level(): void
     {
         $this->fakeHttp([self::URL => Http::response($this->groupResponse(['tiktok']), 201)]);

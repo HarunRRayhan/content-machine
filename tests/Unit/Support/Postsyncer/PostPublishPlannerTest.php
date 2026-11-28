@@ -1078,26 +1078,38 @@ class PostPublishPlannerTest extends TestCase
         }
     }
 
-    public function test_motion_list_naming_a_missing_file_or_fewer_than_two_slides_fails_loudly(): void
+    public function test_motion_list_naming_a_missing_file_is_reported_by_name_and_never_falls_back_to_images(): void
     {
         $workspace = Workspace::factory()->create();
         $config = $this->configFor($workspace);
+        $post = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'gone.mp4']);
 
-        $missing = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'gone.mp4']);
-        $this->expectException(PostsyncerException::class);
-        $this->expectExceptionMessage('refusing to fall back to images');
-        $this->planner->plan($missing, $config, ['motion' => true]);
+        $this->planner->plan($post, $config, ['motion' => true]);
+
+        $error = $this->planner->motionError('english');
+        $this->assertStringContainsString('gone.mp4', $error);
+        $this->assertStringNotContainsString('a.mp4', $error);
+        $this->assertStringContainsString('refusing to fall back to images', $error);
+        $this->assertNull($this->planner->motionError('bangla'));
     }
 
-    public function test_a_single_motion_slide_is_refused_rather_than_posted_as_a_reel(): void
+    public function test_one_motion_slide_or_more_than_twenty_is_an_error_not_a_reel_or_a_truncation(): void
     {
         $workspace = Workspace::factory()->create();
         $config = $this->configFor($workspace);
 
         $one = $this->motionPost($workspace, ['a.mp4'], ['a.mp4']);
-        $this->expectException(PostsyncerException::class);
-        $this->expectExceptionMessage('takes 2 to 20 slides');
         $this->planner->plan($one, $config, ['motion' => true]);
+        $this->assertStringContainsString('takes 2 to 20 slides', $this->planner->motionError('english'));
+
+        $names = array_map(fn (int $i): string => "s{$i}.mp4", range(1, 21));
+        $many = $this->motionPost($workspace, $names, $names);
+        $this->planner->plan($many, $config, ['motion' => true]);
+        $this->assertStringContainsString('names 21', $this->planner->motionError('english'));
+
+        $ok = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'b.mp4']);
+        $this->planner->plan($ok, $config, ['motion' => true]);
+        $this->assertNull($this->planner->motionError('english'));
     }
 
     public function test_motion_slides_of_the_other_language_do_not_resolve(): void
@@ -1106,7 +1118,8 @@ class PostPublishPlannerTest extends TestCase
         $config = $this->configFor($workspace);
 
         $bangla = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'b.mp4'], language: 'bn');
-        $this->expectException(PostsyncerException::class);
         $this->planner->plan($bangla, $config, ['motion' => true]);
+
+        $this->assertNotNull($this->planner->motionError('english'));
     }
 }
