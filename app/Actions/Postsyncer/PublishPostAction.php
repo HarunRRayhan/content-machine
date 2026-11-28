@@ -138,7 +138,8 @@ class PublishPostAction
                         $groupKey,
                     );
 
-                    if ($this->completedGroup($completedGroups, $index, $groupKey) !== null) {
+                    if ($this->completedGroup($completedGroups, $index, $groupKey) !== null
+                        || $this->isSkippedGroup($progress, $index, $groupKey)) {
                         continue;
                     }
 
@@ -1016,6 +1017,75 @@ class PublishPostAction
                 'publish_state' => 'failed',
                 'publish_error' => 'PostSyncer create was verified absent. Retry the publish to create it with the existing media.',
                 'publish_progress' => $latestProgress,
+                'publish_claimed_at' => null,
+                'publish_lease_id' => null,
+            ])->save();
+        });
+
+        $post->refresh();
+    }
+
+    /**
+     * Resolve an uncertain create without retrying or deleting anything remote.
+     * The group's outcome stays unknown: it is recorded as `skipped_unknown`
+     * (with the checkpoint, idempotency key, who, when and why) and the next
+     * retry never creates it, but finishes the other groups and, on a split
+     * post, hands over to SocialReins. The group is not in `completed_groups`
+     * and never reaches `postsyncer.groups`, so it never reads as published.
+     * Idempotent for the same group; add the platform later with an append.
+     */
+    public function skipUncertainGroup(Post $post, string $groupKey, string $reason, ?string $by = null): void
+    {
+        DB::transaction(function () use ($post, $groupKey, $reason, $by): void {
+            $locked = Post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
+            $progress = $locked->publish_progress;
+
+            if (! is_array($progress)) {
+                throw new PostsyncerException('This post has no PostSyncer progress to resolve.');
+            }
+
+            $this->assertProgressShape($progress);
+
+            foreach ($progress['skipped_groups'] ?? [] as $skipped) {
+                if (($skipped['group_key'] ?? null) === $groupKey) {
+                    return;
+                }
+            }
+
+            $current = $progress['current'] ?? null;
+
+            if ($locked->publish_state !== 'failed'
+                || ($progress['state'] ?? null) !== 'uncertain'
+                || ! is_array($current)
+                || ($current['phase'] ?? null) !== 'creating') {
+                throw new PostsyncerException(
+                    'This post does not have an uncertain PostSyncer create to skip.'
+                );
+            }
+
+            if (($current['group_key'] ?? null) !== $groupKey) {
+                throw new PostsyncerException(
+                    'The group key does not match the uncertain PostSyncer create.'
+                );
+            }
+
+            $progress['skipped_groups'][] = [
+                'index' => $current['index'],
+                'group_key' => $groupKey,
+                'status' => 'skipped_unknown',
+                'idempotency_key' => $current['idempotency_key'],
+                'operation_id' => $progress['operation_id'],
+                'checkpoint' => $current,
+                'reason' => $reason,
+                'skipped_by' => $by,
+                'skipped_at' => now()->toISOString(),
+            ];
+            $progress['current'] = null;
+            $progress['state'] = 'failed';
+
+            $locked->forceFill([
+                'publish_error' => 'An uncertain PostSyncer create was skipped (outcome unknown, not created again). Retry the publish to continue the other groups.',
+                'publish_progress' => $progress,
                 'publish_claimed_at' => null,
                 'publish_lease_id' => null,
             ])->save();
@@ -3397,6 +3467,7 @@ class PublishPostAction
             || $storedHash !== $plan['hash']
             || $storedGroups !== $plan['groups']) {
             if ($this->completedGroups($existing) === []
+                && ($existing['skipped_groups'] ?? []) === []
                 && ($existing['current'] ?? null) === null) {
                 $existing['plan_hash'] = $plan['hash'];
                 $existing['planned_groups'] = $plan['groups'];
@@ -3598,6 +3669,16 @@ class PublishPostAction
             );
         }
 
+        foreach ($progress['skipped_groups'] ?? [] as $skipped) {
+            if (! is_array($skipped)
+                || ! is_int($skipped['index'] ?? null)
+                || ! is_string($skipped['group_key'] ?? null)) {
+                throw new PostsyncerException(
+                    'PostSyncer publish progress is invalid. Reconcile the post before retrying.'
+                );
+            }
+        }
+
         if (array_key_exists('supplemental_groups', $progress)
             && ! is_array($progress['supplemental_groups'])) {
             throw new PostsyncerException(
@@ -3736,16 +3817,33 @@ class PublishPostAction
             if (! is_array($planned)
                 || ! is_int($planned['index'] ?? null)
                 || ! is_string($planned['group_key'] ?? null)
-                || $this->completedGroup(
+                || ($this->completedGroup(
                     $completedGroups,
                     $planned['index'],
                     $planned['group_key'],
-                ) === null) {
+                ) === null
+                    && ! $this->isSkippedGroup($progress, $planned['index'], $planned['group_key']))) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function isSkippedGroup(array $progress, int $index, string $groupKey): bool
+    {
+        foreach ($progress['skipped_groups'] ?? [] as $skipped) {
+            if (is_array($skipped)
+                && ($skipped['index'] ?? null) === $index
+                && ($skipped['group_key'] ?? null) === $groupKey) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
