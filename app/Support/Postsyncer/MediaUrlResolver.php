@@ -87,6 +87,39 @@ class MediaUrlResolver
     }
 
     /**
+     * Signed URLs of the named role=motion MP4s, in the given order. `$language` is the
+     * attachment tag (`bn`/`en`). A name picks the newest upload of that filename in the
+     * language, whatever platform slot it was uploaded for (same rule as the Captions preview).
+     * A name with no readable upload is left out, so the caller compares counts.
+     *
+     * @param  list<string>  $names
+     * @return list<string>
+     */
+    public function resolveMotionSlides(Post $post, string $language, array $names): array
+    {
+        $post->loadMissing(['attachments.mediaAsset']);
+        $byName = [];
+
+        // Ascending id, so the newest copy of each filename overwrites older ones.
+        foreach ($post->attachments->where('role', 'motion')->where('language', $language)->sortBy('id') as $attachment) {
+            $media = $attachment->mediaAsset;
+            if ($media !== null) {
+                $byName[$media->original_filename ?: basename($media->path)] = $media;
+            }
+        }
+
+        $urls = [];
+        foreach ($names as $name) {
+            $media = $byName[$name] ?? null;
+            if ($media !== null && $this->attachmentIsReadable($media)) {
+                $urls[] = $this->signedPostMediaUrl($post, $media);
+            }
+        }
+
+        return $urls;
+    }
+
+    /**
      * Newest attached post document (LinkedIn carousel PDF), if any.
      *
      * Document uploads replace the working carousel generation. Keep the
@@ -142,7 +175,7 @@ class MediaUrlResolver
         $urls = [];
 
         foreach ($post->attachments->sortBy('position') as $attachment) {
-            // Motion slides are preview-only; PostSyncer takes the image set.
+            // Motion slides are never part of the image set (see resolveMotionSlides).
             if (in_array($attachment->role, ['document', 'motion'], true)) {
                 continue;
             }

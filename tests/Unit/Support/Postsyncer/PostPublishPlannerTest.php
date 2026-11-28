@@ -1004,4 +1004,109 @@ class PostPublishPlannerTest extends TestCase
         $this->assertSame(['facebook'], $groups[0]->platforms);
         $this->assertNotSame([], $groups[0]->mediaUrls);
     }
+
+    /** @param list<string> $names */
+    private function motionPost(Workspace $workspace, array $names, ?array $motionList, string $language = 'en'): Post
+    {
+        Storage::fake('scratchpad');
+        $post = Post::factory()->for($workspace)->create([
+            'language' => 'en',
+            'platforms' => ['facebook', 'instagram'],
+            'image_drive_urls' => ['https://drive.google.com/file/d/cover/view'],
+            'captions' => [
+                'English' => [
+                    'facebook' => ['caption' => 'FB'],
+                    'instagram' => ['caption' => 'IG'] + ($motionList === null ? [] : ['motion' => $motionList]),
+                ],
+            ],
+        ]);
+
+        foreach ($names as $i => $name) {
+            $asset = MediaAsset::factory()->for($workspace)->create([
+                'kind' => 'video',
+                'disk' => 'scratchpad',
+                'path' => "posts/{$name}",
+                'original_filename' => $name,
+                'mime' => 'video/mp4',
+            ]);
+            Storage::disk('scratchpad')->put("posts/{$name}", 'mp4');
+            Attachment::factory()->for($post, 'attachable')->for($asset)->create([
+                'role' => 'motion',
+                'platform' => 'instagram',
+                'language' => $language,
+                'position' => $i,
+            ]);
+        }
+
+        return $post->fresh();
+    }
+
+    public function test_motion_option_sends_the_listed_mp4s_to_instagram_only_in_list_order(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+        $post = $this->motionPost($workspace, ['a.mp4', 'b.mp4', 'c.mp4'], ['c.mp4', 'a.mp4']);
+
+        $groups = $this->planner->plan($post, $config, ['motion' => true]);
+
+        $instagram = collect($groups)->first(fn (PublishGroup $g) => in_array('instagram', $g->platforms, true));
+        $facebook = collect($groups)->first(fn (PublishGroup $g) => in_array('facebook', $g->platforms, true));
+        $this->assertCount(2, $groups);
+        $this->assertCount(2, $instagram->mediaUrls);
+        $this->assertStringContainsString('/publish-media/posts/', $instagram->mediaUrls[0]);
+        $this->assertSame(
+            [$post->attachments->firstWhere('mediaAsset.original_filename', 'c.mp4')->media_asset_id, $post->attachments->firstWhere('mediaAsset.original_filename', 'a.mp4')->media_asset_id],
+            array_map(fn (string $url): int => (int) basename(parse_url($url, PHP_URL_PATH)), $instagram->mediaUrls),
+        );
+        // Facebook keeps its image set, untouched by motion.
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=cover&export=download&confirm=t'], $facebook->mediaUrls);
+    }
+
+    public function test_instagram_without_a_motion_list_or_without_the_option_keeps_its_images(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $noList = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], null);
+        $withList = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'b.mp4']);
+        $empty = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], []);
+
+        foreach ([[$noList, true], [$empty, true], [$withList, false]] as [$post, $motion]) {
+            $groups = $this->planner->plan($post, $config, ['motion' => $motion]);
+            $this->assertCount(1, $groups);
+            $this->assertSame(['facebook', 'instagram'], $groups[0]->platforms);
+        }
+    }
+
+    public function test_motion_list_naming_a_missing_file_or_fewer_than_two_slides_fails_loudly(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $missing = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'gone.mp4']);
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('refusing to fall back to images');
+        $this->planner->plan($missing, $config, ['motion' => true]);
+    }
+
+    public function test_a_single_motion_slide_is_refused_rather_than_posted_as_a_reel(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $one = $this->motionPost($workspace, ['a.mp4'], ['a.mp4']);
+        $this->expectException(PostsyncerException::class);
+        $this->expectExceptionMessage('takes 2 to 20 slides');
+        $this->planner->plan($one, $config, ['motion' => true]);
+    }
+
+    public function test_motion_slides_of_the_other_language_do_not_resolve(): void
+    {
+        $workspace = Workspace::factory()->create();
+        $config = $this->configFor($workspace);
+
+        $bangla = $this->motionPost($workspace, ['a.mp4', 'b.mp4'], ['a.mp4', 'b.mp4'], language: 'bn');
+        $this->expectException(PostsyncerException::class);
+        $this->planner->plan($bangla, $config, ['motion' => true]);
+    }
 }

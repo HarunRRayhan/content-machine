@@ -186,7 +186,7 @@ class PublishToSocialreinsAction
         $planner = $video ? app(VideoPublishPlanner::class) : app(PostPublishPlanner::class);
 
         /** @var list<PublishGroup> $groups */
-        $groups = $planner->plan($subject, $config->planningConfig($workspace), $options);
+        $groups = $planner->plan($subject, $config->planningConfig($workspace), $video ? $options : [...$options, 'motion' => true]);
 
         [$live, $skipped] = $this->liveLanguages($rows);
         $present = [];
