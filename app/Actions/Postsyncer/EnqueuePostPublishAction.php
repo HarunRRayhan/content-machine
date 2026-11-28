@@ -427,8 +427,9 @@ class EnqueuePostPublishAction
      */
     private function hasCompletedGroups(array $progress): bool
     {
-        return is_array($progress['completed_groups'] ?? null)
-            && $progress['completed_groups'] !== [];
+        return (is_array($progress['completed_groups'] ?? null)
+            && $progress['completed_groups'] !== [])
+            || ($progress['skipped_groups'] ?? []) !== [];
     }
 
     /**

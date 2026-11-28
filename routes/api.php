@@ -244,6 +244,10 @@ Route::prefix('v1')->name('api.v1.')->group(function (): void {
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.abandon-retry');
 
+    Route::post('posts/{human_id}/publish/skip-uncertain-group', [PostsApiController::class, 'skipUncertainGroup'])
+        ->middleware('auth.workspace-token:posts:write')
+        ->name('posts.skip-uncertain-group');
+
     Route::post('posts/{human_id}/rebase-retry-publish-now', [PostsApiController::class, 'rebaseRetryToPublishNow'])
         ->middleware('auth.workspace-token:posts:write')
         ->name('posts.rebase-retry-publish-now');

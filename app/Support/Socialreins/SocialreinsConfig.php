@@ -221,6 +221,7 @@ class SocialreinsConfig
         return ($progress['state'] ?? null) !== 'uncertain'
             && ($current === null || (is_array($current) && ($current['phase'] ?? null) === 'retryable'))
             && ($progress['completed_groups'] ?? []) === []
+            && ($progress['skipped_groups'] ?? []) === []
             && ($progress['base_groups'] ?? []) === [];
     }
 

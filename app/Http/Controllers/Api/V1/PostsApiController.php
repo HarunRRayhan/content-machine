@@ -414,6 +414,27 @@ class PostsApiController extends Controller
         return new PostResource($post->fresh(['attachments.mediaAsset']));
     }
 
+    public function skipUncertainGroup(Request $request, string $humanId, PublishPostAction $action): PostResource
+    {
+        $post = $this->resolvePost($humanId);
+
+        $payload = $request->validate([
+            'group_key' => ['required', 'string', 'max:255'],
+            'confirm' => ['required', 'in:skip'],
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        try {
+            $action->skipUncertainGroup($post, $payload['group_key'], $payload['reason'], $request->user()?->email);
+        } catch (PostsyncerException $exception) {
+            throw ValidationException::withMessages([
+                'publish' => $exception->getMessage(),
+            ]);
+        }
+
+        return new PostResource($post->fresh(['attachments.mediaAsset']));
+    }
+
     public function abandonRetry(Request $request, string $humanId, PublishPostAction $action): PostResource
     {
         $post = $this->resolvePost($humanId);

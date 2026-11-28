@@ -51,7 +51,8 @@ class UpdatePostsyncerSettingsAction
                     $record->publish_error,
                     $record->publish_progress,
                 ) && is_array($record->publish_progress)
-                    && ($record->publish_progress['completed_groups'] ?? []) === []) {
+                    && ($record->publish_progress['completed_groups'] ?? []) === []
+                    && ($record->publish_progress['skipped_groups'] ?? []) === []) {
                     continue;
                 }
 
@@ -77,7 +78,7 @@ class UpdatePostsyncerSettingsAction
      */
     private function blocksSettings(array $progress): bool
     {
-        if (($progress['current'] ?? null) !== null) {
+        if (($progress['current'] ?? null) !== null || ($progress['skipped_groups'] ?? []) !== []) {
             return true;
         }
 
@@ -107,7 +108,8 @@ class UpdatePostsyncerSettingsAction
                         $record->publish_progress,
                     )
                     || ! is_array($record->publish_progress)
-                    || ($record->publish_progress['completed_groups'] ?? []) !== []) {
+                    || ($record->publish_progress['completed_groups'] ?? []) !== []
+                    || ($record->publish_progress['skipped_groups'] ?? []) !== []) {
                     continue;
                 }
 
