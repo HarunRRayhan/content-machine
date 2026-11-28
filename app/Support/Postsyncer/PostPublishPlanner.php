@@ -16,6 +16,14 @@ class PostPublishPlanner
     /** X allows at most four images in one tweet. */
     private const X_MAX_IMAGES = 4;
 
+    /** Instagram's Motion Carousel: 2 to 20 slides. */
+    private const MOTION_MIN_SLIDES = 2;
+
+    private const MOTION_MAX_SLIDES = 20;
+
+    /** @var array<string, string> language => reason, set by the last plan() with `motion`. */
+    private array $motionErrors = [];
+
     public function __construct(
         private readonly MediaUrlResolver $mediaUrlResolver,
     ) {}
@@ -106,7 +114,11 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool}  $options
+     * `motion: true` (SocialReins only) sends an Instagram section's role=motion MP4s, in its
+     * `motion` list's order, instead of the image set. PostSyncer allows one video per post, so
+     * its path never sets it.
+     *
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool, motion?: bool}  $options
      * @return list<PublishGroup>
      */
     public function plan(Post $post, PostsyncerConfig $config, array $options): array
@@ -114,6 +126,7 @@ class PostPublishPlanner
         $when = $this->resolveWhen($options['when'] ?? null, $this->workspaceTimezone($post));
         $confirmAsk = (bool) ($options['confirm_ask'] ?? false);
         $selected = $this->selectedPlatforms($post, $options);
+        $this->motionErrors = [];
         $this->mediaUrlResolver->publishingAt($when);
         $defaultMediaUrls = $this->mediaUrlResolver->forPost($post);
         $byLanguage = $this->captionsByLanguage($post);
@@ -146,6 +159,10 @@ class PostPublishPlanner
 
                 if (! $config->isPlatformEnabled($language, $platform)) {
                     continue;
+                }
+
+                if (($options['motion'] ?? false) === true && $platform === 'instagram') {
+                    $platformCaptions[$platform] = $this->withMotionUrls($post, $language, $platformCaptions[$platform]);
                 }
 
                 $mediaUrls = $this->resolveMediaUrls($post, $platformCaptions[$platform], $defaultMediaUrls);
@@ -186,7 +203,7 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>  $platformCaptions
+     * @param  array<string, array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}>  $platformCaptions
      * @param  list<string>  $defaultMediaUrls
      * @return list<PublishGroup>
      */
@@ -344,12 +361,16 @@ class PostPublishPlanner
     }
 
     /**
-     * @param  array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}  $platformData
+     * @param  array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}  $platformData
      * @param  list<string>  $defaultMediaUrls
      * @return list<string>
      */
     private function resolveMediaUrls(Post $post, array $platformData, array $defaultMediaUrls): array
     {
+        if (isset($platformData['motion_urls'])) {
+            return $platformData['motion_urls'];
+        }
+
         if (array_key_exists('images', $platformData)) {
             $images = array_values(array_filter(
                 array_map(
@@ -381,11 +402,56 @@ class PostPublishPlanner
     }
 
     /**
+     * A section with a non-empty `motion` list publishes those MP4s as its media. An empty or
+     * absent list leaves the section on its images. A listed file that is not uploaded, or fewer
+     * than two slides, is not planned and not thrown here: the caller may not send this
+     * language's Instagram at all (not covered, already live). It reads motionError() once it
+     * knows and fails the publish then. A Motion Carousel is 2 to 20 slides and a lone video
+     * would go out as a Reel, so falling back to images would post something unapproved.
+     *
+     * @param  array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}  $data
+     * @return array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}
+     */
+    private function withMotionUrls(Post $post, string $language, array $data): array
+    {
+        $names = array_values(array_filter(
+            array_map(static fn (mixed $name): string => trim((string) $name), (array) ($data['motion'] ?? [])),
+            static fn (string $name): bool => $name !== '',
+        ));
+
+        if ($names === []) {
+            return $data;
+        }
+
+        $urls = $this->mediaUrlResolver->resolveMotionSlides($post, $language === 'english' ? 'en' : 'bn', $names);
+
+        if (count($names) < self::MOTION_MIN_SLIDES || count($names) > self::MOTION_MAX_SLIDES) {
+            $this->motionErrors[$language] = 'An Instagram Motion Carousel takes '.self::MOTION_MIN_SLIDES.' to '.self::MOTION_MAX_SLIDES
+                .' slides, but the '.$language.' motion list names '.count($names).'.';
+        } elseif (count($urls) !== count($names)) {
+            // Names are matched by filename; report the ones with no readable upload.
+            $missing = array_values(array_filter($names, fn (string $name): bool => $this->mediaUrlResolver->resolveMotionSlides($post, $language === 'english' ? 'en' : 'bn', [$name]) === []));
+            $this->motionErrors[$language] = 'Could not resolve Instagram motion slides: '.implode(', ', $missing)
+                .'. Upload them (role motion, '.$language.') before publishing; refusing to fall back to images.';
+        } else {
+            $data['motion_urls'] = $urls;
+        }
+
+        return $data;
+    }
+
+    /** Why this language's Instagram motion list cannot be published, from the last plan(); null when it can. */
+    public function motionError(string $language): ?string
+    {
+        return $this->motionErrors[$language] ?? null;
+    }
+
+    /**
      * Publishable captions keyed by language then platform, exactly as the
      * planner reads them. Public so edits to a publish-locked post can be
      * checked against the same reading.
      *
-     * @return array<string, array<string, array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}>>
+     * @return array<string, array<string, array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}>>
      */
     public function captionsByLanguage(Post $post): array
     {
@@ -451,7 +517,7 @@ class PostPublishPlanner
 
     /**
      * @param  array<mixed>  $fields
-     * @return array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}
+     * @return array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}
      */
     private function normalizePlatformFields(array $fields, bool $fromNormalizedCaptions = false): array
     {
@@ -475,6 +541,10 @@ class PostPublishPlanner
             )),
         ];
 
+        if (array_key_exists('motion', $fields) && is_array($fields['motion'])) {
+            $normalized['motion'] = array_values(array_map('strval', $fields['motion']));
+        }
+
         if (array_key_exists('images', $fields)) {
             $raw = $fields['images'];
             $images = is_array($raw) ? array_values(array_map('strval', $raw)) : [];
@@ -491,7 +561,7 @@ class PostPublishPlanner
      * Prefer the attached LinkedIn carousel PDF (`role=document`); fall back to named
      * images / defaults only when no document is attached.
      *
-     * @param  array{caption: string, first_comment: string, images?: list<string>, thread: list<string>}  $platformData
+     * @param  array{caption: string, first_comment: string, images?: list<string>, motion?: list<string>, motion_urls?: list<string>, thread: list<string>}  $platformData
      * @param  list<string>  $defaultMediaUrls
      * @return list<string>
      */

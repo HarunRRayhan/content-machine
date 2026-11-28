@@ -187,4 +187,25 @@ class PublishMediaControllerTest extends TestCase
         $this->get(preg_replace('/signature=[0-9a-f]/', 'signature=x', $url))->assertForbidden();
         $this->get(preg_replace('/expires=\d+/', 'expires='.now()->addDay()->timestamp, $url))->assertForbidden();
     }
+
+    public function test_signed_url_serves_a_motion_mp4_with_a_video_content_type(): void
+    {
+        Storage::fake('scratchpad');
+
+        $workspace = Workspace::factory()->create();
+        $post = Post::factory()->for($workspace)->create();
+        $media = MediaAsset::factory()->for($workspace)->create([
+            'kind' => 'video',
+            'disk' => 'scratchpad',
+            'path' => 'posts/slide.mp4',
+            'mime' => 'video/mp4',
+            'original_filename' => 'slide.mp4',
+        ]);
+        Storage::disk('scratchpad')->put('posts/slide.mp4', 'mp4-bytes');
+        Attachment::factory()->for($post, 'attachable')->for($media)->create(['role' => 'motion', 'platform' => 'instagram', 'language' => 'en']);
+
+        $url = URL::temporarySignedRoute('publish-media.post', now()->addHour(), ['post' => $post->id, 'mediaAsset' => $media->id]);
+
+        $this->get($url)->assertOk()->assertHeader('Content-Type', 'video/mp4');
+    }
 }

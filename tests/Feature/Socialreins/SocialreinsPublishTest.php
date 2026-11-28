@@ -13,6 +13,8 @@ use App\Actions\Socialreins\TakeDownSocialreinsAction;
 use App\Data\Posts\UpdatePostData;
 use App\Jobs\PublishPostJob;
 use App\Jobs\PublishSocialreinsJob;
+use App\Models\Attachment;
+use App\Models\MediaAsset;
 use App\Models\Post;
 use App\Models\SocialreinsGroup;
 use App\Models\Video;
@@ -25,6 +27,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
@@ -218,6 +221,72 @@ class SocialreinsPublishTest extends TestCase
         $this->assertStringContainsString('TikTok visibility', $result->publish_error);
         Http::assertNothingSent();
         $this->assertSame(0, SocialreinsGroup::query()->count());
+    }
+
+    /** @param  list<string>  $names */
+    private function attachMotion(Post $post, array $names): void
+    {
+        Storage::fake('scratchpad');
+        foreach ($names as $i => $name) {
+            $asset = MediaAsset::factory()->for($post->workspace)->create([
+                'kind' => 'video', 'disk' => 'scratchpad', 'path' => "posts/{$name}", 'original_filename' => $name, 'mime' => 'video/mp4',
+            ]);
+            Storage::disk('scratchpad')->put("posts/{$name}", 'mp4');
+            Attachment::factory()->for($post, 'attachable')->for($asset)->create([
+                'role' => 'motion', 'platform' => 'instagram', 'language' => 'en', 'position' => $i,
+            ]);
+        }
+    }
+
+    public function test_instagram_gets_its_motion_mp4s_in_order_while_facebook_keeps_its_image(): void
+    {
+        $this->fakeHttp([self::URL => Http::response($this->groupResponse(['facebook', 'instagram']), 201)]);
+        $post = $this->makePost($this->workspace(), [
+            'facebook' => ['caption' => 'FB'],
+            'instagram' => ['caption' => 'IG', 'motion' => ['two.mp4', 'one.mp4']],
+        ], ['platforms' => ['facebook', 'instagram']]);
+        $this->attachMotion($post, ['one.mp4', 'two.mp4']);
+
+        $result = $this->publish($post);
+
+        $this->assertSame('succeeded', $result->publish_state);
+        $body = $this->sent()[0];
+        $instagram = $body['overrides']['instagram']['media'];
+        $this->assertCount(2, $instagram);
+        $this->assertStringContainsString('/publish-media/posts/', $instagram[0]);
+        $this->assertSame(
+            $post->attachments->firstWhere('mediaAsset.original_filename', 'two.mp4')->media_asset_id,
+            (int) basename(parse_url($instagram[0], PHP_URL_PATH)),
+        );
+        $this->assertSame(['https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t'], $body['overrides']['facebook']['media']);
+    }
+
+    public function test_a_motion_list_naming_a_file_that_is_not_uploaded_fails_the_publish_before_anything_is_sent(): void
+    {
+        $this->fakeHttp([]);
+        $post = $this->makePost($this->workspace(), [
+            'instagram' => ['caption' => 'IG', 'motion' => ['one.mp4', 'gone.mp4']],
+        ], ['platforms' => ['instagram']]);
+        $this->attachMotion($post, ['one.mp4']);
+
+        $result = $this->publish($post);
+
+        $this->assertSame('failed', $result->publish_state);
+        $this->assertStringContainsString('refusing to fall back to images', $result->publish_error);
+        Http::assertNothingSent();
+        $this->assertSame(0, SocialreinsGroup::query()->count());
+    }
+
+    public function test_a_bad_motion_list_is_ignored_when_that_languages_instagram_is_not_sent(): void
+    {
+        $this->fakeHttp([self::URL => Http::response($this->groupResponse(['facebook']), 201)]);
+        $post = $this->makePost($this->workspace(), [
+            'facebook' => ['caption' => 'FB'],
+            'instagram' => ['caption' => 'IG', 'motion' => ['one.mp4', 'gone.mp4']],
+        ], ['platforms' => ['facebook']]);
+        $this->attachMotion($post, ['one.mp4']);
+
+        $this->assertSame('succeeded', $this->publish($post)->publish_state);
     }
 
     public function test_tiktok_gets_the_workspace_privacy_level(): void

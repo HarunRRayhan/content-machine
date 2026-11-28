@@ -12,7 +12,8 @@ use Illuminate\Validation\ValidationException;
 /**
  * Stores an uploaded MP4 slide on the private `scratchpad` disk and attaches
  * it with role `motion` for one platform + language. Motion slides preview a
- * video carousel on the Captions tab only; publishing ignores them. Attaching
+ * video carousel on the Captions tab, and SocialReins publishes them as the Instagram
+ * Motion Carousel when that language's Instagram caption lists them under `motion`. Attaching
  * the same bytes to the same slot again is a no-op.
  */
 class AttachPostMotionAction

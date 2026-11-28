@@ -186,7 +186,7 @@ class PublishToSocialreinsAction
         $planner = $video ? app(VideoPublishPlanner::class) : app(PostPublishPlanner::class);
 
         /** @var list<PublishGroup> $groups */
-        $groups = $planner->plan($subject, $config->planningConfig($workspace), $options);
+        $groups = $planner->plan($subject, $config->planningConfig($workspace), $video ? $options : [...$options, 'motion' => true]);
 
         [$live, $skipped] = $this->liveLanguages($rows);
         $present = [];
@@ -216,6 +216,10 @@ class PublishToSocialreinsAction
             $only = array_filter($only, fn (string $platform): bool => $config->covers($language, $platform, strict: $leaveOut));
             if ($only === []) {
                 continue;
+            }
+            // A bad motion list only matters when this language's Instagram is actually sent now.
+            if ($planner instanceof PostPublishPlanner && in_array('instagram', $only, true) && ($error = $planner->motionError($language)) !== null) {
+                throw new PostsyncerException($error);
             }
             $payload = $builder->build($language, $languageGroups, $video, array_values($only));
             if ($payload !== null) {
