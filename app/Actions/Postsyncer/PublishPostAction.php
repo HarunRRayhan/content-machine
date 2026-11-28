@@ -1039,10 +1039,17 @@ class PublishPostAction
      * post, hands over to SocialReins. The group is not in `completed_groups`
      * and never reaches `postsyncer.groups`, so it never reads as published.
      * Idempotent for the same group; add the platform later with an append.
+     *
+     * `$socialreinsLanguages` (optional, split posts only) narrows the SocialReins half that follows
+     * to those languages, so the other language's legs are never planned or sent. It is recorded on
+     * the skip audit entry and in the split's stored SocialReins options, which every retry reuses.
+     * The PostSyncer plan is untouched: its remaining planned groups still run as planned.
+     *
+     * @param  list<string>  $socialreinsLanguages
      */
-    public function skipUncertainGroup(Post $post, string $groupKey, string $reason, ?string $by = null): void
+    public function skipUncertainGroup(Post $post, string $groupKey, string $reason, ?string $by = null, array $socialreinsLanguages = []): void
     {
-        DB::transaction(function () use ($post, $groupKey, $reason, $by): void {
+        DB::transaction(function () use ($post, $groupKey, $reason, $by, $socialreinsLanguages): void {
             $locked = Post::query()->whereKey($post->getKey())->lockForUpdate()->firstOrFail();
             $progress = $locked->publish_progress;
 
@@ -1056,6 +1063,14 @@ class PublishPostAction
             if (($progress['state'] ?? null) !== 'uncertain') {
                 foreach ($progress['skipped_groups'] ?? [] as $skipped) {
                     if (($skipped['group_key'] ?? null) === $groupKey) {
+                        // A repeat must not silently keep a different narrowing than the caller asked for.
+                        $asked = array_values(array_unique(array_map('strtolower', $socialreinsLanguages)));
+                        $stored = $progress['split']['socialreins']['languages'] ?? [];
+
+                        if ($asked !== [] && $asked !== $stored) {
+                            throw new PostsyncerException('This group was already skipped with different SocialReins languages; the stored narrowing is unchanged.');
+                        }
+
                         return;
                     }
                 }
@@ -1078,6 +1093,15 @@ class PublishPostAction
                 );
             }
 
+            if ($socialreinsLanguages !== []) {
+                if (! is_array($progress['split']['socialreins'] ?? null)) {
+                    throw new PostsyncerException('Narrowing languages needs a split publish with a SocialReins half.');
+                }
+
+                $socialreinsLanguages = array_values(array_unique(array_map('strtolower', $socialreinsLanguages)));
+                $progress['split']['socialreins']['languages'] = $socialreinsLanguages;
+            }
+
             $progress['skipped_groups'][] = [
                 'index' => $current['index'],
                 'group_key' => $groupKey,
@@ -1088,6 +1112,7 @@ class PublishPostAction
                 'reason' => $reason,
                 'skipped_by' => $by,
                 'skipped_at' => now()->toISOString(),
+                ...($socialreinsLanguages !== [] ? ['socialreins_languages' => $socialreinsLanguages] : []),
             ];
             $progress['current'] = null;
             $progress['state'] = 'failed';

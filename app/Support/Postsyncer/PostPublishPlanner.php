@@ -118,7 +118,7 @@ class PostPublishPlanner
      * `motion` list's order, instead of the image set. PostSyncer allows one video per post, so
      * its path never sets it.
      *
-     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool, motion?: bool}  $options
+     * @param  array{when?: string|null, platforms?: list<string>, confirm_ask?: bool, append_missing?: bool, motion?: bool, languages?: list<string>}  $options
      * @return list<PublishGroup>
      */
     public function plan(Post $post, PostsyncerConfig $config, array $options): array
@@ -136,8 +136,15 @@ class PostPublishPlanner
             ? $this->existingPairs($post)
             : [];
 
+        // Optional narrowing (set only by skipUncertainGroup on a split's SocialReins half): plan no other language.
+        $only = is_array($options['languages'] ?? null) ? array_map('strtolower', $options['languages']) : null;
+
         $groups = [];
         foreach ($byLanguage as $language => $platformCaptions) {
+            if ($only !== null && ! in_array(strtolower($language), $only, true)) {
+                continue;
+            }
+
             $langConfig = $config->language($language);
             $workspaceId = $langConfig['workspace_id'] ?? null;
 
