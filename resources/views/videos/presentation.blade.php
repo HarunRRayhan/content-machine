@@ -65,12 +65,18 @@
         /* Fullscreen is what Harun screen-records: everything left of the separator is the deck,
            edge to edge in the deck's own colour, no margin and no rounded corners. */
         #presShell.is-fullscreen{padding:0; gap:0; align-items:stretch; justify-content:flex-start}
-        #presShell.is-fullscreen .pres-left-col{flex:1 1 0; min-width:0; height:100vh; align-items:center; justify-content:center;
-            background:var(--deck-bg, #ffffff)}
         #presShell.is-fullscreen .pres-notes{flex:0 0 min(640px, 34vw); align-self:center; padding:3vh 3vw}
         #presShell.is-fullscreen .pres-notes{max-width:640px; font-size:1.15em; color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-cue{background:var(--cm-muted); border-color:var(--cm-border); color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-fs-btn{background:var(--cm-muted); color:var(--cm-fg); border-color:var(--cm-border)}
+        /* Embedded tab and fullscreen: the deck covers the whole column left of the separator.
+           The square is pinned to the top and trimmed at the bottom (the decks keep that band
+           free of text), at most 15% of its height; any leftover strip is the deck's own colour. */
+        body.embed .pres-shell, #presShell.is-fullscreen{padding:0; gap:0; align-items:stretch; height:100vh; min-height:0}
+        body.embed .pres-left-col, #presShell.is-fullscreen .pres-left-col{flex:1 1 0; min-width:0; height:100vh;
+            position:relative; overflow:hidden; display:block; background:var(--deck-bg, #ffffff)}
+        body.embed #presLeft, #presShell.is-fullscreen #presLeft{position:absolute; top:0; left:50%; transform:translateX(-50%)}
+        body.embed .pres-notes{flex:0 0 min(520px, 34vw); align-self:safe center; max-height:100vh; overflow-y:auto; padding:16px 24px}
         .pres-vidno{font-family:var(--font-cue); font-size:15px; font-weight:800; color:var(--cm-fg);
             text-align:center; margin:0 0 2px; letter-spacing:.02em}
         .pres-stepno{font-family:monospace; font-size:12px; color:var(--cm-muted-fg); text-align:center; margin:0 0 8px}
@@ -280,10 +286,18 @@
                 const left = document.getElementById('presLeft');
                 if (!left) return;
                 const isFs = shell.classList.contains('is-fullscreen');
-                const col = left.parentElement;
-                const side = isFs
-                    ? Math.max(260, Math.min(window.innerHeight, col ? col.getBoundingClientRect().width : window.innerHeight))
-                    : Math.max(260, Math.min(window.innerHeight - left.getBoundingClientRect().top - 16, window.innerWidth - 360));
+                const cover = isFs || document.body.classList.contains('embed');
+                let side;
+                if (cover) {
+                    const box = left.parentElement.getBoundingClientRect();
+                    // Cover the column; trim at most 15% off the bottom or 4% off each side.
+                    side = box.width >= box.height
+                        ? Math.min(box.width, box.height / 0.85)
+                        : Math.min(box.height, box.width / 0.92);
+                    side = Math.round(Math.max(260, side));
+                } else {
+                    side = Math.max(260, Math.min(window.innerHeight - left.getBoundingClientRect().top - 16, window.innerWidth - 360));
+                }
                 left.style.height = side + 'px';
                 left.style.width = side + 'px';
             }
