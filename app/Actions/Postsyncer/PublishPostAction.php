@@ -1063,6 +1063,14 @@ class PublishPostAction
             if (($progress['state'] ?? null) !== 'uncertain') {
                 foreach ($progress['skipped_groups'] ?? [] as $skipped) {
                     if (($skipped['group_key'] ?? null) === $groupKey) {
+                        // A repeat must not silently keep a different narrowing than the caller asked for.
+                        $asked = array_values(array_unique(array_map('strtolower', $socialreinsLanguages)));
+                        $stored = $progress['split']['socialreins']['languages'] ?? [];
+
+                        if ($asked !== [] && $asked !== $stored) {
+                            throw new PostsyncerException('This group was already skipped with different SocialReins languages; the stored narrowing is unchanged.');
+                        }
+
                         return;
                     }
                 }

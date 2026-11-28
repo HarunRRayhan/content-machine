@@ -296,6 +296,19 @@ class PostsSkipUncertainGroupTest extends TestCase
         $this->assertArrayHasKey('Bangla', $post->fresh()->captions, 'the Bangla captions stay on the post');
     }
 
+    public function test_a_repeat_skip_cannot_change_the_stored_languages(): void
+    {
+        $post = $this->uncertainPost();
+        $key = $post->publish_progress['current']['group_key'];
+
+        $this->skip($post, $key, 'skip', ['socialreins_languages' => ['english']])->assertOk();
+        $this->skip($post, $key, 'skip', ['socialreins_languages' => ['english']])->assertOk();
+        $this->skip($post, $key, 'skip', ['socialreins_languages' => ['english', 'bangla']])->assertStatus(422);
+        $this->skip($post, $key)->assertOk();
+
+        $this->assertSame(['english'], $post->fresh()->publish_progress['split']['socialreins']['languages']);
+    }
+
     public function test_languages_are_validated_and_need_a_split_publish(): void
     {
         $post = $this->uncertainPost();
