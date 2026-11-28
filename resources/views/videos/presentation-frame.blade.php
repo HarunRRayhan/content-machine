@@ -75,6 +75,29 @@
                 window.parent.postMessage({ source: 'cm-pres-frame', type: type, ...payload }, '*');
             }
 
+            // The deck's own canvas colour, so the host can paint the whole
+            // presentation area with it (one colour, no frame around the deck).
+            function deckBackground() {
+                const transparent = /^(transparent|rgba\(0, 0, 0, 0\))$/;
+                const candidates = [
+                    stageEl.querySelector('.slides > section'),
+                    stageEl.querySelector('.reveal'),
+                    stageEl,
+                ];
+                for (const el of candidates) {
+                    if (!el) continue;
+                    const colour = getComputedStyle(el).backgroundColor;
+                    if (colour && !transparent.test(colour)) return colour;
+                }
+                return '';
+            }
+
+            function notifyReady(readySteps) {
+                const background = deckBackground();
+                if (background) document.body.style.background = background;
+                notify('ready', { steps: readySteps, background: background });
+            }
+
             const deck = (Array.isArray(deckKeys) ? deckKeys : [])
                 .map(function (key) { return window.PRESENTATIONS[key]; })
                 .find(function (candidate) { return candidate && typeof candidate === 'object'; });
@@ -264,9 +287,9 @@
                     reveal.on('fragmentshown', notifyState);
                     reveal.on('fragmenthidden', notifyState);
                     reveal.initialize().then(function () {
-                        notify('ready', { steps: steps.map(function (step, index) {
+                        notifyReady(steps.map(function (step, index) {
                             return { ...step, ...stepStates[index] };
-                        }) });
+                        }));
                         notifyState();
                     }).catch(function () { showError('Reveal.js could not initialize this deck.'); });
                 } catch (error) {
@@ -277,7 +300,7 @@
                 try {
                     stageEl.innerHTML = deck.stage();
                     showStageStep(0);
-                    notify('ready', { steps: steps });
+                    notifyReady(steps);
                 } catch (error) {
                     showError(error instanceof Error ? error.message : 'This deck could not be rendered.');
                 }

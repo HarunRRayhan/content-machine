@@ -58,11 +58,16 @@
             --line:rgba(28,30,32,.12); --line-strong:rgba(28,30,32,.2);
             --accent:#1a7a4c; --accent-soft:#125c38; --amber:#9c6b16;
             --good:#3f8b52; --warn:#9c6b16; --bad:#c23a22; --info:#3d6ea5; --ready:#6b4fa0;
-            border-radius:18px; background:#ffffff; overflow:hidden; container-type:size}
+            border-radius:0; background:var(--deck-bg, #ffffff); overflow:hidden; container-type:size}
         #presShell.is-fullscreen{display:flex; align-items:center; justify-content:center; gap:36px; width:100vw; height:100vh;
             background:var(--cm-bg); padding:3vh 4vw; box-sizing:border-box; position:static; left:auto; margin-left:0;
             color:var(--cm-fg)}
-        #presShell.is-fullscreen .pres-left, #presShell.is-fullscreen #presLeft{height:calc(100vh - 76px); width:calc(100vh - 76px)}
+        /* Fullscreen is what Harun screen-records: everything left of the separator is the deck,
+           edge to edge in the deck's own colour, no margin and no rounded corners. */
+        #presShell.is-fullscreen{padding:0; gap:0; align-items:stretch; justify-content:flex-start}
+        #presShell.is-fullscreen .pres-left-col{flex:1 1 0; min-width:0; height:100vh; align-items:center; justify-content:center;
+            background:var(--deck-bg, var(--cm-bg))}
+        #presShell.is-fullscreen .pres-notes{flex:0 0 min(640px, 34vw); max-width:none; align-self:center; padding:3vh 3vw}
         #presShell.is-fullscreen .pres-notes{max-width:640px; font-size:1.15em; color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-cue{background:var(--cm-muted); border-color:var(--cm-border); color:var(--cm-fg)}
         #presShell.is-fullscreen .pres-fs-btn{background:var(--cm-muted); color:var(--cm-fg); border-color:var(--cm-border)}
@@ -275,8 +280,9 @@
                 const left = document.getElementById('presLeft');
                 if (!left) return;
                 const isFs = shell.classList.contains('is-fullscreen');
+                const col = left.parentElement;
                 const side = isFs
-                    ? Math.max(260, window.innerHeight - 76)
+                    ? Math.max(260, Math.min(window.innerHeight, col ? col.getBoundingClientRect().width : window.innerHeight))
                     : Math.max(260, Math.min(window.innerHeight - left.getBoundingClientRect().top - 16, window.innerWidth - 360));
                 left.style.height = side + 'px';
                 left.style.width = side + 'px';
@@ -326,6 +332,10 @@
 
                 if (event.source === frameEl?.contentWindow && event.origin === 'null' && data.source === 'cm-pres-frame') {
                     if (data.type === 'ready') {
+                        if (typeof data.background === 'string' && data.background.length < 64
+                            && window.CSS && CSS.supports('color', data.background)) {
+                            shell.style.setProperty('--deck-bg', data.background);
+                        }
                         setSteps(data.steps);
                         updateChrome(0);
                     }
