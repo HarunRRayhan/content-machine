@@ -264,6 +264,12 @@ class PublishPostAction
                 $this->supplementalGroups($progress),
             );
 
+            if ($publishedGroups === [] && ! is_array($progress['split'] ?? null)) {
+                throw new PostsyncerException(
+                    'Every PostSyncer group of this post was skipped, so nothing was published. Add the platforms again with a new publish.'
+                );
+            }
+
             $progress['state'] = 'succeeded';
             $progress['completed_groups'] = $completedGroups;
             $progress['current'] = null;
@@ -1046,9 +1052,12 @@ class PublishPostAction
 
             $this->assertProgressShape($progress);
 
-            foreach ($progress['skipped_groups'] ?? [] as $skipped) {
-                if (($skipped['group_key'] ?? null) === $groupKey) {
-                    return;
+            // Already skipped and nothing uncertain now: a repeat call changes nothing.
+            if (($progress['state'] ?? null) !== 'uncertain') {
+                foreach ($progress['skipped_groups'] ?? [] as $skipped) {
+                    if (($skipped['group_key'] ?? null) === $groupKey) {
+                        return;
+                    }
                 }
             }
 
@@ -2722,7 +2731,8 @@ class PublishPostAction
 
             $locked->forceFill([
                 'postsyncer' => ['groups' => $publishedGroups],
-                'status' => $this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted',
+                // Every group skipped: nothing went out on PostSyncer, so the status is not 'posted'.
+                'status' => $publishedGroups === [] ? $locked->status : ($this->hasScheduledCompletedGroup($publishedGroups) ? 'scheduled' : 'posted'),
                 'publish_state' => 'succeeded',
                 'publish_error' => null,
                 'publish_progress' => $progress,
@@ -3455,6 +3465,7 @@ class PublishPostAction
         if ($storedHash === null) {
             if ($storedGroups !== []
                 || $this->completedGroups($existing) !== []
+                || ($existing['skipped_groups'] ?? []) !== []
                 || ($existing['current'] ?? null) !== null) {
                 throw new PostsyncerException(
                     'PostSyncer publish progress has no plan metadata. Reconcile it before retrying.'

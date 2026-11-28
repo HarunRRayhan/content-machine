@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Actions\ApiTokens\CreateWorkspaceApiTokenAction;
 use App\Actions\Postsyncer\EnqueuePostPublishAction;
 use App\Actions\Postsyncer\PublishPostAction;
+use App\Actions\Postsyncer\UpdatePostsyncerSettingsAction;
 use App\Actions\Socialreins\PublishToSocialreinsAction;
 use App\Data\ApiTokens\CreateWorkspaceApiTokenData;
 use App\Jobs\PublishPostJob;
@@ -18,6 +19,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Validation\ValidationException;
 use Tests\Support\FakesPublicDns;
 use Tests\TestCase;
 
@@ -253,6 +255,40 @@ class PostsSkipUncertainGroupTest extends TestCase
         $this->assertSame('succeeded', $post->publish_state);
         $this->assertSame('socialreins', $post->publish_progress['driver']);
         $this->assertCount(1, $post->postsyncer['groups']);
+        $this->assertSame('skipped_unknown', $post->publish_progress['split']['skipped_groups'][0]['status']);
         $this->assertSame(2, $this->srCreates);
+    }
+
+    public function test_a_running_publish_is_refused(): void
+    {
+        $post = $this->uncertainPost();
+        $post->forceFill(['publish_state' => 'running'])->save();
+
+        $this->skip($post->fresh())->assertUnprocessable()->assertJsonValidationErrors('publish');
+        $this->assertArrayNotHasKey('skipped_groups', $post->fresh()->publish_progress);
+    }
+
+    /** After a skip only `skipped_groups` records the external progress: edits and settings must still be locked. */
+    public function test_a_skip_still_locks_post_edits_and_postsyncer_settings(): void
+    {
+        $post = $this->uncertainPost();
+        $this->skip($post)->assertOk();
+        $before = $post->fresh()->publish_progress;
+        $post->forceFill(['publish_progress' => [...$before, 'completed_groups' => []]])->save();
+
+        $this->withToken($this->token)->patchJson('/api/v1/posts/'.$post->human_id, [
+            'publish_state' => 'idle',
+            'publish_error' => null,
+        ])->assertUnprocessable()->assertJsonValidationErrors('publish_state');
+
+        try {
+            app(UpdatePostsyncerSettingsAction::class)->handle($this->workspace, ['publish_enabled' => true, 'api_key' => 'other']);
+            $this->fail('Settings must be locked while a skipped group is pending.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('postsyncer', $e->errors());
+        }
+
+        $this->assertSame('failed', $post->fresh()->publish_state);
+        $this->assertSame($before['skipped_groups'], $post->fresh()->publish_progress['skipped_groups']);
     }
 }

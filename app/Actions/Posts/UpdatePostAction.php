@@ -436,6 +436,7 @@ class UpdatePostAction
 
         return ($progress['current'] ?? null) !== null
             || ($progress['state'] ?? null) === 'uncertain'
+            || ($progress['skipped_groups'] ?? []) !== []
             || (is_array($progress['completed_groups'] ?? null)
                 && $progress['completed_groups'] !== []);
     }
