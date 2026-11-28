@@ -178,13 +178,24 @@ class PostsSkipUncertainGroupTest extends TestCase
         return $post;
     }
 
-    private function skip(Post $post, ?string $groupKey = null, string $confirm = 'skip')
+    /** @param  array<string, mixed>  $extra */
+    private function skip(Post $post, ?string $groupKey = null, string $confirm = 'skip', array $extra = [])
     {
         return $this->withToken($this->token)->postJson('/api/v1/posts/'.$post->human_id.'/publish/skip-uncertain-group', [
             'group_key' => $groupKey ?? $post->publish_progress['current']['group_key'],
             'confirm' => $confirm,
             'reason' => 'Verified in the PostSyncer UI: cannot tell if it exists; Harun approved skipping.',
+            ...$extra,
         ]);
+    }
+
+    /** @return list<string> SocialReins tokens (one per language set) that received a create. */
+    private function socialreinsTokensUsed(): array
+    {
+        return collect(Http::recorded())
+            ->filter(fn (array $pair): bool => $pair[0]->url() === self::SR_URL)
+            ->map(fn (array $pair): string => $pair[0]->header('Authorization')[0] ?? '')
+            ->values()->all();
     }
 
     public function test_skipping_the_uncertain_group_records_it_and_clears_the_blocker(): void
@@ -256,7 +267,49 @@ class PostsSkipUncertainGroupTest extends TestCase
         $this->assertSame('socialreins', $post->publish_progress['driver']);
         $this->assertCount(1, $post->postsyncer['groups']);
         $this->assertSame('skipped_unknown', $post->publish_progress['split']['skipped_groups'][0]['status']);
-        $this->assertSame(2, $this->srCreates);
+        $this->assertSame(2, $this->srCreates, 'without the option both languages go to SocialReins');
+        $this->assertArrayNotHasKey('languages', $post->publish_progress['split']['socialreins']);
+    }
+
+    public function test_skip_with_languages_resumes_with_only_that_language_on_socialreins(): void
+    {
+        $post = $this->uncertainPost();
+        $this->skip($post, null, 'skip', ['socialreins_languages' => ['english']])
+            ->assertOk()
+            ->assertJsonPath('data.publish_progress.skipped_groups.0.socialreins_languages', ['english'])
+            ->assertJsonPath('data.publish_progress.split.socialreins.languages', ['english']);
+
+        $stored = $post->fresh()->publish_progress;
+        $this->assertSame($post->publish_progress['plan_hash'], $stored['plan_hash'], 'the PostSyncer plan is untouched');
+        $this->assertArrayNotHasKey('languages', $stored['options']);
+
+        app(EnqueuePostPublishAction::class)->handle($post->fresh(), $this->workspace, []);
+        $this->runQueued();
+
+        $post = $post->fresh();
+        $this->assertSame(2, $this->psCreates, 'the skipped group must not be created again');
+        $this->assertSame('succeeded', $post->publish_state);
+        $this->assertSame(1, $this->srCreates, 'only the English SocialReins post is created');
+        $this->assertSame(['Bearer sr_en'], $this->socialreinsTokensUsed());
+        $this->assertSame(['english'], $post->publish_progress['options']['languages']);
+        $this->assertSame(['english'], $post->publish_progress['split']['socialreins']['languages']);
+        $this->assertArrayHasKey('Bangla', $post->fresh()->captions, 'the Bangla captions stay on the post');
+    }
+
+    public function test_languages_are_validated_and_need_a_split_publish(): void
+    {
+        $post = $this->uncertainPost();
+
+        $this->skip($post, null, 'skip', ['socialreins_languages' => ['french']])
+            ->assertUnprocessable()->assertJsonValidationErrors('socialreins_languages.0');
+
+        $progress = $post->publish_progress;
+        unset($progress['split']);
+        $post->forceFill(['publish_progress' => $progress])->save();
+
+        $this->skip($post->fresh(), null, 'skip', ['socialreins_languages' => ['english']])
+            ->assertUnprocessable()->assertJsonValidationErrors('publish');
+        $this->assertArrayNotHasKey('skipped_groups', $post->fresh()->publish_progress);
     }
 
     public function test_a_running_publish_is_refused(): void

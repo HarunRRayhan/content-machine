@@ -422,10 +422,12 @@ class PostsApiController extends Controller
             'group_key' => ['required', 'string', 'max:255'],
             'confirm' => ['required', 'in:skip'],
             'reason' => ['required', 'string', 'min:3', 'max:500'],
+            'socialreins_languages' => ['nullable', 'array', 'min:1'],
+            'socialreins_languages.*' => ['string', 'in:english,bangla'],
         ]);
 
         try {
-            $action->skipUncertainGroup($post, $payload['group_key'], $payload['reason'], $request->user()?->email);
+            $action->skipUncertainGroup($post, $payload['group_key'], $payload['reason'], $request->user()?->email, $payload['socialreins_languages'] ?? []);
         } catch (PostsyncerException $exception) {
             throw ValidationException::withMessages([
                 'publish' => $exception->getMessage(),
